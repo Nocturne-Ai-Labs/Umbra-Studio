@@ -17,6 +17,7 @@ import { gallerySearchPathKey } from './GallerySearchPathKey';
 import { resolveGalleryPublicDir } from './GalleryRuntimePaths';
 import { GalleryWarmupScheduler } from './GalleryWarmupScheduler';
 import { GalleryFolderRevisions } from './GalleryFolderRevisions';
+import { GalleryTreeChanges } from './GalleryTreeChanges';
 import { GalleryWorkQueue as AsyncWorkerQueue } from './GalleryWorkQueue';
 import { extractVideoFrame } from './GalleryVideoThumbnail';
 import { ThumbnailService } from '../backend/ThumbnailService';
@@ -195,6 +196,15 @@ const galleryWorker = new AsyncWorkerQueue(GALLERY_WORKER_CONCURRENCY, 160);
 const filmstripWorker = new AsyncWorkerQueue(FILMSTRIP_WORKER_CONCURRENCY, 128);
 const metadataWorker = new AsyncWorkerQueue(METADATA_WORKER_CONCURRENCY, 64);
 const mediaStatWorker = new AsyncWorkerQueue(8, 128);
+const treeWatchWorker = new AsyncWorkerQueue(2, 256);
+const treeChanges = new GalleryTreeChanges({
+  changed: path => {
+    invalidateFolderTree(path);
+    invalidateFolderSummary(path);
+  },
+  read: path => treeWatchWorker.run(`tree-watch:${path}`, async () => (await fs.readdir(path, { withFileTypes: true }))
+    .filter(entry => entry.isDirectory()).map(entry => entry.name)),
+});
 const galleryDb = new GalleryDb(ROOT_DIR);
 
 function json(data: unknown, status = 200): Response {
@@ -1129,6 +1139,8 @@ async function authorizeDirectGalleryFsRequest(req: Request, reqUrl: URL): Promi
   if (req.method === 'GET' && reqUrl.pathname === '/api/fs/search') {
     paths.push(...reqUrl.searchParams.getAll('root').concat(reqUrl.searchParams.getAll('roots'))
       .flatMap((value) => String(value || '').split('|')));
+  } else if (req.method === 'GET' && reqUrl.pathname === '/api/fs/tree-changes') {
+    paths.push(...reqUrl.searchParams.getAll('path'));
   } else if (req.method === 'GET') {
     const path = reqUrl.searchParams.get('path');
     if (path) paths.push(path);
@@ -2591,6 +2603,7 @@ async function handleMetadata(reqUrl: URL): Promise<Response> {
 }
 
 const LOCAL_GALLERY_FS_GET_ALIAS_PATHS = new Set([
+  'tree-changes',
   'tree',
   'list-progressive',
   'folder-summary',
@@ -2651,6 +2664,7 @@ const server = Bun.serve({
           thumbnailBytes: thumbnailCacheBytes,
           thumbnailInFlight: thumbnailBuildInFlight.size,
           folderTrees: folderTreeCache.size,
+          watchedTreeFolders: treeChanges.size,
           folderSummaries: folderSummaryCache.size,
           metadata: metadataCache.size,
           prewarmRoots: backgroundWarmup.size,
@@ -2663,6 +2677,26 @@ const server = Bun.serve({
     }
 
     // Local FS APIs run fully in the gallery process.
+    if (reqUrl.pathname === '/api/fs/tree-changes' && req.method === 'GET') {
+      const paths = reqUrl.searchParams.getAll('path');
+      if (!paths.length || paths.length > 64 || paths.some(path => !path.trim())) {
+        return withTrustedCors(req, json({ error: 'Watch between 1 and 64 folder paths' }, 400));
+      }
+      const clientPaths = new Map<string, string[]>();
+      for (const path of paths) {
+        const resolved = resolveGalleryPath(path);
+        if (!resolved) return withTrustedCors(req, json({ error: 'Invalid folder path' }, 400));
+        const key = normalizePath(resolved);
+        clientPaths.set(key, [...(clientPaths.get(key) || []), path]);
+      }
+      try {
+        const changes = await treeChanges.wait([...clientPaths.keys()], reqUrl.searchParams.get('cursor') || '', req.signal);
+        return withTrustedCors(req, json({ cursor: changes.cursor, paths: changes.paths.flatMap(path => clientPaths.get(path) || []) }));
+      } catch (error) {
+        return withTrustedCors(req, json({ error: error instanceof Error ? error.message : 'Folder watch unavailable' }, req.signal.aborted ? 499 : 503));
+      }
+    }
+
     if (reqUrl.pathname === '/api/fs/tree' && req.method === 'GET') {
       return withTrustedCors(req, await runBunGalleryFsGet(reqUrl, () => handleTree(reqUrl)));
     }
@@ -2764,6 +2798,7 @@ const server = Bun.serve({
 
 seedPrewarmRoots();
 const folderPrewarmTimer = setInterval(() => {
+  treeChanges.retireIdle();
   runPeriodicPrewarmCycle();
 }, FOLDER_SUMMARY_PREWARM_INTERVAL_MS);
 if (typeof (folderPrewarmTimer as any).unref === 'function') {
@@ -2773,6 +2808,7 @@ if (typeof (folderPrewarmTimer as any).unref === 'function') {
 process.on('exit', () => {
   clearInterval(folderPrewarmTimer);
   folderRevisions.close();
+  treeChanges.close();
   backgroundWarmup.close();
   try {
     galleryDb.close();

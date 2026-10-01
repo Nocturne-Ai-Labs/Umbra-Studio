@@ -18752,7 +18752,7 @@ async function proxyGalleryBridgeFsGet(
     const fastNameListing = targetPath === '/api/fs/list-progressive'
       && sourceUrl.searchParams.get('sortBy') === 'name'
       && sourceUrl.searchParams.get('fast') === '1';
-    const proxyTimeoutMs = targetPath === '/api/fs/image'
+    const proxyTimeoutMs = targetPath === '/api/fs/tree-changes' ? 30_000 : targetPath === '/api/fs/image'
       ? 20000
       : (targetPath === '/api/fs/thumbnail' ? 12000
         : (targetPath === '/api/fs/list-progressive' && !fastNameListing ? 30000 : 6000));
@@ -18762,12 +18762,14 @@ async function proxyGalleryBridgeFsGet(
       headers,
       signal: upstreamSignal,
     });
-    if (upstream.status >= 500) {
+    if (upstream.status >= 500 && targetPath !== '/api/fs/tree-changes') {
       await upstream.body?.cancel();
       throw new Error(`Gallery service returned ${upstream.status}`);
     }
-    galleryBridgeProxyBackoffUntil = 0;
-    galleryBridgeProxyFailures = 0;
+    if (targetPath !== '/api/fs/tree-changes') {
+      galleryBridgeProxyBackoffUntil = 0;
+      galleryBridgeProxyFailures = 0;
+    }
     const responseHeaders = new Headers(upstream.headers);
     responseHeaders.set('X-Gallery-Proxy-Ms', String(Math.round((performance.now() - startedAt) * 10) / 10));
     if (remoteImageOptimized) {
@@ -18788,6 +18790,7 @@ async function proxyGalleryBridgeFsGet(
       traceProxy('proxy_timeout', { error: error?.message || String(error) }, 0);
       return json({ error: 'Gallery worker timed out. Retry this request.' }, 504);
     }
+    if (targetPath === '/api/fs/tree-changes') return fallback();
     galleryBridgeProxyFailures += 1;
     galleryBridgeProxyBackoffUntil = Date.now() + 2000;
     if (galleryBridgeProxyFailures >= 3 && !isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy())) {
@@ -18817,6 +18820,7 @@ function getGalleryBridgeAllowedRoots(): string[] {
 }
 
 function getGalleryBridgeRequestPaths(sourceUrl: URL, targetPath: string): string[] {
+  if (targetPath === '/api/fs/tree-changes') return sourceUrl.searchParams.getAll('path');
   if (targetPath === '/api/fs/search' || targetPath === '/api/fs/search-suggestions') {
     return sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
       .flatMap((value) => String(value || '').split('|'));
@@ -34033,6 +34037,13 @@ const server = Bun.serve<UmbraSocketData>({
           () => handleFsListProgressive(url, req.signal),
           server,
         );
+      }
+      if (path === '/api/gallery-bridge/fs/tree-changes' && method === 'GET') {
+        const paths = url.searchParams.getAll('path');
+        if (!paths.length || paths.length > 64 || paths.some(path => !path.trim())) {
+          return json({ error: 'Watch between 1 and 64 folder paths' }, 400);
+        }
+        return proxyGalleryBridgeFsGet(req, url, '/api/fs/tree-changes', () => json({ error: 'Gallery folder watch unavailable' }, 503), server);
       }
       if (path === '/api/gallery-bridge/fs/tree' && method === 'GET') {
         return proxyGalleryBridgeFsGet(
