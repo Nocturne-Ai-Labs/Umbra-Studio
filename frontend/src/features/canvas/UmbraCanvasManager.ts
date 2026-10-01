@@ -18,6 +18,7 @@ import {
 } from './canvasModel';
 import { renderUmbraCanvasRasterSurface } from './canvasRasterRenderer';
 import { fitUmbraCanvasViewport, getUmbraCanvasGridSpacing } from './canvasViewportMath';
+import { snapUmbraCanvasLayers } from './canvasSnapping';
 
 interface UmbraCanvasManagerCallbacks {
   onSelectEntity: (entityId: string, additive?: boolean) => void;
@@ -236,7 +237,8 @@ export class UmbraCanvasManager {
   private previewScaleBucket = 1;
   private previewRefreshTimer: number | null = null;
   private selectedEntityIds = new Set<string>();
-  private selectedDragStart: { sourceId: string; sourceX: number; sourceY: number; positions: Map<string, { x: number; y: number }> } | null = null;
+  private layerSnappingEnabled = true;
+  private selectedDragStart: { sourceId: string; sourceX: number; sourceY: number; bounds: UmbraCanvasRect; positions: Map<string, { x: number; y: number }> } | null = null;
 
   constructor(
     container: HTMLDivElement,
@@ -275,6 +277,11 @@ export class UmbraCanvasManager {
     this.stage.size({ width: Math.max(1, width), height: Math.max(1, height) });
     this.drawGrid();
     this.stage.batchDraw();
+  }
+
+  setLayerSnappingEnabled(enabled: boolean): void {
+    this.layerSnappingEnabled = enabled;
+    if (!enabled) this.clearSnapGuides();
   }
 
   setSpacePressed(pressed: boolean): void {
@@ -1093,46 +1100,16 @@ export class UmbraCanvasManager {
 
   private snapDrawableNode(node: Konva.Node, entity: UmbraCanvasDrawableEntity | UmbraCanvasMaskEntity): void {
     if (!this.document) return;
-    const threshold = 8 / Math.max(0.05, this.viewport.scale);
-    const gridX = Math.round(node.x() / 8) * 8;
-    const gridY = Math.round(node.y() / 8) * 8;
-    node.position({ x: gridX, y: gridY });
-    const nodeBounds = node.getClientRect({ relativeTo: node.getParent() || undefined, skipShadow: true, skipStroke: true });
-    const activeX = [nodeBounds.x, nodeBounds.x + nodeBounds.width / 2, nodeBounds.x + nodeBounds.width];
-    const activeY = [nodeBounds.y, nodeBounds.y + nodeBounds.height / 2, nodeBounds.y + nodeBounds.height];
-    let xDelta = 0;
-    let yDelta = 0;
-    let xDistance = threshold + 1;
-    let yDistance = threshold + 1;
-    let verticalGuide: number | null = null;
-    let horizontalGuide: number | null = null;
-    for (const other of this.document.entities) {
-      if (!isUmbraCanvasSpatialEntity(other) || other.id === entity.id || !other.visible || this.selectedEntityIds.has(other.id)) continue;
-      const otherBounds = getUmbraCanvasSpatialBounds(other);
-      const targetsX = [otherBounds.x, otherBounds.x + otherBounds.width / 2, otherBounds.x + otherBounds.width];
-      const targetsY = [otherBounds.y, otherBounds.y + otherBounds.height / 2, otherBounds.y + otherBounds.height];
-      for (const active of activeX) {
-        for (const target of targetsX) {
-          const delta = target - active;
-          if (Math.abs(delta) <= threshold && Math.abs(delta) < xDistance) {
-            xDelta = delta;
-            xDistance = Math.abs(delta);
-            verticalGuide = target;
-          }
-        }
-      }
-      for (const active of activeY) {
-        for (const target of targetsY) {
-          const delta = target - active;
-          if (Math.abs(delta) <= threshold && Math.abs(delta) < yDistance) {
-            yDelta = delta;
-            yDistance = Math.abs(delta);
-            horizontalGuide = target;
-          }
-        }
-      }
-    }
-    node.position({ x: gridX + xDelta, y: gridY + yDelta });
+    const drag = this.selectedDragStart;
+    const nodeBounds = drag && drag.sourceId === node.id()
+      ? { ...drag.bounds, x: drag.bounds.x + node.x() - drag.sourceX, y: drag.bounds.y + node.y() - drag.sourceY }
+      : getUmbraCanvasSpatialBounds({ ...entity, x: node.x(), y: node.y(), scaleX: node.scaleX(), scaleY: node.scaleY(), rotation: node.rotation() });
+    const targets = this.document.entities
+      .filter(isUmbraCanvasSpatialEntity)
+      .filter((other) => other.visible && other.id !== entity.id && !drag?.positions.has(other.id))
+      .map(getUmbraCanvasSpatialBounds);
+    const { xDelta, yDelta, verticalGuide, horizontalGuide } = snapUmbraCanvasLayers(nodeBounds, targets, node.position(), this.viewport.scale);
+    node.position({ x: node.x() + xDelta, y: node.y() + yDelta });
     this.snapGuideGroup.destroyChildren();
     const left = -this.viewport.x / this.viewport.scale;
     const top = -this.viewport.y / this.viewport.scale;
@@ -1159,14 +1136,24 @@ export class UmbraCanvasManager {
   private beginSelectedDrag(node: Konva.Node): void {
     if (!this.selectedEntityIds.has(node.id())) return;
     const positions = new Map<string, { x: number; y: number }>();
-    for (const selected of this.entityTransformer.nodes()) positions.set(selected.id(), { x: selected.x(), y: selected.y() });
+    const bounds: UmbraCanvasRect[] = [];
+    for (const selected of this.entityTransformer.nodes()) {
+      positions.set(selected.id(), { x: selected.x(), y: selected.y() });
+      const entity = this.document?.entities.find((candidate) => candidate.id === selected.id());
+      if (entity && isUmbraCanvasSpatialEntity(entity)) bounds.push(getUmbraCanvasSpatialBounds({ ...entity, x: selected.x(), y: selected.y(), scaleX: selected.scaleX(), scaleY: selected.scaleY(), rotation: selected.rotation() }));
+    }
     const source = positions.get(node.id());
-    if (!source) return;
-    this.selectedDragStart = { sourceId: node.id(), sourceX: source.x, sourceY: source.y, positions };
+    if (!source || bounds.length === 0) return;
+    const x = Math.min(...bounds.map((rect) => rect.x));
+    const y = Math.min(...bounds.map((rect) => rect.y));
+    const width = Math.max(...bounds.map((rect) => rect.x + rect.width)) - x;
+    const height = Math.max(...bounds.map((rect) => rect.y + rect.height)) - y;
+    this.selectedDragStart = { sourceId: node.id(), sourceX: source.x, sourceY: source.y, bounds: { x, y, width, height }, positions };
   }
 
-  private moveSelectedDrag(node: Konva.Node, entity: UmbraCanvasDrawableEntity | UmbraCanvasMaskEntity): void {
-    this.snapDrawableNode(node, entity);
+  private moveSelectedDrag(node: Konva.Node, entity: UmbraCanvasDrawableEntity | UmbraCanvasMaskEntity, bypassSnapping: boolean): void {
+    if (this.layerSnappingEnabled && !bypassSnapping) this.snapDrawableNode(node, entity);
+    else this.clearSnapGuides();
     const drag = this.selectedDragStart;
     if (!drag || drag.sourceId !== node.id() || drag.positions.size < 2) return;
     const deltaX = node.x() - drag.sourceX;
@@ -1278,9 +1265,9 @@ export class UmbraCanvasManager {
         this.selectPointerEntity(mask.id, event.evt as PointerEvent);
       });
       group.on('dragstart', () => this.beginSelectedDrag(group));
-      group.on('dragmove', () => this.moveSelectedDrag(group, mask));
-      group.on('dragend', () => {
-        this.moveSelectedDrag(group, mask);
+      group.on('dragmove', (event) => this.moveSelectedDrag(group, mask, Boolean(event.evt.altKey)));
+      group.on('dragend', (event) => {
+        this.moveSelectedDrag(group, mask, Boolean(event.evt.altKey));
         this.clearSnapGuides();
         this.commitEntityTransforms(this.selectedDragStart?.positions.has(group.id()) ? this.entityTransformer.nodes() : [group]);
         this.selectedDragStart = null;
@@ -1384,9 +1371,9 @@ export class UmbraCanvasManager {
           this.selectPointerEntity(entity.id, event.evt as PointerEvent);
         });
         node.on('dragstart', () => this.beginSelectedDrag(node));
-        node.on('dragmove', () => this.moveSelectedDrag(node, entity));
-        node.on('dragend', () => {
-          this.moveSelectedDrag(node, entity);
+        node.on('dragmove', (event) => this.moveSelectedDrag(node, entity, Boolean(event.evt.altKey)));
+        node.on('dragend', (event) => {
+          this.moveSelectedDrag(node, entity, Boolean(event.evt.altKey));
           this.clearSnapGuides();
           this.commitEntityTransforms(this.selectedDragStart?.positions.has(node.id()) ? this.entityTransformer.nodes() : [node]);
           this.selectedDragStart = null;

@@ -30,6 +30,7 @@ import {
   Lock,
   Pin,
   LoaderCircle,
+  Magnet,
   Maximize2,
   Minimize2,
   MousePointer2,
@@ -445,6 +446,7 @@ export function UmbraCanvasWorkspace({
   const acceptStagedGeneration = useUmbraCanvasStore((state) => state.acceptStagedGeneration);
   const stages = useUmbraCanvasStore((state) => state.present.generation.staging);
   const [tool, setTool] = React.useState<UmbraCanvasTool>('select');
+  const [layerSnappingEnabled, setLayerSnappingEnabled] = React.useState(true);
   const [maskBrushSize, setMaskBrushSize] = React.useState(64);
   const [maskBrushOpacity, setMaskBrushOpacity] = React.useState(0.72);
   const [rasterBrushSize, setRasterBrushSize] = React.useState(64);
@@ -727,6 +729,10 @@ export function UmbraCanvasWorkspace({
   React.useEffect(() => {
     managerRef.current?.setTool(tool);
   }, [tool]);
+
+  React.useEffect(() => {
+    managerRef.current?.setLayerSnappingEnabled(layerSnappingEnabled);
+  }, [layerSnappingEnabled]);
 
   React.useEffect(() => {
     managerRef.current?.setMaskBrush(maskBrushSize, maskBrushOpacity);
@@ -2703,6 +2709,7 @@ export function UmbraCanvasWorkspace({
           <button type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!canUndo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">Z</kbd></button>
           <button type="button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!canRedo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Redo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">⇧Z</kbd></button>
           <div className="ml-auto flex items-center gap-2">
+            <ToolButton active={layerSnappingEnabled} title="Snap layers (hold Alt to bypass)" icon={<Magnet size={15} />} onClick={() => setLayerSnappingEnabled((enabled) => !enabled)} />
             <button type="button" title="Fit visible content" aria-label="Fit visible content" onClick={() => managerRef.current?.fitToContent()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><Focus size={15} /></button>
             <button type="button" title="Reset view" aria-label="Reset view" onClick={() => managerRef.current?.resetView()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><RotateCcw size={15} /></button>
           </div>
