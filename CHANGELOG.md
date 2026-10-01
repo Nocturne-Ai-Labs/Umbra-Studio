@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.32.44 - OmniForge, Live Gallery Folders, And Media Workflow Updates
+
+### TL;DR - Setup After Updating
 
 **Umbra Studio Mobile is experimental and is not ready for feedback.**
 
@@ -8,15 +10,48 @@
 
 **Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
 
-### Workspace Availability
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio. Existing `User/`, `Tools/`, models, cards, and projects are preserved. No migration is required for the Gallery, filmstrip, or Image Censor changes.
+- For **LTX-2.3 OmniForge**, stop ComfyUI and use **Umbra Updater > Managed dependencies** to install/update ComfyUI and the **LTX-2.3 OmniForge video tools** dependencies: DaSiWa Nodes, WhatDreamsCost/PodJamz Director, and KJNodes. Restart Umbra-managed ComfyUI afterward. The integration checks for ComfyUI 0.37.0 or newer and the required registered nodes before submitting a job.
+- Open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux > **Models > LTX-2.3 Video**, then install or verify the encoder, text projection, separate video/audio VAEs, and x2 latent upscaler. The complete support pack is approximately **18.3 GB / 17.1 GiB**; the newly added projection and VAEs account for approximately **4.1 GB / 3.8 GiB** when the existing encoder and upscaler are already complete. A compatible LTX-2.3 transformer and chosen LoRAs remain separate downloads through Model Manager.
+- Optional sampler previews use **Models > LTX-2.3 Preview TAE (Optional)**, approximately **23.5 MB / 22.4 MiB**. Optional spatial/temporal tiled decoding needs the **LTX-2.3 tiled video VAE decode** dependency pack; optional advanced pixel upscaling needs **LTX-2.3 advanced pixel upscale** and a separately supplied upscale model. Experimental Triton VAE patching needs a compatible separately installed Triton runtime; Setup does not install it.
+- Review the Gemma Terms of Use and LTX-2 Community License notices in Setup before downloading or using the weights. Generation models are not bundled in either portable archive. Linux managed tools may need `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### LTX-2.3 OmniForge
+
+- Add an Umbra frontend and native graph adapter for DaSiWa's OmniForge workflow techniques, with Director image/text timelines, first/last-frame handoffs, audio and motion guidance, retakes, and one-, two-, or three-pass rendering.
+- Carry independent video/audio LoRA strengths, output audio, sampler previews, decoder options, and opt-in post-processing through the existing generation queue and output routing. Reject missing staged files, empty Image-to-Video timelines, incompatible selections, and missing nodes before submission.
+- Credit DaSiWa / darksidewalker, WhatDreamsCost, PodJamz, Kijai, Lightricks, and the other upstream node authors. Their custom-node code and the supplied reference workflow are not copied into Umbra's source. Existing MiniMax H3, WAN, and legacy LTX workflows remain available.
+
+### Gallery, Filmstrip, And Image Censor
+
+- Refresh loaded Gallery tree branches and the current folder grid when directories are created, renamed, or deleted. Debounced monitoring runs in the separate Gallery process, with bounded subscriptions and waits, cancellation, replaced-directory recovery, and retry after temporary read failures.
+- Add a permanent **Latest** filmstrip folder that follows newly generated output folders while selected. Manual navigation stops following immediately, and the selection survives reloads.
+- Clear individual or all folder/history notification badges without removing folders or navigating away. New generated media can create fresh notifications.
+- Place **Skip** beside the live generation preview in the filmstrip generation area. Include Canvas/Inpaint previews even when saved recent generations are hidden.
+- Gallery **Send to Censor** opens Extras > Image Censor and asks for a new or existing destination project. Cancel preserves the open project; pending selections survive reload, and repeated sends during import are deduplicated.
+
+### Canvas Availability And Experimental Editing
 
 - Hide the Canvas tab for now without removing its implementation or changing its generation logic. Saved Canvas workspace navigation returns to TXT2IMG while Canvas is disabled.
-- Carry the Mobile, Canvas, and Video readiness warnings in every package release. Video generation remains available; no video pipeline behavior changes.
+- Retain the experimental Canvas editing improvements behind that disabled tab: collapsible inspectors and results, improved fit-to-view and ruler spacing, layer/group snapping with a magnet toggle and Alt bypass, recoverable background cutouts, transparent PNG export, and non-destructive Ctrl-drag cropping.
+- Crops remain attached to saved and duplicated layers. Undo/redo and project replacement invalidate pending background-removal results so they cannot overwrite a restored document.
+
+### Validation And Limits
+
+- Independently reviewed the combined feature integration and corrected stale displayed/saved dimensions when toggling OmniForge. Release qualification includes targeted Canvas, Gallery, filmstrip, LTX, Setup, queue, and package-privacy regressions; frontend/backend type checking; lint; production build; and all 56 bundled workflow audits.
+- Gallery create/rename, authorization, cancellation, and long-poll capacity are checked through an isolated Umbra server. Prior isolated browser checks covered Canvas editing/export, filmstrip controls, and Image Censor project imports and recovery.
+- Live LTX GPU rendering, advanced video combinations, and model-based Canvas background removal remain unqualified. Filmstrip live-preview/Skip checks used simulated generation events. Linux/network-drive Gallery behavior has not been runtime-tested. These limits are preserved from the accepted development checkpoints; no personal runtime or GPU session is changed.
+- Windows and Linux portable archives are validated for required launchers, Setup/model manifests, native runtime dependencies, safe archive paths, and exclusion of personal data and private development sources before publication.
 
 ### Fixes And Quality-of-Life Recap
 
-- Improved: Canvas stays out of the navigation until its interface is ready for feedback.
-- Improved: release notes clearly state the availability and maturity of Mobile, Canvas, and Video.
+- Fixed: new Gallery folders no longer require repeated manual refreshes; directory replacement, overloaded waits, and transient read failures recover without blocking ordinary Gallery reads.
+- Fixed: manual folder navigation stops Latest following immediately, and Canvas/Inpaint live previews reach the filmstrip generation area.
+- Fixed: Gallery imports no longer silently append to the previously open Image Censor project; repeated in-flight sends do not duplicate imports.
+- Fixed: OmniForge preserves required media/audio handoffs, identifies missing optional node packs, rejects empty Image-to-Video input, and refreshes draft sizing when its mode changes.
+- Fixed: experimental Canvas handles short viewports, low-zoom rulers, crop duplication, and stale background-removal results across undo/redo.
+- Improved: filmstrip Latest following, notification clearing, and grouped preview/Skip controls make generation outputs easier to follow.
+- Improved: Canvas stays hidden while its editing tools remain available for future development; Mobile, Canvas, and Video readiness warnings remain prominent.
 
 ## v0.32.43 - Portable Anima Node Sync Hotfix
 
