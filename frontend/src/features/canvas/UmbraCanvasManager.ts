@@ -17,6 +17,7 @@ import {
   type UmbraCanvasViewport,
 } from './canvasModel';
 import { renderUmbraCanvasRasterSurface } from './canvasRasterRenderer';
+import { fitUmbraCanvasViewport, getUmbraCanvasGridSpacing } from './canvasViewportMath';
 
 interface UmbraCanvasManagerCallbacks {
   onSelectEntity: (entityId: string, additive?: boolean) => void;
@@ -33,9 +34,6 @@ interface UmbraCanvasManagerCallbacks {
 }
 
 export type UmbraCanvasTool = 'select' | 'bbox' | 'pan' | 'eyedropper' | 'raster-brush' | 'raster-eraser' | 'mask-brush' | 'mask-eraser' | 'mask-lasso' | 'freehand-shape' | 'polygon-shape';
-
-const GRID_MINOR = 64;
-const GRID_MAJOR = 256;
 
 const IMAGE_CACHE = new Map<string, Promise<HTMLImageElement>>();
 const RASTER_SURFACE_CACHE = new Map<string, { entityId: string; imageUrl: string; surface: HTMLCanvasElement }>();
@@ -456,16 +454,10 @@ export class UmbraCanvasManager {
     const top = Math.min(...rects.map((rect) => rect.y));
     const right = Math.max(...rects.map((rect) => rect.x + rect.width));
     const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
-    const padding = 72;
-    const scale = Math.max(0.05, Math.min(2, Math.min(
-      (this.stage.width() - padding * 2) / Math.max(1, right - left),
-      (this.stage.height() - padding * 2) / Math.max(1, bottom - top),
-    )));
-    this.updateViewport({
-      scale,
-      x: this.stage.width() / 2 - ((left + right) / 2) * scale,
-      y: this.stage.height() / 2 - ((top + bottom) / 2) * scale,
-    }, true);
+    this.updateViewport(fitUmbraCanvasViewport(
+      { x: left, y: top, width: right - left, height: bottom - top },
+      this.stage.width(), this.stage.height(),
+    ), true);
   }
 
   resetView(): void {
@@ -958,11 +950,11 @@ export class UmbraCanvasManager {
     const top = -this.viewport.y / scale;
     const right = left + this.stage.width() / scale;
     const bottom = top + this.stage.height() / scale;
-    const spacing = scale < 0.25 ? GRID_MAJOR : GRID_MINOR;
+    const { minor: spacing, major: majorSpacing } = getUmbraCanvasGridSpacing(scale);
     const startX = Math.floor(left / spacing) * spacing;
     const startY = Math.floor(top / spacing) * spacing;
     for (let x = startX; x <= right + spacing; x += spacing) {
-      const major = x % GRID_MAJOR === 0;
+      const major = x % majorSpacing === 0;
       this.gridGroup.add(new Konva.Line({
         points: [x, top - spacing, x, bottom + spacing],
         stroke: major ? 'rgba(103,232,249,0.18)' : 'rgba(255,255,255,0.06)',
@@ -982,7 +974,7 @@ export class UmbraCanvasManager {
       }
     }
     for (let y = startY; y <= bottom + spacing; y += spacing) {
-      const major = y % GRID_MAJOR === 0;
+      const major = y % majorSpacing === 0;
       this.gridGroup.add(new Konva.Line({
         points: [left - spacing, y, right + spacing, y],
         stroke: major ? 'rgba(103,232,249,0.18)' : 'rgba(255,255,255,0.06)',
