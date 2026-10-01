@@ -19,6 +19,7 @@ import {
 import { renderUmbraCanvasRasterSurface } from './canvasRasterRenderer';
 import { fitUmbraCanvasViewport, getUmbraCanvasGridSpacing } from './canvasViewportMath';
 import { snapUmbraCanvasLayers } from './canvasSnapping';
+import { getUmbraCanvasRasterCropPosition, getUmbraCanvasRasterCropRect, getUmbraCanvasRasterSourceFrame } from './canvasRasterCrop';
 
 interface UmbraCanvasManagerCallbacks {
   onSelectEntity: (entityId: string, additive?: boolean) => void;
@@ -26,6 +27,7 @@ interface UmbraCanvasManagerCallbacks {
     entityId: string;
     transform: Partial<Pick<UmbraCanvasDrawableEntity | UmbraCanvasMaskEntity, 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotation'>>;
   }>) => void;
+  onCropRasterEntity?: (entityId: string, sourceRevision: number, rect: UmbraCanvasRect) => void;
   onGenerationBboxChange: (bbox: UmbraCanvasRect) => void;
   onViewportChange: (viewport: UmbraCanvasViewport) => void;
   onMaskStroke: (entityId: string, stroke: UmbraCanvasMaskStroke) => void;
@@ -239,6 +241,8 @@ export class UmbraCanvasManager {
   private selectedEntityIds = new Set<string>();
   private layerSnappingEnabled = true;
   private selectedDragStart: { sourceId: string; sourceX: number; sourceY: number; bounds: UmbraCanvasRect; positions: Map<string, { x: number; y: number }> } | null = null;
+  private rasterCrop: { entity: UmbraCanvasRasterEntity; node: Konva.Image; surface: HTMLCanvasElement; rect: UmbraCanvasRect } | null = null;
+  private discardingCrop = false;
 
   constructor(
     container: HTMLDivElement,
@@ -498,6 +502,14 @@ export class UmbraCanvasManager {
   }
 
   render(project: UmbraCanvasProjectDocument): void {
+    if (this.rasterCrop) {
+      this.rasterCrop = null;
+      this.discardingCrop = true;
+      this.entityTransformer.stopTransform();
+      this.discardingCrop = false;
+      this.entityTransformer.flipEnabled(true);
+      this.entityTransformer.borderDash([]);
+    }
     this.document = project;
     this.viewport = project.viewport;
     this.applyViewport();
@@ -656,7 +668,72 @@ export class UmbraCanvasManager {
     this.bboxRect.on('dragmove', () => this.snapGenerationBboxPosition());
     this.bboxRect.on('dragend', () => this.commitBbox());
     this.bboxRect.on('transformend', () => this.commitBbox());
-    this.entityTransformer.on('transformend', () => this.commitEntityTransforms(this.entityTransformer.nodes()));
+    this.entityTransformer.on('transformstart', (event) => this.beginRasterCrop(Boolean((event.evt as MouseEvent).ctrlKey)));
+    this.entityTransformer.on('transform', () => this.previewRasterCrop());
+    this.entityTransformer.on('transformend', () => {
+      if (this.discardingCrop) return;
+      const crop = this.rasterCrop;
+      if (!crop) {
+        this.commitEntityTransforms(this.entityTransformer.nodes());
+        return;
+      }
+      this.rasterCrop = null;
+      this.entityTransformer.flipEnabled(true);
+      this.entityTransformer.borderDash([]);
+      this.callbacks.onCropRasterEntity?.(crop.entity.id, crop.entity.revision, crop.rect);
+      if (this.document) this.render(this.document);
+    });
+    this.entityTransformer.boundBoxFunc((oldBox, newBox) => {
+      const crop = this.rasterCrop;
+      if (!crop) return newBox;
+      return Math.abs(newBox.width) < Math.abs(crop.entity.scaleX) * this.viewport.scale
+        || Math.abs(newBox.height) < Math.abs(crop.entity.scaleY) * this.viewport.scale ? oldBox : newBox;
+    });
+  }
+
+  private beginRasterCrop(controlPressed: boolean): void {
+    this.rasterCrop = null;
+    const nodes = this.entityTransformer.nodes();
+    const anchor = this.entityTransformer.getActiveAnchor();
+    if (!controlPressed || !this.callbacks.onCropRasterEntity || nodes.length !== 1 || !anchor || anchor === 'rotater') return;
+    const node = nodes[0];
+    const source = this.document?.entities.find((entity) => entity.id === node.id());
+    if (!source || source.kind !== 'raster' || source.locked || !(node instanceof Konva.Image)) return;
+    const image = node.getAttr('cropSourceImage') as HTMLImageElement | undefined;
+    if (!image) return;
+    const entity = structuredClone(source);
+    const frame = getUmbraCanvasRasterSourceFrame(entity);
+    // Render the complete source once, including edits outside the current frame,
+    // so expanding a cropped edge reveals pixels without re-rendering on every move.
+    const surface = renderUmbraCanvasRasterSurface(image, {
+      ...entity, width: frame.width, height: frame.height, sourceFrame: undefined,
+      strokes: entity.strokes.map((stroke) => ({ ...stroke, points: stroke.points.map((value, index) => value - (index % 2 === 0 ? frame.x : frame.y)) })),
+    }, spatialPreviewScale(entity, this.viewport.scale));
+    this.rasterCrop = { entity, node, surface, rect: { x: 0, y: 0, width: entity.width, height: entity.height } };
+    this.entityTransformer.flipEnabled(false);
+    this.entityTransformer.borderDash([5, 4]);
+    this.previewRasterCrop();
+  }
+
+  private previewRasterCrop(): void {
+    const crop = this.rasterCrop;
+    if (!crop) return;
+    const { entity, node, surface } = crop;
+    const rect = getUmbraCanvasRasterCropRect(entity, {
+      ...node.position(), width: node.width(), height: node.height(), scaleX: node.scaleX(), scaleY: node.scaleY(), rotation: node.rotation(),
+    });
+    const frame = getUmbraCanvasRasterSourceFrame(entity);
+    const previewX = surface.width / frame.width;
+    const previewY = surface.height / frame.height;
+    crop.rect = rect;
+    node.image(surface);
+    node.crop({ x: (rect.x - frame.x) * previewX, y: (rect.y - frame.y) * previewY, width: rect.width * previewX, height: rect.height * previewY });
+    node.size({ width: rect.width, height: rect.height });
+    node.position(getUmbraCanvasRasterCropPosition(entity, rect));
+    node.scale({ x: entity.scaleX, y: entity.scaleY });
+    node.rotation(entity.rotation);
+    this.entityTransformer.forceUpdate();
+    this.stage.batchDraw();
   }
 
   private readTouchGesture(touches: TouchList): { centerX: number; centerY: number; distance: number } | null {
@@ -1286,6 +1363,7 @@ export class UmbraCanvasManager {
           const surface = rasterSurfaceFor(image, entity, this.viewport.scale);
           node = new Konva.Image({
             image: surface,
+            cropSourceImage: image,
             width: entity.width,
             height: entity.height,
           });

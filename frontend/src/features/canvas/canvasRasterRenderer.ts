@@ -1,4 +1,5 @@
 import { normalizeUmbraCanvasRasterAdjustments, type UmbraCanvasRasterEntity } from './canvasModel';
+import { getUmbraCanvasRasterSourceFrame } from './canvasRasterCrop';
 
 function traceStroke(context: CanvasRenderingContext2D, points: number[]): void {
   if (points.length < 2) return;
@@ -24,7 +25,8 @@ export function renderUmbraCanvasRasterSurface(
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
   context.scale(scale, scale);
-  context.drawImage(source, 0, 0, entity.width, entity.height);
+  const frame = getUmbraCanvasRasterSourceFrame(entity);
+  context.drawImage(source, frame.x, frame.y, frame.width, frame.height);
   for (const stroke of entity.strokes || []) {
     if (stroke.points.length < 2) continue;
     if (stroke.mode === 'erase' && entity.alphaLocked) continue;

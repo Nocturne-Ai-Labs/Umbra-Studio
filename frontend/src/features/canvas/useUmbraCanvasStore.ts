@@ -26,6 +26,7 @@ import {
   type UmbraCanvasRect,
   type UmbraCanvasViewport,
 } from './canvasModel';
+import { cropUmbraCanvasRasterEntity } from './canvasRasterCrop';
 
 interface UmbraCanvasHistory {
   past: UmbraCanvasProjectDocument[];
@@ -60,7 +61,10 @@ function collectProjectAssetCosts(project: UmbraCanvasProjectDocument): Map<stri
     if ((entity.kind !== 'raster' && entity.kind !== 'mask') || !entity.imageUrl) continue;
     const bytesPerPixel = entity.kind === 'raster' ? 4 : 1;
     const maximum = entity.kind === 'raster' ? 128 * 1024 * 1024 : 32 * 1024 * 1024;
-    assets.set(`${entity.kind}:${entity.imageUrl}`, Math.min(entity.width * entity.height * bytesPerPixel, maximum));
+    const pixels = entity.kind === 'raster' && entity.sourceFrame
+      ? Math.max(entity.width * entity.height, entity.sourceFrame.width * entity.sourceFrame.height)
+      : entity.width * entity.height;
+    assets.set(`${entity.kind}:${entity.imageUrl}`, Math.min(pixels * bytesPerPixel, maximum));
   }
   for (const pending of project.generation.pending) {
     if (pending.acceptanceMaskUrl) assets.set(`mask:${pending.acceptanceMaskUrl}`, Math.min(pending.bbox.width * pending.bbox.height, 32 * 1024 * 1024));
@@ -137,6 +141,7 @@ function duplicateCanvasEntity(source: UmbraCanvasEntity, offset = 24): UmbraCan
       blendMode: source.blendMode,
       generationEnabled: source.generationEnabled,
       alphaLocked: source.alphaLocked,
+      sourceFrame: source.sourceFrame ? { ...source.sourceFrame } : undefined,
       adjustments: { ...source.adjustments },
       strokes: source.strokes.map((stroke) => ({ ...stroke, points: [...stroke.points] })),
     };
@@ -161,6 +166,7 @@ interface UmbraCanvasStore extends UmbraCanvasHistory {
   renameProject: (name: string) => void;
   addRaster: (entity: UmbraCanvasRasterEntity) => void;
   addRasterCutout: (projectId: string, sourceId: string, sourceRevision: number, historyEpoch: number, entity: UmbraCanvasRasterEntity) => boolean;
+  cropRaster: (entityId: string, sourceRevision: number, rect: UmbraCanvasRect) => void;
   addDrawable: (entity: UmbraCanvasDrawableEntity) => void;
   mergeVisibleDrawables: (entity: UmbraCanvasRasterEntity, sourceIds: string[]) => void;
   addRasterStroke: (entityId: string, stroke: UmbraCanvasRasterStroke) => void;
@@ -340,6 +346,12 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     entities: [...project.entities, entity],
     activeEntityId: entity.id,
   }))),
+  cropRaster: (entityId, sourceRevision, rect) => set((state) => {
+    const source = state.present.entities.find((entity) => entity.id === entityId);
+    if (!source || source.kind !== 'raster' || source.locked || source.revision !== sourceRevision || !Object.values(rect).every(Number.isFinite)) return state;
+    if (rect.x === 0 && rect.y === 0 && rect.width === source.width && rect.height === source.height) return state;
+    return revise(state, (project) => updateEntity(project, entityId, (entity) => cropUmbraCanvasRasterEntity(entity as UmbraCanvasRasterEntity, rect)));
+  }),
   mergeVisibleDrawables: (entity, sourceIds) => set((state) => revise(state, (project) => {
     const sourceIdSet = new Set(sourceIds);
     return {
@@ -507,6 +519,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
       scaleX: 1,
       scaleY: 1,
       rotation: 0,
+      sourceFrame: undefined,
       adjustments: normalizeUmbraCanvasRasterAdjustments(undefined),
       strokes: [],
       revision: entity.revision + 1,

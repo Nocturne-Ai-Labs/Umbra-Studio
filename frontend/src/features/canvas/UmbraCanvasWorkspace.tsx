@@ -407,6 +407,7 @@ export function UmbraCanvasWorkspace({
   const canRedo = useUmbraCanvasStore((state) => state.future.length > 0);
   const addRaster = useUmbraCanvasStore((state) => state.addRaster);
   const addRasterCutout = useUmbraCanvasStore((state) => state.addRasterCutout);
+  const cropRaster = useUmbraCanvasStore((state) => state.cropRaster);
   const addDrawable = useUmbraCanvasStore((state) => state.addDrawable);
   const mergeVisibleDrawables = useUmbraCanvasStore((state) => state.mergeVisibleDrawables);
   const addRasterStroke = useUmbraCanvasStore((state) => state.addRasterStroke);
@@ -679,6 +680,7 @@ export function UmbraCanvasWorkspace({
     const manager = new UmbraCanvasManager(container, {
       onSelectEntity: handleSelectEntity,
       onTransformEntities: updateDrawableTransforms,
+      onCropRasterEntity: cropRaster,
       onGenerationBboxChange: setGenerationBbox,
       onViewportChange: setViewport,
       onMaskStroke: addMaskStroke,
@@ -703,7 +705,7 @@ export function UmbraCanvasWorkspace({
       manager.destroy();
       managerRef.current = null;
     };
-  }, [addDrawable, addMaskStroke, addRasterStroke, handleSelectEntity, setGenerationBbox, setViewport, showToast, updateDrawableTransforms]);
+  }, [addDrawable, addMaskStroke, addRasterStroke, cropRaster, handleSelectEntity, setGenerationBbox, setViewport, showToast, updateDrawableTransforms]);
 
   const canvasSceneKey = React.useMemo(() => JSON.stringify({
     bbox: project.generationBbox,
@@ -2764,7 +2766,7 @@ export function UmbraCanvasWorkspace({
           </div>
         </div>
         <div data-umbra-canvas-tool-toolbar="" role="toolbar" aria-label="Canvas editing tools" className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/35 p-2 [&_button]:shrink-0">
-          <ToolButton active={tool === 'select'} title="Select and transform" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
+          <ToolButton active={tool === 'select'} title="Select and transform; Ctrl-drag an image handle to crop" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
           <ToolButton active={tool === 'bbox'} title="Generation bounding box" shortcut="G" icon={<BoxSelect size={15} />} onClick={() => setTool('bbox')} />
           <ToolButton active={tool === 'pan'} title="Pan Canvas" shortcut="H" icon={<Hand size={15} />} onClick={() => setTool('pan')} />
           {UMBRA_CANVAS_RASTER_PAINT_ENABLED ? <ToolButton active={tool === 'raster-brush'} title="Paint active image layer" icon={<Brush size={15} />} onClick={() => activateRasterTool('raster-brush')} /> : null}

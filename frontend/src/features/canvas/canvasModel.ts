@@ -66,6 +66,7 @@ export interface UmbraCanvasRasterEntity {
   sourcePath: string;
   width: number;
   height: number;
+  sourceFrame?: UmbraCanvasRect;
   x: number;
   y: number;
   scaleX: number;
