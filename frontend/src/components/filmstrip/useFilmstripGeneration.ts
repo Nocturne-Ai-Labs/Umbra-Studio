@@ -45,10 +45,19 @@ export function filmstripSkipMessage(job: FilmstripRunningJob, requestId: string
   };
 }
 
+export function readFilmstripInpaintPreview(value: unknown, jobId: string, promptId: string, prompt?: string): Payload | null {
+  const preview = record(value);
+  if (!jobId || !promptId || preview.jobId !== jobId || preview.promptId !== promptId
+    || preview.active !== true || typeof preview.imageDataUrl !== 'string' || !preview.imageDataUrl.startsWith('data:image/')
+    || !Number.isFinite(preview.updatedAt)) return null;
+  return { ...preview, prompt };
+}
+
 export function useFilmstripGeneration(previewsEnabled: boolean) {
   const activities = useUmbraQueueActivities();
   const [runningJob, setRunningJob] = useState<FilmstripRunningJob | null>(null);
   const [preview, setPreview] = useState<Payload | null>(null);
+  const [inpaintPreview, setInpaintPreview] = useState<Payload | null>(null);
   const [skipPending, setSkipPending] = useState(false);
   const busyRef = useRef(false);
   const enabledRef = useRef(previewsEnabled);
@@ -126,6 +135,39 @@ export function useFilmstripGeneration(previewsEnabled: boolean) {
   }, []);
 
   const activity = activities.find((entry) => entry.status === 'running' && !entry.cancelRequested && getUmbraQueueActivityControls(entry).skip);
+  const inpaintActivity = activities.find(entry => entry.status === 'running' && !entry.cancelRequested
+    && (entry.owner === 'umbra-ui-inpaint-workspace' || entry.owner === 'umbra-ui-canvas-workspace')
+    && getUmbraQueueActivityControls(entry).skip);
+  const inpaintJobId = inpaintActivity?.requestId;
+  const inpaintPromptId = inpaintActivity?.promptId;
+  const inpaintPrompt = inpaintActivity?.detail;
+  useEffect(() => {
+    setInpaintPreview(null);
+    if (!previewsEnabled || !inpaintJobId || !inpaintPromptId) return;
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnect: number | undefined;
+    const connect = () => {
+      if (disposed) return;
+      socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/inpaint-preview`);
+      socket.onmessage = event => {
+        if (disposed) return;
+        let message: Payload;
+        try { message = record(JSON.parse(String(event.data))); } catch { return; }
+        if (message.type !== 'umbra_ui_inpaint_preview') return;
+        const data = record(message.data);
+        if (data.jobId !== inpaintJobId || data.promptId !== inpaintPromptId || !Number.isFinite(data.updatedAt)) return;
+        const next = readFilmstripInpaintPreview(data, inpaintJobId, inpaintPromptId, inpaintPrompt);
+        if (!next && data.active !== false) return;
+        setInpaintPreview(current => current && Number(current.updatedAt) > Number(data.updatedAt) ? current : next);
+      };
+      socket.onclose = () => { if (!disposed) reconnect = window.setTimeout(connect, 1500); };
+    };
+    connect();
+    return () => { disposed = true; window.clearTimeout(reconnect); socket?.close(); };
+  }, [inpaintJobId, inpaintPromptId, inpaintPrompt, previewsEnabled]);
+  const currentInpaintPreview = inpaintPreview?.jobId === inpaintJobId && inpaintPreview?.promptId === inpaintPromptId ? inpaintPreview : null;
+  const showingInpaintPreview = previewsEnabled && Boolean(currentInpaintPreview) && (!runningJob || !preview);
   const canSkip = Boolean(runningJob || activity);
   const skip = useCallback(async () => {
     if (busyRef.current || !canSkip) return;
@@ -133,7 +175,9 @@ export function useFilmstripGeneration(previewsEnabled: boolean) {
     setSkipPending(true);
     try {
       const job = jobRef.current;
-      if (job) {
+      if (showingInpaintPreview && inpaintActivity) {
+        await controlUmbraQueueActivity(inpaintActivity, 'skip');
+      } else if (job) {
         const socket = socketRef.current;
         if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Queue service is disconnected.');
         const id = crypto.randomUUID();
@@ -157,7 +201,10 @@ export function useFilmstripGeneration(previewsEnabled: boolean) {
       busyRef.current = false;
       setSkipPending(false);
     }
-  }, [activity, canSkip]);
+  }, [activity, canSkip, inpaintActivity, showingInpaintPreview]);
 
-  return { preview, runningJob, canSkip, skipPending, skip };
+  const activePreview = previewsEnabled
+    ? (runningJob ? preview : null) || currentInpaintPreview
+    : null;
+  return { preview: activePreview, runningJob, canSkip, skipPending, skip };
 }

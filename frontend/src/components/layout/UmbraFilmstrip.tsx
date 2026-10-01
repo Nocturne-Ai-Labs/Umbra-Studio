@@ -433,7 +433,8 @@ export function UmbraFilmstrip({
   const metadataTooltipEnabled = useStore((state) => state.appSettings['library.metadataHoverTooltips'] !== false);
   const liveGenerationPreviewsEnabled = useStore((state) => state.appSettings['comfyui.showFilmstripLivePreviews'] !== false);
   const recentGenerationsVisible = useStore((state) => state.appSettings['comfyui.showFilmstripRecentGenerations'] !== false);
-  const generation = useFilmstripGeneration(liveGenerationPreviewsEnabled && recentGenerationsVisible);
+  const followLatest = useStore((state) => state.appSettings['comfyui.filmstripFollowLatest']);
+  const generation = useFilmstripGeneration(liveGenerationPreviewsEnabled);
   const liveGenerationPreviewImage = useMemo(() => filmstripImageFromGenerationPreview(generation.preview), [generation.preview]);
   const skipCurrentGeneration = useCallback(async () => {
     try {
@@ -550,7 +551,6 @@ export function UmbraFilmstrip({
     const recentLimit = recentGenerationsExpanded ? 10 : 3;
     const currentByPath = new Map(displayedImages.map((image) => [pathKey(image.path), image]));
     const lane = [
-      ...(liveGenerationPreviewsEnabled && liveGenerationPreviewImage ? [liveGenerationPreviewImage] : []),
       ...recentGenerationOutputImages.slice(0, recentLimit),
     ];
     const seen = new Set<string>();
@@ -567,7 +567,7 @@ export function UmbraFilmstrip({
         privacyClass: image.privacyClass === 'nsfw' || current.privacyClass === 'nsfw' ? 'nsfw' : 'normal',
       };
     });
-  }, [displayedImages, liveGenerationPreviewImage, liveGenerationPreviewsEnabled, recentGenerationOutputImages, recentGenerationsExpanded, recentGenerationsVisible]);
+  }, [displayedImages, recentGenerationOutputImages, recentGenerationsExpanded, recentGenerationsVisible]);
 
   useEffect(() => {
     recentGenerationOutputImagesRef.current = recentGenerationOutputImages;
@@ -768,6 +768,25 @@ export function UmbraFilmstrip({
       window.removeEventListener('umbra:gallery-folder-changed', onGalleryFolderChanged as EventListener);
     };
   }, [rememberRecentFolders, folderActivity.markOpened]);
+
+  useEffect(() => {
+    const stopFollowing = () => {
+      if (useStore.getState().appSettings['comfyui.filmstripFollowLatest']) setAppSetting('comfyui.filmstripFollowLatest', false);
+    };
+    const onOpenPath = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: string; folderPath?: string; imagePath?: string; source?: string }>).detail;
+      if (detail?.source === 'filmstrip-latest' || isLiveGenerationPreviewPath(detail?.imagePath || '')) return;
+      if (detail?.path || detail?.folderPath || detail?.imagePath) stopFollowing();
+    };
+    window.addEventListener('umbra:gallery-folder-navigation-started', stopFollowing);
+    window.addEventListener('umbra:gallery-open-path', onOpenPath);
+    window.addEventListener('umbra:gallery-reveal-path', onOpenPath);
+    return () => {
+      window.removeEventListener('umbra:gallery-folder-navigation-started', stopFollowing);
+      window.removeEventListener('umbra:gallery-open-path', onOpenPath);
+      window.removeEventListener('umbra:gallery-reveal-path', onOpenPath);
+    };
+  }, [setAppSetting]);
 
   useEffect(() => {
     const onFolderLoadFailed = (event: Event) => {
@@ -1288,6 +1307,7 @@ export function UmbraFilmstrip({
     const folderPath = treatAsFile
       ? pathParent(normalizedTargetPath) || normalizedTargetPath
       : normalizedTargetPath;
+    setAppSetting('comfyui.filmstripFollowLatest', false);
     const imagePath = treatAsFile ? normalizedTargetPath : '';
     if (pathKey(folderPath) !== pathKey(currentFolderRef.current)) {
       localCustomSortPendingRef.current = null;
@@ -1298,7 +1318,7 @@ export function UmbraFilmstrip({
     setActiveWorkspace('library');
     const detail = { path: folderPath, folderPath, ...(imagePath ? { imagePath } : {}), source };
     window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', { detail }));
-  }, [generation.preview, setActiveWorkspace]);
+  }, [generation.preview, setActiveWorkspace, setAppSetting]);
 
   const onSelect = useCallback((id: string, event: React.MouseEvent) => {
     const orderedIds = selectableImages.map((item) => item.id);
@@ -2123,12 +2143,25 @@ export function UmbraFilmstrip({
   }, [folderActivity.markOpened]);
 
   const openPinnedFolder = useCallback((folderPath: string) => {
+    setAppSetting('comfyui.filmstripFollowLatest', false);
     openFilmstripFolder(folderPath, 'filmstrip-pinned-local');
-  }, [openFilmstripFolder]);
+  }, [openFilmstripFolder, setAppSetting]);
 
   const openNewestFolder = useCallback((folderPath: string) => {
+    setAppSetting('comfyui.filmstripFollowLatest', false);
     openFilmstripFolder(folderPath, 'filmstrip-newest-local');
-  }, [openFilmstripFolder]);
+  }, [openFilmstripFolder, setAppSetting]);
+
+  const openLatestFolder = useCallback(() => {
+    setAppSetting('comfyui.filmstripFollowLatest', true);
+    if (folderActivity.latestFolder) openFilmstripFolder(folderActivity.latestFolder, 'filmstrip-latest');
+  }, [folderActivity.latestFolder, openFilmstripFolder, setAppSetting]);
+
+  useEffect(() => {
+    if (!followLatest || !folderActivity.latestFolder || !useStore.getState().appSettings['comfyui.filmstripFollowLatest']) return;
+    if (pathKey(folderActivity.latestFolder) === pathKey(currentFolderRef.current)) return;
+    openFilmstripFolder(folderActivity.latestFolder, 'filmstrip-latest');
+  }, [followLatest, folderActivity.latestFolder, openFilmstripFolder]);
 
   const removePinnedFolder = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
@@ -2228,6 +2261,7 @@ export function UmbraFilmstrip({
         unreadFolderMediaCount={folderActivity.total}
         images={displayedImages}
         recentGenerationImages={recentGenerationLaneImages}
+        liveGenerationImage={liveGenerationPreviewImage || undefined}
         onSkipGeneration={skipCurrentGeneration}
         canSkipGeneration={generation.canSkip}
         skipGenerationPending={generation.skipPending}
@@ -2326,13 +2360,17 @@ export function UmbraFilmstrip({
         metadataTooltipEnabled={metadataTooltipEnabled}
         onDataChanged={refreshImages}
         onHeightChange={onHeightChange}
-        folderLabel={pathLeaf(currentFolder || rootPath) || 'No folder'}
+        folderLabel={followLatest ? `Latest${currentFolder ? ` / ${pathLeaf(currentFolder)}` : ''}` : pathLeaf(currentFolder || rootPath) || 'No folder'}
         folderPath={currentFolder || rootPath}
         pinnedFolders={pinnedFolderItems}
         newestFolders={newestFolderItems}
         onOpenPinnedFolder={openPinnedFolder}
         onOpenNewestFolder={openNewestFolder}
         onRemovePinnedFolder={removePinnedFolder}
+        latestFolderPath={folderActivity.latestFolder}
+        followLatest={followLatest}
+        onOpenLatestFolder={openLatestFolder}
+        onClearFolderNotifications={folderActivity.clearNotifications}
         onPinnedDrop={onPinnedDrop}
         onPinnedDropTargetChange={setDropTargetPath}
         onRefresh={() => refreshImages({ reload: true })}

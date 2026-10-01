@@ -7,6 +7,7 @@ import {
   ArrowDownAZ,
   ArrowUpAZ,
   CheckSquare,
+  CheckCheck,
   ChevronUp,
   Copy,
   FileJson,
@@ -22,6 +23,7 @@ import {
   ScanSearch,
   Send,
   SkipForward,
+  Sparkles,
   Tags,
   Trash2,
   Undo2,
@@ -63,6 +65,7 @@ export interface FilmstripProps {
   statusMessage?: string;
   statusIsError?: boolean;
   recentGenerationImages?: FilmstripImage[];
+  liveGenerationImage?: FilmstripImage;
   onSkipGeneration?: () => void;
   canSkipGeneration?: boolean;
   skipGenerationPending?: boolean;
@@ -116,6 +119,10 @@ export interface FilmstripProps {
   folderLabel?: string;
   folderPath?: string;
   unreadFolderMediaCount?: number;
+  latestFolderPath?: string;
+  followLatest?: boolean;
+  onOpenLatestFolder?: () => void;
+  onClearFolderNotifications?: (path?: string) => void;
   pinnedFolders?: Array<{
     path: string;
     label: string;
@@ -298,6 +305,10 @@ export function FilmstripFolderSelector({
   onOpenPinnedFolder,
   onOpenHistoryFolder,
   onRemovePinnedFolder,
+  latestFolderPath = '',
+  followLatest = false,
+  onOpenLatestFolder,
+  onClearFolderNotifications,
   onPinnedDrop,
   onPinnedDropTargetChange,
 }: {
@@ -307,6 +318,10 @@ export function FilmstripFolderSelector({
   onOpenPinnedFolder?: (path: string) => void;
   onOpenHistoryFolder?: (path: string) => void;
   onRemovePinnedFolder?: (path: string) => void;
+  latestFolderPath?: string;
+  followLatest?: boolean;
+  onOpenLatestFolder?: () => void;
+  onClearFolderNotifications?: (path?: string) => void;
   onPinnedDrop?: (event: DragEvent, destinationPath: string) => void | Promise<void>;
   onPinnedDropTargetChange?: (path: string) => void;
 }) {
@@ -315,7 +330,9 @@ export function FilmstripFolderSelector({
     pinnedFolders.length > 0 || historyFolders.length === 0 ? 'pinned' : 'history'
   ));
   const [historyOrder, setHistoryOrder] = useState<string[]>(() => historyFolders.map((folder) => folder.path));
+  const [panelOffsetX, setPanelOffsetX] = useState(0);
   const selectorRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const panelId = React.useId();
   const totalFolderCount = pinnedFolders.length + historyFolders.length;
   const displayedHistoryFolders = useMemo(() => {
@@ -336,6 +353,30 @@ export function FilmstripFolderSelector({
     }
     return ordered;
   }, [historyFolders, historyOrder, open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const positionPanel = () => {
+      const selector = selectorRef.current;
+      const panel = panelRef.current;
+      if (!selector || !panel) return;
+      const viewportWidth = document.documentElement.clientWidth;
+      const naturalLeft = selector.getBoundingClientRect().right - panel.offsetWidth;
+      const left = Math.max(12, Math.min(viewportWidth - panel.offsetWidth - 12, naturalLeft));
+      setPanelOffsetX(left - naturalLeft);
+    };
+    positionPanel();
+    const observer = new ResizeObserver(positionPanel);
+    if (selectorRef.current) observer.observe(selectorRef.current);
+    if (panelRef.current) observer.observe(panelRef.current);
+    window.addEventListener('resize', positionPanel);
+    window.addEventListener('scroll', positionPanel, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', positionPanel);
+      window.removeEventListener('scroll', positionPanel, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -399,11 +440,45 @@ export function FilmstripFolderSelector({
 
       {open ? (
         <div
+          ref={panelRef}
           id={panelId}
           role="dialog"
           aria-label="Filmstrip folders"
+          style={{ transform: `translateX(${panelOffsetX}px)` }}
           className="absolute bottom-[calc(100%+6px)] right-0 z-[10020] w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-md border border-zinc-700 bg-zinc-950 shadow-2xl"
         >
+          <div className="flex items-stretch gap-1 border-b border-zinc-800 p-1.5">
+            <button
+              type="button"
+              aria-label="Follow latest generated folder"
+              aria-pressed={followLatest}
+              title={latestFolderPath || 'Follow the next generated media folder'}
+              onClick={onOpenLatestFolder}
+              className={cn(
+                'flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left',
+                followLatest
+                  ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)]'
+                  : 'border-zinc-800 bg-zinc-900/45 hover:border-zinc-700 hover:bg-zinc-900/80',
+              )}
+            >
+              <Sparkles size={13} className="shrink-0 text-[var(--umbra-accent)]" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs font-medium text-zinc-200">Latest</span>
+                <span className="block truncate text-[10px] text-zinc-500">{latestFolderPath || 'No generated media yet'}</span>
+              </span>
+              {followLatest ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Following</span> : null}
+            </button>
+            {onClearFolderNotifications ? (
+              <button
+                type="button"
+                title="Clear all folder notifications"
+                aria-label="Clear all folder notifications"
+                disabled={unreadCount <= 0}
+                onClick={() => onClearFolderNotifications()}
+                className="inline-flex w-10 shrink-0 items-center justify-center rounded-sm border border-zinc-800 text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-30"
+              ><CheckCheck size={16} /></button>
+            ) : null}
+          </div>
           <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-1.5" role="tablist" aria-label="Folder list">
             <button
               type="button"
@@ -480,6 +555,15 @@ export function FilmstripFolderSelector({
                     {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
                     <FolderActivityBadge count={folder.unreadCount || 0} />
                   </button>
+                  {onClearFolderNotifications && (folder.unreadCount || 0) > 0 ? (
+                    <button
+                      type="button"
+                      title="Clear folder notifications"
+                      aria-label={`Clear notifications for ${folder.label || folder.path}`}
+                      onClick={() => onClearFolderNotifications(folder.path)}
+                      className="inline-flex w-9 shrink-0 items-center justify-center border-l border-zinc-800 text-zinc-400 hover:bg-white/5 hover:text-white"
+                    ><CheckCheck size={14} /></button>
+                  ) : null}
                   <button
                     type="button"
                     title="Remove pinned folder"
@@ -500,18 +584,21 @@ export function FilmstripFolderSelector({
                 </div>
               )
             ) : displayedHistoryFolders.length > 0 ? displayedHistoryFolders.map((folder) => (
-              <button
+              <div
                 key={folder.path}
-                type="button"
                 title={folder.path}
-                onClick={() => onOpenHistoryFolder?.(folder.path)}
                 className={cn(
-                  'mb-1 flex min-h-11 w-full items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left last:mb-0',
+                  'mb-1 flex min-h-11 w-full items-stretch overflow-hidden rounded-sm border last:mb-0',
                   folder.isCurrent
                     ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)]'
                     : 'border-zinc-800 bg-zinc-900/45 hover:border-zinc-700 hover:bg-zinc-900/80',
                 )}
               >
+                <button
+                  type="button"
+                  onClick={() => onOpenHistoryFolder?.(folder.path)}
+                  className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left"
+                >
                 <History size={13} className="shrink-0 text-zinc-500" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-zinc-200">{folder.label || folder.path}</span>
@@ -519,7 +606,17 @@ export function FilmstripFolderSelector({
                 </span>
                 {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
                 <FolderActivityBadge count={folder.unreadCount || 0} />
-              </button>
+                </button>
+                {onClearFolderNotifications && (folder.unreadCount || 0) > 0 ? (
+                  <button
+                    type="button"
+                    title="Clear folder notifications"
+                    aria-label={`Clear notifications for ${folder.label || folder.path}`}
+                    onClick={() => onClearFolderNotifications(folder.path)}
+                    className="inline-flex w-9 shrink-0 items-center justify-center border-l border-zinc-800 text-zinc-400 hover:bg-white/5 hover:text-white"
+                  ><CheckCheck size={14} /></button>
+                ) : null}
+              </div>
             )) : (
               <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-center text-zinc-600">
                 <History size={18} />
@@ -865,6 +962,7 @@ export function Filmstrip({
   statusMessage,
   statusIsError = false,
   recentGenerationImages = [],
+  liveGenerationImage,
   onSkipGeneration,
   canSkipGeneration = false,
   skipGenerationPending = false,
@@ -908,6 +1006,10 @@ export function Filmstrip({
   folderLabel = '',
   folderPath = '',
   unreadFolderMediaCount = 0,
+  latestFolderPath = '',
+  followLatest = false,
+  onOpenLatestFolder,
+  onClearFolderNotifications,
   pinnedFolders = [],
   newestFolders = [],
   onOpenPinnedFolder,
@@ -935,10 +1037,12 @@ export function Filmstrip({
     () => recentGenerationsVisible ? recentGenerationImages.slice(0, recentGenerationExpanded ? 11 : 4) : [],
     [recentGenerationExpanded, recentGenerationImages, recentGenerationsVisible]
   );
-  const recentGenerationSectionWidth = displayMode === 'strip' && visibleRecentGenerationImages.length > 0
+  const showLiveGenerationSlot = Boolean(liveGenerationImage || canSkipGeneration || skipGenerationPending);
+  const showGenerationSection = showLiveGenerationSlot || visibleRecentGenerationImages.length > 0;
+  const recentGenerationSectionWidth = displayMode === 'strip' && showGenerationSection
     ? RECENT_GENERATION_CONTROL_WIDTH
       + RECENT_GENERATION_SECTION_GAP
-      + (visibleRecentGenerationImages.length * (STRIP_CARD_SIZE + STRIP_CARD_GAP))
+      + ((visibleRecentGenerationImages.length + Number(showLiveGenerationSlot)) * (STRIP_CARD_SIZE + STRIP_CARD_GAP))
       + 24
     : 0;
   const stripVirtualizer = useVirtualizer({
@@ -1310,6 +1414,45 @@ export function Filmstrip({
     window.dispatchEvent(new CustomEvent('umbra:filmstrip-drag-end'));
   }, []);
 
+  const generationControls = (
+    <div role="group" aria-label="Filmstrip generation controls"
+      className="flex h-[104px] w-[118px] shrink-0 flex-col justify-between rounded-md border border-emerald-300/30 bg-emerald-400/[0.07] px-2.5 py-2 text-emerald-100">
+      <span className="text-[9px] font-black uppercase text-emerald-200/85">Generation</span>
+      <span className="text-[11px] font-semibold text-emerald-50">{showLiveGenerationSlot ? 'Sampling' : `${visibleRecentGenerationImages.length} recent`}</span>
+      <div className="flex items-center gap-2">
+        {onSkipGeneration ? (
+          <button type="button" onClick={onSkipGeneration} disabled={!canSkipGeneration || skipGenerationPending}
+            aria-label="Skip current generation" aria-busy={skipGenerationPending}
+            title={skipGenerationPending ? 'Skipping current generation' : canSkipGeneration ? 'Skip current generation; keep pending jobs' : 'No running generation to skip'}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-emerald-300/30 text-emerald-100 hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-30">
+            {skipGenerationPending ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <SkipForward size={15} aria-hidden="true" />}
+          </button>
+        ) : null}
+        {visibleRecentGenerationImages.length > 0 && onToggleRecentGenerationExpanded ? (
+          <button type="button" onClick={onToggleRecentGenerationExpanded}
+            aria-label={recentGenerationExpanded ? 'Show compact recent generations' : 'Show more recent generations'}
+            title={recentGenerationExpanded ? 'Show compact recent generations' : 'Show more recent generations'}
+            className="flex h-8 w-8 items-center justify-center rounded border border-emerald-300/30 text-emerald-100 hover:bg-emerald-300/15">
+            <GalleryHorizontalEnd size={15} aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+  const livePreviewTile = showLiveGenerationSlot ? liveGenerationImage ? (
+    <FilmstripTile image={liveGenerationImage} selected={false} displayMode="strip" activeWorkspace={activeWorkspace}
+      showContextButton={false} selectionMode={false} singleTapOpen
+      onSelect={() => onOpen?.(liveGenerationImage)} onOpen={() => onOpen?.(liveGenerationImage)}
+      onContextMenu={event => event.preventDefault()} onDragStart={event => event.preventDefault()}
+      onDragOver={event => event.preventDefault()} onDrop={event => event.preventDefault()} onDragEnd={endDrag} />
+  ) : (
+    <div role="status" aria-label="Waiting for generation preview"
+      className="flex h-[104px] w-[104px] shrink-0 flex-col items-center justify-center gap-2 rounded-md border border-emerald-300/30 bg-black/30 text-center text-[10px] text-emerald-200/70">
+      <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+      Generating
+    </div>
+  ) : null;
+
   return (
     <div
       ref={filmstripRef}
@@ -1345,21 +1488,12 @@ export function Filmstrip({
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
-          {onSkipGeneration ? (
-            <button
-              type="button"
-              onClick={onSkipGeneration}
-              disabled={!canSkipGeneration || skipGenerationPending}
-              aria-label="Skip current generation"
-              aria-busy={skipGenerationPending}
-              title={skipGenerationPending ? 'Skipping current generation' : canSkipGeneration ? 'Skip current generation; keep pending jobs' : 'No running generation to skip'}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-zinc-800 text-zinc-400 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {skipGenerationPending ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <SkipForward size={14} aria-hidden="true" />}
-            </button>
-          ) : null}
           <FilmstripFolderSelector
             unreadCount={unreadFolderMediaCount}
+            latestFolderPath={latestFolderPath}
+            followLatest={followLatest}
+            onOpenLatestFolder={onOpenLatestFolder}
+            onClearFolderNotifications={onClearFolderNotifications}
             pinnedFolders={pinnedFolders}
             historyFolders={newestFolders}
             onOpenPinnedFolder={onOpenPinnedFolder}
@@ -1471,7 +1605,7 @@ export function Filmstrip({
               role="switch"
               aria-checked={recentGenerationsVisible}
               aria-label="Show recent generations"
-              title={recentGenerationsVisible ? 'Hide recent generations and live preview' : 'Show recent generations and live preview'}
+              title={recentGenerationsVisible ? 'Hide recent generations' : 'Show recent generations'}
               onClick={onToggleRecentGenerationsVisible}
               className={cn(
                 'flex h-7 w-7 shrink-0 items-center justify-center rounded border transition-colors',
@@ -1500,7 +1634,7 @@ export function Filmstrip({
         }}
         onWheel={handleStripWheel}
       >
-        {images.length === 0 && visibleRecentGenerationImages.length === 0 ? (
+        {images.length === 0 && !showGenerationSection ? (
           <div className={cn('flex h-full items-center justify-center text-sm', statusIsError ? 'text-red-400' : 'text-zinc-500')}>
             {statusMessage || 'No images in filmstrip'}
           </div>
@@ -1510,27 +1644,15 @@ export function Filmstrip({
             style={{ width: stripVirtualizer.getTotalSize() }}
             data-umbra-virtualized-filmstrip
           >
-            {visibleRecentGenerationImages.length > 0 ? (
+            {showGenerationSection ? (
               <div
                 className="absolute left-0 top-0 flex h-full items-stretch gap-2 pr-3"
                 style={{ width: recentGenerationSectionWidth }}
                 data-umbra-filmstrip-recent-generations=""
               >
-                <button
-                  type="button"
-                  onClick={onToggleRecentGenerationExpanded}
-                  className="flex h-[104px] w-[118px] shrink-0 flex-col justify-between rounded-lg border border-emerald-300/30 bg-emerald-400/[0.07] px-2.5 py-2 text-left text-emerald-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_18px_rgba(16,185,129,0.12)] transition hover:border-emerald-200/55 hover:bg-emerald-400/[0.11]"
-                  title={recentGenerationExpanded ? 'Show compact recent generations' : 'Show more recent generations'}
-                >
-                  <span className="text-[9px] font-black uppercase tracking-[0.18em] text-emerald-200/85">Generations</span>
-                  <span className="text-[18px] font-black leading-none text-emerald-50">
-                    {visibleRecentGenerationImages.length}
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-200/75">
-                    {recentGenerationExpanded ? 'Expanded' : 'Compact'}
-                  </span>
-                </button>
+                {generationControls}
                 <div className="flex h-full items-stretch gap-2">
+                  {livePreviewTile}
                   {visibleRecentGenerationImages.map((image) => (
                     <FilmstripTile
                       key={`recent-generation-${image.id}`}
@@ -1625,8 +1747,10 @@ export function Filmstrip({
               'grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2',
             )}
           >
-            {visibleRecentGenerationImages.length > 0 ? (
-              <div className="col-span-full border-b-[3px] border-emerald-200/80 pb-2 text-xs font-semibold text-emerald-200">Recent generations</div>
+            {showGenerationSection ? (
+              <div className="col-span-full flex flex-wrap items-start gap-2 border-b-[3px] border-emerald-200/80 pb-2">
+                {generationControls}{livePreviewTile}
+              </div>
             ) : null}
             {orderedSelectionImages.map((image, index) => (
               <React.Fragment key={image.id}>
