@@ -2803,8 +2803,8 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-media-tool-preview] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-canvas-workspace] {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) !important;
+  display: flex !important;
+  flex-direction: column;
   width: 100%;
   min-width: 0;
 }
@@ -2824,7 +2824,10 @@ html[data-umbra-remote-mode="phone"] [data-umbra-canvas-layers-panel] {
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-canvas-staging-strip] {
-  min-height: 9rem;
+  min-height: 0;
+}
+
+html[data-umbra-remote-mode="phone"] #umbra-canvas-results {
   scroll-snap-type: x proximity;
   overscroll-behavior-inline: contain;
 }
