@@ -14,3 +14,25 @@ Attribution request for public forks and redistributed modified builds:
 
 This attribution request is intended to preserve clear ownership, authorship, and project
 lineage while keeping Umbra Studio broadly open and fork-friendly.
+
+LTX-2.3 OmniForge integration notice:
+- The DaSiWa-branded OmniForge workflow supplied as a technique reference is credited to
+  DaSiWa / darksidewalker (https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes).
+  The workflow JSON is not included in Umbra Studio.
+- LTX Director nodes are by Jonathan Watkins (WhatDreamsCost), from the GPL-3.0
+  WhatDreamsCost-ComfyUI project. Umbra's managed installation uses the PodJamz fork:
+  https://github.com/PodJamz/whatdreamscost-comfyui
+- DaSiWa custom nodes and Kijai's ComfyUI-KJNodes are also GPL-3.0 projects installed
+  as separate ComfyUI extensions by Setup/updater. No LTX OmniForge upstream node
+  source is copied into or modified in Umbra Studio for this integration. The existing
+  MiniMax H3 DaSiWa compatibility patch remains a separate managed-install change.
+- Optional LTX video tiling nodes come from Lightricks/ComfyUI-LTXVideo under the
+  LTX-2 Community License. Optional advanced pixel upscaling comes from
+  Artificial-Sweetener/comfyui-WhiteRabbit under AGPL-3.0-only. Setup/updater
+  installs each as a separate upstream checkout on request; no node code is vendored.
+  KJNodes' experimental PatchTritonVAE additionally requires a compatible Triton
+  runtime, which this integration does not install automatically.
+- LTX-2.3 model components downloaded separately are subject to the LTX-2 Community
+  License (https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE). The Gemma 3
+  encoder has separate Gemma terms (https://ai.google.dev/gemma/terms). Umbra's MIT
+  license does not replace any of these third-party terms.

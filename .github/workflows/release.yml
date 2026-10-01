@@ -152,8 +152,15 @@ jobs:
             echo "Release notes for ${tag} were not found in CHANGELOG.md" >&2
             exit 1
           fi
-          if ! grep -Fq 'Umbra Studio Mobile is experimental and is not ready for feedback.' release-notes.md; then
-            { printf '**Umbra Studio Mobile is experimental and is not ready for feedback.**\n\n'; cat release-notes.md; } > release-notes-mobile.md
-            mv release-notes-mobile.md release-notes.md
-          fi
+          awk '
+            BEGIN {
+              mobile="**Umbra Studio Mobile is experimental and is not ready for feedback.**"
+              canvas="**Canvas is temporarily disabled and is not ready for feedback.**"
+              video="**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**"
+              print mobile "\n\n" canvas "\n\n" video "\n"
+            }
+            { sub(/\r$/, "") }
+            $0 != mobile && $0 != canvas && $0 != video { print }
+          ' release-notes.md > release-notes-warnings.md
+          mv release-notes-warnings.md release-notes.md
           gh release create "${tag}" artifacts/* --repo "${GITHUB_REPOSITORY}" --notes-file release-notes.md --title "Umbra Studio ${tag}"

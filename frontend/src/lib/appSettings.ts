@@ -39,6 +39,7 @@ export interface AppSettings {
   'comfyui.showFilmstrip': boolean;
   'comfyui.showFilmstripLivePreviews': boolean;
   'comfyui.showFilmstripRecentGenerations': boolean;
+  'comfyui.filmstripFollowLatest': boolean;
   'library.metadataHoverTooltips': boolean;
   'library.multiFolderView': boolean;
   'comfyui.externalOutputPath': string;
@@ -106,6 +107,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'comfyui.showFilmstrip': true,
   'comfyui.showFilmstripLivePreviews': true,
   'comfyui.showFilmstripRecentGenerations': true,
+  'comfyui.filmstripFollowLatest': false,
   'library.metadataHoverTooltips': false,
   'library.multiFolderView': false,
   'comfyui.externalOutputPath': '',
@@ -160,6 +162,7 @@ const BOOLEAN_KEYS: Array<keyof AppSettings> = [
   'comfyui.showFilmstrip',
   'comfyui.showFilmstripLivePreviews',
   'comfyui.showFilmstripRecentGenerations',
+  'comfyui.filmstripFollowLatest',
   'library.metadataHoverTooltips',
   'library.multiFolderView',
   'library.enableExternalRoots',

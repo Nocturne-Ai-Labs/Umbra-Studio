@@ -30,15 +30,17 @@ import {
   Lock,
   Pin,
   LoaderCircle,
+  Magnet,
+  Maximize2,
+  Minimize2,
   MousePointer2,
-  PanelLeftOpen,
-  PanelRightOpen,
   PenTool,
   Pipette,
   Redo2,
   RotateCcw,
   RotateCw,
   Save,
+  Scissors,
   ScanLine,
   Search,
   Send,
@@ -88,6 +90,7 @@ import {
   fetchUmbraUiInpaintJob,
   failLostUmbraUiInpaintJob,
   isUmbraUiInpaintJobTerminal,
+  removeUmbraUiImageBackground,
   submitUmbraUiInpaintJob,
   type UmbraUiInpaintJob,
 } from '@/lib/umbraUiInpaint';
@@ -130,6 +133,7 @@ import {
 import {
   createUmbraCanvasMaskEntity,
   createUmbraCanvasRasterEntity,
+  createUmbraCanvasRasterCutoutEntity,
   createUmbraCanvasShapeEntity,
   createUmbraCanvasTextEntity,
   createUmbraCanvasGradientEntity,
@@ -149,7 +153,7 @@ import {
   type UmbraCanvasProjectDocument,
   type UmbraCanvasStagedGeneration,
 } from './canvasModel';
-import { composeUmbraCanvasAcceptedReplacementBlob, composeUmbraCanvasDrawableRegionBlob, composeUmbraCanvasGenerationRegion, composeUmbraCanvasMaskBlob, composeUmbraCanvasProjectThumbnail, composeUmbraCanvasRasterBlob, composeUmbraCanvasRasterCropBlob, type UmbraCanvasCompositeResult } from './canvasCompositor';
+import { composeUmbraCanvasAcceptedReplacementBlob, composeUmbraCanvasCutoutBlob, composeUmbraCanvasDrawableRegionBlob, composeUmbraCanvasGenerationRegion, composeUmbraCanvasMaskBlob, composeUmbraCanvasProjectThumbnail, composeUmbraCanvasRasterBlob, composeUmbraCanvasRasterCropBlob, composeUmbraCanvasRasterSourceBlob, type UmbraCanvasCompositeResult } from './canvasCompositor';
 import { releaseUmbraCanvasImageResource, UmbraCanvasManager, type UmbraCanvasTool } from './UmbraCanvasManager';
 import { saveUmbraCanvasRequiredRevision } from './canvasProjectSaveGate';
 import { useUmbraCanvasStore } from './useUmbraCanvasStore';
@@ -402,6 +406,8 @@ export function UmbraCanvasWorkspace({
   const canUndo = useUmbraCanvasStore((state) => state.past.length > 0);
   const canRedo = useUmbraCanvasStore((state) => state.future.length > 0);
   const addRaster = useUmbraCanvasStore((state) => state.addRaster);
+  const addRasterCutout = useUmbraCanvasStore((state) => state.addRasterCutout);
+  const cropRaster = useUmbraCanvasStore((state) => state.cropRaster);
   const addDrawable = useUmbraCanvasStore((state) => state.addDrawable);
   const mergeVisibleDrawables = useUmbraCanvasStore((state) => state.mergeVisibleDrawables);
   const addRasterStroke = useUmbraCanvasStore((state) => state.addRasterStroke);
@@ -445,6 +451,7 @@ export function UmbraCanvasWorkspace({
   const acceptStagedGeneration = useUmbraCanvasStore((state) => state.acceptStagedGeneration);
   const stages = useUmbraCanvasStore((state) => state.present.generation.staging);
   const [tool, setTool] = React.useState<UmbraCanvasTool>('select');
+  const [layerSnappingEnabled, setLayerSnappingEnabled] = React.useState(true);
   const [maskBrushSize, setMaskBrushSize] = React.useState(64);
   const [maskBrushOpacity, setMaskBrushOpacity] = React.useState(0.72);
   const [rasterBrushSize, setRasterBrushSize] = React.useState(64);
@@ -457,6 +464,9 @@ export function UmbraCanvasWorkspace({
   const [pendingMediaImport, setPendingMediaImport] = React.useState<UmbraUiMediaHandoff | null>(null);
   const [mediaImportBusy, setMediaImportBusy] = React.useState(false);
   const [compactPanel, setCompactPanel] = React.useState<'generation' | 'inpaint' | 'layers' | ''>('');
+  const lastPanelRef = React.useRef<'generation' | 'inpaint' | 'layers'>('inpaint');
+  const panelButtonsRef = React.useRef<Partial<Record<'generation' | 'inpaint' | 'layers', HTMLButtonElement | null>>>({});
+  const [stagingExpanded, setStagingExpanded] = React.useState(true);
   const [layerSearch, setLayerSearch] = React.useState('');
   const [projectSummaries, setProjectSummaries] = React.useState<UmbraCanvasWorkspaceProjectSummary[]>([]);
   const [restorePoints, setRestorePoints] = React.useState<UmbraCanvasWorkspaceRestorePointSummary[]>([]);
@@ -474,6 +484,10 @@ export function UmbraCanvasWorkspace({
   const [forkingProject, setForkingProject] = React.useState(false);
   const [croppingRaster, setCroppingRaster] = React.useState(false);
   const [mergingLayers, setMergingLayers] = React.useState(false);
+  const [removingBackground, setRemovingBackground] = React.useState(false);
+  const [exportingRaster, setExportingRaster] = React.useState(false);
+  const [backgroundRemovalError, setBackgroundRemovalError] = React.useState('');
+  const backgroundRemovalRequestRef = React.useRef<AbortController | null>(null);
   const [archiving, setArchiving] = React.useState(false);
   const [preparingRegion, setPreparingRegion] = React.useState(false);
   const [preparedRegion, setPreparedRegion] = React.useState<UmbraCanvasPreparedRegion | null>(null);
@@ -541,6 +555,15 @@ export function UmbraCanvasWorkspace({
   const projectRef = React.useRef(project);
   projectRef.current = project;
   jobRef.current = job;
+
+  React.useEffect(() => {
+    setRemovingBackground(false);
+    setBackgroundRemovalError('');
+    return () => {
+      backgroundRemovalRequestRef.current?.abort();
+      backgroundRemovalRequestRef.current = null;
+    };
+  }, [project.id]);
 
   const resetGenerationTracking = React.useCallback((stages: readonly UmbraCanvasStagedGeneration[] = []) => {
     setJob(null);
@@ -657,6 +680,7 @@ export function UmbraCanvasWorkspace({
     const manager = new UmbraCanvasManager(container, {
       onSelectEntity: handleSelectEntity,
       onTransformEntities: updateDrawableTransforms,
+      onCropRasterEntity: cropRaster,
       onGenerationBboxChange: setGenerationBbox,
       onViewportChange: setViewport,
       onMaskStroke: addMaskStroke,
@@ -681,7 +705,7 @@ export function UmbraCanvasWorkspace({
       manager.destroy();
       managerRef.current = null;
     };
-  }, [addDrawable, addMaskStroke, addRasterStroke, handleSelectEntity, setGenerationBbox, setViewport, showToast, updateDrawableTransforms]);
+  }, [addDrawable, addMaskStroke, addRasterStroke, cropRaster, handleSelectEntity, setGenerationBbox, setViewport, showToast, updateDrawableTransforms]);
 
   const canvasSceneKey = React.useMemo(() => JSON.stringify({
     bbox: project.generationBbox,
@@ -724,6 +748,10 @@ export function UmbraCanvasWorkspace({
   React.useEffect(() => {
     managerRef.current?.setTool(tool);
   }, [tool]);
+
+  React.useEffect(() => {
+    managerRef.current?.setLayerSnappingEnabled(layerSnappingEnabled);
+  }, [layerSnappingEnabled]);
 
   React.useEffect(() => {
     managerRef.current?.setMaskBrush(maskBrushSize, maskBrushOpacity);
@@ -2350,6 +2378,65 @@ export function UmbraCanvasWorkspace({
       setCroppingRaster(false);
     }
   };
+  const removeRasterBackground = async () => {
+    if (backgroundRemovalRequestRef.current || !comfyConnected) return;
+    const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
+    const raster = current.entities.find((entity) => entity.id === current.activeEntityId && entity.kind === 'raster');
+    if (!raster || raster.kind !== 'raster' || raster.locked || raster.alphaLocked) return;
+    const frozenRaster = structuredClone(raster);
+    const controller = new AbortController();
+    backgroundRemovalRequestRef.current = controller;
+    setRemovingBackground(true);
+    setBackgroundRemovalError('');
+    let imageUrl = '';
+    try {
+      const response = await fetch('/api/umbra-ui/inpaint/models', { cache: 'no-store', signal: controller.signal });
+      const catalog = await response.json();
+      if (!response.ok || catalog?.verified !== true || catalog?.features?.backgroundRemoval !== true) {
+        throw new Error('Background removal requires the Remove Background custom node in ComfyUI. Update your custom nodes and restart ComfyUI.');
+      }
+      const source = await composeUmbraCanvasRasterSourceBlob(frozenRaster);
+      controller.signal.throwIfAborted();
+      const result = await removeUmbraUiImageBackground({ image: source, imageName: `${frozenRaster.name}-source.png`, model: 'isnet-anime', signal: controller.signal });
+      const blob = await composeUmbraCanvasCutoutBlob(source, result.blob, frozenRaster.width, frozenRaster.height);
+      controller.signal.throwIfAborted();
+      imageUrl = URL.createObjectURL(blob);
+      const cutout = createUmbraCanvasRasterCutoutEntity(frozenRaster, imageUrl);
+      if (!addRasterCutout(current.id, frozenRaster.id, frozenRaster.revision, historyEpoch, cutout)) {
+        throw new Error('The source layer changed during background removal. Try again from the current layer.');
+      }
+      imageUrl = '';
+    } catch (error) {
+      if (!controller.signal.aborted) setBackgroundRemovalError(error instanceof Error ? error.message : 'Background removal failed. The original image was kept.');
+    } finally {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      if (backgroundRemovalRequestRef.current === controller) {
+        backgroundRemovalRequestRef.current = null;
+        setRemovingBackground(false);
+      }
+    }
+  };
+  const exportRasterPng = async () => {
+    if (exportingRaster) return;
+    const current = useUmbraCanvasStore.getState().present;
+    const raster = current.entities.find((entity) => entity.id === current.activeEntityId && entity.kind === 'raster');
+    if (!raster || raster.kind !== 'raster') return;
+    setExportingRaster(true);
+    setBackgroundRemovalError('');
+    try {
+      const blob = await composeUmbraCanvasRasterSourceBlob(structuredClone(raster));
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${raster.name.replace(/[^a-z0-9._-]+/gi, '-').replace(/\.[a-z0-9]+$/i, '') || 'canvas-layer'}.png`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error) {
+      setBackgroundRemovalError(error instanceof Error ? error.message : 'The image layer could not be exported.');
+    } finally {
+      setExportingRaster(false);
+    }
+  };
   const mergeVisibleLayers = async () => {
     if (mergingLayers || saving) return;
     const current = useUmbraCanvasStore.getState().present;
@@ -2391,6 +2478,29 @@ export function UmbraCanvasWorkspace({
   };
 
   const generationResolutionIssue = getUmbraCanvasGenerationResolutionIssue(project.generationBbox, capabilities.resolution);
+  const isMaskBrush = tool === 'mask-brush' || tool === 'mask-eraser';
+  const isRasterBrush = tool === 'raster-brush' || tool === 'raster-eraser';
+  const backgroundRemovalDisabledReason = removingBackground ? 'Removing background'
+    : !comfyConnected ? 'Launch ComfyUI to remove image backgrounds'
+      : activeEntity?.kind !== 'raster' ? 'Select an image layer to remove its background'
+        : activeEntity.locked ? 'Unlock the image layer before removing its background'
+          : activeEntity.alphaLocked ? 'Unlock transparent pixels before removing the background' : '';
+  const togglePanel = (panel: 'generation' | 'inpaint' | 'layers') => {
+    lastPanelRef.current = panel;
+    setCompactPanel((current) => current === panel ? '' : panel);
+  };
+  const closePanel = () => {
+    setCompactPanel('');
+    panelButtonsRef.current[compactPanel || lastPanelRef.current]?.focus();
+  };
+  const onPanelKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    // Portaled selectors own Escape even though React bubbles through the inspector.
+    if (!event.currentTarget.contains(event.target as Node)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePanel();
+  };
 
   return (
     <section
@@ -2399,12 +2509,35 @@ export function UmbraCanvasWorkspace({
       data-canvas-bbox-y={project.generationBbox.y}
       data-canvas-bbox-width={project.generationBbox.width}
       data-canvas-bbox-height={project.generationBbox.height}
-      className="relative col-span-full grid min-h-0 grid-cols-[minmax(0,1fr)] bg-[#07090a] 2xl:grid-cols-[clamp(250px,18vw,300px)_clamp(240px,17vw,280px)_minmax(0,1fr)_280px]"
+      className="@container/canvas relative col-span-full flex min-h-0 min-w-0 flex-col bg-[#07090a]"
     >
-      {compactPanel ? <button type="button" aria-label="Close Canvas side panel" onClick={() => setCompactPanel('')} className="absolute inset-0 z-10 bg-black/65 2xl:hidden" /> : null}
+      <header data-umbra-canvas-project-toolbar="" className="flex min-h-12 min-w-0 shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/25 px-3 py-1.5">
+        <div role="group" aria-label="Canvas panels" className="flex shrink-0 items-center gap-1">
+          {([
+            { id: 'inpaint', label: 'Prompt', icon: Focus },
+            { id: 'generation', label: 'Generation', icon: ScanLine },
+            { id: 'layers', label: 'Layers', icon: Layers3 },
+          ] as const).map(({ id, label, icon: Icon }) => (
+            <button key={id} ref={(button) => { panelButtonsRef.current[id] = button; }} type="button" title={`${compactPanel === id ? 'Hide' : 'Show'} ${label.toLowerCase()} controls`} aria-label={`Toggle Canvas ${label.toLowerCase()} panel`} aria-expanded={compactPanel === id} aria-controls={`umbra-canvas-${id}-panel`} onClick={() => togglePanel(id)} className={cn('inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-[10px] font-bold', compactPanel === id ? 'border-cyan-300/35 bg-cyan-500/10 text-cyan-100' : 'border-white/10 text-zinc-400 hover:text-zinc-100')}><Icon size={14} /><span>{label}</span></button>
+          ))}
+          <button type="button" title={compactPanel ? 'Hide Canvas controls' : 'Restore Canvas controls'} aria-label={compactPanel ? 'Hide Canvas controls' : 'Restore Canvas controls'} aria-pressed={!compactPanel} onClick={() => setCompactPanel((current) => current ? '' : lastPanelRef.current)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-zinc-100">{compactPanel ? <Maximize2 size={14} /> : <Minimize2 size={14} />}</button>
+        </div>
+        <input value={project.name} onChange={(event) => renameProject(event.target.value)} aria-label="Canvas project name" className="h-8 min-w-32 max-w-72 flex-1 rounded-md border border-transparent bg-transparent px-2 font-mono text-[11px] font-bold text-zinc-300 outline-none focus:border-cyan-300/25 focus:bg-black/35" />
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <button type="button" title="New Canvas project" aria-label="New Canvas project" onClick={startBlankProject} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100"><Layers3 size={14} /></button>
+          <button type="button" title="Canvas projects" aria-label="Canvas projects" onClick={openProjectBrowser} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100"><FolderOpen size={14} /></button>
+          <button type="button" title={saveError ? `Last save failed: ${saveError}` : 'Save Canvas project'} onClick={() => void saveProject()} disabled={saving || project.entities.length === 0 || conflictedProjectId === project.id} className={cn('inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700', saveError ? 'border-amber-300/35 bg-amber-400/[0.08] text-amber-100' : 'border-cyan-300/20 bg-cyan-500/[0.06] text-cyan-100')}><Save size={14} />{saving ? 'Saving' : conflictedProjectId === project.id ? 'Conflict' : saveError ? 'Retry Save' : 'Save'}</button>
+          {conflictedProjectId === project.id && <button type="button" title="Reload saved project; asks before discarding your draft" aria-label="Reload saved project" onClick={() => void loadProject(project.id)} disabled={saving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-amber-300/35 text-amber-100"><RotateCcw size={14} /></button>}
+          <button type="button" title="Save project as a new copy" aria-label="Save project as a new copy" onClick={() => void forkProject()} disabled={forkingProject || saving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800">{forkingProject ? <LoaderCircle size={14} className="animate-spin" /> : <Copy size={14} />}</button>
+          <button type="button" title="Export portable Canvas project" aria-label="Export portable Canvas project" onClick={() => void exportProject()} disabled={archiving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800"><Download size={14} /></button>
+          <button type="button" title="Import portable Canvas project" aria-label="Import portable Canvas project" onClick={() => archiveInputRef.current?.click()} disabled={archiving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800"><Upload size={14} /></button>
+        </div>
+      </header>
+      <div data-umbra-canvas-layout="" className={cn('relative grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)]', compactPanel ? '@min-[1100px]/canvas:grid-cols-[320px_minmax(0,1fr)]' : '')}>
+      {compactPanel ? <button type="button" aria-label="Close Canvas side panel" onClick={closePanel} className="absolute inset-0 z-10 bg-black/65 @min-[1100px]/canvas:hidden" /> : null}
 
-      <aside data-umbra-canvas-generation-panel="" className={cn(
-        'absolute bottom-0 left-0 top-0 z-20 w-[min(340px,100%)] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar 2xl:static 2xl:z-auto 2xl:block 2xl:w-auto 2xl:bg-black/20 2xl:shadow-none',
+      <aside id="umbra-canvas-generation-panel" data-umbra-canvas-generation-panel="" onKeyDown={onPanelKeyDown} className={cn(
+        'absolute bottom-0 left-0 top-0 z-20 w-[min(340px,100%)] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar @min-[1100px]/canvas:static @min-[1100px]/canvas:z-auto @min-[1100px]/canvas:w-auto @min-[1100px]/canvas:shadow-none',
         compactPanel === 'generation' ? 'block' : 'hidden',
       )}>
         <div className="mb-3 flex items-center gap-2">
@@ -2413,7 +2546,7 @@ export function UmbraCanvasWorkspace({
             <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Canvas Generation</h2>
             <p className="font-mono text-[8px] uppercase text-zinc-600">Bound to the generation box</p>
           </div>
-          <button type="button" aria-label="Close generation panel" onClick={() => setCompactPanel('')} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 2xl:hidden"><X size={13} /></button>
+          <button type="button" aria-label="Close generation panel" onClick={closePanel} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400"><X size={13} /></button>
         </div>
         <div className="space-y-3">
           <label className="block space-y-1.5">
@@ -2526,8 +2659,8 @@ export function UmbraCanvasWorkspace({
         </div>
       </aside>
 
-      <aside data-umbra-canvas-inpaint-panel="" className={cn(
-        'absolute bottom-0 left-0 top-0 z-20 w-[min(340px,100%)] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar 2xl:static 2xl:z-auto 2xl:block 2xl:w-auto 2xl:bg-black/15 2xl:shadow-none',
+      <aside id="umbra-canvas-inpaint-panel" data-umbra-canvas-inpaint-panel="" onKeyDown={onPanelKeyDown} className={cn(
+        'absolute bottom-0 left-0 top-0 z-20 w-[min(340px,100%)] min-h-0 overflow-y-auto border-r border-white/10 bg-[#090c0e] p-3 shadow-2xl custom-scrollbar @min-[1100px]/canvas:static @min-[1100px]/canvas:z-auto @min-[1100px]/canvas:w-auto @min-[1100px]/canvas:shadow-none',
         compactPanel === 'inpaint' ? 'block' : 'hidden',
       )}>
         <div className="mb-3 flex items-center gap-2">
@@ -2536,7 +2669,7 @@ export function UmbraCanvasWorkspace({
             <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Prompt & Inpaint</h2>
             <p className="font-mono text-[8px] uppercase text-zinc-600">Content and edge behavior</p>
           </div>
-          <button type="button" aria-label="Close prompt and inpaint panel" onClick={() => setCompactPanel('')} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 2xl:hidden"><X size={13} /></button>
+          <button type="button" aria-label="Close prompt and inpaint panel" onClick={closePanel} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400"><X size={13} /></button>
         </div>
         <div className="space-y-3">
           <UmbraPositivePromptEditor
@@ -2582,28 +2715,13 @@ export function UmbraCanvasWorkspace({
         <div ref={onCatalogTriggerContainerChange} data-umbra-canvas-catalog-trigger-container="" className="mt-3 flex justify-end" />
       </aside>
 
-      <div data-umbra-canvas-center="" className={cn('grid min-h-0 min-w-0', stages.length ? 'grid-rows-[42px_auto_minmax(0,1fr)_auto_auto_38px]' : 'grid-rows-[42px_auto_minmax(0,1fr)_auto_38px]')}>
-        <div className="flex min-w-0 items-center gap-2 overflow-x-auto border-b border-white/10 bg-black/25 px-3 custom-scrollbar">
-          <button type="button" title="Generation controls" aria-label="Open generation controls" onClick={() => setCompactPanel((current) => current === 'generation' ? '' : 'generation')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-300/20 text-rose-200 2xl:hidden"><PanelLeftOpen size={13} /></button>
-          <button type="button" title="Prompt and inpaint controls" aria-label="Open prompt and inpaint controls" onClick={() => setCompactPanel((current) => current === 'inpaint' ? '' : 'inpaint')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 text-cyan-200 2xl:hidden"><Focus size={13} /></button>
-          <input
-            value={project.name}
-            onChange={(event) => renameProject(event.target.value)}
-            aria-label="Canvas project name"
-            className="h-8 min-w-0 max-w-72 flex-1 rounded-md border border-transparent bg-transparent px-2 font-mono text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 outline-none focus:border-cyan-300/25 focus:bg-black/35"
-          />
-          <button type="button" onClick={startBlankProject} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-500 hover:text-cyan-100"><Layers3 size={12} /> New</button>
-          <button type="button" onClick={openProjectBrowser} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-500 hover:text-cyan-100"><FolderOpen size={12} /> Projects</button>
-          <button type="button" title={saveError ? `Last save failed: ${saveError}` : 'Save Canvas project'} onClick={() => void saveProject()} disabled={saving || project.entities.length === 0 || conflictedProjectId === project.id} className={cn('inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[9px] font-black uppercase disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700', saveError ? 'border-amber-300/35 bg-amber-400/[0.08] text-amber-100' : 'border-cyan-300/20 bg-cyan-500/[0.06] text-cyan-100')}><Save size={12} /> {saving ? 'Saving' : conflictedProjectId === project.id ? 'Conflict' : saveError ? 'Retry Save' : 'Save'}</button>
-          {conflictedProjectId === project.id && <button type="button" title="Reload saved project; asks before discarding your draft" aria-label="Reload saved project" onClick={() => void loadProject(project.id)} disabled={saving} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-amber-300/35 text-amber-100"><RotateCcw size={12} /></button>}
-          <button type="button" title="Save project as a new copy" aria-label="Save project as a new copy" onClick={() => void forkProject()} disabled={forkingProject || saving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800">{forkingProject ? <LoaderCircle size={12} className="animate-spin" /> : <Copy size={12} />}</button>
-          <button type="button" title="Export portable Canvas project" aria-label="Export portable Canvas project" onClick={() => void exportProject()} disabled={archiving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800"><Download size={12} /></button>
-          <button type="button" title="Import portable Canvas project" aria-label="Import portable Canvas project" onClick={() => archiveInputRef.current?.click()} disabled={archiving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800"><Upload size={12} /></button>
+      <div data-umbra-canvas-center="" className="grid min-h-0 min-w-0" style={{ gridTemplateRows: stages.length ? `auto auto minmax(0,1fr) ${stagingExpanded ? 'min(240px, 30%)' : '36px'} auto 28px` : 'auto auto minmax(0,1fr) auto 28px' }}>
+        <div data-umbra-canvas-tool-settings="" role="group" aria-label="Canvas tool settings" className="flex min-h-10 min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/25 px-3 py-1">
           {tool === 'bbox' ? (
-            <div className="flex shrink-0 items-center gap-1 border-l border-white/10 pl-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               {(['x', 'y', 'width', 'height'] as const).map((field) => (
-                <label key={field} className="font-mono text-[7px] uppercase text-zinc-600">{field === 'width' ? 'W' : field === 'height' ? 'H' : field.toUpperCase()}
-                  <input type="number" aria-label={`Generation ${field}`} value={Math.round(project.generationBbox[field])} onChange={(event) => setGenerationBbox({ [field]: Number(event.target.value) })} className="ml-1 h-7 w-16 rounded-md border border-white/10 bg-black/35 px-1.5 font-mono text-[8px] text-zinc-300 outline-none focus:border-rose-300/35" />
+                <label key={field} className="font-mono text-[10px] uppercase text-zinc-400">{field === 'width' ? 'W' : field === 'height' ? 'H' : field.toUpperCase()}
+                  <input type="number" aria-label={`Generation ${field}`} value={Math.round(project.generationBbox[field])} onChange={(event) => setGenerationBbox({ [field]: Number(event.target.value) })} className="ml-1 h-7 w-16 rounded-md border border-white/10 bg-black/35 px-1.5 font-mono text-[10px] text-zinc-300 outline-none focus:border-rose-300/35" />
                 </label>
               ))}
               {generationResolutionIssue ? <span role="alert" className="max-w-56 text-[8px] leading-tight text-amber-200">{generationResolutionIssue}</span> : null}
@@ -2629,15 +2747,26 @@ export function UmbraCanvasWorkspace({
               <button type="button" title="Fit generation box to enabled masks" aria-label="Fit generation box to enabled masks" onClick={() => fitGenerationBbox('masks')} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-rose-100"><Brush size={11} /></button>
             </div>
           ) : null}
+          {isMaskBrush || isRasterBrush ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-[10px] text-zinc-400">Size
+                <input aria-label="Canvas brush size" type="range" min="4" max="512" step="4" value={isMaskBrush ? maskBrushSize : rasterBrushSize} onChange={(event) => (isMaskBrush ? setMaskBrushSize : setRasterBrushSize)(Number(event.target.value))} className="w-28 accent-cyan-300" />
+                <span className="w-10 font-mono text-zinc-200">{isMaskBrush ? maskBrushSize : rasterBrushSize}px</span>
+              </label>
+              <label className="flex items-center gap-2 text-[10px] text-zinc-400">Opacity
+                <input aria-label="Canvas brush opacity" type="range" min="0.05" max="1" step="0.05" value={isMaskBrush ? maskBrushOpacity : rasterBrushOpacity} onChange={(event) => (isMaskBrush ? setMaskBrushOpacity : setRasterBrushOpacity)(Number(event.target.value))} className="w-24 accent-cyan-300" />
+                <span className="w-9 font-mono text-zinc-200">{Math.round((isMaskBrush ? maskBrushOpacity : rasterBrushOpacity) * 100)}%</span>
+              </label>
+            </div>
+          ) : null}
           <div className="ml-auto flex shrink-0 items-center gap-2 font-mono text-[9px] text-zinc-600">
             <span>{Math.round(project.viewport.scale * 100)}%</span>
             <span>{project.generationBbox.width} x {project.generationBbox.height}</span>
             <span>{project.generationAlignment}px</span>
-            <button type="button" title="Canvas layers" aria-label="Open Canvas layers" onClick={() => setCompactPanel((current) => current === 'layers' ? '' : 'layers')} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 text-cyan-200 2xl:hidden"><PanelRightOpen size={13} /></button>
           </div>
         </div>
         <div data-umbra-canvas-tool-toolbar="" role="toolbar" aria-label="Canvas editing tools" className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/35 p-2 [&_button]:shrink-0">
-          <ToolButton active={tool === 'select'} title="Select and transform" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
+          <ToolButton active={tool === 'select'} title="Select and transform; Ctrl-drag an image handle to crop" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
           <ToolButton active={tool === 'bbox'} title="Generation bounding box" shortcut="G" icon={<BoxSelect size={15} />} onClick={() => setTool('bbox')} />
           <ToolButton active={tool === 'pan'} title="Pan Canvas" shortcut="H" icon={<Hand size={15} />} onClick={() => setTool('pan')} />
           {UMBRA_CANVAS_RASTER_PAINT_ENABLED ? <ToolButton active={tool === 'raster-brush'} title="Paint active image layer" icon={<Brush size={15} />} onClick={() => activateRasterTool('raster-brush')} /> : null}
@@ -2659,13 +2788,17 @@ export function UmbraCanvasWorkspace({
             </>
           ) : null}
           <button type="button" title="Import image" aria-label="Import image" onClick={() => fileInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><ImagePlus size={15} /></button>
+          <button type="button" title={backgroundRemovalDisabledReason || 'Remove image background'} aria-label="Remove image background" aria-busy={removingBackground} disabled={Boolean(backgroundRemovalDisabledReason)} onClick={() => void removeRasterBackground()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-700">{removingBackground ? <LoaderCircle size={15} className="animate-spin" /> : <Scissors size={15} />}</button>
+          <button type="button" title="Export image layer PNG" aria-label="Export image layer PNG" disabled={exportingRaster || activeEntity?.kind !== 'raster'} onClick={() => void exportRasterPng()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-700">{exportingRaster ? <LoaderCircle size={15} className="animate-spin" /> : <Download size={15} />}</button>
           <button type="button" title="Import mask image" aria-label="Import mask image" onClick={() => maskInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-300/15 bg-black/35 text-rose-300/55 hover:border-rose-300/35 hover:text-rose-100"><LassoSelect size={15} /></button>
           <button type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!canUndo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">Z</kbd></button>
           <button type="button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!canRedo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Redo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">⇧Z</kbd></button>
           <div className="ml-auto flex items-center gap-2">
+            <ToolButton active={layerSnappingEnabled} title="Snap layers (hold Alt to bypass)" icon={<Magnet size={15} />} onClick={() => setLayerSnappingEnabled((enabled) => !enabled)} />
             <button type="button" title="Fit visible content" aria-label="Fit visible content" onClick={() => managerRef.current?.fitToContent()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><Focus size={15} /></button>
             <button type="button" title="Reset view" aria-label="Reset view" onClick={() => managerRef.current?.resetView()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><RotateCcw size={15} /></button>
           </div>
+          {backgroundRemovalError ? <p role="alert" className="basis-full px-1 py-2 text-xs text-rose-200">{backgroundRemovalError}</p> : null}
         </div>
         <div className="relative min-h-0 min-w-0">
         <div
@@ -2698,7 +2831,15 @@ export function UmbraCanvasWorkspace({
         />
         </div>
         {stages.length > 0 ? (
-          <section data-umbra-canvas-staging-strip="" aria-label="Canvas staging strip" className="flex min-h-28 items-stretch gap-2 overflow-x-auto border-t border-white/10 bg-black/40 p-2 custom-scrollbar">
+          <section data-umbra-canvas-staging-strip="" aria-label="Canvas staging strip" className="grid min-h-0 min-w-0 grid-rows-[36px_minmax(0,1fr)] border-t border-white/20 bg-black/40">
+            <header className="flex h-9 items-center gap-2 px-3">
+              <Layers3 size={13} className="text-cyan-200" />
+              <h2 className="text-[10px] font-bold text-zinc-200">Results</h2>
+              <span className="font-mono text-[10px] text-zinc-400">{stages.length}</span>
+              {previewStage ? <span className="truncate text-[10px] text-cyan-200">Previewing seed {previewStage.seed}</span> : null}
+              <button type="button" title={stagingExpanded ? 'Collapse Canvas results' : 'Expand Canvas results'} aria-label={stagingExpanded ? 'Collapse Canvas results' : 'Expand Canvas results'} aria-expanded={stagingExpanded} aria-controls="umbra-canvas-results" onClick={() => setStagingExpanded((current) => !current)} className="ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-zinc-100">{stagingExpanded ? <ArrowDown size={13} /> : <ArrowUp size={13} />}</button>
+            </header>
+            <div id="umbra-canvas-results" className={cn('min-h-0 items-stretch gap-2 overflow-auto p-2 custom-scrollbar', stagingExpanded ? 'flex' : 'hidden')}>
             <div className="flex w-36 shrink-0 flex-col justify-center">
               <strong className="text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300">Staging</strong>
               <span className="mt-1 font-mono text-[8px] uppercase text-zinc-600">{stages.length} sample{stages.length === 1 ? '' : 's'}</span>
@@ -2747,6 +2888,7 @@ export function UmbraCanvasWorkspace({
                 </div>
               </article>
             );})}
+            </div>
           </section>
         ) : null}
         <UmbraGenerationActionBar task="Canvas" onGenerate={() => void prepareGenerationRegion()}
@@ -2769,8 +2911,8 @@ export function UmbraCanvasWorkspace({
         </div>
       </div>
 
-      <aside data-umbra-canvas-layers-panel="" className={cn(
-        'absolute bottom-0 right-0 top-0 z-20 w-[min(340px,100%)] min-h-0 flex-col border-l border-white/10 bg-[#090c0e] shadow-2xl 2xl:static 2xl:z-auto 2xl:flex 2xl:w-auto 2xl:bg-black/30 2xl:shadow-none',
+      <aside id="umbra-canvas-layers-panel" data-umbra-canvas-layers-panel="" onKeyDown={onPanelKeyDown} className={cn(
+        'absolute bottom-0 left-0 top-0 z-20 order-first w-[min(340px,100%)] min-h-0 flex-col border-r border-white/10 bg-[#090c0e] shadow-2xl @min-[1100px]/canvas:static @min-[1100px]/canvas:z-auto @min-[1100px]/canvas:w-auto @min-[1100px]/canvas:shadow-none',
         compactPanel === 'layers' ? 'flex' : 'hidden',
       )}>
         <div className="flex h-11 items-center gap-2 border-b border-white/10 px-3">
@@ -2779,7 +2921,7 @@ export function UmbraCanvasWorkspace({
           {selectedEntityIds.size > 1 ? <span className="rounded-sm border border-cyan-300/20 bg-cyan-500/[0.06] px-1.5 py-0.5 font-mono text-[7px] uppercase text-cyan-200">{selectedEntityIds.size} selected</span> : null}
           <button type="button" onClick={() => fileInputRef.current?.click()} title="Import image layer" className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><ImagePlus size={12} /></button>
           <button type="button" onClick={() => void mergeVisibleLayers()} disabled={mergingLayers || saving} title="Merge enabled visible layers" aria-label="Merge enabled visible layers" className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100 disabled:text-zinc-800">{mergingLayers ? <LoaderCircle size={12} className="animate-spin" /> : <Combine size={12} />}</button>
-          <button type="button" aria-label="Close layers panel" onClick={() => setCompactPanel('')} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 2xl:hidden"><X size={12} /></button>
+          <button type="button" aria-label="Close layers panel" onClick={closePanel} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-400"><X size={12} /></button>
         </div>
         <label className="relative mx-2 mt-2 block">
           <Search size={11} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-600" />
@@ -3008,6 +3150,7 @@ export function UmbraCanvasWorkspace({
         ) : null}
       </aside>
 
+      </div>
       {pendingMediaImport ? (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm">
           <section role="dialog" aria-modal="true" aria-label="Choose Canvas project destination" className="flex max-h-[86%] w-full max-w-4xl flex-col overflow-hidden rounded-md border border-cyan-300/20 bg-[#090c0e] shadow-2xl">

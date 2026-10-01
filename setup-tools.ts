@@ -1886,6 +1886,9 @@ const COMFY_NODES = [
     { name: 'ComfyUI-Anima-LLLite', repo: 'https://github.com/kohya-ss/ComfyUI-Anima-LLLite.git', required: true },
     { name: 'ComfyUI-Anima-2.9B', repo: 'https://github.com/gazingstars123/ComfyUI-Anima-2.9B.git', required: true },
     { name: 'ComfyUI-DaSiWa-Nodes', repo: 'https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes.git' },
+    { name: 'whatdreamscost-comfyui', repo: 'https://github.com/PodJamz/whatdreamscost-comfyui.git' },
+    { name: 'ComfyUI-LTXVideo', repo: 'https://github.com/Lightricks/ComfyUI-LTXVideo.git', defaultEnabled: false },
+    { name: 'comfyui-WhiteRabbit', repo: 'https://github.com/Artificial-Sweetener/comfyui-WhiteRabbit.git', defaultEnabled: false },
     { name: 'comfyui-anima-3-8B', repo: 'https://github.com/GumGum10/comfyui-anima-3-8B.git' },
     { name: 'ComfyUI-Anima-3.8B-LoRA-Bridge', repo: 'https://github.com/Lakeside529/ComfyUI-Anima-3.8B-LoRA-Bridge.git' },
     { name: 'ComfyUI-KJNodes', repo: 'https://github.com/kijai/ComfyUI-KJNodes.git', required: true },
@@ -1905,20 +1908,21 @@ const COMFY_NODES = [
 
 // Config file for enabled nodes (shared with manage-tools.ts)
 const COMFY_NODES_CONFIG = join(ROOT_DIR, 'User', 'Config', 'comfy-nodes.json');
+const DEFAULT_COMFY_NODES = COMFY_NODES.filter(node => !('defaultEnabled' in node && node.defaultEnabled === false)).map(node => node.name);
 
 function getEnabledNodes(): Set<string> {
     try {
         if (existsSync(COMFY_NODES_CONFIG)) {
             const config = JSON.parse(readFileSync(COMFY_NODES_CONFIG, 'utf-8'));
-            const enabledNodes = new Set<string>(config.enabledNodes || COMFY_NODES.map(n => n.name));
+            const enabledNodes = new Set<string>(config.enabledNodes || DEFAULT_COMFY_NODES);
             for (const node of COMFY_NODES) {
                 if ('required' in node && node.required) enabledNodes.add(node.name);
             }
             return enabledNodes;
         }
     } catch { }
-    // Default: all nodes enabled
-    return new Set(COMFY_NODES.map(n => n.name));
+    // Keep advanced, platform-sensitive extensions opt-in during general setup.
+    return new Set(DEFAULT_COMFY_NODES);
 }
 
 function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeName: string): boolean {

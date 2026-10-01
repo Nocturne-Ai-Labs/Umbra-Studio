@@ -66,6 +66,7 @@ export interface UmbraCanvasRasterEntity {
   sourcePath: string;
   width: number;
   height: number;
+  sourceFrame?: UmbraCanvasRect;
   x: number;
   y: number;
   scaleX: number;
@@ -455,6 +456,19 @@ export function createUmbraCanvasProjectDocument(name = 'Untitled Canvas'): Umbr
     revision: 0,
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+export function createUmbraCanvasRasterCutoutEntity(source: UmbraCanvasRasterEntity, imageUrl: string): UmbraCanvasRasterEntity {
+  return {
+    ...createUmbraCanvasRasterEntity({ name: `${source.name} Cutout`, imageUrl, width: source.width, height: source.height, x: source.x, y: source.y }),
+    scaleX: source.scaleX,
+    scaleY: source.scaleY,
+    rotation: source.rotation,
+    opacity: source.opacity,
+    blendMode: source.blendMode,
+    visible: source.visible,
+    generationEnabled: source.generationEnabled,
   };
 }
 

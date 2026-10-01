@@ -26,6 +26,7 @@ import {
   type UmbraCanvasRect,
   type UmbraCanvasViewport,
 } from './canvasModel';
+import { cropUmbraCanvasRasterEntity } from './canvasRasterCrop';
 
 interface UmbraCanvasHistory {
   past: UmbraCanvasProjectDocument[];
@@ -60,7 +61,10 @@ function collectProjectAssetCosts(project: UmbraCanvasProjectDocument): Map<stri
     if ((entity.kind !== 'raster' && entity.kind !== 'mask') || !entity.imageUrl) continue;
     const bytesPerPixel = entity.kind === 'raster' ? 4 : 1;
     const maximum = entity.kind === 'raster' ? 128 * 1024 * 1024 : 32 * 1024 * 1024;
-    assets.set(`${entity.kind}:${entity.imageUrl}`, Math.min(entity.width * entity.height * bytesPerPixel, maximum));
+    const pixels = entity.kind === 'raster' && entity.sourceFrame
+      ? Math.max(entity.width * entity.height, entity.sourceFrame.width * entity.sourceFrame.height)
+      : entity.width * entity.height;
+    assets.set(`${entity.kind}:${entity.imageUrl}`, Math.min(pixels * bytesPerPixel, maximum));
   }
   for (const pending of project.generation.pending) {
     if (pending.acceptanceMaskUrl) assets.set(`mask:${pending.acceptanceMaskUrl}`, Math.min(pending.bbox.width * pending.bbox.height, 32 * 1024 * 1024));
@@ -137,6 +141,7 @@ function duplicateCanvasEntity(source: UmbraCanvasEntity, offset = 24): UmbraCan
       blendMode: source.blendMode,
       generationEnabled: source.generationEnabled,
       alphaLocked: source.alphaLocked,
+      sourceFrame: source.sourceFrame ? { ...source.sourceFrame } : undefined,
       adjustments: { ...source.adjustments },
       strokes: source.strokes.map((stroke) => ({ ...stroke, points: [...stroke.points] })),
     };
@@ -154,11 +159,14 @@ function duplicateCanvasEntity(source: UmbraCanvasEntity, offset = 24): UmbraCan
 }
 
 interface UmbraCanvasStore extends UmbraCanvasHistory {
+  historyEpoch: number;
   replaceProject: (project: UmbraCanvasProjectDocument) => void;
   syncPersistedProject: (project: UmbraCanvasProjectDocument) => void;
   newProject: () => void;
   renameProject: (name: string) => void;
   addRaster: (entity: UmbraCanvasRasterEntity) => void;
+  addRasterCutout: (projectId: string, sourceId: string, sourceRevision: number, historyEpoch: number, entity: UmbraCanvasRasterEntity) => boolean;
+  cropRaster: (entityId: string, sourceRevision: number, rect: UmbraCanvasRect) => void;
   addDrawable: (entity: UmbraCanvasDrawableEntity) => void;
   mergeVisibleDrawables: (entity: UmbraCanvasRasterEntity, sourceIds: string[]) => void;
   addRasterStroke: (entityId: string, stroke: UmbraCanvasRasterStroke) => void;
@@ -292,17 +300,18 @@ function hydratePersistedAssets(
 }
 
 export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
+  historyEpoch: 0,
   past: [],
   present: createUmbraCanvasProjectDocument(),
   future: [],
-  replaceProject: (project) => set({ past: [], present: cloneProject(project), future: [] }),
+  replaceProject: (project) => set((state) => ({ past: [], present: cloneProject(project), future: [], historyEpoch: state.historyEpoch + 1 })),
   syncPersistedProject: (project) => set((state) => {
     if (state.present.id !== project.id) return state;
     if ((project.serverRevision ?? 0) < (state.present.serverRevision ?? 0)) return state;
     if (state.present.revision === project.revision) return { present: cloneProject(project) };
     return { present: hydratePersistedAssets(state.present, project) };
   }),
-  newProject: () => set({ past: [], present: createUmbraCanvasProjectDocument(), future: [] }),
+  newProject: () => set((state) => ({ past: [], present: createUmbraCanvasProjectDocument(), future: [], historyEpoch: state.historyEpoch + 1 })),
   renameProject: (name) => set((state) => revise(state, (project) => ({
     ...project,
     name: String(name || '').trim().slice(0, 160) || 'Untitled Canvas',
@@ -312,11 +321,37 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     entities: [...project.entities, entity],
     activeEntityId: entity.id,
   }))),
+  addRasterCutout: (projectId, sourceId, sourceRevision, historyEpoch, entity) => {
+    let applied = false;
+    set((state) => {
+      const index = state.present.entities.findIndex((candidate) => candidate.id === sourceId);
+      const source = state.present.entities[index];
+      if (state.historyEpoch !== historyEpoch || state.present.id !== projectId || !source || source.kind !== 'raster' || source.locked || source.alphaLocked || source.revision !== sourceRevision) return state;
+      applied = true;
+      return revise(state, (project) => ({
+        ...project,
+        entities: [
+          ...project.entities.slice(0, index),
+          { ...source, visible: false, generationEnabled: false, revision: source.revision + 1, updatedAt: Date.now() },
+          entity,
+          ...project.entities.slice(index + 1),
+        ],
+        activeEntityId: entity.id,
+      }));
+    });
+    return applied;
+  },
   addDrawable: (entity) => set((state) => revise(state, (project) => ({
     ...project,
     entities: [...project.entities, entity],
     activeEntityId: entity.id,
   }))),
+  cropRaster: (entityId, sourceRevision, rect) => set((state) => {
+    const source = state.present.entities.find((entity) => entity.id === entityId);
+    if (!source || source.kind !== 'raster' || source.locked || source.revision !== sourceRevision || !Object.values(rect).every(Number.isFinite)) return state;
+    if (rect.x === 0 && rect.y === 0 && rect.width === source.width && rect.height === source.height) return state;
+    return revise(state, (project) => updateEntity(project, entityId, (entity) => cropUmbraCanvasRasterEntity(entity as UmbraCanvasRasterEntity, rect)));
+  }),
   mergeVisibleDrawables: (entity, sourceIds) => set((state) => revise(state, (project) => {
     const sourceIdSet = new Set(sourceIds);
     return {
@@ -484,6 +519,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
       scaleX: 1,
       scaleY: 1,
       rotation: 0,
+      sourceFrame: undefined,
       adjustments: normalizeUmbraCanvasRasterAdjustments(undefined),
       strokes: [],
       revision: entity.revision + 1,
@@ -700,6 +736,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
       past: state.past.slice(0, -1),
       present: { ...cloneProject(previous), serverRevision: state.present.serverRevision, revision: state.present.revision + 1, updatedAt: Date.now() },
       future: [cloneProject(state.present), ...state.future.slice(0, 79)],
+      historyEpoch: state.historyEpoch + 1,
     };
   }),
   redo: () => set((state) => {
@@ -709,6 +746,7 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
       past: [...state.past.slice(-79), cloneProject(state.present)],
       present: { ...cloneProject(next), serverRevision: state.present.serverRevision, revision: state.present.revision + 1, updatedAt: Date.now() },
       future: state.future.slice(1),
+      historyEpoch: state.historyEpoch + 1,
     };
   }),
 }));

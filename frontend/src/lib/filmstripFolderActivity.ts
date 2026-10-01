@@ -30,6 +30,16 @@ export function acknowledgeFolderActivity(snapshot: FolderActivitySnapshot, read
   return { epoch: snapshot.epoch, counts };
 }
 
+export function clearFolderActivityNotifications(snapshot: FolderActivitySnapshot, read: FolderActivityReadState, path?: string): FolderActivityReadState {
+  const counts = read.epoch === snapshot.epoch ? { ...read.counts } : {};
+  for (const folder of snapshot.folders) {
+    if (path && folder.path !== path) continue;
+    // Unlike opening a folder, clearing its badge also acknowledges child folders.
+    for (const entry of folder.entries) counts[entry.id] = Math.max(counts[entry.id] || 0, entry.count);
+  }
+  return { epoch: snapshot.epoch, counts };
+}
+
 export function readFolderActivityState(): FolderActivityReadState {
   try {
     const value = JSON.parse(localStorage.getItem(FOLDER_ACTIVITY_READ_KEY) || 'null');

@@ -303,6 +303,8 @@ import {
   type UmbraLtxExtendedControls,
   type UmbraLtxExtendedSequenceMetadata,
 } from './shared/umbra-ui/videoExtension';
+import { createDefaultLtx23OmniForgeControls, normalizeLtx23OmniForgeControls, type Ltx23OmniForgeControls } from './shared/umbra-ui/ltx23OmniForge';
+import { buildLtx23OmniForgeWorkflow, assertLtx23OmniForgeRuntime, assertLtx23OmniForgeStagedMedia, isLtx23OmniForgeWorkflow } from './backend/Ltx23OmniForgeWorkflow';
 
 const execAsync = promisify(exec);
 const gzipAsync = promisify(gzip);
@@ -8984,6 +8986,30 @@ function extractPPApiWorkflowMetadataPayload(rawWorkflow: unknown, promptGraph: 
     : null;
 }
 
+function compileLtx23OmniForgeGraph(generation: PowerPrompterGenerationControls, prompt: string) {
+  const video = generation.video;
+  if (!video || video.family !== 'ltx23' || !video.ltx.omniForge.enabled) {
+    throw new Error('Enable DaSiWa OmniForge in the LTX-2.3 video workspace before using this pipeline.');
+  }
+  if (video.mode !== 'text_to_video' && video.mode !== 'image_to_video') {
+    throw new Error('Use the LTX OmniForge timeline for image/text guidance. This pipeline does not accept legacy VID2VID or reference modes.');
+  }
+  if (video.mode === 'image_to_video' && !video.ltx.omniForge.retake.enabled
+    && (!video.ltx.omniForge.mainTrackEnabled || !video.ltx.omniForge.segments.some((segment) => segment.type === 'image'))) {
+    throw new Error('Add an image to the LTX OmniForge main timeline before using Image to Video, or select Text to Video.');
+  }
+  const graph = buildLtx23OmniForgeWorkflow({
+    controls: video.ltx.omniForge, prompt, negativePrompt: generation.negativePrompt || '',
+    width: video.width, height: video.height, frames: video.frames, fps: video.fps, seed: generation.seed,
+    loraStack: video.loraStack, audioEnabled: video.ltx.audioEnabled,
+  });
+  applyPPVideoRoleToApiNode('video_output', graph.output, generation, prompt);
+  // The OmniForge output controls own encoding; the common role only supplies routing.
+  graph.output.inputs.container = video.ltx.omniForge.outputEncoding.container;
+  graph.output.inputs.codec = video.ltx.omniForge.outputEncoding.codec;
+  return graph;
+}
+
 function compileUmbraUiPipelineWorkflow(
   rawWorkflow: unknown,
   state: any,
@@ -9010,6 +9036,10 @@ function compileUmbraUiPipelineWorkflow(
     workflowDescriptor,
     getUmbraUiVideoControlsSession,
   ));
+  if (isLtx23OmniForgeWorkflow(promptGraph)) {
+    const graph = compileLtx23OmniForgeGraph(generation, String(options.prompt || state?.activePrompt || '').trim());
+    return { promptGraph: graph, workflowPayload: extractPPApiWorkflowMetadataPayload(graph, graph) };
+  }
   const activeImagePipeline = options.selectedPipeline;
   const activeImageCapabilities = activeImagePipeline?.capabilities;
   const optionalStagePolicy = resolveUmbraUiOptionalStagePolicy(
@@ -11686,7 +11716,12 @@ async function runBackendPowerPrompterPipelineQueue(
         selectedPipeline: activePipeline.selectedPipeline,
       });
       if (generation.mediaType === 'video') {
-        resolveUmbraUiVideoLoraNames(queuedWorkflow.promptGraph, await getPPComfyObjectInfoForValidation());
+        const objectInfo = await getPPComfyObjectInfoForValidation();
+        resolveUmbraUiVideoLoraNames(queuedWorkflow.promptGraph, objectInfo);
+        if (isLtx23OmniForgeWorkflow(queuedWorkflow.promptGraph)) {
+          assertLtx23OmniForgeRuntime(queuedWorkflow.promptGraph as ReturnType<typeof buildLtx23OmniForgeWorkflow>, objectInfo);
+          await assertLtx23OmniForgeStagedMedia(queuedWorkflow.promptGraph as ReturnType<typeof buildLtx23OmniForgeWorkflow>, getComfyInputRootFast());
+        }
       } else {
         const objectInfo = await getPPComfyObjectInfoForValidation();
         resolveAnima38LoraNames(queuedWorkflow.promptGraph, objectInfo);
@@ -18717,7 +18752,7 @@ async function proxyGalleryBridgeFsGet(
     const fastNameListing = targetPath === '/api/fs/list-progressive'
       && sourceUrl.searchParams.get('sortBy') === 'name'
       && sourceUrl.searchParams.get('fast') === '1';
-    const proxyTimeoutMs = targetPath === '/api/fs/image'
+    const proxyTimeoutMs = targetPath === '/api/fs/tree-changes' ? 30_000 : targetPath === '/api/fs/image'
       ? 20000
       : (targetPath === '/api/fs/thumbnail' ? 12000
         : (targetPath === '/api/fs/list-progressive' && !fastNameListing ? 30000 : 6000));
@@ -18727,12 +18762,14 @@ async function proxyGalleryBridgeFsGet(
       headers,
       signal: upstreamSignal,
     });
-    if (upstream.status >= 500) {
+    if (upstream.status >= 500 && targetPath !== '/api/fs/tree-changes') {
       await upstream.body?.cancel();
       throw new Error(`Gallery service returned ${upstream.status}`);
     }
-    galleryBridgeProxyBackoffUntil = 0;
-    galleryBridgeProxyFailures = 0;
+    if (targetPath !== '/api/fs/tree-changes') {
+      galleryBridgeProxyBackoffUntil = 0;
+      galleryBridgeProxyFailures = 0;
+    }
     const responseHeaders = new Headers(upstream.headers);
     responseHeaders.set('X-Gallery-Proxy-Ms', String(Math.round((performance.now() - startedAt) * 10) / 10));
     if (remoteImageOptimized) {
@@ -18753,6 +18790,7 @@ async function proxyGalleryBridgeFsGet(
       traceProxy('proxy_timeout', { error: error?.message || String(error) }, 0);
       return json({ error: 'Gallery worker timed out. Retry this request.' }, 504);
     }
+    if (targetPath === '/api/fs/tree-changes') return fallback();
     galleryBridgeProxyFailures += 1;
     galleryBridgeProxyBackoffUntil = Date.now() + 2000;
     if (galleryBridgeProxyFailures >= 3 && !isChildProcessAlive(galleryBridgeProcess) && !(await isGalleryBridgeHealthy())) {
@@ -18782,6 +18820,7 @@ function getGalleryBridgeAllowedRoots(): string[] {
 }
 
 function getGalleryBridgeRequestPaths(sourceUrl: URL, targetPath: string): string[] {
+  if (targetPath === '/api/fs/tree-changes') return sourceUrl.searchParams.getAll('path');
   if (targetPath === '/api/fs/search' || targetPath === '/api/fs/search-suggestions') {
     return sourceUrl.searchParams.getAll('root').concat(sourceUrl.searchParams.getAll('roots'))
       .flatMap((value) => String(value || '').split('|'));
@@ -19582,6 +19621,7 @@ interface PowerPrompterVideoControls {
     }>;
     storyboard: UmbraLtxStoryboardControls;
     extended: UmbraLtxExtendedControls;
+    omniForge: Ltx23OmniForgeControls;
   };
   ltx25: {
     model: string;
@@ -19914,6 +19954,7 @@ const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
         shots: [],
       },
       extended: normalizeUmbraLtxExtendedControls(null),
+      omniForge: createDefaultLtx23OmniForgeControls(),
     },
     ltx25: {
       model: '',
@@ -20565,7 +20606,10 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
     : clampPPInteger(video.fps, family === 'ltx25' ? 24 : family === 'ltx23' ? 25 : defaults.fps, 1, 120);
   const storyboard = normalizeUmbraLtxStoryboardControls(ltx.storyboard);
   const extended = normalizeUmbraLtxExtendedControls(ltx.extended);
-  if (family !== 'ltx23' || storyboard.enabled) extended.enabled = false;
+  const omniForge = normalizeLtx23OmniForgeControls(ltx.omniForge);
+  omniForge.enabled = family === 'ltx23' && omniForge.enabled;
+  if (omniForge.enabled) storyboard.enabled = false;
+  if (family !== 'ltx23' || storyboard.enabled || omniForge.enabled) extended.enabled = false;
   const storyboardTimeline = resolveUmbraLtxStoryboardTimeline(storyboard, normalizedFps, normalizedFrames);
   const resolvedFrames = family === 'ltx23' && storyboardTimeline.enabled
     ? storyboardTimeline.frames
@@ -20705,6 +20749,7 @@ function normalizePPVideoControls(rawVideo: unknown): PowerPrompterVideoControls
       keyframes,
       storyboard,
       extended,
+      omniForge,
     },
     ltx25: {
       model: String(ltx25.model || '').trim().replace(/\\/g, '/'),
@@ -25211,6 +25256,20 @@ async function assertPPApiWorkflowExecutionReady(
     getUmbraUiVideoControlsSession,
   ));
   const isMiniMaxH3 = generation.mediaType === 'video' && generation.video?.family === 'minimax_h3';
+  if (isLtx23OmniForgeWorkflow(extractPPApiPromptGraph(loaded.document) || {})) {
+    // Optional passes, loaders and postprocessing change dependencies; validate the actual graph per request.
+    const graph = compileLtx23OmniForgeGraph(generation, 'Video generation');
+    assertLtx23OmniForgeRuntime(graph, validationContext.objectInfo || {});
+    await assertLtx23OmniForgeStagedMedia(graph, getComfyInputRootFast());
+    const validation = validatePPApiWorkflowDocument(graph, validationContext.availableClassTypes);
+    if (!validation.ok) throw new Error(`LTX OmniForge graph is invalid: ${validation.graph.issues.join(', ')}.`);
+    if (generation.outputFolder) await assertUmbraUiPinnedOutputAvailable(
+      generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'],
+      resolvePathCandidate, getGalleryTransferAllowedRoots(),
+    );
+    assertUmbraUiVideoLoraStackInstalled('ltx23', generation.video.loraStack, validationContext.objectInfo);
+    return;
+  }
   if (isMiniMaxH3 || !validationContext.validatedWorkflows.has(loaded)) {
     const validation = validatePPApiWorkflowDocument(loaded.document, validationContext.availableClassTypes, isMiniMaxH3 ? { ...generation.video.minimaxH3, guideFrameCount: generation.video.frames, directorMode: generation.video.minimaxH3.director.enabled ? miniMaxH3DirectorMode(generation.video.mode, generation.video.frameGuideMode, generation.video.minimaxH3.director) : undefined } : {});
     if (!validation.ok) {
@@ -33979,6 +34038,13 @@ const server = Bun.serve<UmbraSocketData>({
           server,
         );
       }
+      if (path === '/api/gallery-bridge/fs/tree-changes' && method === 'GET') {
+        const paths = url.searchParams.getAll('path');
+        if (!paths.length || paths.length > 64 || paths.some(path => !path.trim())) {
+          return json({ error: 'Watch between 1 and 64 folder paths' }, 400);
+        }
+        return proxyGalleryBridgeFsGet(req, url, '/api/fs/tree-changes', () => json({ error: 'Gallery folder watch unavailable' }, 503), server);
+      }
       if (path === '/api/gallery-bridge/fs/tree' && method === 'GET') {
         return proxyGalleryBridgeFsGet(
           req,
@@ -34837,7 +34903,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/video-setup-readiness' && method === 'GET') {
         const family = url.searchParams.get('family');
-        if (family !== 'minimax_h3' && family !== 'ltx25') return json({ error: 'Unsupported managed video family.' }, 400);
+        if (family !== 'minimax_h3' && family !== 'ltx25' && family !== 'ltx23') return json({ error: 'Unsupported managed video family.' }, 400);
         return json(await inspectManagedVideoModels(SOURCE_DIR, ROOT_DIR, family,
           family === 'minimax_h3' && url.searchParams.get('reference') === 'true',
           family === 'minimax_h3' && url.searchParams.get('promptForge') === 'true'));

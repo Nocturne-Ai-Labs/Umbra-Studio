@@ -61,6 +61,8 @@ import { UmbraH3DirectorPanel } from '@/components/umbra-ui/UmbraH3DirectorPanel
 import { UmbraH3PromptForgeModal } from '@/components/umbra-ui/UmbraH3PromptForgeModal';
 import { UmbraVideoRequirementsNotice } from '@/components/umbra-ui/UmbraVideoRequirementsNotice';
 import { UmbraLtxExtendedPanel } from '@/components/umbra-ui/UmbraLtxExtendedPanel';
+import { UmbraLtxOmniForgePanel } from '@/components/umbra-ui/UmbraLtxOmniForgePanel';
+import { createDefaultLtx23OmniForgeControls, normalizeLtx23OmniForgeControls } from '../../../../shared/umbra-ui/ltx23OmniForge';
 import {
   UmbraQueuePlacementControls,
   useUmbraQueuePlacement,
@@ -68,6 +70,7 @@ import {
 import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { prepareVideoControlsForHandoff } from '@/lib/umbraUiVideoHandoffControls';
+import { applyLtxOmniForgeFrameHandoff } from '@/lib/umbraUiLtxOmniForgeHandoff';
 import { hasUmbraVideoSourceDimensions, selectUmbraVideoMode, startsUmbraLtxExtendedFromImage } from '@/lib/umbraVideoQueueSource';
 import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
 import { resolveUmbraVideoQueueSourceUrl } from '@/lib/umbraVideoQueuePreview';
@@ -255,6 +258,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
         shots: [],
       },
       extended: createDefaultUmbraLtxExtendedControls(),
+      omniForge: createDefaultLtx23OmniForgeControls(),
     },
     ltx25: {
       model: '',
@@ -837,16 +841,17 @@ export function UmbraVideoGenerationControls({
   const handoffAppliedAtRef = React.useRef(0);
   const targetDimensions = React.useMemo(() => resolveUmbraVideoTargetDimensions({
     resolutionPreset: video.resolutionPreset,
-    sourceWidth: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? 0 : video.sourceWidth,
-    sourceHeight: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? 0 : video.sourceHeight,
+    sourceWidth: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || (video.family === 'ltx23' && video.ltx.omniForge.enabled) ? 0 : video.sourceWidth,
+    sourceHeight: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || (video.family === 'ltx23' && video.ltx.omniForge.enabled) ? 0 : video.sourceHeight,
     fallbackAspect: video.aspectRatio,
-  }), [video.aspectRatio, video.family, video.minimaxH3.director.enabled, video.mode, video.resolutionPreset, video.sourceHeight, video.sourceWidth]);
+  }), [video.aspectRatio, video.family, video.ltx.omniForge.enabled, video.minimaxH3.director.enabled, video.mode, video.resolutionPreset, video.sourceHeight, video.sourceWidth]);
   const storyboardTimeline = React.useMemo(
     () => resolveUmbraLtxStoryboardTimeline(video.ltx.storyboard, video.fps, video.frames),
     [video.fps, video.frames, video.ltx.storyboard],
   );
   const storyboardOpen = video.family === 'ltx23' && video.ltx.storyboard.enabled;
   const extendedOpen = video.family === 'ltx23' && video.ltx.extended.enabled;
+  const omniForgeOpen = video.family === 'ltx23' && video.ltx.omniForge.enabled;
   const extendedTotalSeconds = React.useMemo(
     () => resolveUmbraLtxExtendedTotalSeconds(video.ltx.extended),
     [video.ltx.extended],
@@ -885,9 +890,9 @@ export function UmbraVideoGenerationControls({
   }, [extendedOpen, onStoryboardOpenChange, storyboardOpen, video.family, video.minimaxH3.director.enabled]);
 
   React.useEffect(() => {
-    onDirectorOpenChange?.(video.family === 'minimax_h3' && video.minimaxH3.director.enabled);
+    onDirectorOpenChange?.((video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || omniForgeOpen);
     return () => onDirectorOpenChange?.(false);
-  }, [onDirectorOpenChange, video.family, video.minimaxH3.director.enabled]);
+  }, [onDirectorOpenChange, omniForgeOpen, video.family, video.minimaxH3.director.enabled]);
 
   React.useEffect(() => {
     if (!storyboardOpen || video.frames === storyboardTimeline.frames) return;
@@ -939,6 +944,7 @@ export function UmbraVideoGenerationControls({
             ltx: {
               ...defaults.ltx,
               ...(savedVideo.ltx || {}),
+              omniForge: normalizeLtx23OmniForgeControls(savedVideo.ltx?.omniForge),
               keyframes: Array.isArray(savedVideo.ltx?.keyframes) ? savedVideo.ltx.keyframes : [],
               storyboard: {
                 ...defaults.ltx.storyboard,
@@ -1108,6 +1114,7 @@ export function UmbraVideoGenerationControls({
       ltx: {
         ...defaults.ltx,
         ...editorDraft.video.ltx,
+        omniForge: normalizeLtx23OmniForgeControls(editorDraft.video.ltx?.omniForge),
         keyframes: editorDraft.video.ltx.keyframes.map((keyframe) => ({ ...keyframe })),
         storyboard: {
           ...defaults.ltx.storyboard,
@@ -1221,12 +1228,12 @@ export function UmbraVideoGenerationControls({
     return () => controller.abort();
   }, [video.mode, video.sourceImagePath, video.sourceVideoName, video.sourceVideoPath]);
 
-  const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : video.minimaxH3.director.enabled ? 'MiniMax H3 Director' : 'MiniMax H3';
+  const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? omniForgeOpen ? 'LTX-2.3 OmniForge' : 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : video.minimaxH3.director.enabled ? 'MiniMax H3 Director' : 'MiniMax H3';
   const pipelineFeature = video.mode === 'video_to_video'
     ? 'vid2vid'
     : video.mode === 'reference_to_video' ? 'ref2vid'
     : video.mode === 'image_to_video' ? 'img2vid' : 'txt2vid';
-  const pipelineModelSource = video.family === 'ltx23' ? 'checkpoint' : 'unet';
+  const pipelineModelSource = omniForgeOpen ? video.ltx.omniForge.modelSource === 'gguf' ? 'gguf' : 'unet' : video.family === 'ltx23' ? 'checkpoint' : 'unet';
   const pipelineMatch = React.useMemo(
     () => resolveUmbraUiPipeline(workflows, pipelineFeature, modelFamily, pipelineModelSource),
     [modelFamily, pipelineFeature, pipelineModelSource, workflows],
@@ -1289,9 +1296,13 @@ export function UmbraVideoGenerationControls({
     const role: UmbraUiVideoFrameRole = detail.videoFrameRole || 'first';
     handoffRolesRef.current.add(role);
     setVideo((current) => {
+      if (current.family === 'ltx23' && current.ltx.omniForge.enabled && role !== 'source_video') {
+        return applyLtxOmniForgeFrameHandoff(current, role, { name: '', sourcePath: detail.path,
+          previewUrl: detail.imageUrl || `/api/fs/image?path=${encodeURIComponent(detail.path)}` });
+      }
       if (role === 'source_video') {
         return {
-          ...prepareVideoControlsForHandoff(current, true),
+          ...selectUmbraVideoMode(prepareVideoControlsForHandoff(current, true), 'video_to_video'),
           mode: 'video_to_video',
           sourceVideoPath: detail.path,
           sourceVideoName: '',
@@ -1377,6 +1388,7 @@ export function UmbraVideoGenerationControls({
           : resolveUmbraVideoFramesForDuration(durationSeconds, fps, frameStride),
         ltx: {
           ...current.ltx,
+          omniForge: { ...current.ltx.omniForge, enabled: family === 'ltx23' && current.ltx.omniForge.enabled },
           storyboard: {
             ...current.ltx.storyboard,
             enabled: family === 'ltx23' && current.ltx.storyboard.enabled,
@@ -1399,6 +1411,32 @@ export function UmbraVideoGenerationControls({
   const setLtx = <K extends keyof PowerPrompterVideoControls['ltx']>(key: K, value: PowerPrompterVideoControls['ltx'][K]) => {
     setVideo((current) => ({ ...current, ltx: { ...current.ltx, [key]: value } }));
   };
+  const toggleOmniForge = () => setVideo((current) => {
+    const enabled = !current.ltx.omniForge.enabled;
+    let next: PowerPrompterVideoControls = {
+      ...current,
+      mode: current.mode === 'image_to_video' ? 'image_to_video' : 'text_to_video',
+      ltx: {
+        ...current.ltx,
+        omniForge: { ...current.ltx.omniForge, enabled },
+        storyboard: { ...current.ltx.storyboard, enabled: false },
+        extended: { ...current.ltx.extended, enabled: false },
+      },
+    };
+    if (enabled && current.mode === 'image_to_video' && !next.ltx.omniForge.segments.length) {
+      const frames = [
+        ['first', current.sourceImagePath, current.sourceImageName],
+        ...(current.frameGuideMode === 'first_middle_last' ? [['middle', current.middleImagePath, current.middleImageName]] : []),
+        ...(current.frameGuideMode !== 'first' ? [['last', current.lastImagePath, current.lastImageName]] : []),
+      ];
+      for (const [role, path, name] of frames) {
+        if (path || name) next = applyLtxOmniForgeFrameHandoff(next, role as 'first' | 'middle' | 'last', {
+          name, sourcePath: path, previewUrl: path ? `/api/fs/image?path=${encodeURIComponent(path)}` : undefined,
+        });
+      }
+    }
+    return next;
+  });
   const setLtx25 = <K extends keyof PowerPrompterVideoControls['ltx25']>(key: K, value: PowerPrompterVideoControls['ltx25'][K]) => {
     setVideo((current) => ({ ...current, ltx25: { ...current.ltx25, [key]: value } }));
   };
@@ -1456,6 +1494,7 @@ export function UmbraVideoGenerationControls({
             enabled,
             shots,
           },
+          omniForge: { ...current.ltx.omniForge, enabled: false },
           extended: {
             ...current.ltx.extended,
             enabled: false,
@@ -1490,6 +1529,7 @@ export function UmbraVideoGenerationControls({
         ltx: {
           ...current.ltx,
           keyframes: enabled ? [] : current.ltx.keyframes,
+          omniForge: { ...current.ltx.omniForge, enabled: false },
           storyboard: {
             ...current.ltx.storyboard,
             enabled: false,
@@ -1627,10 +1667,10 @@ export function UmbraVideoGenerationControls({
     width: targetDimensions.targetWidth,
     height: targetDimensions.targetHeight,
     family: video.family,
-    ltxTwoStage: video.family === 'ltx25' ? video.ltx25.twoStage : video.ltx.twoStage,
-    upscaleMode: video.postprocess.upscaleMode,
+    ltxTwoStage: video.family === 'ltx25' ? video.ltx25.twoStage : omniForgeOpen ? video.ltx.omniForge.passCount > 1 : video.ltx.twoStage,
+    upscaleMode: omniForgeOpen ? 'none' : video.postprocess.upscaleMode,
     upscaleScale: video.postprocess.upscaleScale,
-    rtxVsrEnabled: video.postprocess.rtxVsrEnabled,
+    rtxVsrEnabled: !omniForgeOpen && video.postprocess.rtxVsrEnabled,
   });
   const updateLtxKeyframe = (id: string, patch: Partial<PowerPrompterVideoControls['ltx']['keyframes'][number]>) => {
     setVideo((current) => ({
@@ -1652,7 +1692,7 @@ export function UmbraVideoGenerationControls({
   const h3Still = directorEnabled && video.minimaxH3.director.imageInpaint;
   const h3Continuity = directorEnabled && !h3Still && (video.minimaxH3.director.continuity.capture
     || !!video.minimaxH3.director.continuity.sourceId || !!video.minimaxH3.director.continuity.sourceVideoId);
-  const sourceDimensionsMissing = !directorEnabled && !hasUmbraVideoSourceDimensions(video);
+  const sourceDimensionsMissing = !directorEnabled && !omniForgeOpen && !hasUmbraVideoSourceDimensions(video);
   const turboIssue = video.family === 'minimax_h3'
     ? (directorEnabled ? miniMaxH3DirectorModelIssue(video.minimaxH3.model, miniMaxH3DirectorMode(video.mode, video.frameGuideMode, video.minimaxH3.director)) : '')
       || miniMaxH3DirectorIssue(video.minimaxH3.director, video.mode, video.frameGuideMode)
@@ -1667,6 +1707,12 @@ export function UmbraVideoGenerationControls({
         ? 'Install the matching Turbo pack in Umbra Setup > Models, refresh the catalog, and select the LoRA.' : '')
     : '';
   const requiredMissing = React.useMemo(() => {
+    if (video.family === 'ltx23' && video.ltx.omniForge.enabled) {
+      const controls = video.ltx.omniForge;
+      return [controls.modelName, controls.textEncoder, controls.connector, controls.videoVae, controls.audioVae,
+        ...(controls.passCount > 1 ? [controls.latentUpscaleModel] : [])].some((value) => !value.trim())
+        || controls.segments.some((segment) => segment.type === 'image' && !segment.sourceImageName && !segment.sourcePath);
+    }
     const sourceVideoMissing = video.mode === 'video_to_video'
       && !video.sourceVideoPath
       && !video.sourceVideoName;
@@ -1735,10 +1781,10 @@ export function UmbraVideoGenerationControls({
       ...(video.mode === 'image_to_video' ? [video.sourceImagePath] : []),
     ].some((value) => !String(value || '').trim());
   }, [extendedOpen, extendedTotalSeconds, video])
-    || (video.postprocess.interpolationEnabled && !video.postprocess.interpolationModel)
-    || (video.postprocess.upscaleMode === 'model' && !video.postprocess.upscaleModel)
-    || (video.postprocess.rtxVsrEnabled && !catalog.rtxAvailable)
-    || (video.family === 'ltx23' && !storyboardOpen && !extendedOpen && video.ltx.keyframes.some((keyframe) => !keyframe.sourceImagePath && !keyframe.sourceImageName))
+    || (!omniForgeOpen && video.postprocess.interpolationEnabled && !video.postprocess.interpolationModel)
+    || (!omniForgeOpen && video.postprocess.upscaleMode === 'model' && !video.postprocess.upscaleModel)
+    || (!omniForgeOpen && video.postprocess.rtxVsrEnabled && !catalog.rtxAvailable)
+    || (video.family === 'ltx23' && !omniForgeOpen && !storyboardOpen && !extendedOpen && video.ltx.keyframes.some((keyframe) => !keyframe.sourceImagePath && !keyframe.sourceImageName))
     || (video.family === 'ltx25' && video.ltx25.keyframes.some((keyframe) => !keyframe.sourceImagePath && !keyframe.sourceImageName))
     || (storyboardOpen && (
       !catalog.umbraDirectorAvailable
@@ -1822,6 +1868,16 @@ export function UmbraVideoGenerationControls({
     }
   };
 
+  const uploadOmniForgeMedia = async (file: File, kind: 'image' | 'video' | 'audio') => {
+    const response = await fetch('/api/comfy/upload-media', { method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', 'x-umbra-media-kind': kind, 'x-umbra-file-name': encodeURIComponent(file.name) }, body: file });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.success === false || !payload.filename) throw new Error(payload?.error || `Could not upload the timeline ${kind}.`);
+    const previewUrl = kind === 'video' ? `/api/comfy/staged-video-preview?filename=${encodeURIComponent(payload.filename)}`
+      : kind === 'image' && payload.sourcePath ? `/api/fs/image?path=${encodeURIComponent(payload.sourcePath)}` : undefined;
+    return { name: payload.filename as string, sourcePath: payload.sourcePath as string | undefined, previewUrl };
+  };
+
   const samplerOptions = catalog.samplers.length > 0 ? catalog.samplers : ['euler', 'uni_pc'];
   const schedulerOptions = catalog.schedulers.length > 0 ? catalog.schedulers : ['simple', 'beta'];
   return (
@@ -1857,14 +1913,14 @@ export function UmbraVideoGenerationControls({
             {video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : video.family === 'minimax_h3' ? 'MiniMax H3' : 'Wan 2.2'}
           </span>
         </div>
-        {(video.family === 'minimax_h3' || video.family === 'ltx25') ? <UmbraVideoRequirementsNotice
-          family={video.family}
+        {(video.family === 'minimax_h3' || video.family === 'ltx25' || omniForgeOpen) ? <UmbraVideoRequirementsNotice
+          family={video.family === 'minimax_h3' ? 'minimax_h3' : video.family === 'ltx25' ? 'ltx25' : 'ltx23'}
           referenceMode={video.family === 'minimax_h3' && video.mode === 'reference_to_video'}
           directorEnabled={video.family === 'minimax_h3' && video.minimaxH3.director.enabled}
           promptForgeOpen={video.family === 'minimax_h3' && h3ForgeOpen}
           comfyConnected={comfyConnected}
         /> : null}
-        {video.family === 'ltx23' ? (
+        {omniForgeOpen ? null : video.family === 'ltx23' ? (
           <VideoResourceField
             label="LTX Checkpoint"
             value={video.ltx.checkpoint}
@@ -1914,6 +1970,11 @@ export function UmbraVideoGenerationControls({
         {video.family === 'minimax_h3' ? <div className="col-span-full"><ToggleButton active={video.minimaxH3.director.enabled} label="DaSiWa Director" onClick={toggleH3Director} title="Use the separately installed DaSiWa H3 Director nodes" /></div> : null}
         {video.family !== 'minimax_h3' ? <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} /> : null}
         {video.family === 'ltx23' ? (
+          <div className="col-span-full [&>button]:w-full">
+            <ToggleButton active={omniForgeOpen} label="DaSiWa OmniForge" onClick={toggleOmniForge} title="DaSiWa LTX-2.3 OmniForge workflow with the native LTX Director timeline" />
+          </div>
+        ) : null}
+        {video.family === 'ltx23' ? (
           <ToggleButton
             active={storyboardOpen}
             label="Umbra Director"
@@ -1936,7 +1997,7 @@ export function UmbraVideoGenerationControls({
       <div className="space-y-3">
         {pipelineMatch.error ? <div className="font-mono text-[9px] leading-relaxed text-red-300/80">{pipelineMatch.error}</div> : null}
 
-        {video.family === 'minimax_h3' && video.minimaxH3.director.enabled ? null : extendedOpen ? (
+        {omniForgeOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? null : extendedOpen ? (
           <VideoAccordion
             title="Extended Starting Frame"
             icon={<ImageIcon size={12} className="text-fuchsia-300" />}
@@ -2092,7 +2153,7 @@ export function UmbraVideoGenerationControls({
           </VideoAccordion>
         ) : null}
 
-        {video.family === 'minimax_h3' && video.minimaxH3.director.enabled ? null : <VideoAccordion
+        {omniForgeOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? null : <VideoAccordion
           title="Media Inputs"
           icon={<Video size={12} className="text-cyan-300" />}
           summary={video.sourceAudioPath ? 'audio attached' : video.mode === 'video_to_video' ? 'source video' : 'optional audio'}
@@ -2305,6 +2366,10 @@ export function UmbraVideoGenerationControls({
             <span className={labelClass}>Output Prefix</span>
             <input value={video.outputPrefix} onChange={(event) => setCommon('outputPrefix', event.target.value)} className={inputClass} />
           </label>
+          {omniForgeOpen ? <label className="col-span-2 flex items-center gap-2 text-xs text-zinc-300">
+            <input type="checkbox" checked={video.ltx.audioEnabled} onChange={(event) => setLtx('audioEnabled', event.target.checked)} />
+            Include audio in output
+          </label> : null}
           </div>
         </VideoAccordion>
 
@@ -2329,6 +2394,10 @@ export function UmbraVideoGenerationControls({
               <div className="grid grid-cols-2 gap-2">
                 <NumberField label="Model Strength" value={entry.strength} min={-10} max={10} step={0.05} onChange={(strength) => updateVideoLora(entry.id, { strength })} />
                 {video.family === 'wan22' ? <SelectField label="Wan Stage" value={entry.wanStage} values={['both', 'high', 'low']} onChange={(wanStage) => updateVideoLora(entry.id, { wanStage: wanStage as UmbraVideoLoraEntry['wanStage'] })} /> : null}
+                {omniForgeOpen ? <>
+                  <NumberField label="Video Multiplier" value={entry.visualStrength ?? 1} min={-10} max={10} step={0.05} onChange={(visualStrength) => updateVideoLora(entry.id, { visualStrength })} />
+                  <NumberField label="Audio Multiplier" value={entry.audioStrength ?? 1} min={-10} max={10} step={0.05} onChange={(audioStrength) => updateVideoLora(entry.id, { audioStrength })} />
+                </> : null}
               </div>
             </div>
           ))}
@@ -2342,7 +2411,7 @@ export function UmbraVideoGenerationControls({
           </button>
         </VideoAccordion>
 
-        <VideoAccordion
+        {!omniForgeOpen ? <VideoAccordion
           title={video.family === 'wan22' ? 'Wan Dual Stage Pipeline' : video.family === 'minimax_h3' ? 'MiniMax H3 Pipeline' : video.family === 'ltx25' ? 'LTX-2.5 Pipeline' : 'LTX-2.3 Pipeline'}
           icon={video.family === 'wan22'
             ? <Database size={12} className="text-amber-300" />
@@ -2576,7 +2645,7 @@ export function UmbraVideoGenerationControls({
             <label className="block space-y-1.5"><span className={labelClass}>Refine Sigmas</span><textarea value={video.ltx.refineSigmas} onChange={(event) => setLtx('refineSigmas', event.target.value)} className={`${inputClass} min-h-14 resize-y font-mono text-[10px]`} /></label>
             </>
           )}
-        </VideoAccordion>
+        </VideoAccordion> : null}
 
         {video.family === 'minimax_h3' ? <VideoAccordion
           title="Timed Guides"
@@ -2658,7 +2727,7 @@ export function UmbraVideoGenerationControls({
           </div>
         </VideoAccordion> : null}
 
-        {video.family !== 'minimax_h3' ? <VideoAccordion
+        {!omniForgeOpen && video.family !== 'minimax_h3' ? <VideoAccordion
           title="Decode Memory"
           icon={<Gauge size={11} className="text-zinc-500" />}
           summary={video.decodeMode}
@@ -2680,7 +2749,7 @@ export function UmbraVideoGenerationControls({
           </div>
         </VideoAccordion> : null}
 
-        <VideoAccordion
+        {!omniForgeOpen ? <VideoAccordion
           title="Post Processing"
           icon={<SlidersHorizontal size={11} className="text-zinc-500" />}
           summary={[
@@ -2732,14 +2801,14 @@ export function UmbraVideoGenerationControls({
               </div>
             ) : null}
           </div>
-        </VideoAccordion>
+        </VideoAccordion> : null}
 
         {catalog.error ? <div className="border border-amber-300/20 bg-amber-500/[0.04] px-2.5 py-2 font-mono text-[9px] text-amber-200/70">{catalog.error}</div> : null}
         {!catalog.loading && requiredMissing ? (
           <div className="border border-amber-300/20 bg-amber-500/[0.04] px-2.5 py-2 font-mono text-[9px] text-amber-100/70">
             {sourceDimensionsMissing
               ? 'Waiting for the uploaded source dimensions before calculating the video resolution.'
-              : `Install and select the required ${video.family === 'wan22' ? 'Wan high/low models, LoRAs, encoders, and VAE' : video.family === 'ltx23' ? 'LTX checkpoint, encoders, LoRAs, and optional stage models' : video.family === 'ltx25' ? 'LTX-2.5 diffusion model, Gemma 4 encoder, video/audio VAEs, and optional stage models' : 'MiniMax H3 diffusion model, text encoder, and video/audio VAEs'} to enable queueing.`}
+              : `Install and select the required ${omniForgeOpen ? 'LTX-2.3 transformer, Gemma encoder, projection, video/audio VAEs, and enabled stage models' : video.family === 'wan22' ? 'Wan high/low models, LoRAs, encoders, and VAE' : video.family === 'ltx23' ? 'LTX checkpoint, encoders, LoRAs, and optional stage models' : video.family === 'ltx25' ? 'LTX-2.5 diffusion model, Gemma 4 encoder, video/audio VAEs, and optional stage models' : 'MiniMax H3 diffusion model, text encoder, and video/audio VAEs'} to enable queueing.`}
           </div>
         ) : null}
 
@@ -2780,6 +2849,30 @@ export function UmbraVideoGenerationControls({
         </div>
       </div>
     </section>
+    {omniForgeOpen ? <UmbraLtxOmniForgePanel
+      controls={video.ltx.omniForge}
+      onChange={(controls) => setLtx('omniForge', controls)}
+      onClose={() => setLtx('omniForge', { ...video.ltx.omniForge, enabled: false })}
+      frameRate={video.fps} frames={video.frames} globalPrompt={prompt}
+      catalog={{ models: catalog.diffusionModels, textEncoders: catalog.textEncoders, connectors: catalog.textEncoders,
+        videoVaes: catalog.vaes, audioVaes: catalog.vaes, latentUpscaleModels: catalog.latentUpscaleModels,
+        icLoras: catalog.loras, samplers: samplerOptions, schedulers: schedulerOptions, attentionBackends: catalog.attentionBackends,
+        previewVaes: catalog.vaes, upscaleModels: catalog.upscaleModels }}
+      wiredControls={['resources', 'passes', 'decode', 'preprocessing', 'attention', 'directorOptions', 'icLora', 'attentionTuner', 'fp16', 'output',
+        'audioTimeline', 'motionTimeline', 'retake', 'tritonVae', 'samplingPreview', 'colorTransfer', 'watermarks', 'resize', 'modelUpscale', 'rtx']}
+      firstFrame={(() => {
+        const segment = video.ltx.omniForge.segments.find((item) => item.id === 'umbra-first-frame');
+        return segment ? { name: segment.sourceImageName, sourcePath: segment.sourcePath, previewUrl: segment.previewUrl } : null;
+      })()}
+      lastFrame={(() => {
+        const segment = video.ltx.omniForge.segments.find((item) => item.id === 'umbra-last-frame');
+        return segment ? { name: segment.sourceImageName, sourcePath: segment.sourcePath, previewUrl: segment.previewUrl } : null;
+      })()}
+      onFirstFrameChange={(image) => setVideo((current) => applyLtxOmniForgeFrameHandoff(current, 'first', image))}
+      onLastFrameChange={(image) => setVideo((current) => applyLtxOmniForgeFrameHandoff(current, 'last', image))}
+      onUploadImage={(file) => uploadOmniForgeMedia(file, 'image')}
+      onUploadMedia={uploadOmniForgeMedia}
+    /> : null}
     {directorEnabled ? (
       <UmbraH3DirectorPanel
         mode={video.mode}

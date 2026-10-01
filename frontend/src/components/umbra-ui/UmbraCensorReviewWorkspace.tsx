@@ -137,6 +137,9 @@ export function UmbraCensorReviewWorkspace() {
   const busyRef = React.useRef(false);
   const [error, setError] = React.useState('');
   const [showProjects, setShowProjects] = React.useState(false);
+  const [pendingImportCount, setPendingImportCount] = React.useState(0);
+  const pendingHandoff = React.useRef<string[]>([]);
+  const importingHandoff = React.useRef(new Set<string>());
   const projectDialog = React.useRef<HTMLDialogElement>(null);
   React.useEffect(() => {
     if (showProjects && projectDialog.current && !projectDialog.current.open) projectDialog.current.showModal();
@@ -254,12 +257,13 @@ export function UmbraCensorReviewWorkspace() {
     }
   };
   const flush = async () => {
-    if (!itemRef.current || !project) return itemRef.current;
+    const currentProject = projectRef.current;
+    if (!itemRef.current || !currentProject) return itemRef.current;
     if (!dirtyRef.current) return itemRef.current;
     const draft = itemRef.current;
-    const saved = await api.save(project.id, draft);
-    if (pendingEdits.get(draftKey(project.id, draft.id)) === draft)
-      pendingEdits.delete(draftKey(project.id, draft.id));
+    const saved = await api.save(currentProject.id, draft);
+    if (pendingEdits.get(draftKey(currentProject.id, draft.id)) === draft)
+      pendingEdits.delete(draftKey(currentProject.id, draft.id));
     receive(saved);
     return saved;
   };
@@ -303,6 +307,7 @@ export function UmbraCensorReviewWorkspace() {
   const openProject = async (id: string) => {
     await flush();
     const next = await api.project(id);
+    projectRef.current = next;
     setProject(next);
     setProjectName(next.name);
     try {
@@ -316,6 +321,7 @@ export function UmbraCensorReviewWorkspace() {
       itemRef.current = null;
     }
     setShowProjects(false);
+    return next;
   };
   const edit = (changes: Partial<CensorReviewEditSnapshot>) => {
     if (!itemRef.current || busyRef.current) return;
@@ -423,14 +429,16 @@ export function UmbraCensorReviewWorkspace() {
       if (mounted.current) setProgress((p) => ({ ...p, running: false }));
     }
   };
-  const importSources = async (sources: Array<File | string>) => {
+  const importSources = async (sources: Array<File | string>, destination?: CensorReviewProject) => {
     if (!sources.length) return;
     await flush();
-    let currentProject = project;
+    let currentProject = destination || projectRef.current;
     if (!currentProject) {
       currentProject = await api.create(projectName);
-      setProject(currentProject);
     }
+    projectRef.current = currentProject;
+    setProject(currentProject);
+    setProjectName(currentProject.name);
     stop.current = false;
     setProgress({ total: sources.length, completed: 0, failed: 0, startedAt: Date.now(), running: true });
     try {
@@ -439,6 +447,7 @@ export function UmbraCensorReviewWorkspace() {
         try {
           currentProject = await api.import(currentProject.id, source, defaults);
           if (mounted.current) {
+            projectRef.current = currentProject;
             setProject(currentProject);
             setProgress((p) => ({ ...p, completed: p.completed + 1 }));
           }
@@ -460,20 +469,49 @@ export function UmbraCensorReviewWorkspace() {
       if (mounted.current) setProgress((p) => ({ ...p, running: false }));
     }
   };
-  const pendingHandoff = React.useRef<string[]>([]);
-  const importRef = React.useRef(importSources);
-  importRef.current = importSources;
+  const persistPendingHandoff = () => {
+    setPendingImportCount(pendingHandoff.current.length);
+    try {
+      if (pendingHandoff.current.length) {
+        sessionStorage.setItem(UMBRA_UI_MEDIA_TOOLS_HANDOFF_KEY, JSON.stringify({
+          mode: 'censor', paths: pendingHandoff.current, createdAt: Date.now(),
+        }));
+      } else {
+        const stored = normalizeUmbraUiMediaToolsHandoff(JSON.parse(sessionStorage.getItem(UMBRA_UI_MEDIA_TOOLS_HANDOFF_KEY) || 'null'));
+        if (stored?.mode === 'censor') sessionStorage.removeItem(UMBRA_UI_MEDIA_TOOLS_HANDOFF_KEY);
+      }
+    } catch { /* The in-memory batch remains available if storage is disabled. */ }
+  };
+  const cancelProjectSelection = () => {
+    pendingHandoff.current = [];
+    persistPendingHandoff();
+    setShowProjects(false);
+  };
+  const chooseImportProject = async (id: string) => {
+    const paths = [...pendingHandoff.current];
+    const destination = await openProject(id);
+    if (!paths.length) return;
+    // Keep handoffs received during project loading for a separate destination choice.
+    const selected = new Set(paths.map(path => path.toLowerCase()));
+    importingHandoff.current = selected;
+    pendingHandoff.current = pendingHandoff.current.filter(path => !selected.has(path.toLowerCase()));
+    persistPendingHandoff();
+    try { await importSources(paths, destination); }
+    finally { importingHandoff.current.clear(); }
+  };
   React.useEffect(() => {
     mounted.current = true;
     const handoff = (value: unknown) => {
       const data = normalizeUmbraUiMediaToolsHandoff(value);
       if (data?.mode !== 'censor') return;
-      pendingHandoff.current.push(...data.paths);
-      if (!busyRef.current)
-        void perform('Importing images', async () => {
-          const paths = pendingHandoff.current.splice(0);
-          await importRef.current(paths);
-        });
+      const seen = new Set([...importingHandoff.current, ...pendingHandoff.current.map(path => path.toLowerCase())]);
+      pendingHandoff.current.push(...data.paths.filter(path => {
+        const key = path.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }));
+      persistPendingHandoff();
     };
     const listener = (event: Event) => handoff((event as CustomEvent).detail);
     window.addEventListener(UMBRA_UI_MEDIA_TOOLS_HANDOFF_EVENT, listener);
@@ -499,8 +537,7 @@ export function UmbraCensorReviewWorkspace() {
       }
       const normalized = normalizeUmbraUiMediaToolsHandoff(pending);
       if (normalized?.mode === 'censor') {
-        sessionStorage.removeItem(UMBRA_UI_MEDIA_TOOLS_HANDOFF_KEY);
-        pendingHandoff.current.push(...normalized.paths);
+        handoff(normalized);
       }
     });
     return () => {
@@ -518,12 +555,12 @@ export function UmbraCensorReviewWorkspace() {
     // Project initialization and Gallery handoffs are intentionally registered once.
   }, []);
   React.useEffect(() => {
-    if (!busy && pendingHandoff.current.length)
-      void perform('Importing images', async () => {
-        const paths = pendingHandoff.current.splice(0);
-        await importRef.current(paths);
+    if (!busy && !drawing && pendingImportCount && !showProjects)
+      void perform('Loading projects', async () => {
+        setShowProjects(true);
+        setProjects(await api.list());
       });
-  }, [busy]);
+  }, [busy, drawing, pendingImportCount, showProjects]);
   React.useEffect(() => {
     if (!dirty || busy || error || drawing) return;
     const timer = window.setTimeout(() => {
@@ -1346,16 +1383,23 @@ export function UmbraCensorReviewWorkspace() {
           className="m-auto max-h-[85dvh] w-[520px] max-w-[calc(100vw-24px)] rounded-lg border border-white/15 bg-zinc-950 p-0 text-zinc-200 backdrop:bg-black/80"
           aria-label="Censor review projects"
           onCancel={(e) => {
-            e.preventDefault(); if (!busy) setShowProjects(false);
+            e.preventDefault(); if (!busy) cancelProjectSelection();
           }}
         >
           <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-white/15 bg-zinc-950 p-4">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-bold">Review projects</h3>
+              <h3 className="text-sm font-bold">{pendingImportCount ? `Import ${pendingImportCount} image${pendingImportCount === 1 ? '' : 's'}` : 'Review projects'}</h3>
               <CensorIconButton
-                title="Close projects"
+                title="Refresh projects"
                 disabled={!!busy}
-                onClick={() => setShowProjects(false)}
+                onClick={() => void perform('Loading projects', async () => { setProjects(await api.list()); })}
+              >
+                <RefreshCw size={16} />
+              </CensorIconButton>
+              <CensorIconButton
+                title={pendingImportCount ? 'Cancel import' : 'Close projects'}
+                disabled={!!busy}
+                onClick={cancelProjectSelection}
               >
                 <X size={16} />
               </CensorIconButton>
@@ -1364,7 +1408,7 @@ export function UmbraCensorReviewWorkspace() {
             <div className="flex gap-2">
               <input
                 autoFocus
-                aria-label="Project name"
+                aria-label={pendingImportCount ? 'New project name' : 'Project name'}
                 className={inputClass}
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
@@ -1374,16 +1418,17 @@ export function UmbraCensorReviewWorkspace() {
                 disabled={!!busy || !projectName.trim()}
                 onClick={() =>
                   void perform('Creating project', async () => {
+                    await flush();
                     const created = await api.create(projectName);
-                    await openProject(created.id);
+                    await chooseImportProject(created.id);
                   })
                 }
               >
                 <Plus size={14} />
-                New
+                {pendingImportCount ? 'Create & import' : 'New'}
               </button>
             </div>
-            {project && (
+            {project && !pendingImportCount && (
               <button
                 className={`${censorButton} mt-2`}
                 disabled={!!busy || !projectName.trim()}
@@ -1403,11 +1448,11 @@ export function UmbraCensorReviewWorkspace() {
                   key={p.id}
                   className="flex w-full items-center gap-3 py-3 text-left hover:bg-white/5"
                   disabled={!!busy}
-                  onClick={() => void perform('Opening project', () => openProject(p.id))}
+                  onClick={() => void perform(pendingImportCount ? 'Importing images' : 'Opening project', async () => { await chooseImportProject(p.id); })}
                 >
                   <FolderOpen size={18} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm">{p.name}</span>
+                    <span className="block truncate text-sm">{pendingImportCount ? `Add to ${p.name}` : p.name}</span>
                     <span className="text-xs text-zinc-400">
                       {p.itemCount} images / {p.approvedCount} approved
                     </span>

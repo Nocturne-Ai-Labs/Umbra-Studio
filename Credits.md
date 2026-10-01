@@ -550,6 +550,35 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 - License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
 - Original project purpose:
   - MiniMax H3 Director, Director Guide, Prompt Forge, references, and continuity tools
+  - LTX-2.3 Advanced LoRA Loader, Enhanced Video Combine, and optional workflow helpers
+- LTX-2.3 OmniForge technique reference: the user-provided workflow titled `DaSiWa - LTX OmniForge` is credited to DaSiWa / darksidewalker based on its branding and project links. Umbra adapts its video workflow concepts; the supplied workflow JSON is not redistributed.
+
+### whatdreamscost-comfyui
+- Managed install source: https://github.com/PodJamz/whatdreamscost-comfyui (fork)
+- Original project: https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI
+- LTX Director author: Jonathan Watkins (WhatDreamsCost); fork maintainer: PodJamz
+- License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
+- Original project purpose:
+  - LTX Director, Director Guide, and Director Crop Guides used by LTX-2.3 timeline workflows
+
+### ComfyUI-KJNodes
+- Project: https://github.com/kijai/ComfyUI-KJNodes
+- Creator / maintainer: Kijai and contributors
+- License: GPL-3.0 (installed as a separate ComfyUI extension; not copied into Umbra source)
+- LTX-2.3 workflow role: VAE loaders and optional sampling preview helpers
+  - Experimental `PatchTritonVAE` is available only when a compatible Triton runtime is installed separately; Setup does not install Triton for this workflow.
+
+### ComfyUI-LTXVideo
+- Project: https://github.com/Lightricks/ComfyUI-LTXVideo
+- Creator / maintainer: Lightricks and contributors
+- License: LTX-2 Community License (installed as a separate ComfyUI extension; not copied into Umbra source)
+- LTX-2.3 workflow role: optional `LTXVSpatioTemporalTiledVAEDecode` for spatial/temporal tiled video decoding
+
+### comfyui-WhiteRabbit
+- Project: https://github.com/Artificial-Sweetener/comfyui-WhiteRabbit
+- Creator / maintainer: Artificial-Sweetener and contributors
+- License: AGPL-3.0-only (installed as a separate ComfyUI extension; not copied into Umbra source)
+- LTX-2.3 workflow role: optional `UpscaleWithModelAdvanced` pixel upscaling; an upscale model must be supplied separately
 
 ### ComfyUI-Inpaint-CropAndStitch
 - Project: https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch

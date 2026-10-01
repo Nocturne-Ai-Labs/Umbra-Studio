@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { acknowledgeFolderActivity, folderActivityCounts, FOLDER_ACTIVITY_READ_KEY, readFolderActivityState, type FolderActivitySnapshot } from './filmstripFolderActivity';
+import { acknowledgeFolderActivity, clearFolderActivityNotifications, folderActivityCounts, FOLDER_ACTIVITY_READ_KEY, readFolderActivityState, type FolderActivitySnapshot, type FolderActivityReadState } from './filmstripFolderActivity';
 
 async function fetchActivity(paths: string[], signal?: AbortSignal): Promise<FolderActivitySnapshot> {
   const params = new URLSearchParams();
@@ -29,6 +29,8 @@ async function fetchActivity(paths: string[], signal?: AbortSignal): Promise<Fol
 
 export function useFilmstripFolderActivity(paths: string[], rememberFolders: (paths: string[]) => void) {
   const [snapshot, setSnapshot] = useState<FolderActivitySnapshot | null>(null);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
   const [read, setRead] = useState(readFolderActivityState);
   const [deletionRevision, setDeletionRevision] = useState(0);
   const deletionRevisionRef = useRef(0);
@@ -52,7 +54,9 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       setSnapshot(null);
     }
     let timer: ReturnType<typeof setTimeout>;
+    let outputTimer: ReturnType<typeof setTimeout>;
     let busy = false;
+    let refreshPending = false;
     const refresh = async () => {
       if (busy || controller.signal.aborted) return;
       clearTimeout(timer);
@@ -66,18 +70,33 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
       finally {
         busy = false;
         if (!controller.signal.aborted) {
-          timer = setTimeout(() => { void refresh(); }, discoveryOnly ? 30_000 : (document.hidden ? 30_000 : 5000));
+          const delay = refreshPending ? 0 : discoveryOnly ? 30_000 : (document.hidden ? 30_000 : 5000);
+          refreshPending = false;
+          timer = setTimeout(() => { void refresh(); }, delay);
         }
       }
     };
     const wake = () => { if (!document.hidden) void refresh(); };
+    const onOutputSaved = () => {
+      clearTimeout(outputTimer);
+      outputTimer = setTimeout(() => {
+        if (busy) refreshPending = true;
+        else void refresh();
+      }, 150);
+    };
     void refresh();
     window.addEventListener('focus', wake);
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('umbra:powerprompter-output-saved', onOutputSaved);
+    window.addEventListener('umbra:gallery-generation-complete', onOutputSaved);
+    window.addEventListener('umbra:gallery-content-changed', onOutputSaved);
     return () => {
-      controller.abort(); clearTimeout(timer);
+      controller.abort(); clearTimeout(timer); clearTimeout(outputTimer);
       window.removeEventListener('focus', wake);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('umbra:powerprompter-output-saved', onOutputSaved);
+      window.removeEventListener('umbra:gallery-generation-complete', onOutputSaved);
+      window.removeEventListener('umbra:gallery-content-changed', onOutputSaved);
     };
   }, [deletionRevision, pathsKey, rememberFolders]);
 
@@ -87,18 +106,23 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
     return () => window.removeEventListener('storage', sync);
   }, []);
 
-  const markOpened = useCallback((path: string) => {
-    const acknowledge = (value: FolderActivitySnapshot) => setRead(previous => {
+  const commitRead = useCallback((value: FolderActivitySnapshot, acknowledge: (base: FolderActivityReadState) => FolderActivityReadState) => {
+    setRead(previous => {
       const stored = readFolderActivityState();
       const counts = previous.epoch === value.epoch ? { ...previous.counts } : {};
       if (stored.epoch === value.epoch) {
         for (const [id, count] of Object.entries(stored.counts)) counts[id] = Math.max(counts[id] || 0, count);
       }
       const base = { epoch: value.epoch, counts };
-      const next = acknowledgeFolderActivity(value, base, path);
+      const next = acknowledge(base);
       try { localStorage.setItem(FOLDER_ACTIVITY_READ_KEY, JSON.stringify(next)); } catch { /* In-memory counts still work. */ }
       return next;
     });
+  }, []);
+
+  const markOpened = useCallback((path: string) => {
+    const snapshot = snapshotRef.current;
+    const acknowledge = (value: FolderActivitySnapshot) => commitRead(value, base => acknowledgeFolderActivity(value, base, path));
     // A matching polled snapshot is the click-time ceiling. A later response could
     // include outputs published after the folder was opened and mark them read.
     if (snapshot?.folders.some(folder => folder.path === path)) {
@@ -108,7 +132,18 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
     // Cold or untracked folders still need a fetch; their read cutoff is when
     // that response arrives, so an output published during the request may be read.
     void fetchActivity([path]).then(acknowledge).catch(() => undefined);
-  }, [snapshot]);
+  }, [commitRead]);
 
-  return { ...useMemo(() => folderActivityCounts(snapshot, read), [snapshot, read]), markOpened };
+  const clearNotifications = useCallback((path?: string) => {
+    const snapshot = snapshotRef.current;
+    // Clear only the counts already displayed, so new outputs remain unread.
+    if (snapshot) commitRead(snapshot, base => clearFolderActivityNotifications(snapshot, base, path));
+  }, [commitRead]);
+
+  return {
+    ...useMemo(() => folderActivityCounts(snapshot, read), [snapshot, read]),
+    latestFolder: snapshot?.recentFolders[0]?.path || '',
+    markOpened,
+    clearNotifications,
+  };
 }

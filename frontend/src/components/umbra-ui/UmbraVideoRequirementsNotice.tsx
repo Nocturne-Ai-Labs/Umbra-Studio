@@ -5,7 +5,7 @@ import { AlertTriangle, RefreshCw, Wrench } from 'lucide-react';
 import { readUmbraObjectInfoRequiredInputs } from '@/lib/umbraUiObjectInfo';
 import { useStore } from '@/store/useStore';
 
-type Family = 'minimax_h3' | 'ltx25';
+type Family = 'minimax_h3' | 'ltx25' | 'ltx23';
 type ModelStatus = { totalFiles: number; missing: string[] };
 type NodeStatus = { installed: boolean; updateAvailable: boolean };
 
@@ -37,15 +37,17 @@ export function UmbraVideoRequirementsNotice({ family, referenceMode, directorEn
       if (!modelResponse.ok) throw new Error(modelResult.error || 'Video model requirements could not be checked.');
       if (!abort.signal.aborted) setModels(modelResult);
 
-      if (family !== 'minimax_h3') return;
-      if (needsDaSiWa) {
+      if (family === 'ltx25') return;
+      if (family === 'minimax_h3' && needsDaSiWa) {
         const nodeResponse = await fetch('/api/umbra-ui/h3-director/node-update', { signal: abort.signal, cache: 'no-store' });
         if (!nodeResponse.ok) throw new Error('DaSiWa node installation could not be checked.');
         if (!abort.signal.aborted) setNodes(await nodeResponse.json() as NodeStatus);
       }
       if (!comfyConnected) return;
-      const required = ['MiniMaxH3SigmaShift', ...(referenceMode ? ['MiniMaxH3ReferenceToVideo'] : []),
-        ...(directorEnabled ? ['MiniMaxH3Director'] : [])];
+      const required = family === 'ltx23'
+        ? ['LTXDirector', 'LTXDirectorGuide', 'LTXDirectorCropGuides', 'DaSiWa_LTX2LoraLoader', 'VAELoaderKJ', 'DaSiWa_EnhancedVideoCombine', 'LTXVAudioVAEDecode']
+        : ['MiniMaxH3SigmaShift', ...(referenceMode ? ['MiniMaxH3ReferenceToVideo'] : []),
+          ...(directorEnabled ? ['MiniMaxH3Director'] : [])];
       const missing = await Promise.all(required.map(async (nodeType) => {
         const response = await fetch(`/object_info/${encodeURIComponent(nodeType)}`, { signal: abort.signal, cache: 'no-store' });
         if (response.status === 404) return nodeType;
@@ -75,9 +77,9 @@ export function UmbraVideoRequirementsNotice({ family, referenceMode, directorEn
     <div className="flex items-center gap-2 font-semibold"><AlertTriangle size={14} /> Video setup needs attention</div>
     {error ? <p className="mt-1">{error}</p> : null}
     {models?.totalFiles === 0 ? <p className="mt-1">No managed model requirements were found for this video family.</p> : null}
-    {missingModels.length ? <p className="mt-1">{missingModels.length} managed model file{missingModels.length === 1 ? '' : 's'} missing or incomplete. Open Umbra Setup &gt; Models and select {family === 'minimax_h3' ? referenceMode ? 'MiniMax H3 Reference Video' : 'MiniMax H3 Video' : 'LTX-2.5 Video'}{promptForgeOpen ? ' and DaSiWa H3 Prompt Forge Model' : ''}.</p> : null}
+    {missingModels.length ? <p className="mt-1">{missingModels.length} managed model file{missingModels.length === 1 ? '' : 's'} missing or incomplete. Open Umbra Setup &gt; Models and select {family === 'minimax_h3' ? referenceMode ? 'MiniMax H3 Reference Video' : 'MiniMax H3 Video' : family === 'ltx23' ? 'LTX-2.3 Video' : 'LTX-2.5 Video'}{promptForgeOpen ? ' and DaSiWa H3 Prompt Forge Model' : ''}.</p> : null}
     {missingDirector ? <p className="mt-1">DaSiWa nodes are missing. Install or update managed Custom Nodes, then restart ComfyUI.</p> : null}
-    {missingNativeNodes.length ? <p className="mt-1">ComfyUI is missing {missingNativeNodes.join(', ')}. Update managed ComfyUI, then restart it.</p> : null}
+    {missingNativeNodes.length ? <p className="mt-1">ComfyUI is missing {missingNativeNodes.join(', ')}. Update managed ComfyUI{family === 'ltx23' ? ' and the LTX OmniForge custom-node pack' : ''}, then restart it.</p> : null}
     {updateAvailable ? <p className="mt-1">A DaSiWa node update is available. Check Director compatibility before updating.</p> : null}
     {comfyConnected && (missingDirector || missingNativeNodes.length > 0 || updateAvailable) ? <p className="mt-1 text-amber-200/75">Stop ComfyUI before running an update.</p> : null}
     <div className="mt-2 flex flex-wrap gap-2">

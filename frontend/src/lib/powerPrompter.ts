@@ -3,6 +3,7 @@ import { normalizeMiniMaxH3Guides } from '../../../shared/umbra-ui/minimaxH3Guid
 import { DEFAULT_MINIMAX_H3_DIRECTOR, normalizeMiniMaxH3Director } from '../../../shared/umbra-ui/minimaxH3Director';
 import { normalizeMiniMaxH3Turbo } from '../../../shared/umbra-ui/minimaxH3Turbo';
 import { normalizeUmbraVideoLoraStack } from '../../../shared/umbra-ui/videoLoraStack';
+import { createDefaultLtx23OmniForgeControls, normalizeLtx23OmniForgeControls } from '../../../shared/umbra-ui/ltx23OmniForge';
 import type {
   PowerPrompterAutocompleteMode,
   PowerPrompterAutocompleteSettings,
@@ -496,6 +497,7 @@ export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGeneration
         shots: [],
       },
       extended: createDefaultUmbraLtxExtendedControls(),
+      omniForge: createDefaultLtx23OmniForgeControls(),
     },
     ltx25: {
       model: '',
@@ -930,9 +932,12 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
     enabled: family === 'ltx23' && normalizedStoryboard.enabled,
   };
   const normalizedExtended = normalizeUmbraLtxExtendedControls(ltx.extended);
+  const omniForge = normalizeLtx23OmniForgeControls(ltx.omniForge);
+  omniForge.enabled = family === 'ltx23' && omniForge.enabled;
+  if (omniForge.enabled) storyboard.enabled = false;
   const extended = {
     ...normalizedExtended,
-    enabled: family === 'ltx23' && !storyboard.enabled && normalizedExtended.enabled,
+    enabled: family === 'ltx23' && !storyboard.enabled && !omniForge.enabled && normalizedExtended.enabled,
   };
   const storyboardTimeline = resolveUmbraLtxStoryboardTimeline(storyboard, normalizedFps, normalizedFrames);
   const resolvedFrames = extended.enabled
@@ -1076,6 +1081,7 @@ function normalizePowerPrompterVideoControls(rawVideo: unknown): PowerPrompterVi
       keyframes,
       storyboard,
       extended,
+      omniForge,
     },
     ltx25: {
       model: String(ltx25.model || '').trim().replace(/\\/g, '/'),

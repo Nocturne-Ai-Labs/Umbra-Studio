@@ -5599,6 +5599,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     setError('');
     const loadSource = options?.source || 'system';
     if (loadSource === 'local') {
+      window.dispatchEvent(new CustomEvent('umbra:gallery-folder-navigation-started', { detail: { folderPath } }));
       const navigationAt = Date.now();
       latestLocalFolderNavigationAtRef.current = navigationAt;
       pendingLocalFolderNavigationRef.current = { folder: folderPath, at: navigationAt };
@@ -6595,8 +6596,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         return file ? [[path, imageUrl(file, { lane: 'gallery', remoteOriginals: true })]] : [];
       }));
       const handoff = stageUmbraUiMediaToolsHandoff(mode, pathValues, previewUrls);
+      if (mode === 'censor') openUmbraUiExtrasTool('censor');
       setActiveWorkspace('umbraui');
-      addToast({
+      if (mode !== 'censor') addToast({
         type: 'success',
         message: `${handoff.paths.length} item${handoff.paths.length === 1 ? '' : 's'} staged in Umbra UI Extras. Choose an output destination to continue.`,
       });
@@ -8472,7 +8474,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const imagePath = normalizePath(detail.imagePath || '');
       if (imagePath && isLiveGenerationPreviewPath(imagePath)) {
         followLiveGenerationViewerRef.current = true;
-        const targetFile = liveGenerationPreviewFile || viewerFileFallback || galleryFileFromGenerationPreview(detail);
+        const targetFile = galleryFileFromGenerationPreview(detail) || liveGenerationPreviewFile || viewerFileFallback;
         const liveMetadata = metadataFromGenerationPreview(detail);
         if (liveMetadata) setCachedViewerMetadata(imagePath, liveMetadata);
         if (targetFile) {

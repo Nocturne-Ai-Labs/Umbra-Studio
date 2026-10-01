@@ -331,6 +331,14 @@ function normalizeProject(rawProject: unknown): Record<string, any> {
       name: String(entity.name || `Image ${index + 1}`).trim().slice(0, 240) || `Image ${index + 1}`,
       imageUrl: String(entity.imageUrl || '').trim(),
       sourcePath: String(entity.sourcePath || '').trim().slice(0, 4096),
+      ...(entity.sourceFrame && typeof entity.sourceFrame === 'object' ? {
+        sourceFrame: {
+          x: finiteNumber(asRecord(entity.sourceFrame).x, 0, -MAX_COORDINATE, MAX_COORDINATE),
+          y: finiteNumber(asRecord(entity.sourceFrame).y, 0, -MAX_COORDINATE, MAX_COORDINATE),
+          width: Math.round(finiteNumber(asRecord(entity.sourceFrame).width, drawableBase.width, 1, MAX_IMAGE_SIDE)),
+          height: Math.round(finiteNumber(asRecord(entity.sourceFrame).height, drawableBase.height, 1, MAX_IMAGE_SIDE)),
+        },
+      } : {}),
       alphaLocked: entity.alphaLocked === true,
       adjustments: {
         brightness: finiteNumber(asRecord(entity.adjustments).brightness, 0, -100, 100),
