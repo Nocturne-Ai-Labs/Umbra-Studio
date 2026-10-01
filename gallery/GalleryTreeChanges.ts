@@ -1,5 +1,5 @@
 import { watch } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 
 type WatchHandle = { close(): void; on(event: 'error', handler: () => void): unknown };
 type Entry = {
@@ -8,16 +8,21 @@ type Entry = {
   touchedAt: number;
   subscribers: number;
   watcher?: WatchHandle;
+  identity?: string;
+  check?: Promise<boolean>;
   retryAt: number;
   timer?: ReturnType<typeof setTimeout>;
   scan?: Promise<void>;
+  rescan: boolean;
   dirty: boolean;
 };
 type Options = {
   capacity?: number;
+  maxPendingWaits?: number;
   debounceMs?: number;
   now?: () => number;
   read?: (path: string) => Promise<string[]>;
+  identity?: (path: string) => Promise<string>;
   watch?: (path: string, changed: (event: string) => void) => WatchHandle;
   changed: (path: string) => void;
 };
@@ -27,19 +32,68 @@ export class GalleryTreeChanges {
   private readonly listeners = new Set<() => void>();
   private readonly epoch = crypto.randomUUID();
   private revision = 0;
+  private pendingWaits = 0;
   private disposed = false;
   private readonly now: () => number;
   private readonly read: (path: string) => Promise<string[]>;
+  private readonly identity: (path: string) => Promise<string>;
   private readonly watchFolder: NonNullable<Options['watch']>;
 
   constructor(private readonly options: Options) {
     this.now = options.now ?? Date.now;
     this.read = options.read ?? (async path => (await readdir(path, { withFileTypes: true }))
       .filter(entry => entry.isDirectory()).map(entry => entry.name));
+    this.identity = options.identity ?? (async path => {
+      const info = await stat(path);
+      if (!info.isDirectory()) throw new Error('Watched path is not a directory');
+      return `${info.dev}:${info.ino}:${info.birthtimeMs}`;
+    });
     this.watchFolder = options.watch ?? ((path, changed) => watch(path, { persistent: false }, changed));
   }
 
   get size() { return this.entries.size; }
+
+  private check(path: string, entry: Entry): Promise<boolean> {
+    if (entry.check) return entry.check;
+    entry.check = this.identity(path).then(identity => {
+      if (this.disposed || this.entries.get(path) !== entry) return false;
+      const replaced = entry.identity !== undefined && entry.identity !== identity;
+      if (replaced) {
+        entry.watcher?.close();
+        entry.watcher = undefined;
+        entry.retryAt = 0;
+        entry.signature = undefined;
+        entry.rescan = true;
+        this.options.changed(path);
+        entry.revision = ++this.revision;
+        for (const listener of this.listeners) listener();
+      }
+      entry.identity = identity;
+      if (!entry.watcher && this.now() >= entry.retryAt) {
+        entry.retryAt = this.now() + 30_000;
+        // Reconcile changes missed during a watch outage, even when reopening
+        // the same directory rather than a replacement inode.
+        entry.rescan = true;
+        try {
+          entry.watcher = this.watchFolder(path, event => {
+            if (event === 'rename') this.schedule(path, entry);
+          });
+          entry.watcher.on('error', () => {
+            entry.watcher?.close();
+            entry.watcher = undefined;
+            entry.retryAt = this.now() + 30_000;
+          });
+        } catch { /* The existing periodic refresh handles unsupported drives. */ }
+      }
+      return true;
+    }).catch(() => {
+      entry.watcher?.close();
+      entry.watcher = undefined;
+      entry.retryAt = this.now() + 30_000;
+      return false;
+    }).finally(() => { entry.check = undefined; });
+    return entry.check;
+  }
 
   private schedule(path: string, entry: Entry) {
     if (this.disposed || this.entries.get(path) !== entry) return;
@@ -51,10 +105,15 @@ export class GalleryTreeChanges {
     }, this.options.debounceMs ?? 100);
   }
 
-  private scan(path: string, entry: Entry): Promise<void> {
+  private scan(path: string, entry: Entry, checked = false): Promise<void> {
     if (entry.scan) return entry.scan;
-    entry.scan = this.read(path).then(names => {
+    entry.scan = (checked ? Promise.resolve(true) : this.check(path, entry)).then(async readable => {
+      if (!readable) return;
+      return this.read(path);
+    }).then(names => {
+      if (!names) return;
       if (this.disposed || this.entries.get(path) !== entry) return;
+      entry.rescan = false;
       const signature = JSON.stringify(names.sort());
       if (entry.signature !== undefined && entry.signature !== signature) {
         this.options.changed(path);
@@ -91,38 +150,28 @@ export class GalleryTreeChanges {
       // A fresh subscription must reconcile a branch even if its previous
       // watch expired while the browser was hidden or watching other folders.
       this.options.changed(path);
-      entry = { revision: ++this.revision, touchedAt: this.now(), subscribers: 0, retryAt: 0, dirty: false };
+      entry = { revision: ++this.revision, touchedAt: this.now(), subscribers: 0, retryAt: 0, dirty: false, rescan: false };
       this.entries.set(path, entry);
     }
     entry.touchedAt = this.now();
     entry.subscribers++;
-    const current = entry;
-    if (!entry.watcher && this.now() >= entry.retryAt) {
-      entry.retryAt = this.now() + 30_000;
-      try {
-        entry.watcher = this.watchFolder(path, event => {
-          if (event === 'rename') this.schedule(path, current);
-        });
-        entry.watcher.on('error', () => {
-          current.watcher?.close();
-          current.watcher = undefined;
-          current.retryAt = this.now() + 30_000;
-        });
-      } catch { /* The existing periodic refresh handles unsupported drives. */ }
-      void this.scan(path, entry);
-    }
     return entry;
   }
 
   async wait(paths: string[], cursor: string, signal?: AbortSignal, timeoutMs = 20_000): Promise<{ cursor: string; paths: string[] }> {
     signal?.throwIfAborted();
+    if (this.pendingWaits >= (this.options.maxPendingWaits ?? 64)) throw new Error('Gallery folder wait capacity reached');
+    this.pendingWaits++;
     const acquired: Entry[] = [];
     try {
       for (const path of paths) acquired.push(this.acquire(path));
       await new Promise<void>((resolve, reject) => {
         const abort = () => { signal?.removeEventListener('abort', abort); reject(signal?.reason); };
         signal?.addEventListener('abort', abort, { once: true });
-        Promise.all(acquired.map(entry => entry.scan)).then(() => {
+        Promise.all(acquired.map((entry, index) => this.check(paths[index], entry).then(readable => {
+          if (readable && (entry.signature === undefined || entry.rescan)) return this.scan(paths[index], entry, true);
+          return entry.scan;
+        }))).then(() => {
           signal?.removeEventListener('abort', abort); resolve();
         }, error => { signal?.removeEventListener('abort', abort); reject(error); });
         if (signal?.aborted) abort();
@@ -153,6 +202,7 @@ export class GalleryTreeChanges {
       }
       return { cursor: `${this.epoch}:${this.revision}`, paths: changes() };
     } finally {
+      this.pendingWaits--;
       for (const entry of acquired) {
         entry.subscribers--;
         entry.touchedAt = this.now();
