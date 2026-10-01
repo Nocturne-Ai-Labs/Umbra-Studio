@@ -6596,8 +6596,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         return file ? [[path, imageUrl(file, { lane: 'gallery', remoteOriginals: true })]] : [];
       }));
       const handoff = stageUmbraUiMediaToolsHandoff(mode, pathValues, previewUrls);
+      if (mode === 'censor') openUmbraUiExtrasTool('censor');
       setActiveWorkspace('umbraui');
-      addToast({
+      if (mode !== 'censor') addToast({
         type: 'success',
         message: `${handoff.paths.length} item${handoff.paths.length === 1 ? '' : 's'} staged in Umbra UI Extras. Choose an output destination to continue.`,
       });
