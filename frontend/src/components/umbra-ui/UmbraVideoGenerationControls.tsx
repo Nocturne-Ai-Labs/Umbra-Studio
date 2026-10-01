@@ -844,7 +844,7 @@ export function UmbraVideoGenerationControls({
     sourceWidth: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || (video.family === 'ltx23' && video.ltx.omniForge.enabled) ? 0 : video.sourceWidth,
     sourceHeight: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || (video.family === 'ltx23' && video.ltx.omniForge.enabled) ? 0 : video.sourceHeight,
     fallbackAspect: video.aspectRatio,
-  }), [video.aspectRatio, video.family, video.minimaxH3.director.enabled, video.mode, video.resolutionPreset, video.sourceHeight, video.sourceWidth]);
+  }), [video.aspectRatio, video.family, video.ltx.omniForge.enabled, video.minimaxH3.director.enabled, video.mode, video.resolutionPreset, video.sourceHeight, video.sourceWidth]);
   const storyboardTimeline = React.useMemo(
     () => resolveUmbraLtxStoryboardTimeline(video.ltx.storyboard, video.fps, video.frames),
     [video.fps, video.frames, video.ltx.storyboard],
