@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## v0.32.45 - Native DaSiWa Video And Workspace Updates
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio and its updater. Existing `User/`, `Tools/`, models, saved controls, cards and projects are preserved. The refreshed Model Manager, Datasets, Extras, Video and Canvas editing layouts need no data migration.
+- Video defaults to **DaSiWa only** with the original H3 C-MMH3-26 and LTX C-LTX23-50 workflows. Before using them, finish queued work and stop the selected managed ComfyUI. In **Umbra Updater > Managed dependencies** or **Umbra Setup**, review **Official H3 + LTX workflow dependencies**. This uses the existing installer for ComfyUI 0.38.0/frontend 1.53.6 or compatible newer versions, DaSiWa 0.4.73 and reviewed MMH3 UltimateUpscale, KJNodes, rgthree, GGUF, WhatDreamsCost, LTXVideo and WhiteRabbit suites. Local/divergent changes and unmanaged folders hold repair; review and preserve them before retrying. Restart managed ComfyUI and refresh its native frontend afterward. Queues do not resume automatically.
+- Open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux > **Models** to verify separately selected model resources. Dependency repair does not download generation weights. Existing LTX-2.3 support selections total approximately **18.3 GB / 17.1 GiB**; optional preview TAE is approximately **23.5 MB / 22.4 MiB**. A compatible transformer, chosen LoRAs and H3 model resources remain separate selections. Review Setup's exact file list, shared-file checks and licenses before downloading; these weights are not bundled.
+- An enabled native LTX TritonVAE branch requires a Triton build compatible with the installed Torch/platform/GPU. There is no universal or unreviewed automatic Triton installation. Missing or uncertain branch dependencies hold submission. H3 does not require Triton.
+- Load the exact original in native ComfyUI, configure native controls, and capture or import a paired Workflow JSON/API JSON export before **Queue captured workflow**. Keep original wiring and lossless seed values. Choose **Video routing > All video routes** explicitly to return to legacy routes; saved work remains paused until deliberate **Resume**.
+- Canvas background removal and Extras **Auto cutout (CPU)** use the installed `isnet-anime` model and helper environment. Missing resources display readiness information without automatic downloads; manual editing remains available. Linux managed tools may need `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or equivalents. Optional AI Toolkit still requires host Git and Node.js 20 or newer.
 
 ### Official DaSiWa Workflow Captures
 
@@ -61,6 +76,16 @@
 - Actual CPU-only `isnet-anime` removal passed on illustrated portrait fixtures with ComfyUI stopped: original dimensions and transparency, soft alpha, recoverable cutout layers, Undo/Save/Redo, reopen and identical PNG export, repeated requests, and failure handling. Live Cancel and project-switch tests confirmed worker termination, including the Windows interpreter and wrapper; tablet controls were checked in browser emulation. Inspect cutouts before accepting them; this is limited model-quality qualification.
 - **Canvas remains experimental and is not ready for feedback.** Photographic-subject removal and fresh GPU generation remain unqualified. Physical touch and pinch/pen interaction remain unqualified. Complete localization and broader model-specific documentation remain pending.
 - **Video generation remains in beta.** The layout checks use simulated jobs and media; they do not establish fresh GPU rendering qualification for LTX, WAN, MiniMax H3, or advanced model combinations.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: native capture admission rejects foreign node IDs/classes, changed direct wiring, inactive execution nodes and unsafe numeric seeds; original exports retain their exact text and hashes.
+- Fixed: video route changes preserve the latest controls and prompts, wait for pending media/Forge work and expose recovery after uncertain acknowledgements.
+- Fixed: managed repair preserves local/divergent checkouts and interrupted progress, requires idle runtime evidence and separates installed files from native/GPU readiness.
+- Fixed: Canvas autosave, delayed edits, saved cutouts and Undo/Save/Redo preserve newer project state and recoverable assets.
+- Improved: Model Manager and Datasets use Gallery-style browsing; Metadata Viewer, Image Analysis and Model Merge share more compact workspace controls.
+- Improved: Extras transparency editing exports real alpha PNGs; Canvas and Extras CPU cutouts preserve soft alpha with request-scoped cancellation.
+- Improved: Video provides a central viewer, prompt/reference tray and collapsible Queue/Results without discarding mounted drafts.
 
 ## v0.32.44 - OmniForge, Live Gallery Folders, And Media Workflow Updates
 
