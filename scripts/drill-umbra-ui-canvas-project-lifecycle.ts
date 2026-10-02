@@ -100,11 +100,13 @@ async function main(): Promise<void> {
     checks.restorePointCreated = Boolean(restoreId);
     saved.name = 'Lifecycle Mutated';
     saved = await save(baseUrl, saved);
-    const restored = await api(await fetch(`${baseUrl}/api/umbra-ui/canvas/projects/${encodeURIComponent(projectId)}/restore-points/${encodeURIComponent(restoreId)}/restore`, { method: 'POST' }), 'Restore project');
+    const restored = await api(await fetch(`${baseUrl}/api/umbra-ui/canvas/projects/${encodeURIComponent(projectId)}/restore-points/${encodeURIComponent(restoreId)}/restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverRevision: saved.serverRevision ?? 0 }),
+    }), 'Restore project');
     checks.restoreRecoversBaseline = restored.project?.name === 'Canvas V8 Lifecycle';
 
     const forked = await api(await fetch(`${baseUrl}/api/umbra-ui/canvas/projects/${encodeURIComponent(projectId)}/fork`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Lifecycle Fork' }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Lifecycle Fork', serverRevision: restored.project?.serverRevision ?? 0 }),
     }), 'Fork project');
     forkId = forked.project?.id || '';
     checks.forkCreated = Boolean(forkId && forkId !== projectId);

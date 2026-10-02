@@ -3650,9 +3650,9 @@ function GalleryMediaViewer({
         <button type="button" disabled={isVideo} onClick={() => sendToUmbra('inpaint')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Paintbrush size={12} className="text-rose-300" /> Inpaint
         </button>
-        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('canvas')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
+        {!isPhoneViewer && <button type="button" disabled={isVideo} onClick={() => sendToUmbra('canvas')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Grid3X3 size={12} className="text-cyan-300" /> Canvas
-        </button>
+        </button>}
         <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Clapperboard size={12} className="text-fuchsia-300" /> IMG2VID / First Frame
         </button>
@@ -4029,9 +4029,6 @@ function GalleryMediaViewer({
               </button>
               <button type="button" disabled={isVideo} onClick={() => sendToUmbra('inpaint')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-rose-400/15 disabled:opacity-30">
                 <Paintbrush size={17} className="shrink-0 text-rose-300" /> Inpaint
-              </button>
-              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('canvas')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-cyan-400/15 disabled:opacity-30">
-                <Grid3X3 size={17} className="shrink-0 text-cyan-300" /> Canvas
               </button>
               <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-fuchsia-400/20 bg-fuchsia-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-fuchsia-400/15 disabled:opacity-30">
                 <Clapperboard size={17} className="shrink-0 text-fuchsia-300" /> Video first frame
@@ -10316,7 +10313,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       { label: 'TXT2IMG From Parameters', icon: <Sparkles size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'txt2img') },
       { label: 'IMG2IMG', icon: <Images size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'img2img') },
       { label: 'Inpaint', icon: <Paintbrush size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'inpaint') },
-      { label: 'Canvas', icon: <Grid3X3 size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'canvas') },
+      ...(isPhoneRemote ? [] : [{ label: 'Canvas', icon: <Grid3X3 size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'canvas') }]),
     ];
     const umbraUiVideoItems: ContextMenuItem[] = [
       { label: 'Use as First Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first') },

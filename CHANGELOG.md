@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Restore the native Canvas workspace on desktop and tablet, including saved projects, image and mask layers, editing tools, restore points, and portable project/PNG export. Phone Remote continues to use the supported generation workspaces.
+- Give Video a large central viewer, bottom prompt/reference tray, collapsible settings, and a resizable Queue/Results panel while preserving generation controls and queue behavior.
+- Canvas remains experimental. Current local checks cover editing and project durability; fresh GPU generation and model-based background removal qualification remain pending.
+- Keep autosave scoped to each Canvas project, preserve newer edits during asynchronous cropping/merging, and upload shared image data once when duplicate layers are saved.
+
 ## v0.32.44 - OmniForge, Live Gallery Folders, And Media Workflow Updates
 
 ### TL;DR - Setup After Updating

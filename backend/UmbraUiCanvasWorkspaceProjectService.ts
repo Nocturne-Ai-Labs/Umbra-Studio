@@ -744,9 +744,17 @@ export class UmbraUiCanvasWorkspaceProjectService {
       }
       uploaded.set(key, filename);
     }
+    // Duplicate layers can share one transient image URL and one uploaded payload.
+    // Resolve only from this request's accepted uploads; durable URLs still use normal project validation.
+    const uploadedLayerUrls = new Map<string, string>();
+    for (const entity of project.entities) {
+      if (entity.kind !== 'raster' && entity.kind !== 'mask') continue;
+      const filename = uploaded.get(entity.id);
+      if (filename && /^(blob:|data:)/i.test(entity.imageUrl)) uploadedLayerUrls.set(entity.imageUrl, filename);
+    }
     project.entities = project.entities.map((entity: Record<string, any>) => {
       if (entity.kind !== 'raster' && entity.kind !== 'mask') return entity;
-      const uploadedFilename = uploaded.get(entity.id);
+      const uploadedFilename = uploaded.get(entity.id) || uploadedLayerUrls.get(entity.imageUrl);
       const currentUrl = this.dehydrateExistingUrl(projectId, entity.imageUrl);
       const previousUrl = String(asRecord(previousById.get(entity.id)).imageUrl || '');
       if (uploadedFilename) return { ...entity, imageUrl: `${PROJECT_ASSET_PREFIX}${uploadedFilename}` };

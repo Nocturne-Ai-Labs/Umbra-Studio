@@ -77,12 +77,15 @@ export async function saveUmbraCanvasWorkspaceProject(
 ): Promise<UmbraCanvasProjectDocument> {
   const form = new FormData();
   form.set('document', JSON.stringify(project));
+  const uploadedLayerUrls = new Set<string>();
   for (const entity of project.entities) {
     if (entity.kind !== 'raster' && entity.kind !== 'mask') continue;
     if (!entity.imageUrl) continue;
     if (!/^(blob:|data:)/i.test(entity.imageUrl)) continue;
+    if (uploadedLayerUrls.has(entity.imageUrl)) continue;
     const blob = await readCanvasBlob(entity.imageUrl, `layer ${entity.name}`);
     form.append(`asset:${encodeURIComponent(entity.id)}`, blob, assetFilename(entity.name, blob.type));
+    uploadedLayerUrls.add(entity.imageUrl);
   }
   for (const pending of project.generation.pending) {
     await appendBlobAsset(form, pendingMaskAssetKey(pending.jobId), pending.acceptanceMaskUrl || '', 'pending-acceptance-mask.png');

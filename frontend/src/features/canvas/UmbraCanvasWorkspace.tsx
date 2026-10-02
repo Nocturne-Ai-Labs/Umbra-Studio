@@ -532,7 +532,7 @@ export function UmbraCanvasWorkspace({
   const [stagingSaveDestination, setStagingSaveDestination] = React.useState('');
   const [savingStagedResults, setSavingStagedResults] = React.useState(false);
   const [conflictStageId, setConflictStageId] = React.useState('');
-  const [lastSavedRevision, setLastSavedRevision] = React.useState(-1);
+  const [lastSavedProject, setLastSavedProject] = React.useState<{ id: string; revision: number } | null>(null);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const managerRef = React.useRef<UmbraCanvasManager | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -943,7 +943,7 @@ export function UmbraCanvasWorkspace({
         const saved = await saveUmbraCanvasWorkspaceProject(current, thumbnail);
         syncPersistedProject(saved);
         window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, saved.id);
-        setLastSavedRevision(saved.revision);
+        setLastSavedProject({ id: saved.id, revision: saved.revision });
         setSaveError('');
         setConflictedProjectId('');
         if (projectBrowserOpen) void refreshProjects();
@@ -973,7 +973,7 @@ export function UmbraCanvasWorkspace({
       return token === projectTransitionRef.current && latest.id === current.id && latest.revision === current.revision;
     };
     if (current.entities.length || current.revision > 0) {
-      const saved = await saveProject();
+      const saved = await saveUmbraCanvasRequiredRevision(current, () => saveProject(), isCurrent);
       if (!saved || saved.id !== current.id || saved.revision !== current.revision) return null;
     }
     if (!isCurrent()) return null;
@@ -1008,7 +1008,7 @@ export function UmbraCanvasWorkspace({
       replaceProject(saved);
       resetGenerationTracking(saved.generation.staging);
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, saved.id);
-      setLastSavedRevision(saved.revision);
+      setLastSavedProject({ id: saved.id, revision: saved.revision });
       if (saved.generation.settings) onRestoreGenerationSettings(saved.generation.settings);
       requestAnimationFrame(() => managerRef.current?.fitToContent());
       showToast(`Imported ${saved.name}.`, 'success');
@@ -1021,10 +1021,11 @@ export function UmbraCanvasWorkspace({
   }, [archiving, onRestoreGenerationSettings, prepareProjectTransition, replaceProject, resetGenerationTracking, showToast]);
 
   React.useEffect(() => {
-    if (conflictedProjectId === project.id || project.entities.length === 0 || project.revision === lastSavedRevision || saving) return;
+    if (conflictedProjectId === project.id || project.entities.length === 0
+      || (lastSavedProject?.id === project.id && lastSavedProject.revision === project.revision) || saving) return;
     const timer = window.setTimeout(() => void saveProject(false), 30_000);
     return () => window.clearTimeout(timer);
-  }, [conflictedProjectId, lastSavedRevision, project.id, project.entities.length, project.revision, saveProject, saving]);
+  }, [conflictedProjectId, lastSavedProject, project.id, project.entities.length, project.revision, saveProject, saving]);
 
   const openProjectBrowser = React.useCallback(() => {
     setProjectBrowserOpen(true);
@@ -1051,7 +1052,7 @@ export function UmbraCanvasWorkspace({
       setConflictedProjectId('');
       setSaveError('');
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, loaded.id);
-      setLastSavedRevision(loaded.revision);
+      setLastSavedProject({ id: loaded.id, revision: loaded.revision });
       if (loaded.generation.settings) {
         onRestoreGenerationSettings(loaded.generation.settings);
         setDenoise(loaded.generation.settings.denoise);
@@ -1126,7 +1127,7 @@ export function UmbraCanvasWorkspace({
           replaceProject(loaded);
           resetGenerationTracking(loaded.generation.staging);
           window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, loaded.id);
-          setLastSavedRevision(loaded.revision);
+          setLastSavedProject({ id: loaded.id, revision: loaded.revision });
           destinationSettings = loaded.generation.settings;
         }
       } else {
@@ -1249,7 +1250,7 @@ export function UmbraCanvasWorkspace({
       setConflictedProjectId('');
       setSaveError('');
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, forked.id);
-      setLastSavedRevision(forked.revision);
+      setLastSavedProject({ id: forked.id, revision: forked.revision });
       if (forked.generation.settings) onRestoreGenerationSettings(forked.generation.settings);
       setProjectBrowserOpen(false);
       requestAnimationFrame(() => managerRef.current?.fitToContent());
@@ -1300,7 +1301,7 @@ export function UmbraCanvasWorkspace({
       if (useUmbraCanvasStore.getState().present.id === summary.id) {
         newProject();
         resetGenerationTracking();
-        setLastSavedRevision(-1);
+        setLastSavedProject(null);
       }
       try {
         if (window.localStorage.getItem(UMBRA_CANVAS_LAST_PROJECT_KEY) === summary.id) {
@@ -1360,7 +1361,7 @@ export function UmbraCanvasWorkspace({
       replaceProject(restored);
       resetGenerationTracking(restored.generation.staging);
       window.localStorage.setItem(UMBRA_CANVAS_LAST_PROJECT_KEY, restored.id);
-      setLastSavedRevision(restored.revision);
+      setLastSavedProject({ id: restored.id, revision: restored.revision });
       if (restored.generation.settings) {
         onRestoreGenerationSettings(restored.generation.settings);
         setDenoise(restored.generation.settings.denoise);
@@ -2352,15 +2353,26 @@ export function UmbraCanvasWorkspace({
   };
   const cropRasterToGenerationBbox = async (entityId: string) => {
     if (croppingRaster || saving) return;
-    const current = useUmbraCanvasStore.getState().present;
+    const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
     const raster = current.entities.find((entity) => entity.kind === 'raster' && entity.id === entityId);
     if (!raster || raster.locked) return;
+    const isCurrent = () => {
+      const latest = useUmbraCanvasStore.getState();
+      return latest.historyEpoch === historyEpoch && latest.present.id === current.id && latest.present.revision === current.revision;
+    };
+    const requireCurrent = () => {
+      if (!isCurrent()) throw new Error('The Canvas changed while cropping. Your newer work was kept; crop again from the current layer.');
+    };
     setCroppingRaster(true);
     try {
-      const saved = await saveProject(false);
+      const saved = await saveUmbraCanvasRequiredRevision(current, () => saveProject(false), isCurrent);
       if (!saved) return;
+      requireCurrent();
+      if (saved.id !== current.id || saved.revision !== current.revision) return;
       await createUmbraCanvasWorkspaceRestorePoint(saved.id, `Before cropping ${raster.name}`);
+      requireCurrent();
       const blob = await composeUmbraCanvasRasterCropBlob(saved, entityId);
+      requireCurrent();
       const imageUrl = URL.createObjectURL(blob);
       replaceRasterSource(entityId, {
         imageUrl,
@@ -2439,17 +2451,27 @@ export function UmbraCanvasWorkspace({
   };
   const mergeVisibleLayers = async () => {
     if (mergingLayers || saving) return;
-    const current = useUmbraCanvasStore.getState().present;
+    const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
     const currentDrawables = current.entities.filter(isUmbraCanvasDrawableEntity).filter((entity) => entity.visible && entity.generationEnabled);
     if (currentDrawables.length < 2) {
       showToast('Enable at least two visible drawable layers to merge them.', 'error');
       return;
     }
+    const isCurrent = () => {
+      const latest = useUmbraCanvasStore.getState();
+      return latest.historyEpoch === historyEpoch && latest.present.id === current.id && latest.present.revision === current.revision;
+    };
+    const requireCurrent = () => {
+      if (!isCurrent()) throw new Error('The Canvas changed while merging. Your newer work was kept; merge again from the current project.');
+    };
     setMergingLayers(true);
     try {
-      const saved = await saveProject(false);
+      const saved = await saveUmbraCanvasRequiredRevision(current, () => saveProject(false), isCurrent);
       if (!saved) return;
+      requireCurrent();
+      if (saved.id !== current.id || saved.revision !== current.revision) return;
       await createUmbraCanvasWorkspaceRestorePoint(saved.id, 'Before merging visible layers');
+      requireCurrent();
       const drawables = saved.entities.filter(isUmbraCanvasDrawableEntity).filter((entity) => entity.visible && entity.generationEnabled);
       const bounds = drawables.map(getUmbraCanvasSpatialBounds);
       const left = Math.floor(Math.min(...bounds.map((entry) => entry.x)));
@@ -2458,6 +2480,7 @@ export function UmbraCanvasWorkspace({
       const bottom = Math.ceil(Math.max(...bounds.map((entry) => entry.y + entry.height)));
       const mergeBbox = { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
       const blob = await composeUmbraCanvasDrawableRegionBlob(saved, mergeBbox);
+      requireCurrent();
       const imageUrl = URL.createObjectURL(blob);
       const merged = createUmbraCanvasRasterEntity({
         name: 'Merged Visible Layers',

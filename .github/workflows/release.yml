@@ -155,7 +155,7 @@ jobs:
           awk '
             BEGIN {
               mobile="**Umbra Studio Mobile is experimental and is not ready for feedback.**"
-              canvas="**Canvas is temporarily disabled and is not ready for feedback.**"
+              canvas="**Canvas is experimental on desktop and tablet and is not ready for feedback. Fresh GPU generation and model-based background removal qualification remain pending.**"
               video="**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**"
               print mobile "\n\n" canvas "\n\n" video "\n"
             }
