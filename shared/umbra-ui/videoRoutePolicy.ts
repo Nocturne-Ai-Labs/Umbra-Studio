@@ -1,3 +1,4 @@
+import { normalizeOfficialVideoWorkflowSelection } from './officialVideoWorkflow';
 export const VIDEO_ROUTE_POLICY_KEY = 'video.routePolicy' as const;
 export type UmbraVideoRoutePolicy = 'dasiwa-only' | 'all-routes';
 export type DasiwaVideoRoute = 'h3-director' | 'ltx23-omniforge';
@@ -7,14 +8,7 @@ const isVideoOutputClass = (type: string) => /^(SaveVideo|SaveAnimatedWEBP|SaveA
 export const normalizeVideoRoutePolicy = (value: unknown): UmbraVideoRoutePolicy => value === 'all-routes' ? 'all-routes' : 'dasiwa-only';
 export function videoControlsPolicyIssue(value: unknown, policy: UmbraVideoRoutePolicy): string | null {
   if (policy === 'all-routes') return null;
-  const video = record(value);
-  if (video.family === 'minimax_h3' && record(record(video.minimaxH3).director).enabled === true
-    && ['text_to_video', 'image_to_video', 'reference_to_video'].includes(video.mode)) return null;
-  const ltx = record(video.ltx);
-  if (video.family === 'ltx23' && record(ltx.omniForge).enabled === true
-    && !record(ltx.storyboard).enabled && !record(ltx.extended).enabled
-    && ['text_to_video', 'image_to_video'].includes(video.mode)) return null;
-  return 'Held by Dasiwa-only video routing. Choose DaSiWa H3 Director or LTX-2.3 OmniForge, or restore All video routes. Saved settings and work are retained.';
+  return 'Held by official DaSiWa video routing. Load a pinned official workflow in ComfyUI and capture its native graph, or explicitly restore All video routes to run adapted jobs. Saved settings and work are retained.';
 }
 export function videoGraphNodes(value: unknown): Record<string, any> {
   const document = record(value);
@@ -65,6 +59,14 @@ export function dasiwaVideoGraphRoute(value: unknown): DasiwaVideoRoute | null {
 export function videoGenerationPolicyIssue(generationValue: unknown, policy: UmbraVideoRoutePolicy, graph?: unknown): string | null {
   if (policy === 'all-routes') return null;
   const generation = record(generationValue);
+  const official = normalizeOfficialVideoWorkflowSelection(generation.officialWorkflow);
+  if (official) {
+    if (generation.mediaType !== 'video') return 'Held: official workflow captures require an explicit video job.';
+    const expected = official.workflowId === 'h3-26' ? 'h3-director' : 'ltx23-omniforge';
+    if (graph !== undefined && dasiwaVideoGraphRoute(graph) !== expected) return 'Held: the captured graph does not match its official DaSiWa workflow. Capture the pinned original again.';
+    return null;
+  }
+  if (generation.officialWorkflow != null) return 'Held: the official workflow capture selection is invalid. Capture the pinned original again.';
   const video = record(generation.video);
   // Image generation also carries inactive normalized video defaults.
   const isVideo = generation.mediaType === 'video' || (generation.mediaType !== 'image' && Object.keys(video).length > 0)
@@ -84,6 +86,6 @@ export function assertVideoGenerationPolicy(generation: unknown, policy: UmbraVi
   if (issue) throw new Error(issue);
 }
 export function videoGraphPolicyIssue(graph: unknown, policy: UmbraVideoRoutePolicy): string | null {
-  return policy === 'dasiwa-only' && isVideoGenerationGraph(graph) && !dasiwaVideoGraphRoute(graph)
-    ? 'Dasiwa-only video routing blocks this legacy video graph. Use the installed DaSiWa H3 Director or LTX-2.3 OmniForge workflow. No legacy fallback is allowed.' : null;
+  return policy === 'dasiwa-only' && isVideoGenerationGraph(graph)
+    ? 'Official DaSiWa video routing requires a verified native capture through the Umbra queue. Manual and adapted video submissions are held; All video routes is the explicit rollback.' : null;
 }

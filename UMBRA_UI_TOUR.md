@@ -145,14 +145,19 @@ and broader model-specific documentation are pending.
 
 ## Video
 
-Video temporarily defaults to **DaSiWa only** in **Settings > Video routing**.
-Use the **H3 Director** or **LTX-2.3 OmniForge** route buttons below that menu.
-These use the existing DaSiWa
-integrations: H3 uses the separately installed Director/Guide nodes, while
-OmniForge uses Umbra's attributed API adapter around the upstream node suite.
-The original upstream OmniForge workflow file is not bundled here. Missing
-workflows, nodes, or models show an unavailable/setup state; Umbra does not
-fall back to a legacy video workflow.
+Video defaults to **DaSiWa only**. Choose the pinned official **H3 C-MMH3-26**
+or **LTX OmniForge C-LTX23-50** workflow, check readiness, then explicitly open
+its original in managed ComfyUI. Configure prompts, resources, timelines,
+sampling, output, and native uint64 seed controls there. Return to Video and
+capture the native workflow, then queue that capture. Umbra retains the native
+graph and uses its existing queue, progress, history, and results. Source links,
+revision, hashes, and GPL license identify the upstream files.
+
+Missing installed nodes, serializer hooks, resources, or media show a setup or
+held state. No adapted fallback or dependency/model installation occurs.
+Real installed frontend compatibility and GPU output quality remain unqualified.
+Official review shows the capture and outputs; exact requeue keeps its native
+controls. Configure the upstream workflow and capture again to change them.
 
 Existing Wan, native H3/LTX, VID2VID, Storyboard, Extended, and custom workflow
 settings are retained. An unsupported saved route displays **Held** and cannot
@@ -163,7 +168,7 @@ draft. Switching routing with live video work pauses the queue; press **Resume**
 explicitly after restoring the routes. Loading a saved legacy queue under
 DaSiWa-only routing restores it paused and held without changing its settings.
 
-Source media, key frames, prompts,
+The adapted controls available through **All video routes** keep source media, key frames, prompts,
 audio where supported, sizing policy, seed behavior, sampling, interpolation,
 and upscale options are kept with each queued video so creators can inspect,
 edit, and requeue results.

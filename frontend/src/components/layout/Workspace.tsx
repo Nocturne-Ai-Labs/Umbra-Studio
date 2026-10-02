@@ -1307,17 +1307,22 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
   const isHealthy = useStore((state) => state.backendHealth.comfyui === true);
   const { addToast } = useToastStore();
   const comfyIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const comfyFrameLoadedRef = useRef(false);
+  const [officialProxyRequested, setOfficialProxyRequested] = useState(false);
+  const [officialLoadRequest, setOfficialLoadRequest] = useState<Record<string, unknown> | null>(null);
+  const loadedOfficialWorkflowRef = useRef<string | null>(null);
+  const resolvedOfficialLoadRequestRef = useRef('');
   const loadedComfyWorkflowToastRef = useRef<{ key: string; at: number } | null>(null);
   const [remoteClientRevision, setRemoteClientRevision] = useState(0);
   const isRemoteClient = useMemo(() => isUmbraRemoteClient(), [remoteClientRevision]);
   const comfyFrameUrl = useMemo(() => {
-    if (isRemoteClient) {
+    if (isRemoteClient || officialProxyRequested) {
       return '/comfy/';
     }
     return comfyUrl;
-  }, [comfyUrl, isRemoteClient]);
+  }, [comfyUrl, isRemoteClient, officialProxyRequested]);
   const comfyOrigin = useMemo(() => {
-    if (isRemoteClient) {
+    if (isRemoteClient || officialProxyRequested) {
       return window.location.origin;
     }
     try {
@@ -1325,7 +1330,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
     } catch {
       return null;
     }
-  }, [comfyUrl, isRemoteClient]);
+  }, [comfyUrl, isRemoteClient, officialProxyRequested]);
   const [nodePickerOpen, setNodePickerOpen] = useState(false);
   const [nodePickerLoading, setNodePickerLoading] = useState(false);
   const [nodePickerAssigning, setNodePickerAssigning] = useState(false);
@@ -1352,14 +1357,23 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
   }, []);
 
   const requestComfyBridge = useCallback(async (
-    messageType: 'UMBRA_COMFY_GET_IMAGE_NODES' | 'UMBRA_COMFY_ASSIGN_IMAGE' | 'UMBRA_COMFY_HANDOFF_IMAGES' | 'UMBRA_COMFY_LOAD_WORKFLOW',
-    expectedResponseType: 'UMBRA_COMFY_IMAGE_NODES' | 'UMBRA_COMFY_ASSIGN_RESULT' | 'UMBRA_COMFY_HANDOFF_RESULT' | 'UMBRA_COMFY_LOAD_WORKFLOW_RESULT',
+    messageType: 'UMBRA_COMFY_GET_IMAGE_NODES' | 'UMBRA_COMFY_ASSIGN_IMAGE' | 'UMBRA_COMFY_HANDOFF_IMAGES' | 'UMBRA_COMFY_LOAD_WORKFLOW' | 'UMBRA_OFFICIAL_WORKFLOW_LOAD' | 'UMBRA_OFFICIAL_WORKFLOW_SERIALIZE',
+    expectedResponseType: 'UMBRA_COMFY_IMAGE_NODES' | 'UMBRA_COMFY_ASSIGN_RESULT' | 'UMBRA_COMFY_HANDOFF_RESULT' | 'UMBRA_COMFY_LOAD_WORKFLOW_RESULT' | 'UMBRA_OFFICIAL_WORKFLOW_LOAD_RESULT' | 'UMBRA_OFFICIAL_WORKFLOW_SERIALIZE_RESULT',
     payload: Record<string, unknown> = {},
     timeoutMs: number = COMFY_BRIDGE_MESSAGE_TIMEOUT_MS
   ) => {
     const iframeWindow = comfyIframeRef.current?.contentWindow;
     if (!iframeWindow) {
       throw new Error('ComfyUI iframe not ready. Open ComfyUI and try again.');
+    }
+    const isOfficialRequest = messageType.startsWith('UMBRA_OFFICIAL_WORKFLOW_');
+    const targetOrigin = isOfficialRequest ? window.location.origin : comfyOrigin;
+    if (isOfficialRequest) {
+      if (!comfyFrameLoadedRef.current) throw new Error('The same-origin ComfyUI frame is still loading.');
+      const frameUrl = new URL(comfyIframeRef.current?.src || '', window.location.href);
+      if (frameUrl.origin !== window.location.origin || !frameUrl.pathname.startsWith('/comfy/')) {
+        throw new Error('Official workflows require the same-origin ComfyUI workspace. Load the official source and retry.');
+      }
     }
 
     const requestId = `umbra-${messageType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1371,7 +1385,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
       };
 
       const onMessage = (event: MessageEvent) => {
-        if (comfyOrigin && event.origin !== comfyOrigin) return;
+        if (event.source !== iframeWindow || (targetOrigin && event.origin !== targetOrigin)) return;
         const data = event.data;
         if (!data || typeof data !== 'object') return;
         if ((data as any).requestId !== requestId) return;
@@ -1386,32 +1400,38 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
 
       const timeoutId = window.setTimeout(() => {
         cleanup();
-        reject(new Error('Comfy bridge timed out. Reload ComfyUI to refresh Umbra bridge extension.'));
+        reject(Object.assign(new Error('Comfy bridge timed out. Reload ComfyUI to refresh Umbra bridge extension.'), { officialWorkflowTerminal: isOfficialRequest }));
       }, timeoutMs);
 
       window.addEventListener('message', onMessage);
       iframeWindow.postMessage(
         { type: messageType, requestId, ...payload },
-        comfyOrigin || '*'
+        targetOrigin || '*'
       );
     });
   }, [comfyOrigin]);
 
   const loadWorkflowIntoComfy = useCallback(async (payload: Record<string, unknown>, options?: { silent?: boolean }) => {
     const workflow = payload?.workflow;
-    if (!workflow || typeof workflow !== 'object') {
+    const officialId = payload?.officialWorkflowId;
+    const isOfficial = officialId === 'h3-26' || officialId === 'ltx23-50';
+    if (!isOfficial && (!workflow || typeof workflow !== 'object')) {
       throw new Error('No workflow document was provided.');
+    }
+    if (isOfficial && (typeof payload.sourceText !== 'string' || !payload.sourceText.trim() || typeof payload.sourceSha256 !== 'string')) {
+      throw new Error('The immutable official workflow source was not provided.');
     }
     const workflowName = String(payload?.workflowName || payload?.name || 'API workflow').trim() || 'API workflow';
     const result = await requestComfyBridge(
-      'UMBRA_COMFY_LOAD_WORKFLOW',
-      'UMBRA_COMFY_LOAD_WORKFLOW_RESULT',
-      { workflow, workflowName },
-      12000
+      isOfficial ? 'UMBRA_OFFICIAL_WORKFLOW_LOAD' : 'UMBRA_COMFY_LOAD_WORKFLOW',
+      isOfficial ? 'UMBRA_OFFICIAL_WORKFLOW_LOAD_RESULT' : 'UMBRA_COMFY_LOAD_WORKFLOW_RESULT',
+      isOfficial ? { sourceText: payload.sourceText, workflowId: officialId, sourceSha256: payload.sourceSha256 } : { workflow, workflowName },
+      isOfficial ? 19000 : 12000
     );
     if (!result?.ok) {
-      throw new Error(String(result?.error || 'ComfyUI could not open the workflow.'));
+      throw Object.assign(new Error(String(result?.error || 'ComfyUI could not open the workflow.')), { officialWorkflowTerminal: isOfficial });
     }
+    if (!isOfficial) loadedOfficialWorkflowRef.current = null;
     if (!options?.silent) {
       addToast({
         type: 'success',
@@ -1419,6 +1439,81 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
       });
     }
   }, [addToast, requestComfyBridge]);
+
+  useEffect(() => {
+    const acceptOfficial = (payload: Record<string, unknown>) => {
+      if (payload.officialWorkflowId !== 'h3-26' && payload.officialWorkflowId !== 'ltx23-50') return;
+      if (payload.loadRequestId && resolvedOfficialLoadRequestRef.current === payload.loadRequestId) return;
+      setUiRequested(true);
+      setShowManager(false);
+      setOfficialProxyRequested(true);
+      setOfficialLoadRequest(current => current?.loadRequestId === payload.loadRequestId ? current : payload);
+    };
+    const onLoad = (event: Event) => {
+      const payload = (event as CustomEvent).detail;
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) acceptOfficial(payload);
+    };
+    window.addEventListener('umbra:comfyui-load-workflow', onLoad);
+    try {
+      const pending = JSON.parse(window.sessionStorage.getItem('umbra.pendingComfyWorkflowLoad') || 'null');
+      if (pending && typeof pending === 'object' && !Array.isArray(pending)) acceptOfficial(pending);
+    } catch { /* Storage can be disabled. */ }
+    return () => window.removeEventListener('umbra:comfyui-load-workflow', onLoad);
+  }, []);
+
+  // An explicit official load stays alive when the user returns to Video.
+  // Readiness and serializer failures are terminal; they never select a fallback.
+  useEffect(() => {
+    if (!officialLoadRequest || !officialProxyRequested) return;
+    let canceled = false;
+    let retryTimer: number | undefined;
+    const deadline = Date.now() + COMFY_WORKFLOW_OPEN_TIMEOUT_MS;
+    const finish = (ok: boolean, error = '') => {
+      resolvedOfficialLoadRequestRef.current = String(officialLoadRequest.loadRequestId || '');
+      window.dispatchEvent(new CustomEvent('umbra:official-workflow-loaded', { detail: { workflowId: officialLoadRequest.officialWorkflowId, loadRequestId: officialLoadRequest.loadRequestId, ok, error } }));
+      try {
+        const pending = JSON.parse(window.sessionStorage.getItem('umbra.pendingComfyWorkflowLoad') || 'null');
+        if (pending?.loadRequestId === officialLoadRequest.loadRequestId) window.sessionStorage.removeItem('umbra.pendingComfyWorkflowLoad');
+      } catch { /* Storage can be disabled. */ }
+      setOfficialLoadRequest(null);
+    };
+    const run = async () => {
+      try {
+        await loadWorkflowIntoComfy(officialLoadRequest, { silent: true });
+        if (canceled) return;
+        loadedOfficialWorkflowRef.current = String(officialLoadRequest.officialWorkflowId);
+        addToast({ type: 'success', message: `Opened ${officialLoadRequest.workflowName || 'official workflow'} in ComfyUI.` });
+        finish(true);
+      } catch (error: any) {
+        if (canceled) return;
+        if (!error?.officialWorkflowTerminal && Date.now() < deadline) { retryTimer = window.setTimeout(() => void run(), 450); return; }
+        finish(false, String(error?.message || 'Failed to open official workflow in ComfyUI.'));
+      }
+    };
+    void run();
+    return () => { canceled = true; window.clearTimeout(retryTimer); };
+  }, [addToast, loadWorkflowIntoComfy, officialLoadRequest, officialProxyRequested]);
+
+  useEffect(() => {
+    const onSerialize = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail || typeof detail.resolve !== 'function' || typeof detail.reject !== 'function') return;
+      const workflowId = detail.workflowId;
+      if ((workflowId !== 'h3-26' && workflowId !== 'ltx23-50') || loadedOfficialWorkflowRef.current !== workflowId) {
+        detail.reject(new Error('Load this official workflow in ComfyUI before capturing its configuration.'));
+        return;
+      }
+      void requestComfyBridge('UMBRA_OFFICIAL_WORKFLOW_SERIALIZE', 'UMBRA_OFFICIAL_WORKFLOW_SERIALIZE_RESULT', { workflowId }, 19000)
+        .then((result) => {
+          if (!result?.ok) throw new Error(String(result?.error || 'ComfyUI could not serialize this native workflow.'));
+          if (result.serializer !== 'comfy-native-v1' || !result.workflow || !result.promptGraph || !result.sourceSha256) throw new Error('The native serializer returned an incomplete capture. Reload the official workflow and retry.');
+          detail.resolve({ workflow: result.workflow, promptGraph: result.promptGraph, sourceSha256: result.sourceSha256, serializer: result.serializer });
+        })
+        .catch((error) => detail.reject(error));
+    };
+    window.addEventListener('umbra:official-workflow-serialize', onSerialize);
+    return () => window.removeEventListener('umbra:official-workflow-serialize', onSerialize);
+  }, [requestComfyBridge]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -1449,6 +1544,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
       const shouldToast = !lastToast || lastToast.key !== workflowKey || Date.now() - lastToast.at > 5000;
       void loadWorkflowIntoComfy(payload, { silent: !shouldToast })
         .then(() => {
+          if (canceled || generation !== workflowLoadGenerationRef.current) return;
           loadedComfyWorkflowToastRef.current = { key: workflowKey, at: Date.now() };
           try {
             window.sessionStorage.removeItem(pendingStorageKey);
@@ -1472,13 +1568,14 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
     const onLoadWorkflow = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return;
+      if (detail.officialWorkflowId === 'h3-26' || detail.officialWorkflowId === 'ltx23-50') return;
       runLoad(detail as Record<string, unknown>);
     };
 
     window.addEventListener('umbra:comfyui-load-workflow', onLoadWorkflow);
     const storedPayload = readStoredPayload();
-    if (storedPayload) {
-      window.setTimeout(() => runLoad(storedPayload), 250);
+    if (storedPayload && storedPayload.officialWorkflowId !== 'h3-26' && storedPayload.officialWorkflowId !== 'ltx23-50') {
+      window.setTimeout(() => { if (!canceled) runLoad(storedPayload); }, 250);
     }
     return () => {
       canceled = true;
@@ -1697,7 +1794,6 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
   const [comfyFrameRevision, setComfyFrameRevision] = useState(0);
   const [comfyFrameLoadState, setComfyFrameLoadState] = useState<'idle' | 'loading' | 'ready'>('idle');
   const [isComfyFrameSlow, setIsComfyFrameSlow] = useState(false);
-  const comfyFrameLoadedRef = useRef(false);
   const shouldRenderIframe = uiRequested && (hasReadyIframe || isHealthy);
 
   useEffect(() => {
@@ -1763,6 +1859,10 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
     workflowLoadGenerationRef.current++;
     try { window.sessionStorage.removeItem('umbra.pendingComfyWorkflowLoad'); } catch { /* Storage can be disabled. */ }
     setUiRequested(false);
+    if (officialLoadRequest) window.dispatchEvent(new CustomEvent('umbra:official-workflow-loaded', { detail: { workflowId: officialLoadRequest.officialWorkflowId, loadRequestId: officialLoadRequest.loadRequestId, ok: false, error: 'ComfyUI was unloaded before the official workflow finished opening.' } }));
+    setOfficialLoadRequest(null);
+    setOfficialProxyRequested(false);
+    loadedOfficialWorkflowRef.current = null;
     setHasReadyIframe(false);
     setConfirmUnload(false);
     closeNodePicker();

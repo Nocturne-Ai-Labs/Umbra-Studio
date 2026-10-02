@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-### Temporary DaSiWa Video Routing
+### Official DaSiWa Workflow Captures
 
-- Default Video to **DaSiWa only**, with the existing H3 Director and LTX-2.3 OmniForge integrations. Hide legacy generation entrypoints and block legacy workflows at selection, compilation, queue dispatch, and the ComfyUI prompt proxy; missing nodes or workflows cannot trigger a native fallback.
+- Default Video to **DaSiWa only**, using the pinned original **C-MMH3-26** and **C-LTX23-50** UI workflows from darksidewalker's official workflow repository at revision `143bd6a47d844ddd7a68175db5c5ff3867f5febb`. Preserve their original bytes, source hashes, GPL-3.0 license, and provenance separately from Umbra's MIT code.
+- Explicitly load the original in managed ComfyUI, configure its native controls, and capture through ComfyUI's actual serializer with DaSiWa status-switch and lossless seed hooks. Submit the native API graph through the existing queue without Umbra's adapted graph construction, role overrides, stage injection, or seed coercion. Only explicit existing model/media bindings may change literal resource inputs; history records the native UI/API snapshots and provenance.
 - Retain legacy source, saved controls, custom workflows, queue data, history, and results. Unsupported saved work displays **Held**; loading a legacy saved queue keeps its original generation settings paused and held. Cancellation and viewing previous outputs remain available.
-- Restore the previous generation choices through **Video > Settings > Video routing > All video routes**. Routing changes do not convert saved settings or resume a live video queue; use **Resume** explicitly after rollback. No dependencies or weights are installed by this switch.
-- This policy change uses mocked generation and isolated API checks. Real Dasiwa inference and multi-scene output quality remain unqualified.
+- Restore the previous adapted choices through **Video > Video routing > All video routes**. Default mode holds all adapted/manual video jobs, including Umbra's earlier H3/OmniForge adapters. Routing changes do not convert saved settings or resume a live video queue; use **Resume** explicitly after rollback. No dependencies or weights are installed by this switch.
+- Missing nodes, native hooks, model selections, or staged media block capture/admission. Accepted official jobs that lose readiness pause with an actionable hold; restored saved official work stays paused. Actual installed frontend compatibility, GPU inference, and output quality remain unqualified; mocked checks do not qualify a release.
 
 ### Workspace Interface Alignment
 

@@ -67,6 +67,8 @@ import {
   type UmbraVideoEditorDraft,
 } from '@/components/umbra-ui/UmbraVideoGenerationControls';
 import { UmbraVideoQueuePanel, UmbraVideoWorkspacePreview } from '@/components/umbra-ui/UmbraVideoQueuePanel';
+import { UmbraOfficialVideoWorkflowPanel } from '@/components/umbra-ui/UmbraOfficialVideoWorkflowPanel';
+import { normalizeVideoRoutePolicy } from '../../../../shared/umbra-ui/videoRoutePolicy';
 import { UmbraExtrasWorkspace } from '@/components/umbra-ui/UmbraExtrasWorkspace';
 import { UmbraInpaintWorkspace } from '@/components/umbra-ui/UmbraInpaintWorkspace';
 import { UmbraCanvasWorkspace } from '@/features/canvas/UmbraCanvasWorkspace';
@@ -527,6 +529,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const activeWorkspace = useStore((state) => state.activeWorkspace);
   const appSidebarCollapsed = useStore((state) => state.ui.isAppBarCollapsed);
   const comfyConnected = useStore((state) => state.connections.comfyui === 'connected');
+  const videoRoutePolicy = useStore((state) => normalizeVideoRoutePolicy(state.appSettings['video.routePolicy']));
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
   const showToast = useStore((state) => state.showToast);
   const [img2imgOutputFolder, setImg2imgOutputFolder] = usePinnedOutputFolder('img2img');
@@ -559,6 +562,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     stopAllUmbraJobs,
     queueImage,
     queueVideo,
+    queueOfficialVideo,
   } = useUmbraPowerPrompterBridge(comfyConnected);
   useUmbraQueueNotificationAudio(queueActivities);
   const imageQueuePlacement = useUmbraQueuePlacement(queueSummary);
@@ -2919,6 +2923,31 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       : null
   ) || (queueSummary.running > 0 ? null : lastImageGenerationInfo);
 
+  const videoReviewPanel = <div className="flex h-full min-h-0 flex-col">
+    <UmbraQueueEmergencyControls
+      queueSummary={queueSummary}
+      queueConnected={queueConnected}
+      busyAction={queueControlBusy}
+      onSkip={() => void handleSkipUmbraJob()}
+      onStopAll={() => void handleStopAllUmbraJobs()}
+    />
+    <UmbraVideoQueuePanel
+      previewJobId={videoPreviewJob?.id || null}
+      onPreviewJob={(id) => { setVideoPreviewJobId(id); setVideoPreviewRevision((revision) => revision + 1); }}
+      jobs={videoJobs}
+      loading={videoJobsLoading}
+      error={videoJobsError}
+      queueVideo={queueVideo}
+      queueOfficialVideo={queueOfficialVideo}
+      onLoadIntoEditor={(draft) => {
+        setVideoEditorDraft(draft);
+        if (videoRoutePolicy === 'dasiwa-only') showToast('Adapted draft held. Restore All video routes to edit it.', 'info');
+      }}
+      onRefresh={refreshVideoJobs}
+      onClear={clearVideoJobs}
+    />
+  </div>;
+
   return (
     <div
       ref={workspaceRootRef}
@@ -3790,6 +3819,14 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         ) : null}
         {modeIsMounted('video') ? (
           <div className={activeMode === 'video' ? 'flex min-h-0 min-w-0 flex-col' : 'hidden'} aria-hidden={activeMode !== 'video'}>
+            {videoRoutePolicy === 'dasiwa-only' ? <UmbraOfficialVideoWorkflowPanel
+              queueConnected={queueConnected}
+              comfyConnected={comfyConnected}
+              queueOfficialVideo={queueOfficialVideo}
+              preview={<UmbraVideoWorkspacePreview key={videoPreviewJob?.id || 'empty'} job={videoPreviewJob} />}
+              review={videoReviewPanel}
+            /> : <>
+            <div className="shrink-0 border-b border-white/10 bg-black/15 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400">Adapted • rollback</div>
             <UmbraVideoGenerationControls
               workflows={workflows}
               catalog={videoModelCatalog}
@@ -3803,27 +3840,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               onEditorDraftApplied={(draftId) => setVideoEditorDraft((current) => current?.id === draftId ? null : current)}
               previewPanel={<UmbraVideoWorkspacePreview key={videoPreviewJob?.id || 'empty'} job={videoPreviewJob} />}
               previewRevision={videoPreviewRevision}
-              reviewPanel={<div className="flex h-full min-h-0 flex-col">
-                <UmbraQueueEmergencyControls
-                  queueSummary={queueSummary}
-                  queueConnected={queueConnected}
-                  busyAction={queueControlBusy}
-                  onSkip={() => void handleSkipUmbraJob()}
-                  onStopAll={() => void handleStopAllUmbraJobs()}
-                />
-                <UmbraVideoQueuePanel
-                  previewJobId={videoPreviewJob?.id || null}
-                  onPreviewJob={(id) => { setVideoPreviewJobId(id); setVideoPreviewRevision((revision) => revision + 1); }}
-                  jobs={videoJobs}
-                  loading={videoJobsLoading}
-                  error={videoJobsError}
-                  queueVideo={queueVideo}
-                  onLoadIntoEditor={setVideoEditorDraft}
-                  onRefresh={refreshVideoJobs}
-                  onClear={clearVideoJobs}
-                />
-              </div>}
+              reviewPanel={videoReviewPanel}
             />
+            </>}
           </div>
         ) : null}
 

@@ -16,7 +16,8 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { normalizeVideoRoutePolicy, videoControlsPolicyIssue, type UmbraVideoRoutePolicy } from '../../../../shared/umbra-ui/videoRoutePolicy';
+import { normalizeVideoRoutePolicy, videoGenerationPolicyIssue, type UmbraVideoRoutePolicy } from '../../../../shared/umbra-ui/videoRoutePolicy';
+import { normalizeOfficialVideoWorkflowSelection } from '../../../../shared/umbra-ui/officialVideoWorkflow';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useStore } from '@/store/useStore';
 import type {
@@ -28,6 +29,7 @@ import type {
   UmbraVideoQueueOptions,
   UmbraVideoReviewJob,
   UmbraVideoReviewOutput,
+  UmbraOfficialVideoQueueOptions,
 } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 import type { UmbraVideoEditorDraft } from '@/components/umbra-ui/UmbraVideoGenerationControls';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
@@ -60,6 +62,7 @@ interface UmbraVideoQueuePanelProps {
   loading: boolean;
   error: string;
   queueVideo: (options: UmbraVideoQueueOptions) => Promise<string>;
+  queueOfficialVideo: (options: UmbraOfficialVideoQueueOptions) => Promise<string>;
   onLoadIntoEditor: (draft: UmbraVideoEditorDraft) => void;
   onRefresh: () => Promise<UmbraVideoReviewJob[]>;
   onClear: () => Promise<number>;
@@ -67,7 +70,7 @@ interface UmbraVideoQueuePanelProps {
 
 const unfinishedVideoStatuses = new Set(['pending', 'submitting', 'running']);
 function jobPolicyHold(job: UmbraVideoReviewJob, policy: UmbraVideoRoutePolicy): string | null {
-  return policy === 'dasiwa-only' ? videoControlsPolicyIssue(job.generation.video, policy) || job.policyHold || null : null;
+  return policy === 'dasiwa-only' ? videoGenerationPolicyIssue(job.generation, policy) || job.policyHold || null : null;
 }
 
 export function UmbraVideoWorkspacePreview({ job }: { job?: UmbraVideoReviewJob }) {
@@ -89,7 +92,7 @@ export function UmbraVideoWorkspacePreview({ job }: { job?: UmbraVideoReviewJob 
           <div className="max-w-md space-y-3 px-5 text-center">
             {job && (job.status === 'running' || job.status === 'submitting') ? <Loader2 size={36} className="mx-auto animate-spin text-fuchsia-300/50" /> : <Clapperboard size={40} className="mx-auto text-fuchsia-300/25" />}
             <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">{policyHold ? 'Generation held' : job ? job.status === 'failed' ? 'Generation failed' : job.status === 'pending' ? 'Waiting in queue' : 'Output pending' : 'Your video workspace'}</p>
-            <p className="text-xs leading-relaxed text-zinc-500">{policyHold || job?.error || (job ? 'The output will appear here when generation finishes.' : 'Write your prompt below, add reference media, and generate. Select a job from Queue or Results to preview it here.')}</p>
+            <p className="text-xs leading-relaxed text-zinc-500">{policyHold || job?.error || (job ? 'The output will appear here when generation finishes.' : 'Select a job from Queue or Results to preview its output here.')}</p>
           </div>
         )}
       </div>
@@ -101,6 +104,7 @@ export function UmbraVideoWorkspacePreview({ job }: { job?: UmbraVideoReviewJob 
 }
 
 function VideoSidecarCard({ job, policyHold, selected, onPreview, onReview }: { job: UmbraVideoReviewJob; policyHold: string | null; selected: boolean; onPreview: () => void; onReview: () => void }) {
+  const official = normalizeOfficialVideoWorkflowSelection(job.generation.officialWorkflow);
   const output = getPrimaryOutput(job.outputs);
   const protectedMedia = classifyUmbraPrompt(job.prompt) === 'nsfw';
   return <article data-video-sidecar-job={job.id} className={cn('overflow-hidden rounded border bg-black/20', selected ? 'border-fuchsia-300/40' : 'border-white/10')}>
@@ -113,6 +117,7 @@ function VideoSidecarCard({ job, policyHold, selected, onPreview, onReview }: { 
         <span className={cn('inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] uppercase', statusTone(job.status))}><StatusIcon status={job.status} /> {job.status}</span>
         {policyHold ? <span data-video-job-held="" title={policyHold} className="ml-1 inline-flex text-[9px] font-bold uppercase text-amber-200">Held</span> : null}
         <span className="block truncate font-mono text-[9px] text-zinc-500">{job.apiWorkflowName || job.requestId}</span>
+        <span className="block text-[9px] text-zinc-500">{official ? 'Official DaSiWa' : 'Adapted • rollback'}</span>
         <span className="block line-clamp-2 text-[11px] leading-relaxed text-zinc-300">{job.prompt || 'No prompt recorded.'}</span>
       </span>
     </button>
@@ -122,7 +127,7 @@ function VideoSidecarCard({ job, policyHold, selected, onPreview, onReview }: { 
     {policyHold ? <p className="px-2 pb-2 text-[10px] text-amber-100/80">{policyHold}</p> : null}
     <div className="flex items-center gap-2 border-t border-white/10 px-2 py-1.5">
       <span className="flex-1 font-mono text-[9px] text-zinc-500">{job.outputs.length} outputs</span>
-      <button type="button" onClick={onReview} className="inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[9px] text-zinc-400 hover:text-fuchsia-100"><Pencil size={11} /> {policyHold ? 'Review & Edit' : 'Review & Requeue'}</button>
+      <button type="button" onClick={onReview} className="inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[9px] text-zinc-400 hover:text-fuchsia-100"><Pencil size={11} /> {official ? 'Review capture' : policyHold ? 'Review & Edit' : 'Review & Requeue'}</button>
     </div>
   </article>;
 }
@@ -376,7 +381,7 @@ function NumberEditor({ label, value, onChange, min = 0, step = 1 }: {
   );
 }
 
-export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading, error, queueVideo, onLoadIntoEditor, onRefresh, onClear }: UmbraVideoQueuePanelProps) {
+export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading, error, queueVideo, queueOfficialVideo, onLoadIntoEditor, onRefresh, onClear }: UmbraVideoQueuePanelProps) {
   const showToast = useStore((state) => state.showToast);
   const routePolicy = normalizeVideoRoutePolicy(useStore((state) => state.appSettings['video.routePolicy']));
   const [tab, setTab] = React.useState<'queue' | 'results'>('queue');
@@ -389,8 +394,9 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
   const [draftPrompt, setDraftPrompt] = React.useState('');
   const [draftNegative, setDraftNegative] = React.useState('');
   const [draftVideo, setDraftVideo] = React.useState<PowerPrompterVideoControls | null>(null);
-  const requeueIssue = draftVideo && routePolicy === 'dasiwa-only'
-    ? videoControlsPolicyIssue(draftVideo, routePolicy) || liveSelectedJob?.policyHold || null : null;
+  const officialSelection = liveSelectedJob ? normalizeOfficialVideoWorkflowSelection(liveSelectedJob.generation.officialWorkflow) : undefined;
+  const requeueIssue = liveSelectedJob && routePolicy === 'dasiwa-only'
+    ? videoGenerationPolicyIssue(draftVideo ? { ...liveSelectedJob.generation, video: draftVideo } : liveSelectedJob.generation, routePolicy) || liveSelectedJob.policyHold || null : null;
   const [draftOutputFolder, setDraftOutputFolder] = React.useState('');
   const [requeueing, setRequeueing] = React.useState(false);
   const requeueInFlightRef = React.useRef(false);
@@ -400,6 +406,13 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
   const clearConfirmTimerRef = React.useRef<number | null>(null);
 
   const openJob = React.useCallback((job: UmbraVideoReviewJob) => {
+    if (normalizeOfficialVideoWorkflowSelection(job.generation.officialWorkflow)) {
+      setSelected(job);
+      setDraftVideo(null);
+      setDrawerVisible(false);
+      window.requestAnimationFrame(() => setDrawerVisible(true));
+      return;
+    }
     const clonedVideo = cloneVideo(job.generation.video!);
     const selectedClip = job.sequence
       ? clonedVideo.ltx.extended.clips.find((clip) => clip.id === job.sequence?.clipId)
@@ -553,7 +566,7 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
   const requeue = React.useCallback(async () => {
     if (!draftVideo || !draftPrompt.trim() || requeueInFlightRef.current || requeueing) return;
     const currentPolicy = normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']);
-    const issue = currentPolicy === 'dasiwa-only' ? videoControlsPolicyIssue(draftVideo, currentPolicy) || liveSelectedJob?.policyHold : null;
+    const issue = currentPolicy === 'dasiwa-only' ? videoGenerationPolicyIssue({ ...liveSelectedJob?.generation, video: draftVideo }, currentPolicy) || liveSelectedJob?.policyHold : null;
     if (issue) { showToast(issue, 'error'); return; }
     requeueInFlightRef.current = true;
     setRequeueing(true);
@@ -586,7 +599,20 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
       requeueInFlightRef.current = false;
       setRequeueing(false);
     }
-  }, [draftNegative, draftOutputFolder, draftPrompt, draftVideo, liveSelectedJob?.policyHold, onRefresh, queueVideo, requeueing, selected?.sequence, showToast]);
+  }, [draftNegative, draftOutputFolder, draftPrompt, draftVideo, liveSelectedJob?.generation, liveSelectedJob?.policyHold, onRefresh, queueVideo, requeueing, selected?.sequence, showToast]);
+
+  const requeueOfficial = async () => {
+    if (!liveSelectedJob || !officialSelection || requeueInFlightRef.current) return;
+    const issue = jobPolicyHold(liveSelectedJob, normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']));
+    if (issue) { showToast(issue, 'error'); return; }
+    requeueInFlightRef.current = true;
+    setRequeueing(true);
+    try {
+      await queueOfficialVideo({ workflowId: officialSelection.workflowId, captureId: officialSelection.captureId, prompt: liveSelectedJob.prompt, bindings: officialSelection.bindings });
+      await onRefresh();
+    } catch (queueError) { showToast(queueError instanceof Error ? queueError.message : 'Failed to requeue the captured workflow.', 'error'); }
+    finally { requeueInFlightRef.current = false; setRequeueing(false); }
+  };
 
   return (
     <main data-umbra-ui-video-queue="" className="relative flex h-full min-h-0 min-w-0 flex-col bg-black/15">
@@ -638,7 +664,21 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
         </div>
       </div>
 
-      {selected && liveSelectedJob && draftVideo ? (
+      {selected && liveSelectedJob && officialSelection ? <div className={cn('fixed inset-0 z-[160] transition-colors duration-200', drawerVisible ? 'bg-black/70' : 'bg-black/0')} onPointerDown={closeDrawer}>
+        <section data-official-video-review="" role="dialog" aria-modal="true" aria-label="Official video capture review" onPointerDown={event => event.stopPropagation()} className={cn('absolute inset-y-0 right-0 flex w-[min(720px,calc(100vw-24px))] flex-col border-l border-white/15 bg-[var(--umbra-panel-bg)] shadow-2xl transition-transform duration-200', drawerVisible ? 'translate-x-0' : 'translate-x-full')}>
+          <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-white/10 px-3"><Clapperboard size={14} className="text-[var(--umbra-accent)]" /><div className="min-w-0 flex-1"><h3 className="text-[11px] font-black uppercase tracking-wider">Official DaSiWa capture</h3><p className="truncate text-[10px] text-zinc-500">{liveSelectedJob.apiWorkflowName}</p></div><span className={cn('rounded border px-2 py-1 text-[9px] uppercase', statusTone(liveSelectedJob.status))}>{liveSelectedJob.status}</span><button type="button" aria-label="Close capture review" onClick={closeDrawer} className="inline-flex h-9 w-9 items-center justify-center rounded border border-white/10 text-zinc-400"><X size={14} /></button></header>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 custom-scrollbar">
+            {requeueIssue ? <p role="status" data-video-requeue-held="" className="border-l-2 border-amber-400 p-3 text-xs text-amber-100">Held · {requeueIssue}</p> : null}
+            {liveSelectedJob.error ? <p role="alert" className="break-words text-xs text-red-300">{liveSelectedJob.error}</p> : null}
+            <p className="text-xs text-zinc-400">This is the captured native configuration. Requeue preserves its seeds, resources, and stages. Configure changes in ComfyUI and capture a new snapshot.</p>
+            <p className="break-all font-mono text-[10px] text-zinc-500">{officialSelection.captureId}</p>
+            <label className="block space-y-2"><span className={labelClass}>Captured native prompt</span><textarea aria-label="Recorded native prompt" readOnly value={liveSelectedJob.prompt} className={`${inputClass} min-h-24 resize-y`} /></label>
+            {liveSelectedJob.outputs.map(output => <div key={output.id} className="overflow-hidden rounded border border-white/10"><ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(liveSelectedJob.prompt) === 'nsfw'} /><p className="truncate border-t border-white/10 px-2 py-1 text-[10px] text-zinc-500">{output.name}</p></div>)}
+          </div>
+          <footer className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-t border-white/10 p-3"><button type="button" onClick={() => useStore.getState().setActiveWorkspace('comfyui')} className="min-h-9 rounded border border-white/10 px-3 text-[11px] text-zinc-300">Open ComfyUI</button><button type="button" onClick={() => void requeueOfficial()} disabled={requeueing || !!requeueIssue} title={requeueIssue || 'Requeue the exact captured native configuration'} className="ml-auto inline-flex min-h-9 items-center gap-2 rounded border border-[var(--umbra-accent)] px-3 text-[11px] font-bold text-[var(--umbra-text)] disabled:opacity-40">{requeueing ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}Requeue captured workflow</button></footer>
+        </section>
+      </div> : null}
+      {selected && liveSelectedJob && !officialSelection && draftVideo ? (
         <div className={cn('fixed inset-0 z-[160] transition-colors duration-200', drawerVisible ? 'bg-black/70' : 'bg-black/0')} onPointerDown={closeDrawer}>
           <section
             className={cn(

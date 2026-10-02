@@ -1,4 +1,6 @@
 import { assertVideoGenerationPolicy, normalizeVideoRoutePolicy, videoGenerationPolicyIssue, videoGraphPolicyIssue, type UmbraVideoRoutePolicy } from './shared/umbra-ui/videoRoutePolicy';
+import { OfficialVideoWorkflowService, officialCaptureMetadata } from './backend/OfficialVideoWorkflowService';
+import { isOfficialVideoWorkflowId, normalizeOfficialVideoWorkflowSelection, type OfficialVideoWorkflowSelection } from './shared/umbra-ui/officialVideoWorkflow';
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from './shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
 import { buildMiniMaxH3DirectorBuilderState, buildMiniMaxH3DirectorTimeline, miniMaxH3DirectorIssue, miniMaxH3DirectorMode, normalizeMiniMaxH3Director, type MiniMaxH3DirectorControls } from './shared/umbra-ui/minimaxH3Director';
@@ -4349,6 +4351,59 @@ function getComfyProxyTarget() {
 function isManagedComfyTarget(target: ReturnType<typeof getComfyProxyTarget>): boolean {
   return target.protocol === 'http:' && isLoopbackIpAddress(target.host);
 }
+function getOfficialComfyExecutionTarget() {
+  const target = getComfyProxyTarget();
+  const args = comfyProcess?.spawnargs || [];
+  const portIndex = args.indexOf('--port');
+  const listenIndex = args.indexOf('--listen');
+  const toolRoot = getComfyToolRootFast();
+  const canonicalPath = (value: string) => { try { return realpathSync(value); } catch { return resolve(value); } };
+  const mainScript = canonicalPath(join(toolRoot, 'main.py'));
+  const samePath = (value: string) => process.platform === 'win32' ? canonicalPath(value).toLowerCase() === mainScript.toLowerCase() : canonicalPath(value) === mainScript;
+  if (!isManagedComfyTarget(target) || !isChildProcessAlive(comfyProcess) || !toolRoot
+    || portIndex < 0 || Number(args[portIndex + 1]) !== target.port
+    || listenIndex < 0 || args[listenIndex + 1]?.replace(/^\[|\]$/g, '') !== target.host.replace(/^\[|\]$/g, '')
+    || !args.some(samePath)) throw new Error('Official workflows require a live ComfyUI process owned by this Umbra instance at its configured endpoint. Start it through Umbra\'s ComfyUI controls; unrelated local or external runtimes are held.');
+  return { baseUrl: getComfyHttpBaseUrl(target), pid: comfyProcess!.pid!, inputRoot: getComfyInputRootFast(), toolRoot };
+}
+function sameOfficialComfyTarget(left: ReturnType<typeof getOfficialComfyExecutionTarget>, right: ReturnType<typeof getOfficialComfyExecutionTarget>) {
+  return left.baseUrl === right.baseUrl && left.pid === right.pid && left.inputRoot === right.inputRoot && left.toolRoot === right.toolRoot;
+}
+async function getOfficialComfyRuntime() {
+  const target = getOfficialComfyExecutionTarget();
+  let objectInfo: Record<string, any> | null = null;
+  try {
+    const response = await fetch(`${target.baseUrl}/object_info`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    if (response.ok) {
+      const value = await response.json();
+      if (value && typeof value === 'object' && !Array.isArray(value)) objectInfo = value;
+    }
+  } catch { /* Native readiness reports unavailable catalogs without fallback. */ }
+  if (!sameOfficialComfyTarget(target, getOfficialComfyExecutionTarget())) throw new Error('The owned ComfyUI endpoint changed during validation. Refresh readiness and capture again.');
+  return { target, objectInfo };
+}
+async function compileOfficialVideoQueueCapture(document: unknown, selection: OfficialVideoWorkflowSelection) {
+  const runtime = await getOfficialComfyRuntime();
+  const compiled = await officialVideoWorkflows.compile(document, selection, runtime.objectInfo);
+  if (!sameOfficialComfyTarget(runtime.target, getOfficialComfyExecutionTarget())) throw new Error('The owned ComfyUI runtime changed during graph validation. Resume only after reviewing readiness.');
+  return { ...compiled, officialExecutionTarget: runtime.target };
+}
+function getBackendPowerPrompterTaskComfyBaseUrl(task?: BackendPowerPrompterQueueTask): string {
+  if (!task?.officialExecutionTarget) return getComfyProxyBaseUrl();
+  try {
+    if (!sameOfficialComfyTarget(task.officialExecutionTarget, getOfficialComfyExecutionTarget())) throw new Error('The submitted official runtime identity changed.');
+    return task.officialExecutionTarget.baseUrl;
+  } catch (error) {
+    const hold = `Official execution outcome is unknown: ${error instanceof Error ? error.message : String(error)} No replacement runtime will be queried or canceled. Check the original ComfyUI before resuming.`;
+    if (task.loaded.readinessHold !== hold) {
+      task.loaded.readinessHold = hold;
+      backendPowerPrompterPauseIntentEpoch += 1;
+      powerPrompterQueueControllerState.paused = true;
+      broadcastPowerPrompterQueueControllerSnapshot('official_execution_outcome_unknown');
+    }
+    throw new Error(hold);
+  }
+}
 
 function validateHostOnlyServiceSettings(
   patch: Record<string, unknown>,
@@ -4666,8 +4721,8 @@ function rewriteComfyHtml(html: string, directExternalWsUrl = ''): string {
   // Install before Comfy's own head scripts can open a direct socket or make
   // root-relative requests that bypass Umbra's access checks.
   return /<head(?:\s[^>]*)?>/i.test(withBase)
-    ? withBase.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${bridgeScript}`)
-    : `${bridgeScript}${withBase}`;
+    ? withBase.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${bridgeScript}<script type="module" src="/api/video/official-workflows/bridge.js"></script>`)
+    : `${bridgeScript}<script type="module" src="/api/video/official-workflows/bridge.js"></script>${withBase}`;
 }
 
 const REMOTE_PROXY_COMPRESSION_MIN_BYTES = 2048;
@@ -5306,6 +5361,7 @@ const prompterPendingQueueRequests = new Map<string, PrompterPendingRequest>();
 const prompterPendingLoraRequests = new Map<string, PrompterPendingRequest>();
 const prompterPendingModelRequests = new Map<string, PrompterPendingRequest>();
 interface BackendPowerPrompterQueueTask {
+  officialExecutionTarget?: ReturnType<typeof getOfficialComfyExecutionTarget>;
   abortController: AbortController;
   canceled: boolean;
   cancelReason: string;
@@ -5667,6 +5723,7 @@ async function clearUmbraUiVideoReviewJobs(): Promise<number> {
 }
 
 interface LoadedPPApiWorkflow {
+  readinessHold?: string;
   item: PPApiWorkflowListItem;
   document: unknown;
   selectedPipeline?: UmbraUiPipelineDescriptor;
@@ -5695,6 +5752,7 @@ function getQueuedVideoPolicyHold(work: BackendPowerPrompterQueuedWork): string 
 function getRequestVideoPolicyHold(request: PowerPrompterQueueControllerRequest, generation?: unknown): string | null {
   const loaded = backendPowerPrompterQueuedWork.find((work) => work.requestId === request.requestId)?.loaded
     || backendPowerPrompterQueueTasks.get(request.requestId)?.loaded;
+  if (loaded?.readinessHold) return loaded.readinessHold;
   const generations = generation ? [generation] : request.prompts.map((prompt) => prompt.generation);
   return generations.map((value) => videoGenerationPolicyIssue(
     { ...(value as object), ...(['txt2vid', 'img2vid', 'ref2vid', 'vid2vid'].includes(request.pipeline?.feature)
@@ -9565,8 +9623,8 @@ function readComfyQueuePromptId(entry: any): string {
   return String(entry?.prompt_id ?? entry?.promptId ?? entry?.id ?? '').trim();
 }
 
-async function getComfyQueuePromptIdSet(signal?: AbortSignal): Promise<Set<string>> {
-  const response = await fetch(`${getComfyProxyBaseUrl()}/queue`, {
+async function getComfyQueuePromptIdSet(signal?: AbortSignal, getBaseUrl = getComfyProxyBaseUrl): Promise<Set<string>> {
+  const response = await fetch(`${getBaseUrl()}/queue`, {
     cache: 'no-store',
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
   });
@@ -9789,7 +9847,18 @@ function startBackendPowerPrompterPreviewMonitor(
 ) {
   if (task.previewMonitorClosed || task.canceled || task.abortController.signal.aborted || task.previewWs) return;
   const clientId = `umbra-backend-powerprompter-${requestId}`;
-  const wsUrl = getComfyProxyWsUrl(`?clientId=${encodeURIComponent(clientId)}`);
+  let wsUrl: string;
+  try {
+    const target = new URL(getBackendPowerPrompterTaskComfyBaseUrl(task));
+    target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
+    target.pathname = '/ws';
+    target.search = `?clientId=${encodeURIComponent(clientId)}`;
+    wsUrl = target.toString();
+  } catch (error) {
+    task.previewReady = Promise.resolve();
+    appendPowerPrompterQueueLog('backend_preview_runtime_held', { requestId, error: String(error) });
+    return;
+  }
   let readySettled = false;
   task.previewReady = new Promise<void>((resolve) => {
     const finish = () => {
@@ -9929,6 +9998,7 @@ async function waitForComfyPromptDrain(
   shouldStop?: () => void,
   onActiveHeartbeat?: () => void,
   taskSignal?: AbortSignal,
+  getBaseUrl = getComfyProxyBaseUrl,
 ) {
   const normalizedPromptId = String(promptId || '').trim();
   if (!normalizedPromptId) return;
@@ -9947,7 +10017,7 @@ async function waitForComfyPromptDrain(
     shouldStop?.();
     let ids: Set<string> | null = null;
     try {
-      ids = await getComfyQueuePromptIdSet(taskSignal);
+      ids = await getComfyQueuePromptIdSet(taskSignal, getBaseUrl);
       lastHealthyAt = Date.now();
     } catch (error) {
       shouldStop?.();
@@ -10048,7 +10118,7 @@ function readComfyHistoryExecutionError(record: any): string {
   return '';
 }
 
-async function waitForBackendPowerPrompterHistoryOutcome(promptId: string, signal?: AbortSignal): Promise<{ success: boolean; error: string }> {
+async function waitForBackendPowerPrompterHistoryOutcome(promptId: string, signal?: AbortSignal, getBaseUrl = getComfyProxyBaseUrl): Promise<{ success: boolean; error: string }> {
   const normalizedPromptId = String(promptId || '').trim();
   if (!normalizedPromptId) return { success: false, error: 'ComfyUI did not return a prompt id.' };
   const startedAt = Date.now();
@@ -10056,7 +10126,7 @@ async function waitForBackendPowerPrompterHistoryOutcome(promptId: string, signa
   while (Date.now() - startedAt < 10000) {
     signal?.throwIfAborted();
     try {
-      const response = await fetch(`${getComfyProxyBaseUrl()}/history/${encodeURIComponent(normalizedPromptId)}`, {
+      const response = await fetch(`${getBaseUrl()}/history/${encodeURIComponent(normalizedPromptId)}`, {
         cache: 'no-store',
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
       });
@@ -10089,7 +10159,7 @@ async function waitForBackendPowerPrompterHistoryOutcome(promptId: string, signa
   };
 }
 
-async function fetchBackendPowerPrompterSavedOutputs(promptId: string, signal?: AbortSignal): Promise<Array<Record<string, unknown>>> {
+async function fetchBackendPowerPrompterSavedOutputs(promptId: string, signal?: AbortSignal, getBaseUrl = getComfyProxyBaseUrl): Promise<Array<Record<string, unknown>>> {
   const normalizedPromptId = String(promptId || '').trim();
   if (!normalizedPromptId) return [];
   const startedAt = Date.now();
@@ -10097,7 +10167,7 @@ async function fetchBackendPowerPrompterSavedOutputs(promptId: string, signal?: 
   while (Date.now() - startedAt < 7000) {
     signal?.throwIfAborted();
     try {
-      const response = await fetch(`${getComfyProxyBaseUrl()}/history/${encodeURIComponent(normalizedPromptId)}`, {
+      const response = await fetch(`${getBaseUrl()}/history/${encodeURIComponent(normalizedPromptId)}`, {
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
       });
       if (response.ok) {
@@ -10130,8 +10200,10 @@ async function emitBackendPowerPrompterSavedOutputs(
   sourceWs?: ServerWebSocket<unknown> | null,
   generation?: PowerPrompterGenerationControls,
   signal?: AbortSignal,
+  task?: BackendPowerPrompterQueueTask,
 ): Promise<Array<Record<string, unknown>>> {
-  const outputs = await fetchBackendPowerPrompterSavedOutputs(promptId, signal);
+  const outputs = await fetchBackendPowerPrompterSavedOutputs(promptId, signal, () => getBackendPowerPrompterTaskComfyBaseUrl(task));
+  getBackendPowerPrompterTaskComfyBaseUrl(task);
   if (outputs.length === 0) {
     if (generation?.outputOwner === 'umbra_ui') {
       throw new Error('ComfyUI completed, but Umbra UI found no saved output for this generation. Check ComfyUI history and the output folder, then try again.');
@@ -10142,7 +10214,7 @@ async function emitBackendPowerPrompterSavedOutputs(
     ...output,
     fullpath: resolveComfySavedOutputPath(output),
   }));
-  if (generation?.outputOwner === 'umbra_ui' && generation.mediaType === 'video' && generation.outputFolder) {
+  if (generation?.outputOwner === 'umbra_ui' && generation.mediaType === 'video' && generation.outputFolder && !generation.officialWorkflow) {
     const destination = resolveUmbraPinnedTaskFolder(generation.outputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, 'Video', getGalleryTransferAllowedRoots());
     const comfyRoot = getComfyToolRootFast();
     for (const [index, output] of resolvedOutputs.entries()) {
@@ -10437,7 +10509,7 @@ async function cancelBackendPowerPrompterActivePromptForStopAll(
   if (!canInterruptPowerPrompterPrompt(prompt, promptId, task.interruptedPromptIndices.has(promptIndex))) return false;
   task.cancelInFlightPromptIds.add(promptId);
   try {
-    if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) {
+    if (!await cancelComfyJobById(getBackendPowerPrompterTaskComfyBaseUrl(task), promptId)) {
       appendPowerPrompterQueueLog('backend_queue_stop_all_active_cancel_not_found', {
         requestId, promptIndex, promptId,
       });
@@ -10467,7 +10539,7 @@ async function cancelBackendPowerPrompterTaskPrompt(
   if (!promptId || task.cancelInFlightPromptIds.has(promptId)) return;
   task.cancelInFlightPromptIds.add(promptId);
   try {
-    if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) {
+    if (!await cancelComfyJobById(getBackendPowerPrompterTaskComfyBaseUrl(task), promptId)) {
       appendPowerPrompterQueueLog('backend_queue_canceled_task_prompt_not_found', { requestId, promptId });
     }
   } catch (error: any) {
@@ -10687,7 +10759,7 @@ async function handleUmbraQueueJobControl(req: Request): Promise<Response> {
         const prompt = findPowerPrompterQueueControllerRequest(requestId)?.prompts[index];
         if (promptId !== String(data?.promptId || '')
           || !canInterruptPowerPrompterPrompt(prompt, promptId, task.interruptedPromptIndices.has(index))) return false;
-        const canceled = await cancelComfyJobById(getComfyProxyBaseUrl(), promptId);
+        const canceled = await cancelComfyJobById(getBackendPowerPrompterTaskComfyBaseUrl(task), promptId);
         if (!canceled) return false;
         // The worker may have advanced while the cancel request was in flight.
         return backendPowerPrompterQueueTasks.get(requestId) === task
@@ -11607,7 +11679,7 @@ async function runBackendPowerPrompterPipelineQueue(
     previewProgressSignatures: new Map<string, string>(),
   };
   backendPowerPrompterQueueTasks.set(requestId, task);
-  startBackendPowerPrompterPreviewMonitor(requestId, task, sourceWs);
+  if (!officialCaptureMetadata(loaded.document)) startBackendPowerPrompterPreviewMonitor(requestId, task, sourceWs);
   appendPowerPrompterQueueLog('backend_queue_start', {
     requestId,
     promptCount: prompts.length,
@@ -11674,7 +11746,7 @@ async function runBackendPowerPrompterPipelineQueue(
     throw new Error(`ComfyUI did not confirm whether the generation was queued. The queue is paused; check ComfyUI before resuming. ${detail}`);
   };
   try {
-    extendedSession = readBackendUmbraLtxExtendedSession(generationByPrompt);
+    extendedSession = officialCaptureMetadata(task.loaded.document) ? null : readBackendUmbraLtxExtendedSession(generationByPrompt);
     if (extendedSession) {
       const firstPipelineFeature = task.loaded.selectedPipeline?.feature;
       if (firstPipelineFeature && firstPipelineFeature !== 'txt2vid' && firstPipelineFeature !== 'img2vid') {
@@ -11759,34 +11831,48 @@ async function runBackendPowerPrompterPipelineQueue(
         activePipeline = extendedImg2VideoPipeline!;
       }
       await task.previewReady?.catch(() => undefined);
-      let queuedWorkflow: ReturnType<typeof compileUmbraUiPipelineWorkflow>;
+      let queuedWorkflow: ReturnType<typeof compileUmbraUiPipelineWorkflow> & { officialProvenance?: Record<string, unknown>; officialExecutionTarget?: ReturnType<typeof getOfficialComfyExecutionTarget> };
       while (true) {
         await waitForVideoPolicyEligibility(task, requestId, generation, activePipeline.document, sourceWs);
         if (finishBeforeNextPromptIfStopped()) return;
         throwIfBackendPowerPrompterQueueCanceled(task);
         try {
-          await assertPPApiWorkflowExecutionReady(activePipeline, generation);
-          queuedWorkflow = compileUmbraUiPipelineWorkflow(activePipeline.document, state, {
+          if (!officialCaptureMetadata(activePipeline.document)) await assertPPApiWorkflowExecutionReady(activePipeline, generation);
+          queuedWorkflow = officialCaptureMetadata(activePipeline.document)
+            ? await compileOfficialVideoQueueCapture(activePipeline.document, generation.officialWorkflow!)
+            : compileUmbraUiPipelineWorkflow(activePipeline.document, state, {
             prompt, generation, promptSetId: promptSetIds[index] ?? 1,
             outputSubfolder: promptOutputSubfolders[index] || '', queueOrigin: task.origin,
             styleSeedMode: state.styleSeedMode, selectedPipeline: activePipeline.selectedPipeline,
           });
+          if (activePipeline.readinessHold) {
+            delete activePipeline.readinessHold;
+            broadcastPowerPrompterQueueControllerSnapshot('official_workflow_ready', sourceWs);
+          }
           break;
         } catch (error) {
           // A policy change while runtime validation awaited its catalog holds
           // this exact job instead of failing it or changing its generation.
           if (videoGenerationPolicyIssue(generation, getVideoRoutePolicy(), activePipeline.document)) continue;
+          if (officialCaptureMetadata(activePipeline.document)) {
+            activePipeline.readinessHold = `Official workflow held: ${error instanceof Error ? error.message : String(error)}`;
+            backendPowerPrompterPauseIntentEpoch += 1;
+            powerPrompterQueueControllerState.paused = true;
+            broadcastPowerPrompterQueueControllerSnapshot('official_workflow_readiness_held', sourceWs);
+            await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
+            continue;
+          }
           throw error;
         }
       }
-      if (generation.mediaType === 'video') {
+      if (generation.mediaType === 'video' && !queuedWorkflow.officialProvenance) {
         const objectInfo = await getPPComfyObjectInfoForValidation();
         resolveUmbraUiVideoLoraNames(queuedWorkflow.promptGraph, objectInfo);
         if (isLtx23OmniForgeWorkflow(queuedWorkflow.promptGraph)) {
           assertLtx23OmniForgeRuntime(queuedWorkflow.promptGraph as ReturnType<typeof buildLtx23OmniForgeWorkflow>, objectInfo);
           await assertLtx23OmniForgeStagedMedia(queuedWorkflow.promptGraph as ReturnType<typeof buildLtx23OmniForgeWorkflow>, getComfyInputRootFast());
         }
-      } else {
+      } else if (generation.mediaType !== 'video') {
         const objectInfo = await getPPComfyObjectInfoForValidation();
         resolveAnima38LoraNames(queuedWorkflow.promptGraph, objectInfo);
         assertAnima38TextEncoderRetentionAvailable(queuedWorkflow.promptGraph, objectInfo);
@@ -11811,6 +11897,7 @@ async function runBackendPowerPrompterPipelineQueue(
         prompt,
       );
       const extraPngInfo: Record<string, unknown> = {
+        ...(queuedWorkflow.officialProvenance ? { umbra_official_workflow: queuedWorkflow.officialProvenance } : {}),
         workflow: queuedWorkflow.workflowPayload,
         prompt: queuedWorkflow.promptGraph,
         umbra_api_workflow: queuedWorkflow.promptGraph,
@@ -11870,9 +11957,47 @@ async function runBackendPowerPrompterPipelineQueue(
       if (finishBeforeNextPromptIfStopped()) return;
       throwIfBackendPowerPrompterQueueCanceled(task);
       assertVideoGenerationPolicy(generation, getVideoRoutePolicy(), queuedWorkflow.promptGraph);
+      let revalidateOfficialTarget = false;
+      while (queuedWorkflow.officialExecutionTarget) {
+        try {
+          if (revalidateOfficialTarget) {
+            const refreshed = await compileOfficialVideoQueueCapture(activePipeline.document, generation.officialWorkflow!);
+            if (JSON.stringify(refreshed.promptGraph) !== JSON.stringify(queuedWorkflow.promptGraph)) throw new Error('The native graph changed while this job was held. Cancel it and review a new capture.');
+            queuedWorkflow.officialExecutionTarget = refreshed.officialExecutionTarget;
+            revalidateOfficialTarget = false;
+          }
+          if (!sameOfficialComfyTarget(queuedWorkflow.officialExecutionTarget, getOfficialComfyExecutionTarget())) throw new Error('The owned runtime or endpoint changed after this native graph was validated. Restore that runtime before resuming this capture.');
+          delete activePipeline.readinessHold;
+          break;
+        } catch (error) {
+          revalidateOfficialTarget = true;
+          activePipeline.readinessHold = `Official workflow held: ${error instanceof Error ? error.message : String(error)}`;
+          backendPowerPrompterPauseIntentEpoch += 1;
+          powerPrompterQueueControllerState.paused = true;
+          broadcastPowerPrompterQueueControllerSnapshot('official_workflow_readiness_held', sourceWs);
+          await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
+          throwIfBackendPowerPrompterQueueCanceled(task);
+          if (finishBeforeNextPromptIfStopped()) return;
+        }
+      }
+      // Native target revalidation can await catalogs/media after Resume.
+      // Cancellation and removal during that await must still prevent POST.
+      throwIfBackendPowerPrompterQueueCanceled(task);
+      if (finishBeforeNextPromptIfStopped()) return;
+      if (task.removedPromptIndices.has(index)) continue;
+      if (task.interruptCurrentRequested) throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
+      assertVideoGenerationPolicy(generation, getVideoRoutePolicy(), queuedWorkflow.promptGraph);
+      if (queuedWorkflow.officialExecutionTarget) {
+        if (task.officialExecutionTarget && !sameOfficialComfyTarget(task.officialExecutionTarget, queuedWorkflow.officialExecutionTarget)) {
+          closeBackendPowerPrompterPreviewMonitor(task);
+          task.previewMonitorClosed = false;
+        }
+        task.officialExecutionTarget = queuedWorkflow.officialExecutionTarget;
+        startBackendPowerPrompterPreviewMonitor(requestId, task, sourceWs);
+      }
       let response: Response;
       try {
-        response = await fetch(`${getComfyProxyBaseUrl()}/prompt`, {
+        response = await fetch(`${queuedWorkflow.officialExecutionTarget?.baseUrl || getComfyProxyBaseUrl()}/prompt`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(30_000),
@@ -11955,6 +12080,7 @@ async function runBackendPowerPrompterPipelineQueue(
           }, 'prompt_heartbeat', sourceWs);
         },
         task.abortController.signal,
+        () => getBackendPowerPrompterTaskComfyBaseUrl(task),
       );
       throwIfBackendPowerPrompterQueueCanceled(task);
       if (task.interruptedPromptIndices.has(index)) {
@@ -11990,7 +12116,7 @@ async function runBackendPowerPrompterPipelineQueue(
         }
         continue;
       }
-      const historyOutcome = await waitForBackendPowerPrompterHistoryOutcome(promptId, task.abortController.signal);
+      const historyOutcome = await waitForBackendPowerPrompterHistoryOutcome(promptId, task.abortController.signal, () => getBackendPowerPrompterTaskComfyBaseUrl(task));
       if (!historyOutcome.success) {
         failedPromptCount += 1;
         updatePowerPrompterQueueControllerPrompt(requestId, index, {
@@ -12034,6 +12160,7 @@ async function runBackendPowerPrompterPipelineQueue(
         sourceWs,
         generation,
         task.abortController.signal,
+        task,
       );
       if (extendedSession) {
         const videoOutput = savedOutputs.find((output) => (
@@ -12316,7 +12443,7 @@ async function interruptBackendPowerPrompterPromptForPlacement(
     // Submission may still be awaiting ComfyUI's ID. Never interrupt another owner.
     await Bun.sleep(25);
   }
-  if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) return false;
+  if (!await cancelComfyJobById(getBackendPowerPrompterTaskComfyBaseUrl(task), promptId)) return false;
   const prompt = findPowerPrompterQueueControllerRequest(requestId)?.prompts[index];
   if (backendPowerPrompterQueueTasks.get(requestId) !== task || task.activePromptIndex !== index
     || task.promptIds[index] !== promptId
@@ -12930,7 +13057,7 @@ function forwardPrompterQueueControlToComfyTarget(
         || !canInterruptPowerPrompterPrompt(prompt, promptId, task.interruptedPromptIndices.has(index))) {
         throw new Error('The active generation changed or is still submitting. Refresh the queue and try again.');
       }
-      if (!await cancelComfyJobById(getComfyProxyBaseUrl(), promptId)) {
+      if (!await cancelComfyJobById(getBackendPowerPrompterTaskComfyBaseUrl(task), promptId)) {
         throw new Error('The generation already finished or could not be canceled.');
       }
       // A delayed response must never retire the next prompt (or a replacement task).
@@ -19545,6 +19672,7 @@ const PP_QUEUE_HISTORY_DIR = join(PP_QUEUE_DIR, 'History');
 const PP_PROMPTS_ROOT_PATH = 'User/PowerPrompter/Prompts';
 const PP_PROMPTS_ROOT_ABS = join(USER_DIR, 'PowerPrompter', 'Prompts');
 const PP_API_WORKFLOWS_DIR = join(USER_DIR, 'PowerPrompter', 'API Workflows');
+const officialVideoWorkflows = new OfficialVideoWorkflowService(join(ROOT_DIR, 'defaults', 'PowerPrompter', 'Official Workflows', 'DaSiWa'), PP_API_WORKFLOWS_DIR, getComfyInputRootFast);
 const PP_BUNDLED_API_WORKFLOWS_DIR = join(SOURCE_DIR, 'defaults', 'PowerPrompter', 'API Workflows');
 const PP_API_WORKFLOW_TARGET_PREFIX = 'api-workflow:';
 const PP_CARD_DOC_EXT = '.ppcards.json';
@@ -19800,6 +19928,7 @@ interface PowerPrompterDetailerStage {
 }
 
 interface PowerPrompterGenerationControls {
+  officialWorkflow?: OfficialVideoWorkflowSelection;
   mediaType?: PowerPrompterMediaType;
   outputOwner?: 'power_prompter' | 'umbra_ui';
   outputMode?: 'txt2img' | 'img2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
@@ -21040,6 +21169,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
       denoise: clampPPNumber((controls as any).img2img?.denoise, 0.3, 0.01, 1),
     },
     video: normalizePPVideoControls((controls as any).video),
+    ...((controls as any).officialWorkflow != null ? { officialWorkflow: normalizeOfficialVideoWorkflowSelection((controls as any).officialWorkflow) || (controls as any).officialWorkflow } : {}),
     videoSequence: normalizeUmbraLtxExtendedSequenceMetadata((controls as any).videoSequence),
     hiresFix: {
       enabled: hiresFix.enabled === true,
@@ -25075,6 +25205,10 @@ function describePPApiWorkflow(rawDoc: unknown): {
   videoFamily?: PowerPrompterVideoFamily;
   videoMode?: PowerPrompterVideoMode;
 } {
+  if (officialCaptureMetadata(rawDoc)) {
+    const description = officialVideoWorkflows.describe(rawDoc);
+    return { mediaType: 'video', modelFamily: description.name, resources: [], videoFamily: description.videoFamily, videoMode: description.videoMode };
+  }
   const promptGraph = extractPPApiPromptGraph(rawDoc);
   if (!promptGraph) return { mediaType: 'image', resources: [] };
   const resources = describePPApiWorkflowResources(promptGraph);
@@ -25345,7 +25479,7 @@ async function assertPPQueueExecutionReady(
 ) {
   const generations = listPPQueueGenerationInputs(state);
   for (const generation of generations) assertVideoGenerationPolicy(generation, getVideoRoutePolicy(), loaded.document);
-  const validationContext = context || await createPPQueueValidationContext();
+  const validationContext = context || (officialCaptureMetadata(loaded.document) ? undefined : await createPPQueueValidationContext());
   for (let index = 0; index < generations.length; index += 1) {
     if (index % 32 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await assertPPApiWorkflowExecutionReady(loaded, generations[index], validationContext);
@@ -25358,6 +25492,12 @@ async function assertPPApiWorkflowExecutionReady(
   context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
 ): Promise<void> {
   assertVideoGenerationPolicy(generationInput, getVideoRoutePolicy(), loaded.document);
+  if ((generationInput as any)?.officialWorkflow != null || officialCaptureMetadata(loaded.document)) {
+    const selection = normalizeOfficialVideoWorkflowSelection((generationInput as any)?.officialWorkflow);
+    if (!selection || !officialCaptureMetadata(loaded.document)) throw new Error('Official video jobs require an intact native capture and selection. No adapted fallback is available.');
+    await compileOfficialVideoQueueCapture(loaded.document, selection);
+    return;
+  }
   const validationContext = context || await createPPQueueValidationContext();
   const generation = normalizePPGenerationControls(bindPPGenerationToWorkflowVideo(
     generationInput,
@@ -25635,6 +25775,9 @@ async function listPPApiWorkflowsFromDirectory(
       const stat = statSync(fullPath);
       const content = readFileSync(fullPath, 'utf-8');
       const parsed = JSON.parse(content);
+      // Native captures are selected through the official panel, never through
+      // the adapted API-workflow catalog or its role-based compiler.
+      if (officialCaptureMetadata(parsed)) continue;
       const validation = validatePPApiWorkflowDocument(parsed, comfyClassTypes);
       const descriptor = attachUmbraUiPipelineReadiness(describePPApiWorkflow(parsed), validation, objectInfo);
       const policyHold = videoGraphPolicyIssue(parsed, getVideoRoutePolicy());
@@ -25804,6 +25947,10 @@ function getPowerPrompterPipelineSelection(
   stateInput: unknown,
   loaded?: LoadedPPApiWorkflow | null,
 ): UmbraUiPipelineSelection {
+  if (loaded && officialCaptureMetadata(loaded.document)) {
+    const description = officialVideoWorkflows.describe(loaded.document);
+    return normalizeUmbraUiPipelineSelection({ feature: description.videoMode === 'reference_to_video' ? 'ref2vid' : description.videoMode === 'image_to_video' ? 'img2vid' : 'txt2vid', modelFamily: description.name, modelSource: 'unet' });
+  }
   const request = getUmbraUiPipelineRequestFromQueueState(stateInput);
   return normalizeUmbraUiPipelineSelection({
     feature: loaded?.selectedPipeline?.feature || request.feature || 'txt2img',
@@ -25814,6 +25961,16 @@ function getPowerPrompterPipelineSelection(
 }
 
 async function loadRequestedPowerPrompterPipeline(state: unknown, restorePolicyHeld = false): Promise<LoadedPPApiWorkflow> {
+  const generations = listPPQueueGenerationInputs(state);
+  const officialSelections = generations.map((generation: any) => generation?.officialWorkflow);
+  if (officialSelections.some(selection => selection != null)) {
+    const selections = officialSelections.map(normalizeOfficialVideoWorkflowSelection);
+    const selected = selections[0];
+    if (!selected || selections.some(selection => !selection || JSON.stringify(selection) !== JSON.stringify(selected))) throw new Error('Each official queue request must use one intact native capture. Queue different captures separately.');
+    const document = await officialVideoWorkflows.load(selected);
+    const description = officialVideoWorkflows.describe(document);
+    return { document, item: { id: selected.captureId, fileName: `${selected.captureId}.json`, name: description.name, compatible: true, missing: [], runtimeNodes: { status: 'unverified', missing: [] }, mediaType: 'video', modelFamily: description.name, resources: [], videoFamily: description.videoFamily, videoMode: description.videoMode, updatedAt: (document as any).umbra_official_workflow.capturedAt, size: Buffer.byteLength(JSON.stringify(document)) } };
+  }
   const request = getUmbraUiPipelineRequestFromQueueState(state);
   const resolved = await resolveUmbraUiPipeline(request.feature, request.modelFamily, request.modelSource, restorePolicyHeld);
   return resolved.loaded;
@@ -26554,7 +26711,11 @@ async function restoreSavedPowerPrompterQueue(id: unknown) {
     // its route, or requiring unavailable legacy runtime dependencies.
     if (!policyHold) {
       if (!loaded.item.compatible) throw new Error(`Saved queue pipeline is unavailable: ${loaded.item.name}`);
-      await assertPPQueueExecutionReady(loaded, group.state, validationContext);
+      try { await assertPPQueueExecutionReady(loaded, group.state, validationContext); }
+      catch (error) {
+        if (!officialCaptureMetadata(loaded.document)) throw error;
+        loaded.readinessHold = `Official workflow held: ${error instanceof Error ? error.message : String(error)}`;
+      }
     }
     prepared.push({
       dispatchDelayRevision,
@@ -33864,6 +34025,37 @@ const server = Bun.serve<UmbraSocketData>({
           return new Response('ComfyUI websocket upgrade failed', { status: 400 });
         }
 
+        if (path === '/api/video/official-workflows' && method === 'GET') {
+          let runtime: Awaited<ReturnType<typeof getOfficialComfyRuntime>> | null = null;
+          try { runtime = await getOfficialComfyRuntime(); } catch { /* Catalog retains actionable unavailable state. */ }
+          return json({ success: true, items: await officialVideoWorkflows.catalog(runtime?.objectInfo || null, !!runtime) });
+        }
+        if (path === '/api/video/official-workflows/bridge.js' && method === 'GET') {
+          return new Response(Bun.file(join(ROOT_DIR, 'backend', 'OfficialWorkflowBridge.js')), { headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' } });
+        }
+        const officialRoute = path.match(/^\/api\/video\/official-workflows\/([^/]+)\/(source|capture|captures\/([^/]+))$/);
+        if (officialRoute) {
+          const id = officialRoute[1];
+          if (!isOfficialVideoWorkflowId(id)) return json({ success: false, error: 'Unknown pinned official workflow.' }, 404);
+          try {
+            if (officialRoute[2] === 'source' && method === 'GET') return new Response(await officialVideoWorkflows.source(id), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+            if (officialRoute[2] === 'capture' && method === 'POST') {
+              if (isRemoteRequest(req, url, server)) return json({ success: false, error: 'Native official captures must be made on this Umbra host.' }, 403);
+              const payload = await req.json();
+              const runtime = await getOfficialComfyRuntime();
+              const capture = await officialVideoWorkflows.capture(id, payload, runtime.objectInfo);
+              if (!sameOfficialComfyTarget(runtime.target, getOfficialComfyExecutionTarget())) return json({ success: false, error: 'The owned ComfyUI runtime changed during capture. Refresh readiness and capture again.' }, 409);
+              const { document: _document, ...summary } = capture;
+              return json({ success: true, ...summary });
+            }
+            if (officialRoute[3] && method === 'GET') {
+              const selection = normalizeOfficialVideoWorkflowSelection({ workflowId: id, captureId: officialRoute[3], bindings: [] });
+              if (!selection) return json({ success: false, error: 'Invalid official capture ID.' }, 400);
+              return json({ success: true, captureId: selection.captureId, ...officialVideoWorkflows.describe(await officialVideoWorkflows.load(selection)) });
+            }
+          } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : 'Official workflow readiness is blocked.' }, 409); }
+          return json({ success: false, error: 'Unsupported official workflow operation.' }, 405);
+        }
         if (path.startsWith('/comfy/') || isComfyRootProxyPath(path)) {
           const targetPath = path.startsWith('/comfy/')
             ? `/${path.slice('/comfy/'.length)}`

@@ -9,6 +9,7 @@ const PUBLIC_MARKDOWN = new Set([
   'REQUIREMENTS.md',
   'UMBRA_UI_TOUR.md',
   'User/README.md',
+  'defaults/PowerPrompter/Official Workflows/DaSiWa/PROVENANCE.md',
 ]);
 
 export function isPrivateDevelopmentSource(relativePath) {

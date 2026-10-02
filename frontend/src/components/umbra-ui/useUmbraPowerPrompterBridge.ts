@@ -1,6 +1,8 @@
 'use client';
 
 import React from 'react';
+import { normalizeOfficialVideoWorkflowSelection, type OfficialVideoWorkflowId, type OfficialVideoBinding } from '../../../../shared/umbra-ui/officialVideoWorkflow';
+import { normalizeVideoRoutePolicy, videoControlsPolicyIssue } from '../../../../shared/umbra-ui/videoRoutePolicy';
 import { normalizeMiniMaxH3Guides } from '../../../../shared/umbra-ui/minimaxH3Guides';
 import { normalizeLtx23OmniForgeControls, buildLtx23DirectorInputs } from '../../../../shared/umbra-ui/ltx23OmniForge';
 import { miniMaxH3DirectorIssue, normalizeMiniMaxH3Director, selectedMiniMaxH3DirectorItems } from '../../../../shared/umbra-ui/minimaxH3Director';
@@ -320,6 +322,13 @@ export interface UmbraImageQueueOptions {
   queuePlacement?: UmbraQueuePlacement;
 }
 
+export interface UmbraOfficialVideoQueueOptions {
+  bindings?: OfficialVideoBinding[];
+  workflowId: OfficialVideoWorkflowId;
+  captureId: string;
+  prompt: string;
+  queuePlacement?: UmbraQueuePlacement;
+}
 export interface UmbraVideoQueueOptions {
   outputFolder?: string;
   prompt: string;
@@ -1846,11 +1855,29 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     }, preparedOptions.queuePlacement, prepared.promptEntry);
   }, [connected, prepareImageQueueRequest, submitQueueRequest]);
 
+  const queueOfficialVideo = React.useCallback(async (options: UmbraOfficialVideoQueueOptions) => {
+    const selection = normalizeOfficialVideoWorkflowSelection({ workflowId: options.workflowId, captureId: options.captureId, bindings: options.bindings ?? [] });
+    if (!selection) throw new Error('Capture the pinned official workflow before queueing.');
+    const response = await fetch(`/api/video/official-workflows/${selection.workflowId}/captures/${selection.captureId}`, { cache: 'no-store' });
+    const summary = await response.json().catch(() => ({}));
+    if (!response.ok || !summary.success) throw new Error(String(summary.error || 'The official capture is unavailable. Capture the pinned original again.'));
+    const feature: UmbraUiPipelineFeature = summary.videoMode === 'reference_to_video' ? 'ref2vid' : summary.videoMode === 'image_to_video' ? 'img2vid' : 'txt2vid';
+    return submitQueueRequest(String(summary.prompt || summary.name), {
+      mediaType: 'video', outputOwner: 'umbra_ui', outputMode: feature,
+      officialWorkflow: selection, video: { family: summary.videoFamily, mode: summary.videoMode },
+    }, '', { feature, modelFamily: String(summary.name) }, options.queuePlacement);
+  }, [submitQueueRequest]);
+
   const queueVideo = React.useCallback(async (options: UmbraVideoQueueOptions) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || !connected) {
       throw new Error('Umbra UI is still connecting to the queue service.');
     }
+    const settingsResponse = await fetch('/api/settings', { cache: 'no-store' });
+    if (!settingsResponse.ok) throw new Error('Video routing policy is unavailable. Refresh the app settings.');
+    const settingsPayload = await settingsResponse.json();
+    const policyIssue = videoControlsPolicyIssue(options.video, normalizeVideoRoutePolicy(settingsPayload?.settings?.['video.routePolicy'] ?? settingsPayload?.['video.routePolicy']));
+    if (policyIssue) throw new Error(policyIssue);
     const requestedExtended = normalizeUmbraLtxExtendedControls(options.video.ltx.extended);
     const extendedEnabled = options.video.family === 'ltx23'
       && requestedExtended.enabled
@@ -2283,6 +2310,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     stopAllUmbraJobs,
     cancelOwnedImage,
     queueImage,
+    queueOfficialVideo,
     queueVideo,
   };
 }
