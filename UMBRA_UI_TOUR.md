@@ -145,8 +145,25 @@ and broader model-specific documentation are pending.
 
 ## Video
 
-Video provides model-aware LTX and Wan generation surfaces for text-to-video,
-image-to-video, and video-to-video work. Source media, key frames, prompts,
+Video temporarily defaults to **DaSiWa only** in **Settings > Video routing**.
+Use the **H3 Director** or **LTX-2.3 OmniForge** route buttons below that menu.
+These use the existing DaSiWa
+integrations: H3 uses the separately installed Director/Guide nodes, while
+OmniForge uses Umbra's attributed API adapter around the upstream node suite.
+The original upstream OmniForge workflow file is not bundled here. Missing
+workflows, nodes, or models show an unavailable/setup state; Umbra does not
+fall back to a legacy video workflow.
+
+Existing Wan, native H3/LTX, VID2VID, Storyboard, Extended, and custom workflow
+settings are retained. An unsupported saved route displays **Held** and cannot
+generate or requeue. Its prompts, source media, history, and previous outputs
+remain available. Restore the previous entrypoints by selecting **All video
+routes** in the same menu. This policy change does not convert an existing
+draft. Switching routing with live video work pauses the queue; press **Resume**
+explicitly after restoring the routes. Loading a saved legacy queue under
+DaSiWa-only routing restores it paused and held without changing its settings.
+
+Source media, key frames, prompts,
 audio where supported, sizing policy, seed behavior, sampling, interpolation,
 and upscale options are kept with each queued video so creators can inspect,
 edit, and requeue results.
@@ -158,9 +175,9 @@ arrow keys. Queue items open their preview in the viewer. Director/OmniForge
 editors and their drafts stay mounted while previewing results or collapsing
 panels, so returning to the editor retains the work in progress.
 
-Video remains in beta. These workspace changes preserve generation behavior;
-simulated job/media checks do not qualify fresh GPU rendering or advanced model
-combinations.
+Video remains in beta. The routing switch preserves the existing Director and
+OmniForge generation behavior. Simulated job/media checks do not qualify fresh
+GPU rendering, recurring-character consistency, or a finished multi-scene video.
 
 ## Extras
 

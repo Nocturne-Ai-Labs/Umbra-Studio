@@ -22,9 +22,14 @@ export function createPowerPrompterAdmissionGate(): PowerPrompterAdmissionGate {
 /** Remove and return the first committed head. A held head retains queue order. */
 export async function takeAdmittedQueueHead<T extends { admissionGate?: PowerPrompterAdmissionGate }>(
   queue: T[], eligible: (head: T) => boolean = () => true,
+  held: (item: T) => boolean = () => false,
 ): Promise<T | null> {
   while (queue.length > 0) {
-    const head = queue[0];
+    // Policy-held work remains in its original position. Unrelated image
+    // requests can proceed without deleting or rewriting a saved video job.
+    const index = queue.findIndex((item) => !held(item));
+    if (index < 0) return null;
+    const head = queue[index];
     if (!eligible(head)) return null;
     if (head.admissionGate?.status === 'pending') {
       await head.admissionGate.settled;
@@ -32,8 +37,8 @@ export async function takeAdmittedQueueHead<T extends { admissionGate?: PowerPro
       // admission is pending. Observe the current gate before dequeuing it.
       continue;
     }
-    if (queue[0] !== head) continue;
-    queue.shift();
+    if (queue[index] !== head || held(head)) continue;
+    queue.splice(index, 1);
     if (head.admissionGate?.status === 'rejected') continue;
     return head;
   }

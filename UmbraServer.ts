@@ -1,3 +1,4 @@
+import { assertVideoGenerationPolicy, normalizeVideoRoutePolicy, videoGenerationPolicyIssue, videoGraphPolicyIssue, type UmbraVideoRoutePolicy } from './shared/umbra-ui/videoRoutePolicy';
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from './shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
 import { buildMiniMaxH3DirectorBuilderState, buildMiniMaxH3DirectorTimeline, miniMaxH3DirectorIssue, miniMaxH3DirectorMode, normalizeMiniMaxH3Director, type MiniMaxH3DirectorControls } from './shared/umbra-ui/minimaxH3Director';
@@ -2818,10 +2819,28 @@ function normalizeGalleryAppSettingsForStorage(settings: Record<string, unknown>
   return next;
 }
 
+function getVideoRoutePolicy(): UmbraVideoRoutePolicy {
+  return normalizeVideoRoutePolicy(settingsManager.getAppSettings()['video.routePolicy']);
+}
+
+function handleVideoRoutePolicySettingChange(previous: Record<string, unknown>) {
+  if (normalizeVideoRoutePolicy(previous['video.routePolicy']) === getVideoRoutePolicy()) return;
+  // Changing a route policy never resumes existing jobs. A deliberate Resume
+  // remains required, including after restoring the legacy routes.
+  if (powerPrompterQueueControllerState.requests.some((request) => request.prompts.some((prompt) =>
+    ['pending', 'submitting', 'running'].includes(prompt.status) && (prompt.generation.mediaType === 'video'
+      || ['txt2vid', 'img2vid', 'ref2vid', 'vid2vid'].includes(request.pipeline?.feature))))) {
+    backendPowerPrompterPauseIntentEpoch += 1;
+    powerPrompterQueueControllerState.paused = true;
+  }
+  broadcastPowerPrompterQueueControllerSnapshot('video_route_policy_changed');
+}
+
 function normalizeAppSettingsForClient(settings: Record<string, unknown>): Record<string, unknown> {
   const normalizedSettings = normalizeGalleryAppSettingsForStorage(settings);
   return {
     ...normalizedSettings,
+    'video.routePolicy': normalizeVideoRoutePolicy(settings['video.routePolicy']),
     'library.defaultComfyOutputRoot': toClientPath(resolvePathCandidate(getDefaultOutputRootPath())),
   };
 }
@@ -5622,7 +5641,10 @@ async function upsertUmbraUiVideoReviewPrompt(
 async function listUmbraUiVideoReviewJobs(limitRaw: unknown): Promise<UmbraUiVideoReviewJob[]> {
   await ensureUmbraUiVideoReviewLoaded();
   const limit = Math.max(1, Math.min(UMBRA_UI_VIDEO_REVIEW_LIMIT, Math.floor(Number(limitRaw) || 100)));
-  return umbraUiVideoReviewJobs.slice(0, limit).map((job) => clonePPSerializable(job));
+  return umbraUiVideoReviewJobs.slice(0, limit).map((job) => ({
+    ...clonePPSerializable(job),
+    policyHold: videoGenerationPolicyIssue(job.generation, getVideoRoutePolicy()),
+  }));
 }
 
 async function deleteUmbraUiVideoReviewJob(idRaw: unknown): Promise<boolean> {
@@ -5662,6 +5684,21 @@ interface BackendPowerPrompterQueuedWork {
   preservePaused?: boolean;
   removedPromptIndices?: Set<number>;
   admissionGate?: PowerPrompterAdmissionGate;
+}
+
+function getQueuedVideoPolicyHold(work: BackendPowerPrompterQueuedWork): string | null {
+  const state = work.data?.state || {};
+  return listPPQueueGenerationInputs(state).map((generation) =>
+    videoGenerationPolicyIssue(generation, getVideoRoutePolicy(), work.loaded.document)).find(Boolean) || null;
+}
+
+function getRequestVideoPolicyHold(request: PowerPrompterQueueControllerRequest, generation?: unknown): string | null {
+  const loaded = backendPowerPrompterQueuedWork.find((work) => work.requestId === request.requestId)?.loaded
+    || backendPowerPrompterQueueTasks.get(request.requestId)?.loaded;
+  const generations = generation ? [generation] : request.prompts.map((prompt) => prompt.generation);
+  return generations.map((value) => videoGenerationPolicyIssue(
+    { ...(value as object), ...(['txt2vid', 'img2vid', 'ref2vid', 'vid2vid'].includes(request.pipeline?.feature)
+      ? { outputMode: request.pipeline.feature } : {}) }, getVideoRoutePolicy(), loaded?.document)).find(Boolean) || null;
 }
 
 const backendPowerPrompterQueuedWork: BackendPowerPrompterQueuedWork[] = [];
@@ -5830,8 +5867,9 @@ function clonePowerPrompterQueueControllerSnapshot(reason?: string) {
       delete publicRequest.workflowImplementationName;
       return {
         ...publicRequest,
+        policyHold: getRequestVideoPolicyHold(request),
         history: historySummary ? toPublicPPQueueHistorySummary(historySummary) : null,
-        prompts: request.prompts.map((prompt) => ({ ...prompt })),
+        prompts: request.prompts.map((prompt) => ({ ...prompt, policyHold: getRequestVideoPolicyHold(request, prompt.generation) })),
       };
     }),
     updatedAt: powerPrompterQueueControllerState.updatedAt,
@@ -7561,13 +7599,14 @@ function getPrompterBridgeCatalogEntries(): PrompterBridgeCatalogEntry[] {
       const stat = statSync(fullPath);
       const parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
       const validation = validatePPApiWorkflowDocument(parsed);
+      const policyHold = videoGraphPolicyIssue(parsed, getVideoRoutePolicy());
       const id = workflow.name.replace(/\.json$/i, '');
       entries.push({
         bridgeId: `api-workflow:${id}`,
         workflowId: id,
         workflowName: sanitizePPApiWorkflowBaseName(id),
-        compatible: validation.ok,
-        missing: validation.missing,
+        compatible: validation.ok && !policyHold,
+        missing: policyHold ? [...validation.missing, policyHold] : validation.missing,
         updatedAt: stat.mtimeMs,
         source: 'api_workflow',
       });
@@ -9032,6 +9071,7 @@ function compileUmbraUiPipelineWorkflow(
   }
 
   const rawGeneration = options.generation || state?.generation;
+  assertVideoGenerationPolicy(rawGeneration, getVideoRoutePolicy(), promptGraph);
   const workflowDescriptor = describePPApiWorkflow(rawWorkflow);
   const generation = normalizePPGenerationControls(bindPPGenerationToWorkflowVideo(
     rawGeneration,
@@ -10690,6 +10730,23 @@ async function waitForBackendPowerPrompterQueueResume(
   }
 }
 
+async function waitForVideoPolicyEligibility(
+  task: BackendPowerPrompterQueueTask, requestId: string, generation: unknown,
+  graph: unknown, sourceWs?: ServerWebSocket<unknown> | null,
+) {
+  let announced = false;
+  while (videoGenerationPolicyIssue(generation, getVideoRoutePolicy(), graph)) {
+    throwIfBackendPowerPrompterQueueCanceled(task);
+    if (task.stopAfterCurrent) return;
+    if (!announced) {
+      announced = true;
+      broadcastPowerPrompterQueueControllerSnapshot('video_policy_held', sourceWs);
+    }
+    await Bun.sleep(500);
+  }
+  await waitForBackendPowerPrompterQueueResume(task, requestId, sourceWs);
+}
+
 async function waitForDurablePowerPrompterSubmitMarker(
   task: BackendPowerPrompterQueueTask,
   requestId: string,
@@ -11701,22 +11758,27 @@ async function runBackendPowerPrompterPipelineQueue(
         };
         activePipeline = extendedImg2VideoPipeline!;
       }
-      updatePowerPrompterQueueControllerPrompt(requestId, index, {
-        status: 'submitting',
-        startedAt: Date.now(),
-        seed: Math.max(0, Math.floor(Number(generation.seed) || 0)),
-      }, 'prompt_submitting', sourceWs);
       await task.previewReady?.catch(() => undefined);
-      await assertPPApiWorkflowExecutionReady(activePipeline, generation);
-      const queuedWorkflow = compileUmbraUiPipelineWorkflow(activePipeline.document, state, {
-        prompt,
-        generation,
-        promptSetId: promptSetIds[index] ?? 1,
-        outputSubfolder: promptOutputSubfolders[index] || '',
-        queueOrigin: task.origin,
-        styleSeedMode: state.styleSeedMode,
-        selectedPipeline: activePipeline.selectedPipeline,
-      });
+      let queuedWorkflow: ReturnType<typeof compileUmbraUiPipelineWorkflow>;
+      while (true) {
+        await waitForVideoPolicyEligibility(task, requestId, generation, activePipeline.document, sourceWs);
+        if (finishBeforeNextPromptIfStopped()) return;
+        throwIfBackendPowerPrompterQueueCanceled(task);
+        try {
+          await assertPPApiWorkflowExecutionReady(activePipeline, generation);
+          queuedWorkflow = compileUmbraUiPipelineWorkflow(activePipeline.document, state, {
+            prompt, generation, promptSetId: promptSetIds[index] ?? 1,
+            outputSubfolder: promptOutputSubfolders[index] || '', queueOrigin: task.origin,
+            styleSeedMode: state.styleSeedMode, selectedPipeline: activePipeline.selectedPipeline,
+          });
+          break;
+        } catch (error) {
+          // A policy change while runtime validation awaited its catalog holds
+          // this exact job instead of failing it or changing its generation.
+          if (videoGenerationPolicyIssue(generation, getVideoRoutePolicy(), activePipeline.document)) continue;
+          throw error;
+        }
+      }
       if (generation.mediaType === 'video') {
         const objectInfo = await getPPComfyObjectInfoForValidation();
         resolveUmbraUiVideoLoraNames(queuedWorkflow.promptGraph, objectInfo);
@@ -11786,6 +11848,13 @@ async function runBackendPowerPrompterPipelineQueue(
       if (task.interruptCurrentRequested) {
         throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
       }
+      await waitForVideoPolicyEligibility(task, requestId, generation, queuedWorkflow.promptGraph, sourceWs);
+      if (finishBeforeNextPromptIfStopped()) return;
+      throwIfBackendPowerPrompterQueueCanceled(task);
+      updatePowerPrompterQueueControllerPrompt(requestId, index, {
+        status: 'submitting', startedAt: Date.now(),
+        seed: Math.max(0, Math.floor(Number(generation.seed) || 0)),
+      }, 'prompt_submitting', sourceWs);
       let durableMarker;
       do {
         durableMarker = await waitForDurablePowerPrompterSubmitMarker(task, requestId, sourceWs);
@@ -11797,6 +11866,10 @@ async function runBackendPowerPrompterPipelineQueue(
       if (finishBeforeNextPromptIfStopped()) return;
       if (task.removedPromptIndices.has(index)) continue;
       if (task.interruptCurrentRequested) throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
+      await waitForVideoPolicyEligibility(task, requestId, generation, queuedWorkflow.promptGraph, sourceWs);
+      if (finishBeforeNextPromptIfStopped()) return;
+      throwIfBackendPowerPrompterQueueCanceled(task);
+      assertVideoGenerationPolicy(generation, getVideoRoutePolicy(), queuedWorkflow.promptGraph);
       let response: Response;
       try {
         response = await fetch(`${getComfyProxyBaseUrl()}/prompt`, {
@@ -12193,7 +12266,7 @@ async function drainBackendPowerPrompterPriorityWork(beforePlacement?: PowerProm
       const placement = normalizePowerPrompterQueuePlacement(head.queuePlacement ?? head.data?.queuePlacement);
       return placement !== 'end' && beforePlacement !== 'interrupt'
         && (beforePlacement !== 'next' || placement === 'interrupt');
-    });
+    }, (work) => !!getQueuedVideoPolicyHold(work));
     if (!next) return;
     await runBackendPowerPrompterQueuedWork(next);
   }
@@ -12311,8 +12384,11 @@ async function drainBackendPowerPrompterQueue() {
   backendPowerPrompterQueueDrainActive = true;
   try {
     while (backendPowerPrompterQueuedWork.length > 0) {
-      const next = await takeAdmittedQueueHead(backendPowerPrompterQueuedWork);
-      if (!next) continue;
+      const next = await takeAdmittedQueueHead(backendPowerPrompterQueuedWork, () => true, (work) => !!getQueuedVideoPolicyHold(work));
+      if (!next) {
+        broadcastPowerPrompterQueueControllerSnapshot('video_policy_held');
+        break;
+      }
       await runBackendPowerPrompterQueuedWork(next);
     }
   } finally {
@@ -13016,6 +13092,7 @@ function forwardPrompterQueueControlToComfyTarget(
       powerPrompterQueueControllerState.paused = paused;
       powerPrompterQueueControllerState.updatedAt = Date.now();
       broadcastPowerPrompterQueueControllerSnapshot(paused ? 'backend_pause_requested' : 'backend_resume_requested', ws);
+      if (!paused) void drainBackendPowerPrompterQueue().catch((error) => console.error('Queue resume failed', error));
       sendWs(ws, {
         type: 'queue_pause_result',
         requestId,
@@ -21030,7 +21107,10 @@ function getUmbraUiVideoControlsSession(): PowerPrompterVideoControls {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  umbraUiVideoControlsSession = normalizePPVideoControls(null);
+  umbraUiVideoControlsSession = normalizePPVideoControls(getVideoRoutePolicy() === 'dasiwa-only' ? {
+    family: 'minimax_h3', mode: 'text_to_video', fps: 24, frames: 121,
+    minimaxH3: { director: { enabled: true } },
+  } : null);
   return normalizePPVideoControls(umbraUiVideoControlsSession);
 }
 
@@ -24638,6 +24718,7 @@ async function savePowerPrompterCardFromEditor(
 }
 
 interface PPApiWorkflowListItem {
+  policyHold?: string | null;
   id: string;
   fileName: string;
   name: string;
@@ -25262,8 +25343,9 @@ async function assertPPQueueExecutionReady(
   state: unknown,
   context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
 ) {
-  const validationContext = context || await createPPQueueValidationContext();
   const generations = listPPQueueGenerationInputs(state);
+  for (const generation of generations) assertVideoGenerationPolicy(generation, getVideoRoutePolicy(), loaded.document);
+  const validationContext = context || await createPPQueueValidationContext();
   for (let index = 0; index < generations.length; index += 1) {
     if (index % 32 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await assertPPApiWorkflowExecutionReady(loaded, generations[index], validationContext);
@@ -25275,6 +25357,7 @@ async function assertPPApiWorkflowExecutionReady(
   generationInput: unknown,
   context?: Awaited<ReturnType<typeof createPPQueueValidationContext>>,
 ): Promise<void> {
+  assertVideoGenerationPolicy(generationInput, getVideoRoutePolicy(), loaded.document);
   const validationContext = context || await createPPQueueValidationContext();
   const generation = normalizePPGenerationControls(bindPPGenerationToWorkflowVideo(
     generationInput,
@@ -25508,6 +25591,7 @@ async function loadPPApiWorkflowFromFilePath(fullPath: string | null): Promise<L
   const comfyClassTypes = objectInfo ? new Set(Object.keys(objectInfo)) : null;
   const validation = validatePPApiWorkflowDocument(parsed, comfyClassTypes);
   const descriptor = attachUmbraUiPipelineReadiness(describePPApiWorkflow(parsed), validation, objectInfo);
+  const policyHold = videoGraphPolicyIssue(parsed, getVideoRoutePolicy());
   const fileName = basename(fullPath);
   const id = fileName.replace(/\.json$/i, '');
   return {
@@ -25515,8 +25599,9 @@ async function loadPPApiWorkflowFromFilePath(fullPath: string | null): Promise<L
       id,
       fileName,
       name: sanitizePPApiWorkflowBaseName(id),
-      compatible: validation.ok,
-      missing: validation.missing,
+      compatible: validation.ok && !policyHold,
+      policyHold,
+      missing: policyHold ? [...validation.missing, policyHold] : validation.missing,
       runtimeNodes: validation.runtimeNodes,
       ...descriptor,
       updatedAt: stat.mtimeMs,
@@ -25552,13 +25637,15 @@ async function listPPApiWorkflowsFromDirectory(
       const parsed = JSON.parse(content);
       const validation = validatePPApiWorkflowDocument(parsed, comfyClassTypes);
       const descriptor = attachUmbraUiPipelineReadiness(describePPApiWorkflow(parsed), validation, objectInfo);
+      const policyHold = videoGraphPolicyIssue(parsed, getVideoRoutePolicy());
       const id = entry.name.replace(/\.json$/i, '');
       items.push({
         id,
         fileName: entry.name,
         name: sanitizePPApiWorkflowBaseName(id),
-        compatible: validation.ok,
-        missing: validation.missing,
+        compatible: validation.ok && !policyHold,
+        policyHold,
+        missing: policyHold ? [...validation.missing, policyHold] : validation.missing,
         runtimeNodes: validation.runtimeNodes,
         ...descriptor,
         updatedAt: stat.mtimeMs,
@@ -25585,6 +25672,7 @@ async function listBundledUmbraUiWorkflows(): Promise<PPApiWorkflowListItem[]> {
 }
 
 interface UmbraUiPipelineRegistryEntry extends UmbraUiPipelineDescriptor {
+  policyHold?: string | null;
   workflowId: string;
   workflowName: string;
   compatible: boolean;
@@ -25598,9 +25686,10 @@ function buildUmbraUiPipelineRegistry(items: PPApiWorkflowListItem[]): UmbraUiPi
       ...pipeline,
       workflowId: item.id,
       workflowName: item.name,
-      compatible: pipeline.readiness?.graph.status === 'valid'
-        || (pipeline.readiness?.graph.status == null && item.compatible),
-      missing: pipeline.readiness?.graph.issues
+      policyHold: item.policyHold,
+      compatible: !item.policyHold && (pipeline.readiness?.graph.status === 'valid'
+        || (pipeline.readiness?.graph.status == null && item.compatible)),
+      missing: item.policyHold ? [...item.missing] : pipeline.readiness?.graph.issues
         ? [...pipeline.readiness.graph.issues]
         : [...item.missing],
       updatedAt: item.updatedAt,
@@ -25621,6 +25710,7 @@ async function resolveUmbraUiPipeline(
   featureInput: unknown,
   modelFamilyInput: unknown,
   modelSourceInput: unknown,
+  restorePolicyHeld = false,
 ): Promise<{
   pipeline: UmbraUiPipelineRegistryEntry;
   loaded: LoadedPPApiWorkflow;
@@ -25652,7 +25742,7 @@ async function resolveUmbraUiPipeline(
     const acceptedSources = Array.from(new Set(familyMatches.flatMap((entry) => entry.modelSources)));
     throw new Error(`The ${familyMatches[0].modelFamily} ${feature} pipeline does not accept ${modelSource} models. Accepted sources: ${acceptedSources.join(', ')}.`);
   }
-  const compatibleMatches = sourceMatches.filter((entry) => entry.compatible);
+  const compatibleMatches = sourceMatches.filter((entry) => entry.compatible || (restorePolicyHeld && entry.policyHold));
   if (compatibleMatches.length <= 0) {
     const missing = Array.from(new Set(sourceMatches.flatMap((entry) => entry.missing)));
     throw new Error(`The locked ${familyMatches[0].modelFamily} ${feature} pipeline is unavailable.${missing.length > 0 ? ` Missing: ${missing.join(', ')}.` : ''}`);
@@ -25723,9 +25813,9 @@ function getPowerPrompterPipelineSelection(
   });
 }
 
-async function loadRequestedPowerPrompterPipeline(state: unknown): Promise<LoadedPPApiWorkflow> {
+async function loadRequestedPowerPrompterPipeline(state: unknown, restorePolicyHeld = false): Promise<LoadedPPApiWorkflow> {
   const request = getUmbraUiPipelineRequestFromQueueState(state);
-  const resolved = await resolveUmbraUiPipeline(request.feature, request.modelFamily, request.modelSource);
+  const resolved = await resolveUmbraUiPipeline(request.feature, request.modelFamily, request.modelSource, restorePolicyHeld);
   return resolved.loaded;
 }
 
@@ -26457,9 +26547,15 @@ async function restoreSavedPowerPrompterQueue(id: unknown) {
   const prepared: BackendPowerPrompterQueuedWork[] = [];
   const validationContext = await createPPQueueValidationContext();
   for (const group of groups) {
-    const loaded = await loadRequestedPowerPrompterPipeline(group.state);
-    if (!loaded.item.compatible) throw new Error(`Saved queue pipeline is unavailable: ${loaded.item.name}`);
-    await assertPPQueueExecutionReady(loaded, group.state, validationContext);
+    const loaded = await loadRequestedPowerPrompterPipeline(group.state, true);
+    const policyHold = listPPQueueGenerationInputs(group.state).map((generation) =>
+      videoGenerationPolicyIssue(generation, getVideoRoutePolicy(), loaded.document)).find(Boolean);
+    // Restore legacy saved work as paused/held without executing it, changing
+    // its route, or requiring unavailable legacy runtime dependencies.
+    if (!policyHold) {
+      if (!loaded.item.compatible) throw new Error(`Saved queue pipeline is unavailable: ${loaded.item.name}`);
+      await assertPPQueueExecutionReady(loaded, group.state, validationContext);
+    }
     prepared.push({
       dispatchDelayRevision,
       sourceWs: null, requestId: crypto.randomUUID(), loaded, prompts: group.prompts, preservePaused: true,
@@ -33772,6 +33868,13 @@ const server = Bun.serve<UmbraSocketData>({
           const targetPath = path.startsWith('/comfy/')
             ? `/${path.slice('/comfy/'.length)}`
             : path;
+          if (method === 'POST' && targetPath.replace(/\/+$/, '') === '/prompt') {
+            let body: any;
+            try { body = await req.clone().json(); }
+            catch { return json({ error: 'Invalid generation prompt JSON.' }, 400); }
+            const policyHold = videoGraphPolicyIssue(body?.prompt, getVideoRoutePolicy());
+            if (policyHold) return json({ error: policyHold, policyHold, policy: getVideoRoutePolicy() }, 409);
+          }
           const staticResponse = method === 'GET' || method === 'HEAD'
             ? await serveComfyStaticFile(targetPath, method)
             : null;
@@ -37794,6 +37897,7 @@ const server = Bun.serve<UmbraSocketData>({
           const trashStorageError = validateRequestedTrashStorageSetting(mergedNextSettings);
           if (trashStorageError) return json({ error: trashStorageError }, 400);
           settingsManager.updateAppSettings(mergedNextSettings);
+          handleVideoRoutePolicySettingChange(currentSettings);
           let comfySecurityResult: ComfySecurityApplyResult | undefined;
           if (Object.prototype.hasOwnProperty.call(mergedNextSettings, 'comfyui.securityLevel') ||
             Object.prototype.hasOwnProperty.call(mergedNextSettings, 'comfyui.path')) {
@@ -37841,6 +37945,7 @@ const server = Bun.serve<UmbraSocketData>({
             const trashStorageError = validateRequestedTrashStorageSetting(portableBundleAppSettings);
             if (trashStorageError) return json({ error: trashStorageError }, 400);
             settingsManager.updateAppSettings(portableBundleAppSettings);
+            handleVideoRoutePolicySettingChange(currentSettings);
             nextBundle.appSettings = portableBundleAppSettings;
             nextBundle.powerPrompterSettings = await savePPSettings(nextBundle.powerPrompterSettings);
 
@@ -38626,6 +38731,7 @@ const server = Bun.serve<UmbraSocketData>({
             promptCount: entry.prompts.length,
             apiWorkflowId: entry.loaded.item.id,
             apiWorkflowName: entry.loaded.item.name,
+            policyHold: getQueuedVideoPolicyHold(entry),
           })),
           activeTasks: Array.from(backendPowerPrompterQueueTasks.entries()).map(([requestId, task]) => ({
             requestId,

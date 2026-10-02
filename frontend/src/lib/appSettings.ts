@@ -1,5 +1,7 @@
 'use client';
 
+import { normalizeVideoRoutePolicy } from '../../../shared/umbra-ui/videoRoutePolicy';
+
 export const APP_SETTINGS_STORAGE_KEY = 'umbralab-settings';
 export const LEGACY_APP_SETTINGS_STORAGE_KEY = 'umbralab_settings';
 export const APP_SETTINGS_CHANGED_EVENT = 'umbra:app-settings-changed';
@@ -28,6 +30,7 @@ export interface AppSettings {
   'ui.idleFrameCapFps': number;
   'ui.language': AppLanguage;
   'comfyui.autoStart': boolean;
+  'video.routePolicy': 'dasiwa-only' | 'all-routes';
   'comfyui.path': string;
   'comfyui.url': string;
   'aitoolkit.path': string;
@@ -96,6 +99,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   'ui.idleFrameCapFps': 18,
   'ui.language': 'en',
   'comfyui.autoStart': false,
+  'video.routePolicy': 'dasiwa-only',
   'comfyui.path': '',
   'comfyui.url': 'http://127.0.0.1:8188',
   'aitoolkit.path': '',
@@ -263,6 +267,7 @@ function clearLegacyBrowserSettingsCache() {
 export function normalizeAppSettings(input: unknown): AppSettings {
   const candidate = toRecord(input);
   const normalized: AppSettings = { ...DEFAULT_APP_SETTINGS };
+  normalized['video.routePolicy'] = normalizeVideoRoutePolicy(candidate['video.routePolicy']);
 
   for (const key of BOOLEAN_KEYS) {
     const value = candidate[key as string];

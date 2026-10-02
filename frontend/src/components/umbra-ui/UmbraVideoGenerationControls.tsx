@@ -9,6 +9,8 @@ import { MINIMAX_H3_TURBO_PRESETS, miniMaxH3TurboIssue, miniMaxH3TurboSamplingPr
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import React from 'react';
+import { pushAppSettingsToBackend, saveAppSettings } from '@/lib/appSettings';
+import { normalizeVideoRoutePolicy, videoControlsPolicyIssue, type UmbraVideoRoutePolicy } from '../../../../shared/umbra-ui/videoRoutePolicy';
 import {
   ChevronDown,
   Clock3,
@@ -167,9 +169,9 @@ interface UmbraVideoDeviceResume extends UmbraVideoPromptRecoveryResume {
   negativePrompt?: string;
 }
 
-function createDefaultVideoControls(): PowerPrompterVideoControls {
+function createDefaultVideoControls(policy: UmbraVideoRoutePolicy = 'all-routes'): PowerPrompterVideoControls {
   return {
-    family: 'wan22',
+    family: policy === 'dasiwa-only' ? 'minimax_h3' : 'wan22',
     loraStack: [],
     mode: 'text_to_video',
     frameGuideMode: 'first',
@@ -191,8 +193,8 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
     sourceHeight: 0,
     width: 1280,
     height: 704,
-    frames: 81,
-    fps: 16,
+    frames: policy === 'dasiwa-only' ? 121 : 81,
+    fps: policy === 'dasiwa-only' ? 24 : 16,
     seed: 0,
     seedMode: 'fixed',
     seedIncrement: 1,
@@ -302,7 +304,7 @@ function createDefaultVideoControls(): PowerPrompterVideoControls {
       referenceImageSize: 'match',
       referenceNotes: ['', '', ''],
       guides: [],
-      director: { ...DEFAULT_MINIMAX_H3_DIRECTOR },
+      director: { ...DEFAULT_MINIMAX_H3_DIRECTOR, enabled: policy === 'dasiwa-only' },
       turboPreset: 'none',
       turboLora: '',
       turboStrength: 1,
@@ -802,6 +804,15 @@ export function UmbraVideoGenerationControls({
   onDirectorOpenChange,
 }: UmbraVideoGenerationControlsProps) {
   const showToast = useStore((state) => state.showToast);
+  const routePolicy = normalizeVideoRoutePolicy(useStore((state) => state.appSettings['video.routePolicy']));
+  const dasiwaOnly = routePolicy === 'dasiwa-only';
+  const [policySaving, setPolicySaving] = React.useState(false);
+  const previousRoutePolicyRef = React.useRef(routePolicy);
+  React.useEffect(() => {
+    if (previousRoutePolicyRef.current === routePolicy) return;
+    previousRoutePolicyRef.current = routePolicy;
+    onRefreshCatalog();
+  }, [onRefreshCatalog, routePolicy]);
   const [initialDeviceResume] = React.useState(() => readDeviceUiResume<UmbraVideoDeviceResume>('umbra-ui-video'));
   const [legacyAutoPromptRecovery] = React.useState(() => recoverLegacyUmbraVideoAutoPrompt(initialDeviceResume));
   const [recoveredPromptHistory, setRecoveredPromptHistory] = React.useState(legacyAutoPromptRecovery.history);
@@ -830,7 +841,10 @@ export function UmbraVideoGenerationControls({
   const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
-  const [video, setVideo] = React.useState<PowerPrompterVideoControls>(() => createDefaultVideoControls());
+  const [video, setVideo] = React.useState<PowerPrompterVideoControls>(() => createDefaultVideoControls(routePolicy));
+  const policyIssue = videoControlsPolicyIssue(video, routePolicy);
+  const videoRef = React.useRef(video);
+  videoRef.current = video;
   const [selectedStoryboardShotId, setSelectedStoryboardShotId] = React.useState('');
   const [sourcePreviewUrl, setSourcePreviewUrl] = React.useState('');
   const [isQueueing, setIsQueueing] = React.useState(false);
@@ -883,26 +897,28 @@ export function UmbraVideoGenerationControls({
   }, []);
 
   React.useEffect(() => {
+    if (policyIssue) return;
     setVideo((current) => (
-      current.width === targetDimensions.targetWidth && current.height === targetDimensions.targetHeight
+      videoControlsPolicyIssue(current, normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']))
+        || (current.width === targetDimensions.targetWidth && current.height === targetDimensions.targetHeight)
         ? current
         : { ...current, width: targetDimensions.targetWidth, height: targetDimensions.targetHeight }
     ));
-  }, [targetDimensions.targetHeight, targetDimensions.targetWidth]);
+  }, [policyIssue, targetDimensions.targetHeight, targetDimensions.targetWidth]);
 
   React.useEffect(() => {
-    onStoryboardOpenChange?.(storyboardOpen || extendedOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled));
+    onStoryboardOpenChange?.(!policyIssue && (storyboardOpen || extendedOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled)));
     return () => onStoryboardOpenChange?.(false);
-  }, [extendedOpen, onStoryboardOpenChange, storyboardOpen, video.family, video.minimaxH3.director.enabled]);
+  }, [extendedOpen, onStoryboardOpenChange, policyIssue, storyboardOpen, video.family, video.minimaxH3.director.enabled]);
 
   React.useEffect(() => {
-    onDirectorOpenChange?.((video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || omniForgeOpen);
+    onDirectorOpenChange?.(!policyIssue && ((video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || omniForgeOpen));
     return () => onDirectorOpenChange?.(false);
-  }, [onDirectorOpenChange, omniForgeOpen, video.family, video.minimaxH3.director.enabled]);
+  }, [onDirectorOpenChange, omniForgeOpen, policyIssue, video.family, video.minimaxH3.director.enabled]);
 
   React.useEffect(() => {
-    if (!storyboardOpen || video.frames === storyboardTimeline.frames) return;
-    setVideo((current) => ({
+    if (policyIssue || !storyboardOpen || video.frames === storyboardTimeline.frames) return;
+    setVideo((current) => videoControlsPolicyIssue(current, normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy'])) ? current : ({
       ...current,
       frames: resolveUmbraLtxStoryboardTimeline(
         current.ltx.storyboard,
@@ -910,7 +926,7 @@ export function UmbraVideoGenerationControls({
         current.frames,
       ).frames,
     }));
-  }, [storyboardOpen, storyboardTimeline.frames, video.frames]);
+  }, [policyIssue, storyboardOpen, storyboardTimeline.frames, video.frames]);
 
   React.useEffect(() => {
     if (!storyboardOpen || video.ltx.storyboard.shots.length <= 0) return;
@@ -1032,11 +1048,13 @@ export function UmbraVideoGenerationControls({
   }, [editorDraft, legacyAutoPromptRecovery, promptSegments, settingsResolved]);
 
   React.useEffect(() => {
-    if (!settingsLoaded) return;
+    if (!settingsLoaded || policyIssue) return;
     const timer = window.setTimeout(() => {
       videoControlsWriteQueueRef.current = videoControlsWriteQueueRef.current
         .catch(() => undefined)
         .then(async () => {
+          const currentPolicy = normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']);
+          if (videoControlsPolicyIssue(video, currentPolicy) || videoControlsPolicyIssue(videoRef.current, currentPolicy)) return;
           const response = await fetch('/api/umbra-ui/video-controls', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -1050,7 +1068,7 @@ export function UmbraVideoGenerationControls({
         });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [settingsLoaded, showToast, video]);
+  }, [policyIssue, settingsLoaded, showToast, video]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -1158,10 +1176,11 @@ export function UmbraVideoGenerationControls({
   }, [editorDraft, onEditorDraftApplied, replacePromptSegments, setPinnedOutputFolder, settingsResolved]);
 
   React.useEffect(() => {
-    if ((video.mode !== 'image_to_video' && video.mode !== 'reference_to_video') || !video.sourceImagePath || video.sourceImageName) return;
+    if (policyIssue || (video.mode !== 'image_to_video' && video.mode !== 'reference_to_video') || !video.sourceImagePath || video.sourceImageName) return;
     const controller = new AbortController();
     const sourcePath = video.sourceImagePath;
     const timer = window.setTimeout(() => {
+      if (videoControlsPolicyIssue(videoRef.current, normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']))) return;
       void fetch('/api/comfy/copy-media', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1174,6 +1193,7 @@ export function UmbraVideoGenerationControls({
         }
         if (controller.signal.aborted) return;
         setVideo((current) => current.sourceImagePath === sourcePath
+          && !videoControlsPolicyIssue(current, normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']))
           ? { ...current, sourceImageName: String(payload.filename) }
           : current);
       }).catch((error) => {
@@ -1184,9 +1204,10 @@ export function UmbraVideoGenerationControls({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [showToast, video.mode, video.sourceImageName, video.sourceImagePath]);
+  }, [policyIssue, showToast, video.mode, video.sourceImageName, video.sourceImagePath]);
 
   React.useEffect(() => {
+    if (policyIssue) return;
     const sourceMode = video.mode;
     const sourcePath = video.mode === 'image_to_video' || video.mode === 'reference_to_video'
       ? video.sourceImagePath
@@ -1221,6 +1242,7 @@ export function UmbraVideoGenerationControls({
       }
       if (!width || !height || controller.signal.aborted) return;
       setVideo((current) => {
+        if (videoControlsPolicyIssue(current, normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']))) return current;
         const currentPath = current.mode === 'image_to_video' || current.mode === 'reference_to_video'
           ? current.sourceImagePath
           : current.mode === 'video_to_video' ? current.sourceVideoPath : '';
@@ -1232,7 +1254,7 @@ export function UmbraVideoGenerationControls({
     };
     void readDimensions().catch(() => undefined);
     return () => controller.abort();
-  }, [video.mode, video.sourceImagePath, video.sourceVideoName, video.sourceVideoPath]);
+  }, [policyIssue, video.mode, video.sourceImagePath, video.sourceVideoName, video.sourceVideoPath]);
 
   const modelFamily = video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? omniForgeOpen ? 'LTX-2.3 OmniForge' : 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : video.minimaxH3.director.enabled ? 'MiniMax H3 Director' : 'MiniMax H3';
   const pipelineFeature = video.mode === 'video_to_video'
@@ -1417,8 +1439,8 @@ export function UmbraVideoGenerationControls({
   const setLtx = <K extends keyof PowerPrompterVideoControls['ltx']>(key: K, value: PowerPrompterVideoControls['ltx'][K]) => {
     setVideo((current) => ({ ...current, ltx: { ...current.ltx, [key]: value } }));
   };
-  const toggleOmniForge = () => setVideo((current) => {
-    const enabled = !current.ltx.omniForge.enabled;
+  const toggleOmniForge = (forceEnabled?: boolean) => setVideo((current) => {
+    const enabled = forceEnabled ?? !current.ltx.omniForge.enabled;
     let next: PowerPrompterVideoControls = {
       ...current,
       mode: current.mode === 'image_to_video' ? 'image_to_video' : 'text_to_video',
@@ -1449,9 +1471,9 @@ export function UmbraVideoGenerationControls({
   const setMiniMaxH3 = <K extends keyof PowerPrompterVideoControls['minimaxH3']>(key: K, value: PowerPrompterVideoControls['minimaxH3'][K]) => {
     setVideo((current) => ({ ...current, minimaxH3: { ...current.minimaxH3, [key]: value } }));
   };
-  const toggleH3Director = () => setVideo((current) => {
+  const toggleH3Director = (forceEnabled?: boolean) => setVideo((current) => {
     const director = current.minimaxH3.director;
-    const enabled = !director.enabled;
+    const enabled = forceEnabled ?? !director.enabled;
     const imageItem = (sourcePath: string, sourceName: string) => ({
       id: crypto.randomUUID(), kind: 'image' as const, sourcePath, sourceName,
       enabled: true, note: '', trimStart: 0, trimEnd: null, mediaMode: 'video' as const, role: 'subject' as const,
@@ -1797,7 +1819,7 @@ export function UmbraVideoGenerationControls({
       || video.ltx.storyboard.shots.length < 2
       || video.ltx.storyboard.shots.some((shot) => !shot.prompt.trim())
     ));
-  const queueBlockReason = !queueConnected
+  const queueBlockReason = policyIssue || (policySaving ? 'Saving video routing policy.' : '') || (!queueConnected
     ? 'Connecting to the shared queue.'
     : !comfyConnected
       ? 'ComfyUI is disconnected.'
@@ -1809,11 +1831,13 @@ export function UmbraVideoGenerationControls({
             ? 'Wait for Umbra to read the source media dimensions.'
             : requiredMissing
               ? 'Select all required video models and source media first.'
-              : videoLoraIssue || turboIssue;
+              : videoLoraIssue || turboIssue);
   const queueDisabled = isQueueing || !!queueBlockReason;
 
   const handleQueue = async (requestedPlacement: UmbraQueuePlacement = effectivePlacement) => {
     if (queueInFlightRef.current) return;
+    const currentPolicyIssue = videoControlsPolicyIssue(video, normalizeVideoRoutePolicy(useStore.getState().appSettings['video.routePolicy']));
+    if (currentPolicyIssue) { showToast(currentPolicyIssue, 'error'); return; }
     if (queueBlockReason) { showToast(queueBlockReason, 'error'); return; }
     const queuePlacement = queueSummary.powerPrompterActive ? requestedPlacement : 'end';
     if (queuePlacement === 'interrupt' && !window.confirm(
@@ -1886,20 +1910,54 @@ export function UmbraVideoGenerationControls({
 
   const samplerOptions = catalog.samplers.length > 0 ? catalog.samplers : ['euler', 'uni_pc'];
   const schedulerOptions = catalog.schedulers.length > 0 ? catalog.schedulers : ['simple', 'beta'];
+  const changeRoutePolicy = async (value: string) => {
+    if (policySaving) return;
+    setPolicySaving(true);
+    try {
+      const patch = { 'video.routePolicy': normalizeVideoRoutePolicy(value) };
+      await pushAppSettingsToBackend(patch);
+      useStore.getState().applyAppSettings(saveAppSettings(patch));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Video routing policy could not be saved.', 'error');
+    } finally {
+      setPolicySaving(false);
+    }
+  };
+  const chooseDasiwaRoute = (family: 'minimax_h3' | 'ltx23') => {
+    setFamily(family);
+    if (family === 'minimax_h3') toggleH3Director(true);
+    else toggleOmniForge(true);
+  };
   const settingsPanel = (
     <section data-umbra-ui-video-controls="" className="min-h-0 flex-1 overflow-y-auto bg-black/15 p-3 custom-scrollbar">
+      <label className="mb-3 block space-y-1.5">
+        <span className={labelClass}>Video routing</span>
+        <UmbraSelectControl value={routePolicy} disabled={policySaving} onChange={(event) => void changeRoutePolicy(event.target.value)} className={inputClass} aria-label="Video routing policy">
+          <option value="dasiwa-only">DaSiWa only</option>
+          <option value="all-routes">All video routes</option>
+        </UmbraSelectControl>
+      </label>
+      {policyIssue ? <div role="status" data-video-policy-held="" className="mb-3 border-l-2 border-amber-400 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-100">
+        <span className="font-semibold">Held</span>
+        <p className="mt-1">{policyIssue}</p>
+        <p className="mt-1 font-mono text-[10px] text-amber-200/70">Saved route: {modelFamily} / {video.mode.replaceAll('_', ' ')}</p>
+      </div> : null}
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className={labelClass}>Model catalog</span>
         <button type="button" onClick={onRefreshCatalog} disabled={catalog.loading} title="Refresh video model catalog" className="inline-flex h-7 w-7 items-center justify-center rounded border border-white/10 text-zinc-500 hover:text-fuchsia-200 disabled:opacity-40">
           <RefreshCw size={12} className={catalog.loading ? 'animate-spin' : ''} />
         </button>
       </div>
-      <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+      {dasiwaOnly ? <div className="mb-3 grid grid-cols-2 gap-1.5" role="group" aria-label="DaSiWa video route">
+        <ToggleButton active={!policyIssue && video.family === 'minimax_h3'} label="H3 Director" onClick={() => chooseDasiwaRoute('minimax_h3')} />
+        <ToggleButton active={!policyIssue && video.family === 'ltx23'} label="LTX-2.3 OmniForge" onClick={() => chooseDasiwaRoute('ltx23')} />
+      </div> : <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
         <ToggleButton active={video.family === 'wan22'} label="Wan 2.2" onClick={() => setFamily('wan22')} />
         <ToggleButton active={video.family === 'ltx23'} label="LTX-2.3" onClick={() => setFamily('ltx23')} />
         <ToggleButton active={video.family === 'ltx25'} label="LTX-2.5" onClick={() => setFamily('ltx25')} />
         <ToggleButton active={video.family === 'minimax_h3'} label="MiniMax H3" onClick={() => setFamily('minimax_h3')} />
-      </div>
+      </div>}
+      {!policyIssue ? <>
       <div className="mb-3 rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] p-2.5">
         <div className="mb-2 flex items-center gap-2">
           <Database size={12} className="text-fuchsia-300" />
@@ -1964,14 +2022,14 @@ export function UmbraVideoGenerationControls({
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'text_to_video'} label="Text to Video" onClick={() => setMode('text_to_video')} />
         <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'image_to_video'} label="Image to Video" onClick={() => setMode('image_to_video')} />
         {video.family === 'minimax_h3' ? <ToggleButton active={video.mode === 'reference_to_video'} label="Reference to Video" onClick={() => setMode('reference_to_video')} /> : null}
-        {video.family === 'minimax_h3' ? <div className="col-span-full"><ToggleButton active={video.minimaxH3.director.enabled} label="DaSiWa Director" onClick={toggleH3Director} title="Use the separately installed DaSiWa H3 Director nodes" /></div> : null}
-        {video.family !== 'minimax_h3' ? <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} /> : null}
-        {video.family === 'ltx23' ? (
+        {!dasiwaOnly && video.family === 'minimax_h3' ? <div className="col-span-full"><ToggleButton active={video.minimaxH3.director.enabled} label="DaSiWa Director" onClick={() => toggleH3Director()} title="Use the separately installed DaSiWa H3 Director nodes" /></div> : null}
+        {!dasiwaOnly && video.family !== 'minimax_h3' ? <ToggleButton active={!storyboardOpen && !extendedOpen && video.mode === 'video_to_video'} label="Video to Video" onClick={() => setMode('video_to_video')} /> : null}
+        {!dasiwaOnly && video.family === 'ltx23' ? (
           <div className="col-span-full [&>button]:w-full">
-            <ToggleButton active={omniForgeOpen} label="DaSiWa OmniForge" onClick={toggleOmniForge} title="DaSiWa LTX-2.3 OmniForge workflow with the native LTX Director timeline" />
+            <ToggleButton active={omniForgeOpen} label="DaSiWa OmniForge" onClick={() => toggleOmniForge()} title="DaSiWa LTX-2.3 OmniForge workflow with the native LTX Director timeline" />
           </div>
         ) : null}
-        {video.family === 'ltx23' ? (
+        {!dasiwaOnly && video.family === 'ltx23' ? (
           <ToggleButton
             active={storyboardOpen}
             label="Umbra Director"
@@ -1979,7 +2037,7 @@ export function UmbraVideoGenerationControls({
             title="Use an exclusive timed-shot LTX pipeline"
           />
         ) : null}
-        {video.family === 'ltx23' ? (
+        {!dasiwaOnly && video.family === 'ltx23' ? (
           <div className="col-span-2 [&>button]:w-full">
             <ToggleButton
               active={extendedOpen}
@@ -2542,6 +2600,7 @@ export function UmbraVideoGenerationControls({
         ) : null}
 
       </div>
+      </> : null}
     </section>
   );
   const referencePanel = (<>
@@ -2854,7 +2913,7 @@ export function UmbraVideoGenerationControls({
           </div>
         </div>
   </>);
-  const directorPanel = omniForgeOpen || directorEnabled || storyboardOpen || extendedOpen ? (<>
+  const directorPanel = !policyIssue && (omniForgeOpen || directorEnabled || storyboardOpen || extendedOpen) ? (<>
     {omniForgeOpen ? <UmbraLtxOmniForgePanel
       controls={video.ltx.omniForge}
       onChange={(controls) => setLtx('omniForge', controls)}
@@ -2920,13 +2979,13 @@ export function UmbraVideoGenerationControls({
   </>) : null;
   return (<>
     <UmbraVideoWorkspace
-      directorKey={omniForgeOpen ? 'OmniForge' : directorEnabled ? 'DaSiWa Director' : storyboardOpen ? 'Umbra Director' : extendedOpen ? 'LTX Extended' : null}
+      directorKey={policyIssue ? null : omniForgeOpen ? 'OmniForge' : directorEnabled ? 'DaSiWa Director' : storyboardOpen ? 'Umbra Director' : extendedOpen ? 'LTX Extended' : null}
       previewRevision={previewRevision}
       title={`${video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3'} / ${omniForgeOpen ? 'OmniForge' : directorEnabled || storyboardOpen ? 'Director' : extendedOpen ? 'Extended sequence' : video.mode.replaceAll('_', ' ')}`}
-      settings={settingsPanel} references={referencePanel} prompt={promptPanel}
+      settings={settingsPanel} references={policyIssue ? null : referencePanel} prompt={policyIssue ? <p className="text-xs text-amber-100/80">Saved prompts and media are retained while this video route is held.</p> : promptPanel}
       actions={actionPanel} director={directorPanel} preview={previewPanel} review={reviewPanel}
     />
-    {h3ForgeOpen && video.family === 'minimax_h3' && !directorEnabled ? <UmbraH3PromptForgeModal
+    {!policyIssue && h3ForgeOpen && video.family === 'minimax_h3' && !directorEnabled ? <UmbraH3PromptForgeModal
       video={video} prompt={prompt} durationSeconds={videoDurationSeconds} comfyConnected={comfyConnected}
       onApplyPrompt={(draft) => {
         if (prompt.trim()) rememberCurrentPrompt();

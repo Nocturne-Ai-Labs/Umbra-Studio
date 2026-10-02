@@ -47,7 +47,7 @@ export function UmbraVideoRequirementsNotice({ family, referenceMode, directorEn
       const required = family === 'ltx23'
         ? ['LTXDirector', 'LTXDirectorGuide', 'LTXDirectorCropGuides', 'DaSiWa_LTX2LoraLoader', 'VAELoaderKJ', 'DaSiWa_EnhancedVideoCombine', 'LTXVAudioVAEDecode']
         : ['MiniMaxH3SigmaShift', ...(referenceMode ? ['MiniMaxH3ReferenceToVideo'] : []),
-          ...(directorEnabled ? ['MiniMaxH3Director'] : [])];
+          ...(directorEnabled ? ['MiniMaxH3Director', 'MiniMaxH3DirectorGuide'] : [])];
       const missing = await Promise.all(required.map(async (nodeType) => {
         const response = await fetch(`/object_info/${encodeURIComponent(nodeType)}`, { signal: abort.signal, cache: 'no-store' });
         if (response.status === 404) return nodeType;

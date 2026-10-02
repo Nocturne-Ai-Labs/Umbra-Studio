@@ -84,6 +84,7 @@ interface QueuePrompt {
   status: QueuePromptStatus;
   updatedAt: number;
   error: string;
+  policyHold?: string | null;
 }
 
 interface QueueRequest {
@@ -95,6 +96,7 @@ interface QueueRequest {
   failed: number;
   canceled: number;
   status: string;
+  policyHold?: string | null;
   activeIndex: number;
   prompts: QueuePrompt[];
 }
@@ -273,6 +275,7 @@ export interface UmbraVideoReviewJob {
   negativePrompt: string;
   status: QueuePromptStatus;
   error: string;
+  policyHold?: string | null;
   apiWorkflowId: string;
   apiWorkflowName: string;
   generation: PowerPrompterGenerationControls;
@@ -520,6 +523,7 @@ function normalizeVideoReviewJob(value: unknown): UmbraVideoReviewJob | null {
     negativePrompt: String(source.negativePrompt || generation.negativePrompt || ''),
     status,
     error: String(source.error || ''),
+    policyHold: typeof source.policyHold === 'string' ? source.policyHold : null,
     apiWorkflowId: String(source.apiWorkflowId || '').trim(),
     apiWorkflowName: String(source.apiWorkflowName || '').trim(),
     generation,
@@ -560,6 +564,7 @@ function normalizeQueueSnapshot(value: unknown): QueueSnapshot | null {
         failed: toFiniteInteger(entry.failed, 0, 0, Number.MAX_SAFE_INTEGER),
         canceled: toFiniteInteger(entry.canceled, 0, 0, Number.MAX_SAFE_INTEGER),
         status: String(entry.status || 'pending').trim(),
+        policyHold: typeof entry.policyHold === 'string' ? entry.policyHold : null,
         activeIndex: toFiniteInteger(entry.activeIndex, 0, 0, Number.MAX_SAFE_INTEGER),
         prompts: Array.isArray(entry.prompts)
           ? entry.prompts
@@ -571,6 +576,7 @@ function normalizeQueueSnapshot(value: unknown): QueueSnapshot | null {
               prompt: String(prompt.prompt || '').trim(),
               status: String(prompt.status || 'pending').trim() as QueuePromptStatus,
               error: String(prompt.error || '').trim(),
+              policyHold: typeof prompt.policyHold === 'string' ? prompt.policyHold : null,
               updatedAt: toFiniteInteger(prompt.updatedAt, 0, 0, Number.MAX_SAFE_INTEGER),
             }))
           : [],

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Temporary DaSiWa Video Routing
+
+- Default Video to **DaSiWa only**, with the existing H3 Director and LTX-2.3 OmniForge integrations. Hide legacy generation entrypoints and block legacy workflows at selection, compilation, queue dispatch, and the ComfyUI prompt proxy; missing nodes or workflows cannot trigger a native fallback.
+- Retain legacy source, saved controls, custom workflows, queue data, history, and results. Unsupported saved work displays **Held**; loading a legacy saved queue keeps its original generation settings paused and held. Cancellation and viewing previous outputs remain available.
+- Restore the previous generation choices through **Video > Settings > Video routing > All video routes**. Routing changes do not convert saved settings or resume a live video queue; use **Resume** explicitly after rollback. No dependencies or weights are installed by this switch.
+- This policy change uses mocked generation and isolated API checks. Real Dasiwa inference and multi-scene output quality remain unqualified.
+
 ### Workspace Interface Alignment
 
 - Metadata Viewer and Image Analysis now share an image preview, bottom media strip, compact toolbar, and inspector pane with the existing Extras tools. Pan, zoom, Fit, and panel visibility work independently of metadata and analysis results; narrow layouts stack the inspector below the image.
