@@ -24,7 +24,10 @@ export function officialUiTopology(document: any): string {
   let count = 0;
   // Native frontend1.53.6 removes only unlabeled, unconnected widget slots in
   // result.workflow. Normalize that representation without changing the graph.
-  const nativeInputs = (values: any[] = []) => (values || []).filter(input => !(input.widget && input.link === null && !input.label));
+  const nativeInputs = (values: any[] = [], type = '') => (values || []).filter(input =>
+    !(input.widget && input.link === null && !input.label)
+    // The pinned KJNodes adds this optional slot to older H3 workflows.
+    && !(type === 'ModelPreviewOverrideKJ' && input.name === 'audio_vae' && input.type === 'VAE' && input.link == null));
   const id = (value: unknown) => { if ((typeof value === 'string' && value.length > 0 && value.length <= 128) || (typeof value === 'number' && Number.isSafeInteger(value))) return String(value); throw new Error('Official workflow contains an invalid node or link ID.'); };
   const ids = (values?: unknown[] | null) => [...new Set((values || []).map(id))].sort();
   const ports = (values: any[] = [], boundary = false) => (values || []).map(port => {
@@ -40,7 +43,7 @@ export function officialUiTopology(document: any): string {
       if (!node || typeof node.type !== 'string' || !node.type || seen.has(key) || ++count > 8192) throw new Error('Official workflow contains invalid or duplicate nodes.');
       seen.add(key);
       if (node.subgraph) walk(node.subgraph, `${scope}/node:${key}`, depth + 1);
-      return { id: key, type: node.type, inputs: ports(nativeInputs(node.inputs)), outputs: ports(node.outputs) };
+      return { id: key, type: node.type, inputs: ports(nativeInputs(node.inputs, node.type)), outputs: ports(node.outputs) };
     }).sort((a: any, b: any) => a.id.localeCompare(b.id));
     const links = value.links.map((link: any) => {
       const parts = Array.isArray(link) ? link : [link.id, link.origin_id, link.origin_slot, link.target_id, link.target_slot, link.type];
@@ -49,7 +52,7 @@ export function officialUiTopology(document: any): string {
       let slot = parts[4];
       if (target) {
         const input = target.inputs?.[slot];
-        slot = input ? nativeInputs(target.inputs).indexOf(input) : -1;
+        slot = input ? nativeInputs(target.inputs, target.type).indexOf(input) : -1;
         if (slot < 0) throw new Error('Official workflow topology targets a missing native input slot.');
       }
       return [id(parts[0]), id(parts[1]), parts[2], id(parts[3]), slot, parts[5]];
@@ -208,7 +211,15 @@ export function assertOfficialApiRuntime(graph: OfficialApiGraph, objectInfo: Re
     const inputs = { ...required, ...record(schema.input?.optional) };
     for (const name of Object.keys(required)) if (!Object.hasOwn(node.inputs, name)) throw new Error(`Official workflow ${node.class_type} requires ${name}. Its installed schema differs from this capture.`);
     for (const [name, value] of Object.entries(node.inputs)) {
-      const descriptor = inputs[name];
+      let descriptor = inputs[name];
+      // The pinned LTX frontend serializes its DOM widget as an empty string.
+      if (!descriptor && node.class_type === 'LTXDirector' && name === 'timeline_ui' && value === '') continue;
+      // rgthree's dynamic context ports are omitted from object_info.
+      if (!descriptor && node.class_type === 'Context Switch (rgthree)' && /^ctx_\d+$/.test(name)
+        && Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && Number.isInteger(value[1])
+        && objectInfo[graph[value[0]]?.class_type]?.output?.[value[1]] === 'RGTHREE_CONTEXT') {
+        descriptor = ['RGTHREE_CONTEXT'];
+      }
       if (!descriptor) throw new Error(`Official workflow ${node.class_type} no longer accepts ${name}. Capture again with compatible upstream nodes.`);
       if (Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && Number.isInteger(value[1])) {
         const linked = graph[String(value[0])];

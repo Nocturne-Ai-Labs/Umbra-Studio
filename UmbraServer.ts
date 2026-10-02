@@ -17956,7 +17956,8 @@ async function startComfyUIProcess() {
     });
     appendBackendStreamLog('comfyui', 'lifecycle', `Starting: ${config.executable} ${config.args.join(' ')}`);
 
-    const comfyEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONUNBUFFERED: '1' };
+    // Node-pack logs can contain Unicode even on Windows legacy code pages.
+    const comfyEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
   const configuredExternalOutput = resolveConfiguredPath(String(settingsManager.getAppSettings()['comfyui.externalOutputPath'] || '').trim());
     if (configuredExternalOutput) {
       comfyEnv.UMBRA_EXTERNAL_OUTPUT_DIR = resolvePathCandidate(configuredExternalOutput);
