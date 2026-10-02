@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Extras Transparency
+
+- Add **Transparency** beside Image Censor in Extras, with a before/after mask editor and checkerboard preview. Import images, erase or restore pixels with size, hardness and strength controls, pan/zoom, and keep independent masks and Undo/Redo histories when switching images.
+- Use **Auto cutout · CPU** to seed an editable soft-alpha mask with the existing local model. Cancel, switching images, or leaving Transparency stops only its owned worker. Manual editing works without the model or ComfyUI running.
+- Export a separate full-resolution `-transparent.png` with real alpha. Restore and reset preserve the original image's existing transparent pixels; originals are never overwritten. Edits remain in the current app session and are discarded on reload; export PNGs to keep results.
+
 ### Canvas Restored On Desktop And Tablet
 
 - Restore the native Canvas workspace with saved projects, image and mask layers, transforms, erasing, mask tools, snapping, crop controls, restore points, and portable project/PNG export. Existing Canvas projects remain in `User/UmbraUI/CanvasProjects`; no project migration or model download is required to use the editing tools.

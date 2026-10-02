@@ -169,6 +169,36 @@ inputs are processed one image at a time so an entire batch is not loaded into
 VRAM simultaneously. Local clients can choose output folders with the native
 file picker; host-only filesystem actions remain unavailable to remote clients.
 
+### Transparency
+
+Open **Extras > Transparency** and choose **Add images**. Select an image in the
+bottom strip, then use **Erase pixels** or **Restore pixels** on the **Before**
+pane. The red overlay shows the editable removal mask; **After** previews the
+actual transparency over a checkerboard. Toggle **Show editable mask** to hide
+the overlay without changing the result. Adjust **Size**, **Hardness**, and
+**Strength**, or use **Pan image**, zoom, and **Fit image** for finer edits.
+
+Each completed brush gesture is one Undo step. **Reset transparency mask**
+returns to the original alpha and is also undoable. Masks and their histories
+stay independent when switching images or other Extras tools. Restore reveals
+the original pixels; it never fills transparency already present in the source.
+
+Optionally choose **Auto cutout · CPU** to start from the model's soft mask and
+refine it with the brushes. This uses the same installed Python dependencies
+and local `isnet-anime` weights as Canvas background removal; ComfyUI can stay
+stopped. It does not install packages or download weights. **Cancel cutout**,
+switching images, and leaving Transparency stop only that cutout's worker and
+keep the previous mask. Manual masking and PNG export remain available without
+the CPU model.
+
+**Export PNG** downloads a separate `-transparent.png` at the original image
+dimensions with real alpha, including for images whose editing preview is
+downsampled. The imported file is never overwritten. Imports use the browser's
+PNG, JPEG, WebP, AVIF and BMP decoders and accept at most 64 megapixels. Images,
+masks and up to 40 Undo steps per image stay in this app session; reloading the
+page discards them, so export results before reloading. The CPU model's subject
+separation still needs inspection, especially for photographic images.
+
 ## Power Prompter
 
 Power Prompter and Umbra UI share the same model-family pipeline definitions

@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraTransparencyWorkspace } from './UmbraTransparencyWorkspace';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -9,6 +10,7 @@ import {
   CheckCircle2,
   Copy,
   EyeOff,
+  Eraser,
   Film,
   FolderOpen,
   ImageUp,
@@ -125,6 +127,7 @@ function ExtrasToolNavigation({
   const tools: Array<{ id: UmbraExtrasToolMode; label: string; icon: React.ReactNode }> = [
     { id: 'upscale', label: t('extras.upscale'), icon: <ImageUp size={12} /> },
     { id: 'censor', label: t('extras.imageCensor'), icon: <EyeOff size={12} /> },
+    { id: 'transparency', label: 'Transparency', icon: <Eraser size={12} /> },
     { id: 'watermark', label: t('extras.imageWatermark'), icon: <Stamp size={12} /> },
     { id: 'video-watermark', label: t('extras.videoWatermark'), icon: <Video size={12} /> },
     { id: 'gif', label: t('extras.videoToGif'), icon: <Film size={12} /> },
@@ -693,7 +696,8 @@ export function UmbraExtrasWorkspace({
         <div key={tool} data-extras-tool={tool} data-umbra-ui-extras-inspector={tool === 'metadata-scanner' || tool === 'visual-analysis' ? '' : undefined} className={tool === activeTool ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'hidden'}>
           {tool === 'metadata-scanner' ? <ScannerWorkspace hideHeader active={active && tool === activeTool} remoteMode={remoteMode} />
             : tool === 'visual-analysis' ? <WaifuDiffusionWorkspace hideHeader active={active && tool === activeTool} remoteMode={remoteMode} />
-              : isMediaToolMode(tool) ? <UmbraExtrasMediaTools mode={tool} /> : null}
+              : tool === 'transparency' ? <UmbraTransparencyWorkspace active={active && tool === activeTool} />
+                : isMediaToolMode(tool) ? <UmbraExtrasMediaTools mode={tool} /> : null}
         </div>
       ))}
       <div data-extras-tool="upscale" className={activeTool === 'upscale' ? 'contents' : 'hidden'}>

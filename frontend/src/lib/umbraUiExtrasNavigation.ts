@@ -3,6 +3,7 @@ export type UmbraUiExtrasToolId =
   | 'metadata-scanner'
   | 'visual-analysis'
   | 'censor'
+  | 'transparency'
   | 'watermark'
   | 'video-watermark'
   | 'gif';
@@ -16,6 +17,7 @@ const VALID_EXTRAS_TOOLS = new Set<UmbraUiExtrasToolId>([
   'metadata-scanner',
   'visual-analysis',
   'censor',
+  'transparency',
   'watermark',
   'video-watermark',
   'gif',
