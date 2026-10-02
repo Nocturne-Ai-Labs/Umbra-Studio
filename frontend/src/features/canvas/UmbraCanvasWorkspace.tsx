@@ -90,10 +90,10 @@ import {
   fetchUmbraUiInpaintJob,
   failLostUmbraUiInpaintJob,
   isUmbraUiInpaintJobTerminal,
-  removeUmbraUiImageBackground,
   submitUmbraUiInpaintJob,
   type UmbraUiInpaintJob,
 } from '@/lib/umbraUiInpaint';
+import { getUmbraCanvasBackgroundRemovalStatus, removeUmbraCanvasImageBackground, type UmbraCanvasBackgroundRemovalStatus } from '@/lib/umbraUiCanvasBackgroundRemoval';
 import type {
   PowerPrompterDetailerStage,
   PowerPrompterHiresFixControls,
@@ -485,9 +485,20 @@ export function UmbraCanvasWorkspace({
   const [croppingRaster, setCroppingRaster] = React.useState(false);
   const [mergingLayers, setMergingLayers] = React.useState(false);
   const [removingBackground, setRemovingBackground] = React.useState(false);
+  const [cancelingBackgroundRemoval, setCancelingBackgroundRemoval] = React.useState(false);
   const [exportingRaster, setExportingRaster] = React.useState(false);
   const [backgroundRemovalError, setBackgroundRemovalError] = React.useState('');
   const backgroundRemovalRequestRef = React.useRef<AbortController | null>(null);
+  const [backgroundRemovalStatus, setBackgroundRemovalStatus] = React.useState<UmbraCanvasBackgroundRemovalStatus | null>(null);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => { void getUmbraCanvasBackgroundRemovalStatus(controller.signal).then(setBackgroundRemovalStatus).catch(error => {
+      if (!controller.signal.aborted) setBackgroundRemovalStatus({ available: false, provider: 'CPUExecutionProvider', model: 'isnet-anime', reason: String(error.message || error) });
+    }); };
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, []);
   const [archiving, setArchiving] = React.useState(false);
   const [preparingRegion, setPreparingRegion] = React.useState(false);
   const [preparedRegion, setPreparedRegion] = React.useState<UmbraCanvasPreparedRegion | null>(null);
@@ -558,6 +569,7 @@ export function UmbraCanvasWorkspace({
 
   React.useEffect(() => {
     setRemovingBackground(false);
+    setCancelingBackgroundRemoval(false);
     setBackgroundRemovalError('');
     return () => {
       backgroundRemovalRequestRef.current?.abort();
@@ -2391,7 +2403,7 @@ export function UmbraCanvasWorkspace({
     }
   };
   const removeRasterBackground = async () => {
-    if (backgroundRemovalRequestRef.current || !comfyConnected) return;
+    if (backgroundRemovalRequestRef.current || !backgroundRemovalStatus?.available) return;
     const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
     const raster = current.entities.find((entity) => entity.id === current.activeEntityId && entity.kind === 'raster');
     if (!raster || raster.kind !== 'raster' || raster.locked || raster.alphaLocked) return;
@@ -2399,17 +2411,16 @@ export function UmbraCanvasWorkspace({
     const controller = new AbortController();
     backgroundRemovalRequestRef.current = controller;
     setRemovingBackground(true);
+    setCancelingBackgroundRemoval(false);
     setBackgroundRemovalError('');
     let imageUrl = '';
     try {
-      const response = await fetch('/api/umbra-ui/inpaint/models', { cache: 'no-store', signal: controller.signal });
-      const catalog = await response.json();
-      if (!response.ok || catalog?.verified !== true || catalog?.features?.backgroundRemoval !== true) {
-        throw new Error('Background removal requires the Remove Background custom node in ComfyUI. Update your custom nodes and restart ComfyUI.');
-      }
+      const status = await getUmbraCanvasBackgroundRemovalStatus(controller.signal);
+      setBackgroundRemovalStatus(status);
+      if (!status.available) throw new Error(status.reason || 'Canvas CPU background removal is unavailable.');
       const source = await composeUmbraCanvasRasterSourceBlob(frozenRaster);
       controller.signal.throwIfAborted();
-      const result = await removeUmbraUiImageBackground({ image: source, imageName: `${frozenRaster.name}-source.png`, model: 'isnet-anime', signal: controller.signal });
+      const result = await removeUmbraCanvasImageBackground({ image: source, imageName: `${frozenRaster.name}-source.png`, signal: controller.signal });
       const blob = await composeUmbraCanvasCutoutBlob(source, result.blob, frozenRaster.width, frozenRaster.height);
       controller.signal.throwIfAborted();
       imageUrl = URL.createObjectURL(blob);
@@ -2419,12 +2430,15 @@ export function UmbraCanvasWorkspace({
       }
       imageUrl = '';
     } catch (error) {
-      if (!controller.signal.aborted) setBackgroundRemovalError(error instanceof Error ? error.message : 'Background removal failed. The original image was kept.');
+      if (backgroundRemovalRequestRef.current === controller && useUmbraCanvasStore.getState().present.id === current.id && (!controller.signal.aborted || (error instanceof Error && error.name !== 'AbortError'))) {
+        setBackgroundRemovalError(error instanceof Error ? error.message : 'Background removal failed. The original image was kept.');
+      }
     } finally {
       if (imageUrl) URL.revokeObjectURL(imageUrl);
       if (backgroundRemovalRequestRef.current === controller) {
         backgroundRemovalRequestRef.current = null;
         setRemovingBackground(false);
+        setCancelingBackgroundRemoval(false);
       }
     }
   };
@@ -2503,8 +2517,9 @@ export function UmbraCanvasWorkspace({
   const generationResolutionIssue = getUmbraCanvasGenerationResolutionIssue(project.generationBbox, capabilities.resolution);
   const isMaskBrush = tool === 'mask-brush' || tool === 'mask-eraser';
   const isRasterBrush = tool === 'raster-brush' || tool === 'raster-eraser';
-  const backgroundRemovalDisabledReason = removingBackground ? 'Removing background'
-    : !comfyConnected ? 'Launch ComfyUI to remove image backgrounds'
+  const backgroundRemovalDisabledReason = removingBackground ? cancelingBackgroundRemoval ? 'Stopping background removal on CPU' : 'Removing background on CPU'
+    : !backgroundRemovalStatus ? 'Checking CPU background removal'
+      : !backgroundRemovalStatus.available ? backgroundRemovalStatus.reason || 'CPU background removal is unavailable'
       : activeEntity?.kind !== 'raster' ? 'Select an image layer to remove its background'
         : activeEntity.locked ? 'Unlock the image layer before removing its background'
           : activeEntity.alphaLocked ? 'Unlock transparent pixels before removing the background' : '';
@@ -2811,7 +2826,9 @@ export function UmbraCanvasWorkspace({
             </>
           ) : null}
           <button type="button" title="Import image" aria-label="Import image" onClick={() => fileInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-500 hover:border-cyan-300/30 hover:text-cyan-100"><ImagePlus size={15} /></button>
-          <button type="button" title={backgroundRemovalDisabledReason || 'Remove image background'} aria-label="Remove image background" aria-busy={removingBackground} disabled={Boolean(backgroundRemovalDisabledReason)} onClick={() => void removeRasterBackground()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-700">{removingBackground ? <LoaderCircle size={15} className="animate-spin" /> : <Scissors size={15} />}</button>
+          <button type="button" title={backgroundRemovalDisabledReason || 'Remove image background on CPU, preserving soft edges'} aria-label="Remove image background" aria-busy={removingBackground} disabled={Boolean(backgroundRemovalDisabledReason)} onClick={() => void removeRasterBackground()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-700">{removingBackground ? <LoaderCircle size={15} className="animate-spin" /> : <Scissors size={15} />}</button>
+          {removingBackground ? <button type="button" title="Stop this background removal and keep the original layer" aria-label="Cancel background removal" disabled={cancelingBackgroundRemoval} onClick={() => { setCancelingBackgroundRemoval(true); backgroundRemovalRequestRef.current?.abort(); }} className="inline-flex h-9 items-center gap-1 rounded-md border border-white/10 px-2 text-xs text-zinc-300 disabled:opacity-50"><X size={13} />Cancel</button> : null}
+          <span role="status" className="text-[10px] text-zinc-500">{removingBackground ? cancelingBackgroundRemoval ? 'Stopping background removal · CPU' : 'Removing background · CPU' : backgroundRemovalStatus?.available ? 'Background removal · CPU' : !backgroundRemovalStatus ? 'Checking CPU background removal' : 'CPU background removal unavailable'}</span>
           <button type="button" title="Export image layer PNG" aria-label="Export image layer PNG" disabled={exportingRaster || activeEntity?.kind !== 'raster'} onClick={() => void exportRasterPng()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-black/35 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-700">{exportingRaster ? <LoaderCircle size={15} className="animate-spin" /> : <Download size={15} />}</button>
           <button type="button" title="Import mask image" aria-label="Import mask image" onClick={() => maskInputRef.current?.click()} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-rose-300/15 bg-black/35 text-rose-300/55 hover:border-rose-300/35 hover:text-rose-100"><LassoSelect size={15} /></button>
           <button type="button" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!canUndo} className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-zinc-500 disabled:text-zinc-800"><Undo2 size={15} /><kbd aria-hidden="true" className="absolute bottom-0.5 right-0.5 min-w-3 rounded-sm bg-black/80 px-0.5 text-center font-mono text-[6px] font-black leading-3 tracking-normal text-zinc-400">Z</kbd></button>

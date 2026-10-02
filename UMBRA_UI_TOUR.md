@@ -63,9 +63,10 @@ denoise behavior. Accepted results can continue into IMG2IMG for a final pass.
 
 Canvas is an experimental desktop/tablet workspace for composing image layers,
 painting masks, and choosing a generation region on one continuous canvas.
-Its editing, project, and export tools work while ComfyUI is offline. Generation
-and model-based background removal require the matching ComfyUI tools and
-models. Canvas is not available in Phone Remote or its Gallery Send menus;
+Its editing, project, export, and CPU background-removal tools work while
+ComfyUI is stopped. Background removal needs the installed Python dependencies
+and local model described below; generation needs the matching ComfyUI tools
+and models. Canvas is not available in Phone Remote or its Gallery Send menus;
 opening a saved Canvas navigation state on a phone returns to TXT2IMG.
 
 1. Open **Canvas** in Umbra UI, then choose **New Canvas project** or
@@ -94,14 +95,21 @@ opening a saved Canvas navigation state on a phone returns to TXT2IMG.
    pending jobs and staging previews. **Export image layer PNG** saves the
    selected raster layer's image as a PNG.
 
-For background removal, launch ComfyUI, select an unlocked image layer, and
-choose **Remove image background**. The `Image Rembg (Remove Background)` custom
-node and `isnet-anime` model must be available. A successful removal adds a
+For background removal, select an unlocked image layer and choose **Remove
+image background**. Canvas runs this feature exclusively on CPU. Its status
+reads **Background removal · CPU** when the installed environment is ready.
+It needs `rembg`, ONNX Runtime, NumPy, and Pillow in Umbra's managed ComfyUI
+Python environment, plus the local `Tools/ComfyUI/models/rembg/isnet-anime.onnx`
+model. Missing dependencies or weights disable the action with an explanation;
+this feature does not install or download them. A successful removal adds a
 cutout layer and hides the original; Undo restores the original, and Redo
 recovers the cutout. Existing transparent and erased pixels remain transparent.
-Inspect hair and fine edges before using the result: the current post-processing
-produces hard mask edges. Switching projects discards the pending result,
-although its ComfyUI inference may continue to completion.
+The cutout preserves the model's soft alpha, including fine edge transitions.
+Inspect the result before exporting; subject separation still depends on the
+image and model. **Cancel** stops this cutout's CPU worker and keeps the source.
+While the worker stops, the status reads **Stopping background removal · CPU**.
+Opening another project also stops the pending worker and discards its result.
+Image and video generation retain their existing execution settings.
 
 Close **Prompt**, **Generation**, or **Layers** to give the canvas more room.
 On a short window, **Hide Strip** also frees space. **Fit visible content**
@@ -127,10 +135,11 @@ document's referenced assets rather than unrelated historical image files.
 Canvas is not ready for feedback. Current local checks cover editing, saved
 project recovery, exports, failure handling, and simulated desktop/tablet
 layouts, including a synthetic 25-layer 4K project. Actual `isnet-anime`
-background removal was checked on illustrated portrait fixtures using CPU
-inference, including alpha preservation, Undo/Save/Redo, reopen, PNG export,
-repeat requests, stale-result protection, and failure handling. This does not
-qualify photographic subjects, GPU background-removal acceleration, fresh
+background removal was checked on illustrated portrait fixtures using explicit
+CPU inference with ComfyUI stopped, including soft alpha and source-transparency
+preservation, Undo/Save/Redo, reopen, identical PNG exports, repeat requests,
+live worker cancellation, project-switch protection, failure handling, and
+tablet control reachability. This does not qualify photographic subjects, fresh
 image generation, or physical touch/pen/pinch interaction. Complete localization
 and broader model-specific documentation are pending.
 

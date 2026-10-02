@@ -117,6 +117,7 @@ import { UmbraCanvasStudioConflictError, UmbraUiCanvasStudioProjectService } fro
 import { UmbraUiCensorReviewService } from './backend/UmbraUiCensorReviewService';
 import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
 import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
+import { UmbraUiCanvasBackgroundRemovalService } from './backend/UmbraUiCanvasBackgroundRemovalService';
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
 import { UmbraUiImg2ImgCompletionReceipts } from './backend/UmbraUiImg2ImgCompletionReceipts';
 import {
@@ -311,6 +312,7 @@ const gzipAsync = promisify(gzip);
 
 const SOURCE_DIR = import.meta.dir;
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
+const canvasBackgroundRemoval = new UmbraUiCanvasBackgroundRemovalService(ROOT_DIR, SOURCE_DIR);
 const censorReviewService = new UmbraUiCensorReviewService(ROOT_DIR, SOURCE_DIR);
 const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
 const SOURCE_PUBLIC_DIR = join(SOURCE_DIR, 'public');
@@ -21489,6 +21491,30 @@ async function handleUmbraUiBackgroundRemoval(req: Request): Promise<Response> {
   }
 }
 
+async function handleUmbraCanvasCpuBackgroundRemoval(req: Request): Promise<Response> {
+  try {
+    const form = await req.formData();
+    const image = form.get('image');
+    if (!(image instanceof File) || image.size <= 0 || !UMBRA_UI_INPAINT_IMAGE_EXTENSIONS.has(extname(image.name).toLowerCase())) {
+      return json({ success: false, error: 'Choose a valid image for Canvas CPU background removal.' }, 400);
+    }
+    const result = await canvasBackgroundRemoval.remove({
+      requestId: String(req.headers.get('X-Umbra-Canvas-Request') || ''),
+      image: () => image.arrayBuffer(),
+      signal: req.signal,
+    });
+    return new Response(Buffer.from(result.bytes), { headers: {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'no-store',
+      'X-Umbra-Background-Filename': result.filename,
+      'X-Umbra-Background-Provider': result.provider,
+      'X-Umbra-Background-Mask': 'soft',
+    } });
+  } catch (error) {
+    return json({ success: false, error: String((error as Error)?.message || error || 'Canvas background removal failed.') }, (error as Error)?.name === 'AbortError' ? 499 : 500);
+  }
+}
+
 async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
   try {
     const form = await req.formData();
@@ -38233,6 +38259,23 @@ const server = Bun.serve<UmbraSocketData>({
 
       if (path === '/api/umbra-ui/inpaint/remove-background' && method === 'POST') {
         return handleUmbraUiBackgroundRemoval(req);
+      }
+
+      if (path === '/api/umbra-ui/canvas/background-removal/status' && method === 'GET') {
+        return json(await canvasBackgroundRemoval.status());
+      }
+
+      if (path === '/api/umbra-ui/canvas/background-removal/cancel' && method === 'POST') {
+        try {
+          const body = await req.json() as { requestId?: string };
+          return json({ success: true, ...await canvasBackgroundRemoval.cancel(String(body.requestId || '')) });
+        } catch (error) {
+          return json({ success: false, error: String((error as Error)?.message || error) }, 400);
+        }
+      }
+
+      if (path === '/api/umbra-ui/canvas/remove-background' && method === 'POST') {
+        return handleUmbraCanvasCpuBackgroundRemoval(req);
       }
 
       if (path === '/api/umbra-ui/canvas/save' && method === 'POST') {

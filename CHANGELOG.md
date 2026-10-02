@@ -7,6 +7,7 @@
 - Restore the native Canvas workspace with saved projects, image and mask layers, transforms, erasing, mask tools, snapping, crop controls, restore points, and portable project/PNG export. Existing Canvas projects remain in `User/UmbraUI/CanvasProjects`; no project migration or model download is required to use the editing tools.
 - Open **Prompt**, **Generation**, or **Layers** from the Canvas toolbar. Close those panels or use **Hide Strip** to free editing space in short windows. See the [Canvas walkthrough](UMBRA_UI_TOUR.md#canvas) for project saves, recovery, tools, and exports.
 - Keep Canvas hidden in Phone Remote, including Gallery Send destinations. A saved Canvas navigation state opens TXT2IMG on a phone. Desktop and tablet Gallery handoffs remain available.
+- Run Canvas background removal exclusively on CPU using the installed `isnet-anime` model and Python environment, including while ComfyUI is stopped. Show CPU readiness or a missing-dependency explanation. Image/video generation and other surfaces retain their existing execution settings.
 
 ### Canvas Reliability
 
@@ -15,6 +16,7 @@
 - Upload a shared temporary image once when duplicate layers are saved, retaining every layer's identity and transforms. Missing sources still block the save; existing request-size limits remain in place for projects with many distinct image payloads.
 - Keep failed-save drafts open with **Retry Save**. A conflicting saved revision exposes **Save project as a new copy** and **Reload saved project**, which asks before discarding the local draft.
 - Fix missing cutout pixels after Undo → Save → Redo: retain immutable saved image assets for open editing histories until project deletion. Save as Copy includes only current document assets. Repeated pixel edits can increase project storage.
+- Preserve the background model's soft alpha rather than thresholding it into a hard mask. Add **Cancel** and stop only the request's isolated CPU worker, including on project changes. Keep original pixels, source alpha, and stale-result/history guards intact. Missing weights or dependencies trigger no automatic download or installation.
 
 ### Video Workspace
 
@@ -24,8 +26,8 @@
 
 - Local verification covers project create/open/save/reload, asset recovery, transforms and masks, crop/merge undo, PNG and portable archive export/import, corrupt imports, failed saves, conflicts, project-scoped autosave, delayed edit races, and desktop/tablet layouts. A synthetic project with 25 shared 4096-by-4096 raster layers remains editable and saves without coordinate drift.
 - Frontend types, lint, production build, pipeline audit, focused persistence/editing tests, and an independent audit pass. The image-upload optimization keeps the existing storage format and generation pipeline contracts.
-- Actual `isnet-anime` background removal passed on illustrated portrait fixtures with CPU inference: original dimensions and transparency, recoverable cutout layers, Undo/Save/Redo, reopen and identical PNG export, repeated requests, and failure handling. Project changes discard stale cutouts but do not stop their ComfyUI inference. Current mask post-processing produces hard edges; inspect fine hair before accepting a cutout.
-- **Canvas remains experimental and is not ready for feedback.** Photographic-subject removal, GPU background-removal acceleration, and fresh GPU generation remain unqualified. Tablet layouts were checked in browser emulation; physical touch and pinch/pen interaction remain unqualified. Complete localization and broader model-specific documentation remain pending.
+- Actual CPU-only `isnet-anime` removal passed on illustrated portrait fixtures with ComfyUI stopped: original dimensions and transparency, soft alpha, recoverable cutout layers, Undo/Save/Redo, reopen and identical PNG export, repeated requests, and failure handling. Live Cancel and project-switch tests confirmed worker termination, including the Windows interpreter and wrapper; tablet controls were checked in browser emulation. Inspect cutouts before accepting them; this is limited model-quality qualification.
+- **Canvas remains experimental and is not ready for feedback.** Photographic-subject removal and fresh GPU generation remain unqualified. Physical touch and pinch/pen interaction remain unqualified. Complete localization and broader model-specific documentation remain pending.
 - **Video generation remains in beta.** The layout checks use simulated jobs and media; they do not establish fresh GPU rendering qualification for LTX, WAN, MiniMax H3, or advanced model combinations.
 
 ## v0.32.44 - OmniForge, Live Gallery Folders, And Media Workflow Updates
