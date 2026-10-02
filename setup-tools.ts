@@ -17,6 +17,7 @@ import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate }
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
 import { readManagedToolRequirements, requirementsForManagedNode } from './setup/ManagedToolRequirements';
 import { repairManagedNodeCheckout } from './setup/ManagedNodeRepair';
+import { repairManagedComfyCheckout } from './setup/ManagedComfyCore';
 import { inspectManagedDependencies, inspectManagedNode } from './updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from './shared/appUpdate';
 
@@ -2304,21 +2305,7 @@ async function repairManagedComfyCore(): Promise<void> {
         return;
     }
     if (!isOwnGitCheckout(toolDir)) throw new Error('Existing ComfyUI is not an independent managed Git checkout. Its files were preserved.');
-    const checkedGit = (args: string[]) => {
-        const result = spawnSync('git', args, { cwd: toolDir, encoding: 'utf8', windowsHide: true });
-        if (result.status !== 0) throw new Error(`Managed ComfyUI repair failed: git ${args[0]}. ${String(result.stderr || '').trim()}`);
-        return result.stdout.trim();
-    };
-    if (checkedGit(['status', '--porcelain', '--untracked-files=no'])) throw new Error('ComfyUI contains local tracked changes or modified submodules. They were preserved; review them before repairing the core/frontend bundle.');
-    const previous = checkedGit(['rev-parse', 'HEAD']);
-    log('->', `ComfyUI prior commit retained for recovery: ${previous}`);
-    if (compareUmbraVersions(status.comfyui.version || '0.0.0', minimum) < 0) {
-        checkedGit(['fetch', '--no-tags', cfg.repo!, `v${minimum}`]);
-        const target = checkedGit(['rev-parse', 'FETCH_HEAD']);
-        const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', previous, target], { cwd: toolDir, windowsHide: true, stdio: 'ignore' });
-        if (ancestor.status !== 0) throw new Error('ComfyUI has divergent or local commits. Its version was preserved; review it before retrying.');
-        checkedGit(['checkout', '--detach', target]);
-    }
+    repairManagedComfyCheckout(toolDir, cfg.repo!, status.comfyui.version, minimum, { log: (message) => log('->', message) });
     // Keep already-newer source and use its own pinned requirements. No reset, forced checkout or branch rewrite.
     if (!setupPythonEnv(toolDir, cfg.id) || !refreshComfyPinnedPackages(toolDir)) exitWithExistingVerifyFailure();
 }

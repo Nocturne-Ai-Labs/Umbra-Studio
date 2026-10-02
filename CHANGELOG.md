@@ -82,6 +82,7 @@
 - Fixed: native capture admission rejects foreign node IDs/classes, changed direct wiring, inactive execution nodes and unsafe numeric seeds; original exports retain their exact text and hashes.
 - Fixed: video route changes preserve the latest controls and prompts, wait for pending media/Forge work and expose recovery after uncertain acknowledgements.
 - Fixed: managed repair preserves local/divergent checkouts and interrupted progress, requires idle runtime evidence and separates installed files from native/GPU readiness.
+- Fixed: managed ComfyUI repair accepts separate upstream release branches only after verifying the clean installed commit against its official release tag; local commits and file collisions still hold repair.
 - Fixed: Canvas autosave, delayed edits, saved cutouts and Undo/Save/Redo preserve newer project state and recoverable assets.
 - Improved: Model Manager and Datasets use Gallery-style browsing; Metadata Viewer, Image Analysis and Model Merge share more compact workspace controls.
 - Improved: Extras transparency editing exports real alpha PNGs; Canvas and Extras CPU cutouts preserve soft alpha with request-scoped cancellation.
