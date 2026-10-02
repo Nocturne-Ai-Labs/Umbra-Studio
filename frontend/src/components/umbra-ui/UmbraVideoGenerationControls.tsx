@@ -11,7 +11,6 @@ import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/um
 import React from 'react';
 import {
   ChevronDown,
-  Clapperboard,
   Clock3,
   Database,
   Film,
@@ -54,6 +53,7 @@ import type {
   UmbraVideoModelCatalog,
   UmbraVideoQueueOptions,
 } from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
+import { UmbraVideoWorkspace } from '@/components/umbra-ui/UmbraVideoWorkspace';
 import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePromptEditor';
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraLtxStoryboardPanel } from '@/components/umbra-ui/UmbraLtxStoryboardPanel';
@@ -132,6 +132,9 @@ const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 
 const labelClass = 'text-[9px] font-black uppercase tracking-[0.16em] text-zinc-500';
 
 interface UmbraVideoGenerationControlsProps {
+  reviewPanel: React.ReactNode;
+  previewPanel: React.ReactNode;
+  previewRevision: number;
   workflows: ApiWorkflowItem[];
   catalog: UmbraVideoModelCatalog;
   queueSummary: UmbraQueueSummary;
@@ -782,6 +785,9 @@ function MediaSourceField({ kind, label, path, stagedName = '', onChange, onUplo
 }
 
 export function UmbraVideoGenerationControls({
+  reviewPanel,
+  previewPanel,
+  previewRevision,
   workflows,
   catalog,
   queueSummary,
@@ -1880,23 +1886,14 @@ export function UmbraVideoGenerationControls({
 
   const samplerOptions = catalog.samplers.length > 0 ? catalog.samplers : ['euler', 'uni_pc'];
   const schedulerOptions = catalog.schedulers.length > 0 ? catalog.schedulers : ['simple', 'beta'];
-  return (
-    <>
-    <section data-umbra-ui-video-controls="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar">
-      <div className="mb-3 flex items-center gap-2">
-        <Clapperboard size={13} className="text-fuchsia-300" />
-        <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Video Generation</h2>
-        <button
-          type="button"
-          onClick={onRefreshCatalog}
-          disabled={catalog.loading}
-          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-600 hover:border-fuchsia-300/30 hover:text-fuchsia-200"
-          title="Refresh video model catalog"
-        >
-          <RefreshCw size={11} className={catalog.loading ? 'animate-spin' : ''} />
+  const settingsPanel = (
+    <section data-umbra-ui-video-controls="" className="min-h-0 flex-1 overflow-y-auto bg-black/15 p-3 custom-scrollbar">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className={labelClass}>Model catalog</span>
+        <button type="button" onClick={onRefreshCatalog} disabled={catalog.loading} title="Refresh video model catalog" className="inline-flex h-7 w-7 items-center justify-center rounded border border-white/10 text-zinc-500 hover:text-fuchsia-200 disabled:opacity-40">
+          <RefreshCw size={12} className={catalog.loading ? 'animate-spin' : ''} />
         </button>
       </div>
-
       <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
         <ToggleButton active={video.family === 'wan22'} label="Wan 2.2" onClick={() => setFamily('wan22')} />
         <ToggleButton active={video.family === 'ltx23'} label="LTX-2.3" onClick={() => setFamily('ltx23')} />
@@ -1996,274 +1993,6 @@ export function UmbraVideoGenerationControls({
 
       <div className="space-y-3">
         {pipelineMatch.error ? <div className="font-mono text-[9px] leading-relaxed text-red-300/80">{pipelineMatch.error}</div> : null}
-
-        {omniForgeOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? null : extendedOpen ? (
-          <VideoAccordion
-            title="Extended Starting Frame"
-            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
-            summary={startsUmbraLtxExtendedFromImage(video) ? 'image guided' : 'text only'}
-            accent="fuchsia"
-            defaultOpen={!video.sourceImagePath}
-          >
-            <FrameSourceField
-              label="Optional First Frame"
-              path={video.sourceImagePath}
-              previewUrl={sourcePreviewUrl}
-              onChange={(path) => {
-                setVideo((current) => ({
-                  ...current,
-                  mode: path ? 'image_to_video' : 'text_to_video',
-                  sourceImagePath: path,
-                  sourceImageName: '',
-                  sourceWidth: 0,
-                  sourceHeight: 0,
-                }));
-                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
-              }}
-              onDimensions={(width, height) => setVideo((current) => ({
-                ...current,
-                sourceWidth: width,
-                sourceHeight: height,
-              }))}
-              onClear={() => {
-                setVideo((current) => ({
-                  ...current,
-                  mode: 'text_to_video',
-                  sourceImagePath: '',
-                  sourceImageName: '',
-                  sourceWidth: 0,
-                  sourceHeight: 0,
-                }));
-                setSourcePreviewUrl('');
-              }}
-            />
-            <p className="mt-2 font-mono text-[8px] leading-relaxed text-zinc-600">
-              Leave empty for text-to-video. When selected, clip 1 starts from this image and every later clip starts from the preceding final frame.
-            </p>
-          </VideoAccordion>
-        ) : video.mode === 'reference_to_video' ? (
-          <VideoAccordion
-            title="Reference Images"
-            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
-            summary={[video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).length ? `${[video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).length} attached` : '1 to 3 images'}
-            accent="fuchsia"
-            defaultOpen={!video.sourceImagePath}
-          >
-            <p className="mb-2 rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
-              One continuous MiniMax H3 shot. Reference notes preserve identity, wardrobe, style, or environment; the shot direction below controls camera and motion.
-            </p>
-            <FrameSourceField
-              label="Reference Image 1"
-              path={video.sourceImagePath}
-              previewUrl={sourcePreviewUrl}
-              onChange={(path) => {
-                setVideo((current) => ({ ...current, sourceImagePath: path, sourceImageName: '', sourceWidth: 0, sourceHeight: 0 }));
-                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
-              }}
-              onDimensions={(width, height) => setVideo((current) => ({ ...current, sourceWidth: width, sourceHeight: height }))}
-              onClear={() => { setVideo((current) => ({ ...current, sourceImagePath: '', sourceImageName: '', sourceWidth: 0, sourceHeight: 0 })); setSourcePreviewUrl(''); }}
-            />
-            <label className="mb-2 block pl-[80px] pr-7">
-              <span className={labelClass}>Reference note (optional)</span>
-              <input value={video.minimaxH3.referenceNotes[0]} onChange={(event) => setMiniMaxReferenceNote(0, event.target.value)} placeholder="e.g. preserve character identity and jacket" className={inputClass} />
-            </label>
-            <FrameSourceField
-              label="Reference Image 2 (optional)"
-              path={video.middleImagePath}
-              onChange={(path) => setVideo((current) => ({ ...current, middleImagePath: path, middleImageName: '' }))}
-              onClear={() => setVideo((current) => ({ ...current, middleImagePath: '', middleImageName: '' }))}
-            />
-            <label className="mb-2 block pl-[80px] pr-7">
-              <span className={labelClass}>Reference note (optional)</span>
-              <input value={video.minimaxH3.referenceNotes[1]} onChange={(event) => setMiniMaxReferenceNote(1, event.target.value)} placeholder="e.g. preserve the environment and lighting" className={inputClass} />
-            </label>
-            <FrameSourceField
-              label="Reference Image 3 (optional)"
-              path={video.lastImagePath}
-              onChange={(path) => setVideo((current) => ({ ...current, lastImagePath: path, lastImageName: '' }))}
-              onClear={() => setVideo((current) => ({ ...current, lastImagePath: '', lastImageName: '' }))}
-            />
-            <label className="mb-2 block pl-[80px] pr-7">
-              <span className={labelClass}>Reference note (optional)</span>
-              <input value={video.minimaxH3.referenceNotes[2]} onChange={(event) => setMiniMaxReferenceNote(2, event.target.value)} placeholder="e.g. preserve the color palette and set dressing" className={inputClass} />
-            </label>
-            <div className="mt-2 max-w-xs">
-              <SelectField
-                label="Reference Image Fit"
-                value={video.minimaxH3.referenceImageSize}
-                values={['match', 'max']}
-                onChange={(value) => setMiniMaxH3('referenceImageSize', value === 'max' ? 'max' : 'match')}
-              />
-            </div>
-          </VideoAccordion>
-        ) : video.mode === 'image_to_video' ? (
-          <VideoAccordion
-            title="Frame Guidance"
-            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
-            summary={video.frameGuideMode.replaceAll('_', ' ')}
-            accent="fuchsia"
-            defaultOpen={!video.sourceImagePath}
-          >
-            {video.family === 'minimax_h3' ? <div className="mb-2 grid grid-cols-2 gap-1">
-              <ToggleButton active={video.frameGuideMode === 'first'} label="First" onClick={() => setCommon('frameGuideMode', 'first')} />
-              <ToggleButton active={video.frameGuideMode === 'first_last'} label="First + Last" onClick={() => setCommon('frameGuideMode', 'first_last')} />
-            </div> : <div className="mb-2 grid grid-cols-3 gap-1">
-              <ToggleButton active={video.frameGuideMode === 'first'} label="First" onClick={() => setCommon('frameGuideMode', 'first')} />
-              <ToggleButton active={video.frameGuideMode === 'first_last'} label="First + Last" onClick={() => setCommon('frameGuideMode', 'first_last')} />
-              <ToggleButton active={video.frameGuideMode === 'first_middle_last'} label="First + Mid + Last" onClick={() => setCommon('frameGuideMode', 'first_middle_last')} />
-            </div>}
-            <FrameSourceField
-              label="First Frame"
-              path={video.sourceImagePath}
-              previewUrl={sourcePreviewUrl}
-              onChange={(path) => {
-                setVideo((current) => ({
-                  ...current,
-                  sourceImagePath: path,
-                  sourceImageName: '',
-                  sourceWidth: 0,
-                  sourceHeight: 0,
-                }));
-                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
-              }}
-              onDimensions={(width, height) => setVideo((current) => ({ ...current, sourceWidth: width, sourceHeight: height }))}
-              onClear={() => {
-                setVideo((current) => ({
-                  ...current,
-                  sourceImagePath: '',
-                  sourceImageName: '',
-                  sourceWidth: 0,
-                  sourceHeight: 0,
-                }));
-                setSourcePreviewUrl('');
-              }}
-            />
-            {video.family !== 'minimax_h3' && video.frameGuideMode === 'first_middle_last' ? <FrameSourceField
-              label="Middle Frame"
-              path={video.middleImagePath}
-              onChange={(path) => setVideo((current) => ({ ...current, middleImagePath: path, middleImageName: '' }))}
-              onClear={() => setVideo((current) => ({ ...current, middleImagePath: '', middleImageName: '' }))}
-            /> : null}
-            {video.frameGuideMode !== 'first' ? <FrameSourceField
-              label="Last Frame"
-              path={video.lastImagePath}
-              onChange={(path) => setVideo((current) => ({ ...current, lastImagePath: path, lastImageName: '' }))}
-              onClear={() => setVideo((current) => ({ ...current, lastImagePath: '', lastImageName: '' }))}
-            /> : null}
-          </VideoAccordion>
-        ) : null}
-
-        {omniForgeOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? null : <VideoAccordion
-          title="Media Inputs"
-          icon={<Video size={12} className="text-cyan-300" />}
-          summary={video.sourceAudioPath ? 'audio attached' : video.mode === 'video_to_video' ? 'source video' : 'optional audio'}
-          accent="cyan"
-          defaultOpen={video.mode === 'video_to_video' && !video.sourceVideoPath}
-        >
-          {video.mode === 'video_to_video' ? <>
-            <MediaSourceField
-              kind="video"
-              label="Source Video"
-              path={video.sourceVideoPath}
-              stagedName={video.sourceVideoName}
-              onChange={(path) => setVideo((current) => ({
-                ...current,
-                sourceVideoPath: path,
-                sourceVideoName: '',
-                sourceWidth: 0,
-                sourceHeight: 0,
-              }))}
-              onUploaded={(path, name) => setVideo((current) => ({
-                ...current,
-                sourceVideoPath: path,
-                sourceVideoName: name,
-                sourceWidth: 0,
-                sourceHeight: 0,
-              }))}
-              onDimensions={(width, height) => setVideo((current) => ({ ...current, sourceWidth: width, sourceHeight: height }))}
-              onClear={() => setVideo((current) => ({
-                ...current,
-                sourceVideoPath: '',
-                sourceVideoName: '',
-                sourceWidth: 0,
-                sourceHeight: 0,
-              }))}
-            />
-            <div className="grid gap-2 border-t border-white/[0.07] py-2 sm:grid-cols-[minmax(0,1fr)_88px_150px] sm:items-end">
-              <label className="space-y-1.5">
-                <span className={labelClass}>Transformation Strength</span>
-                <input
-                  type="range"
-                  min={0.01}
-                  max={1}
-                  step={0.01}
-                  value={video.denoise}
-                  onChange={(event) => setCommon('denoise', Number(event.target.value))}
-                  className="h-9 w-full accent-fuchsia-400"
-                />
-              </label>
-              <NumberField label="Denoise" value={video.denoise} min={0.01} max={1} step={0.01} onChange={(value) => setCommon('denoise', value)} />
-              <ToggleButton
-                active={video.preserveSourceAudio}
-                label="Preserve Source Audio"
-                onClick={() => setCommon('preserveSourceAudio', !video.preserveSourceAudio)}
-              />
-            </div>
-          </> : null}
-          <MediaSourceField
-            kind="audio"
-            label="Audio Track"
-            path={video.sourceAudioPath}
-            onChange={(path) => setVideo((current) => ({ ...current, sourceAudioPath: path, sourceAudioName: '' }))}
-            onUploaded={(path, name) => setVideo((current) => ({ ...current, sourceAudioPath: path, sourceAudioName: name }))}
-            onClear={() => setVideo((current) => ({ ...current, sourceAudioPath: '', sourceAudioName: '' }))}
-          />
-        </VideoAccordion>}
-
-        {extendedOpen ? (
-          <div className="border border-cyan-300/15 bg-cyan-500/[0.035] px-3 py-2.5">
-            <span className="block text-[9px] font-black uppercase tracking-[0.14em] text-cyan-100">
-              Sequence prompts are edited in LTX Extended
-            </span>
-            <span className="mt-1 block font-mono text-[8px] leading-relaxed text-zinc-500">
-              Every clip has its own exact prompt and duration. The negative prompt below applies to the complete sequence.
-            </span>
-          </div>
-        ) : <>
-        {video.family === 'minimax_h3' && !directorEnabled ? <button type="button" className="inline-flex h-9 items-center gap-2 self-start rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100 hover:bg-fuchsia-500/10" onClick={() => setH3ForgeOpen(true)} title="Draft a prompt without enabling Director">
-          <Sparkles size={14} /> Prompt Forge
-        </button> : null}
-        <UmbraPositivePromptEditor
-          segments={promptSegments}
-          activeSegmentId={activePromptSegmentId}
-          onChange={setPromptSegments}
-          onActiveSegmentChange={setActivePromptSegmentId}
-          heading={video.mode === 'reference_to_video' ? 'Reference Shot Direction' : 'Video Prompt'}
-          history={promptHistory}
-          onRememberCurrent={rememberCurrentPrompt}
-          onRestoreHistory={restorePromptHistoryEntry}
-          onRemoveHistory={removePromptHistoryEntry}
-          onClearHistory={clearPromptHistory}
-          onSubmit={() => { void handleQueue(); }}
-          accent="fuchsia"
-        />
-        </>}
-        {video.family === 'minimax_h3' ? (
-          <div className="border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-fuchsia-100/70">
-            {video.minimaxH3.director.enabled ? 'DaSiWa Director uses the prompt and reference slots shown in its panel.' : 'MiniMax H3 uses one native audio-video prompt.'} Negative prompting is not part of this workflow.
-          </div>
-        ) : (
-          <label className="block space-y-1.5">
-            <span className={labelClass}>Negative Prompt</span>
-            <textarea
-              value={negativePrompt}
-              onChange={(event) => setNegativePrompt(event.target.value)}
-              onKeyDown={(event) => handlePromptKeyDown(event, setNegativePrompt)}
-              placeholder="Artifacts and motion failures to avoid"
-              className={`${inputClass} min-h-20 resize-y leading-relaxed`}
-            />
-          </label>
-        )}
 
         <VideoAccordion
           title="Generation Settings"
@@ -2812,12 +2541,289 @@ export function UmbraVideoGenerationControls({
           </div>
         ) : null}
 
-        <div className="border-t border-white/10 pt-3">
+      </div>
+    </section>
+  );
+  const referencePanel = (<>
+        {omniForgeOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? null : extendedOpen ? (
+          <VideoAccordion
+            title="Extended Starting Frame"
+            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
+            summary={startsUmbraLtxExtendedFromImage(video) ? 'image guided' : 'text only'}
+            accent="fuchsia"
+            defaultOpen={!video.sourceImagePath}
+          >
+            <FrameSourceField
+              label="Optional First Frame"
+              path={video.sourceImagePath}
+              previewUrl={sourcePreviewUrl}
+              onChange={(path) => {
+                setVideo((current) => ({
+                  ...current,
+                  mode: path ? 'image_to_video' : 'text_to_video',
+                  sourceImagePath: path,
+                  sourceImageName: '',
+                  sourceWidth: 0,
+                  sourceHeight: 0,
+                }));
+                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
+              }}
+              onDimensions={(width, height) => setVideo((current) => ({
+                ...current,
+                sourceWidth: width,
+                sourceHeight: height,
+              }))}
+              onClear={() => {
+                setVideo((current) => ({
+                  ...current,
+                  mode: 'text_to_video',
+                  sourceImagePath: '',
+                  sourceImageName: '',
+                  sourceWidth: 0,
+                  sourceHeight: 0,
+                }));
+                setSourcePreviewUrl('');
+              }}
+            />
+            <p className="mt-2 font-mono text-[8px] leading-relaxed text-zinc-600">
+              Leave empty for text-to-video. When selected, clip 1 starts from this image and every later clip starts from the preceding final frame.
+            </p>
+          </VideoAccordion>
+        ) : video.mode === 'reference_to_video' ? (
+          <VideoAccordion
+            title="Reference Images"
+            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
+            summary={[video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).length ? `${[video.sourceImagePath, video.middleImagePath, video.lastImagePath].filter(Boolean).length} attached` : '1 to 3 images'}
+            accent="fuchsia"
+            defaultOpen={!video.sourceImagePath}
+          >
+            <p className="mb-2 rounded-md border border-fuchsia-300/20 bg-fuchsia-500/[0.045] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-zinc-400">
+              One continuous MiniMax H3 shot. Reference notes preserve identity, wardrobe, style, or environment; the shot direction below controls camera and motion.
+            </p>
+            <FrameSourceField
+              label="Reference Image 1"
+              path={video.sourceImagePath}
+              previewUrl={sourcePreviewUrl}
+              onChange={(path) => {
+                setVideo((current) => ({ ...current, sourceImagePath: path, sourceImageName: '', sourceWidth: 0, sourceHeight: 0 }));
+                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
+              }}
+              onDimensions={(width, height) => setVideo((current) => ({ ...current, sourceWidth: width, sourceHeight: height }))}
+              onClear={() => { setVideo((current) => ({ ...current, sourceImagePath: '', sourceImageName: '', sourceWidth: 0, sourceHeight: 0 })); setSourcePreviewUrl(''); }}
+            />
+            <label className="mb-2 block pl-[80px] pr-7">
+              <span className={labelClass}>Reference note (optional)</span>
+              <input value={video.minimaxH3.referenceNotes[0]} onChange={(event) => setMiniMaxReferenceNote(0, event.target.value)} placeholder="e.g. preserve character identity and jacket" className={inputClass} />
+            </label>
+            <FrameSourceField
+              label="Reference Image 2 (optional)"
+              path={video.middleImagePath}
+              onChange={(path) => setVideo((current) => ({ ...current, middleImagePath: path, middleImageName: '' }))}
+              onClear={() => setVideo((current) => ({ ...current, middleImagePath: '', middleImageName: '' }))}
+            />
+            <label className="mb-2 block pl-[80px] pr-7">
+              <span className={labelClass}>Reference note (optional)</span>
+              <input value={video.minimaxH3.referenceNotes[1]} onChange={(event) => setMiniMaxReferenceNote(1, event.target.value)} placeholder="e.g. preserve the environment and lighting" className={inputClass} />
+            </label>
+            <FrameSourceField
+              label="Reference Image 3 (optional)"
+              path={video.lastImagePath}
+              onChange={(path) => setVideo((current) => ({ ...current, lastImagePath: path, lastImageName: '' }))}
+              onClear={() => setVideo((current) => ({ ...current, lastImagePath: '', lastImageName: '' }))}
+            />
+            <label className="mb-2 block pl-[80px] pr-7">
+              <span className={labelClass}>Reference note (optional)</span>
+              <input value={video.minimaxH3.referenceNotes[2]} onChange={(event) => setMiniMaxReferenceNote(2, event.target.value)} placeholder="e.g. preserve the color palette and set dressing" className={inputClass} />
+            </label>
+            <div className="mt-2 max-w-xs">
+              <SelectField
+                label="Reference Image Fit"
+                value={video.minimaxH3.referenceImageSize}
+                values={['match', 'max']}
+                onChange={(value) => setMiniMaxH3('referenceImageSize', value === 'max' ? 'max' : 'match')}
+              />
+            </div>
+          </VideoAccordion>
+        ) : video.mode === 'image_to_video' ? (
+          <VideoAccordion
+            title="Frame Guidance"
+            icon={<ImageIcon size={12} className="text-fuchsia-300" />}
+            summary={video.frameGuideMode.replaceAll('_', ' ')}
+            accent="fuchsia"
+            defaultOpen={!video.sourceImagePath}
+          >
+            {video.family === 'minimax_h3' ? <div className="mb-2 grid grid-cols-2 gap-1">
+              <ToggleButton active={video.frameGuideMode === 'first'} label="First" onClick={() => setCommon('frameGuideMode', 'first')} />
+              <ToggleButton active={video.frameGuideMode === 'first_last'} label="First + Last" onClick={() => setCommon('frameGuideMode', 'first_last')} />
+            </div> : <div className="mb-2 grid grid-cols-3 gap-1">
+              <ToggleButton active={video.frameGuideMode === 'first'} label="First" onClick={() => setCommon('frameGuideMode', 'first')} />
+              <ToggleButton active={video.frameGuideMode === 'first_last'} label="First + Last" onClick={() => setCommon('frameGuideMode', 'first_last')} />
+              <ToggleButton active={video.frameGuideMode === 'first_middle_last'} label="First + Mid + Last" onClick={() => setCommon('frameGuideMode', 'first_middle_last')} />
+            </div>}
+            <FrameSourceField
+              label="First Frame"
+              path={video.sourceImagePath}
+              previewUrl={sourcePreviewUrl}
+              onChange={(path) => {
+                setVideo((current) => ({
+                  ...current,
+                  sourceImagePath: path,
+                  sourceImageName: '',
+                  sourceWidth: 0,
+                  sourceHeight: 0,
+                }));
+                setSourcePreviewUrl(path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '');
+              }}
+              onDimensions={(width, height) => setVideo((current) => ({ ...current, sourceWidth: width, sourceHeight: height }))}
+              onClear={() => {
+                setVideo((current) => ({
+                  ...current,
+                  sourceImagePath: '',
+                  sourceImageName: '',
+                  sourceWidth: 0,
+                  sourceHeight: 0,
+                }));
+                setSourcePreviewUrl('');
+              }}
+            />
+            {video.family !== 'minimax_h3' && video.frameGuideMode === 'first_middle_last' ? <FrameSourceField
+              label="Middle Frame"
+              path={video.middleImagePath}
+              onChange={(path) => setVideo((current) => ({ ...current, middleImagePath: path, middleImageName: '' }))}
+              onClear={() => setVideo((current) => ({ ...current, middleImagePath: '', middleImageName: '' }))}
+            /> : null}
+            {video.frameGuideMode !== 'first' ? <FrameSourceField
+              label="Last Frame"
+              path={video.lastImagePath}
+              onChange={(path) => setVideo((current) => ({ ...current, lastImagePath: path, lastImageName: '' }))}
+              onClear={() => setVideo((current) => ({ ...current, lastImagePath: '', lastImageName: '' }))}
+            /> : null}
+          </VideoAccordion>
+        ) : null}
+
+        {omniForgeOpen || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) ? null : <VideoAccordion
+          title="Media Inputs"
+          icon={<Video size={12} className="text-cyan-300" />}
+          summary={video.sourceAudioPath ? 'audio attached' : video.mode === 'video_to_video' ? 'source video' : 'optional audio'}
+          accent="cyan"
+          defaultOpen={video.mode === 'video_to_video' && !video.sourceVideoPath}
+        >
+          {video.mode === 'video_to_video' ? <>
+            <MediaSourceField
+              kind="video"
+              label="Source Video"
+              path={video.sourceVideoPath}
+              stagedName={video.sourceVideoName}
+              onChange={(path) => setVideo((current) => ({
+                ...current,
+                sourceVideoPath: path,
+                sourceVideoName: '',
+                sourceWidth: 0,
+                sourceHeight: 0,
+              }))}
+              onUploaded={(path, name) => setVideo((current) => ({
+                ...current,
+                sourceVideoPath: path,
+                sourceVideoName: name,
+                sourceWidth: 0,
+                sourceHeight: 0,
+              }))}
+              onDimensions={(width, height) => setVideo((current) => ({ ...current, sourceWidth: width, sourceHeight: height }))}
+              onClear={() => setVideo((current) => ({
+                ...current,
+                sourceVideoPath: '',
+                sourceVideoName: '',
+                sourceWidth: 0,
+                sourceHeight: 0,
+              }))}
+            />
+            <div className="grid gap-2 border-t border-white/[0.07] py-2 sm:grid-cols-[minmax(0,1fr)_88px_150px] sm:items-end">
+              <label className="space-y-1.5">
+                <span className={labelClass}>Transformation Strength</span>
+                <input
+                  type="range"
+                  min={0.01}
+                  max={1}
+                  step={0.01}
+                  value={video.denoise}
+                  onChange={(event) => setCommon('denoise', Number(event.target.value))}
+                  className="h-9 w-full accent-fuchsia-400"
+                />
+              </label>
+              <NumberField label="Denoise" value={video.denoise} min={0.01} max={1} step={0.01} onChange={(value) => setCommon('denoise', value)} />
+              <ToggleButton
+                active={video.preserveSourceAudio}
+                label="Preserve Source Audio"
+                onClick={() => setCommon('preserveSourceAudio', !video.preserveSourceAudio)}
+              />
+            </div>
+          </> : null}
+          <MediaSourceField
+            kind="audio"
+            label="Audio Track"
+            path={video.sourceAudioPath}
+            onChange={(path) => setVideo((current) => ({ ...current, sourceAudioPath: path, sourceAudioName: '' }))}
+            onUploaded={(path, name) => setVideo((current) => ({ ...current, sourceAudioPath: path, sourceAudioName: name }))}
+            onClear={() => setVideo((current) => ({ ...current, sourceAudioPath: '', sourceAudioName: '' }))}
+          />
+        </VideoAccordion>}
+
+    {omniForgeOpen || directorEnabled || storyboardOpen ? <p className="font-mono text-[10px] leading-relaxed text-zinc-500">Reference slots and timeline media are available in the active Director workspace above.</p> : null}
+  </>);
+  const promptPanel = (<div className="space-y-3">
+        {extendedOpen ? (
+          <div className="border border-cyan-300/15 bg-cyan-500/[0.035] px-3 py-2.5">
+            <span className="block text-[9px] font-black uppercase tracking-[0.14em] text-cyan-100">
+              Sequence prompts are edited in LTX Extended
+            </span>
+            <span className="mt-1 block font-mono text-[8px] leading-relaxed text-zinc-500">
+              Every clip has its own exact prompt and duration. The negative prompt below applies to the complete sequence.
+            </span>
+          </div>
+        ) : <>
+        {video.family === 'minimax_h3' && !directorEnabled ? <button type="button" className="inline-flex h-9 items-center gap-2 self-start rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100 hover:bg-fuchsia-500/10" onClick={() => setH3ForgeOpen(true)} title="Draft a prompt without enabling Director">
+          <Sparkles size={14} /> Prompt Forge
+        </button> : null}
+        <UmbraPositivePromptEditor
+          segments={promptSegments}
+          activeSegmentId={activePromptSegmentId}
+          onChange={setPromptSegments}
+          onActiveSegmentChange={setActivePromptSegmentId}
+          heading={video.mode === 'reference_to_video' ? 'Reference Shot Direction' : 'Video Prompt'}
+          history={promptHistory}
+          onRememberCurrent={rememberCurrentPrompt}
+          onRestoreHistory={restorePromptHistoryEntry}
+          onRemoveHistory={removePromptHistoryEntry}
+          onClearHistory={clearPromptHistory}
+          onSubmit={() => { void handleQueue(); }}
+          accent="fuchsia"
+        />
+        </>}
+        {video.family === 'minimax_h3' ? (
+          <div className="border border-fuchsia-300/15 bg-fuchsia-500/[0.035] px-2.5 py-2 font-mono text-[9px] leading-relaxed text-fuchsia-100/70">
+            {video.minimaxH3.director.enabled ? 'DaSiWa Director uses the prompt and reference slots shown in its panel.' : 'MiniMax H3 uses one native audio-video prompt.'} Negative prompting is not part of this workflow.
+          </div>
+        ) : (
+          <label className="block space-y-1.5">
+            <span className={labelClass}>Negative Prompt</span>
+            <textarea
+              value={negativePrompt}
+              onChange={(event) => setNegativePrompt(event.target.value)}
+              onKeyDown={(event) => handlePromptKeyDown(event, setNegativePrompt)}
+              placeholder="Artifacts and motion failures to avoid"
+              className={`${inputClass} min-h-20 resize-y leading-relaxed`}
+            />
+          </label>
+        )}
+
+  </div>);
+  const actionPanel = (<>
+        <div className="space-y-2">
           <div className="mb-2 flex items-center gap-2 border border-cyan-300/20 bg-cyan-500/[0.045] px-2.5 py-2">
             <Volume2 size={11} className={(video.family === 'ltx23' && video.ltx.audioEnabled) || (video.family === 'ltx25' && video.ltx25.audioEnabled) ? 'text-cyan-300' : 'text-zinc-700'} />
             <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-400">{queueSummary.remaining} queue remaining</span>
           </div>
-          <div className="space-y-2">
+          <div data-video-generation-action-controls="" className="grid items-start gap-2">
             <UmbraPinnedOutputControl value={pinnedOutputFolder} onChange={setPinnedOutputFolder} task="Video" />
             <UmbraQueuePlacementControls
               queueSummary={queueSummary}
@@ -2847,8 +2853,8 @@ export function UmbraVideoGenerationControls({
             </button>
           </div>
         </div>
-      </div>
-    </section>
+  </>);
+  const directorPanel = omniForgeOpen || directorEnabled || storyboardOpen || extendedOpen ? (<>
     {omniForgeOpen ? <UmbraLtxOmniForgePanel
       controls={video.ltx.omniForge}
       onChange={(controls) => setLtx('omniForge', controls)}
@@ -2893,14 +2899,6 @@ export function UmbraVideoGenerationControls({
         onClose={() => setMiniMaxH3('director', { ...video.minimaxH3.director, enabled: false })}
       />
     ) : null}
-    {h3ForgeOpen && video.family === 'minimax_h3' && !directorEnabled ? <UmbraH3PromptForgeModal
-      video={video} prompt={prompt} durationSeconds={videoDurationSeconds} comfyConnected={comfyConnected}
-      onApplyPrompt={(draft) => {
-        if (prompt.trim()) rememberCurrentPrompt();
-        replacePromptSegments(draft);
-      }}
-      onClose={() => setH3ForgeOpen(false)}
-    /> : null}
     {storyboardOpen ? (
       <UmbraLtxStoryboardPanel
         shots={video.ltx.storyboard.shots}
@@ -2919,6 +2917,23 @@ export function UmbraVideoGenerationControls({
         onClose={() => setExtendedEnabled(false)}
       />
     ) : null}
+  </>) : null;
+  return (<>
+    <UmbraVideoWorkspace
+      directorKey={omniForgeOpen ? 'OmniForge' : directorEnabled ? 'DaSiWa Director' : storyboardOpen ? 'Umbra Director' : extendedOpen ? 'LTX Extended' : null}
+      previewRevision={previewRevision}
+      title={`${video.family === 'wan22' ? 'Wan 2.2' : video.family === 'ltx23' ? 'LTX-2.3' : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3'} / ${omniForgeOpen ? 'OmniForge' : directorEnabled || storyboardOpen ? 'Director' : extendedOpen ? 'Extended sequence' : video.mode.replaceAll('_', ' ')}`}
+      settings={settingsPanel} references={referencePanel} prompt={promptPanel}
+      actions={actionPanel} director={directorPanel} preview={previewPanel} review={reviewPanel}
+    />
+    {h3ForgeOpen && video.family === 'minimax_h3' && !directorEnabled ? <UmbraH3PromptForgeModal
+      video={video} prompt={prompt} durationSeconds={videoDurationSeconds} comfyConnected={comfyConnected}
+      onApplyPrompt={(draft) => {
+        if (prompt.trim()) rememberCurrentPrompt();
+        replacePromptSegments(draft);
+      }}
+      onClose={() => setH3ForgeOpen(false)}
+    /> : null}
     <UmbraModelPickerModal
       open={resourcePicker !== null}
       kind={resourcePicker?.kind || 'checkpoint'}
@@ -2936,7 +2951,7 @@ export function UmbraVideoGenerationControls({
       confirmLabel={resourcePicker ? `Use ${resourcePicker.label}` : undefined}
       showSourceFilter={false}
     />
-    </>
+  </>
   );
 }
 

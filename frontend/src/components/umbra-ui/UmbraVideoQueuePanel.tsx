@@ -46,7 +46,6 @@ import {
 } from '../../../../shared/umbra-ui/videoStoryboard';
 import {
   resolveUmbraLtxExtendedTotalSeconds,
-  type UmbraLtxExtendedSequenceMetadata,
 } from '../../../../shared/umbra-ui/videoExtension';
 import {
   UMBRA_VIDEO_ASPECT_PRESETS,
@@ -54,6 +53,8 @@ import {
 } from '../../../../shared/umbra-ui/videoSizing';
 
 interface UmbraVideoQueuePanelProps {
+  previewJobId: string | null;
+  onPreviewJob: (id: string) => void;
   jobs: UmbraVideoReviewJob[];
   loading: boolean;
   error: string;
@@ -63,6 +64,59 @@ interface UmbraVideoQueuePanelProps {
   onClear: () => Promise<number>;
 }
 
+const unfinishedVideoStatuses = new Set(['pending', 'submitting', 'running']);
+
+export function UmbraVideoWorkspacePreview({ job }: { job?: UmbraVideoReviewJob }) {
+  const [outputId, setOutputId] = React.useState<string | null>(null);
+  const output = job?.outputs.find((item) => item.id === outputId) || (job ? getPrimaryOutput(job.outputs) : null);
+  return (
+    <section data-video-workspace-preview="" className="flex h-full min-h-0 min-w-0 flex-col">
+      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-white/10 px-3">
+        <Clapperboard size={13} className="text-fuchsia-300" />
+        <span className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase tracking-wider">{job?.apiWorkflowName || 'Video preview'}</span>
+        {job ? <span className={cn('inline-flex items-center gap-1 rounded border px-2 py-1 text-[9px] uppercase', statusTone(job.status))}><StatusIcon status={job.status} /> {job.status}</span> : null}
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-black/25 p-3 custom-scrollbar">
+        {output ? <div className="w-full"><ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(job!.prompt) === 'nsfw'} /></div> : (
+          <div className="max-w-md space-y-3 px-5 text-center">
+            {job && (job.status === 'running' || job.status === 'submitting') ? <Loader2 size={36} className="mx-auto animate-spin text-fuchsia-300/50" /> : <Clapperboard size={40} className="mx-auto text-fuchsia-300/25" />}
+            <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">{job ? job.status === 'failed' ? 'Generation failed' : job.status === 'pending' ? 'Waiting in queue' : 'Output pending' : 'Your video workspace'}</p>
+            <p className="text-xs leading-relaxed text-zinc-500">{job?.error || (job ? 'The output will appear here when generation finishes.' : 'Write your prompt below, add reference media, and generate. Select a job from Queue or Results to preview it here.')}</p>
+          </div>
+        )}
+      </div>
+      {job && job.outputs.length > 1 ? <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-white/10 p-2 custom-scrollbar" aria-label="Video job outputs">
+        {job.outputs.map((item) => <button key={item.id} type="button" onClick={() => setOutputId(item.id)} aria-pressed={output?.id === item.id} className={cn('max-w-52 shrink-0 truncate rounded border px-2 py-1.5 text-[10px]', output?.id === item.id ? 'border-fuchsia-300/40 text-fuchsia-100' : 'border-white/10 text-zinc-500')} title={item.name}>{item.name}</button>)}
+      </div> : null}
+    </section>
+  );
+}
+
+function VideoSidecarCard({ job, selected, onPreview, onReview }: { job: UmbraVideoReviewJob; selected: boolean; onPreview: () => void; onReview: () => void }) {
+  const output = getPrimaryOutput(job.outputs);
+  const protectedMedia = classifyUmbraPrompt(job.prompt) === 'nsfw';
+  return <article data-video-sidecar-job={job.id} className={cn('overflow-hidden rounded border bg-black/20', selected ? 'border-fuchsia-300/40' : 'border-white/10')}>
+    <div className="relative">
+    <button type="button" onClick={onPreview} aria-pressed={selected} aria-label={`Preview ${job.apiWorkflowName || job.requestId}: ${job.status}`} className="flex w-full items-start gap-2 p-2 text-left hover:bg-white/[0.03]">
+      <span className="relative flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded bg-black/40 text-fuchsia-300/40">
+        {output?.type === 'image' ? <img data-umbra-nsfw-media={protectedMedia ? '' : undefined} src={mediaUrl(output.path)} alt="" loading="lazy" className="h-full w-full object-contain" /> : output?.type === 'video' ? <LazyVideo src={mediaUrl(output.path)} protectedMedia={protectedMedia} shield={false} muted className="pointer-events-none h-full w-full object-contain" /> : <StatusIcon status={job.status} />}
+      </span>
+      <span className="min-w-0 flex-1 space-y-1">
+        <span className={cn('inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] uppercase', statusTone(job.status))}><StatusIcon status={job.status} /> {job.status}</span>
+        <span className="block truncate font-mono text-[9px] text-zinc-500">{job.apiWorkflowName || job.requestId}</span>
+        <span className="block line-clamp-2 text-[11px] leading-relaxed text-zinc-300">{job.prompt || 'No prompt recorded.'}</span>
+      </span>
+    </button>
+    {output && (output.type === 'image' || output.type === 'video') ? <div className="pointer-events-none absolute left-2 top-2 h-16 w-24 [&>button]:pointer-events-auto"><NsfwPrivacyShield compact protectedMedia={protectedMedia} /></div> : null}
+    </div>
+    {job.error ? <p className="line-clamp-2 px-2 pb-2 text-[10px] text-red-200/80" title={job.error}>{job.error}</p> : null}
+    <div className="flex items-center gap-2 border-t border-white/10 px-2 py-1.5">
+      <span className="flex-1 font-mono text-[9px] text-zinc-500">{job.outputs.length} outputs</span>
+      <button type="button" onClick={onReview} className="inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[9px] text-zinc-400 hover:text-fuchsia-100"><Pencil size={11} /> Review & Requeue</button>
+    </div>
+  </article>;
+}
+
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/45 px-3 py-2.5 text-xs text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-fuchsia-300/45';
 const labelClass = 'text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500';
 
@@ -70,12 +124,13 @@ function mediaUrl(path: string): string {
   return path ? `/api/fs/image?path=${encodeURIComponent(path)}` : '';
 }
 
-function LazyVideo({ src, controls = false, muted = false, className = '', protectedMedia = false }: {
+function LazyVideo({ src, controls = false, muted = false, className = '', protectedMedia = false, shield = true }: {
   src: string;
   controls?: boolean;
   muted?: boolean;
   className?: string;
   protectedMedia?: boolean;
+  shield?: boolean;
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = React.useState(false);
@@ -109,7 +164,7 @@ function LazyVideo({ src, controls = false, muted = false, className = '', prote
           className={className}
         />
       ) : <div className="h-full w-full animate-pulse bg-white/[0.025]" />}
-      {visible ? <NsfwPrivacyShield compact protectedMedia={protectedMedia} /> : null}
+      {visible && shield ? <NsfwPrivacyShield compact protectedMedia={protectedMedia} /> : null}
     </div>
   );
 }
@@ -175,19 +230,6 @@ function getPrimaryOutput(outputs: UmbraVideoReviewOutput[]): UmbraVideoReviewOu
     || outputs.find((output) => output.type === 'image')
     || outputs[0]
     || null;
-}
-
-function CardOutputPreview({ output, protectedMedia }: { output: UmbraVideoReviewOutput; protectedMedia: boolean }) {
-  if (output.type === 'video') {
-    return <LazyVideo src={mediaUrl(output.path)} controls className="h-full w-full object-contain" protectedMedia={protectedMedia} />;
-  }
-  if (output.type === 'image') {
-    return <img data-umbra-nsfw-media={protectedMedia ? '' : undefined} src={mediaUrl(output.path)} alt={output.name} loading="lazy" className="h-full w-full object-contain" />;
-  }
-  if (output.type === 'audio') {
-    return <div className="flex h-full items-center justify-center"><Music2 size={18} className="text-cyan-300/65" /></div>;
-  }
-  return <div className="flex h-full items-center justify-center font-mono text-[9px] text-zinc-600">FILE</div>;
 }
 
 function ReviewOutputPreview({ output, protectedMedia }: { output: UmbraVideoReviewOutput; protectedMedia: boolean }) {
@@ -260,45 +302,6 @@ function ReferenceStrip({ video, large = false }: { video: PowerPrompterVideoCon
   );
 }
 
-function SettingsChips({ video, sequence, seed, seedMode, seedIncrement }: {
-  video: PowerPrompterVideoControls;
-  sequence?: UmbraLtxExtendedSequenceMetadata;
-  seed: number;
-  seedMode: string;
-  seedIncrement: number;
-}) {
-  const chips = [
-    video.family === 'wan22'
-      ? 'Wan 2.2'
-      : video.family === 'ltx23'
-        ? 'LTX-2.3'
-        : video.family === 'ltx25' ? 'LTX-2.5' : 'MiniMax H3',
-    sequence ? 'LTX Extended' : '',
-    sequence ? `Clip ${sequence.clipIndex + 1}/${sequence.clipCount}` : '',
-    sequence ? `${sequence.totalDurationSeconds.toFixed(1)}s total` : '',
-    sequence?.finalClip ? 'Final Clip' : '',
-    video.family === 'ltx23' && video.ltx.storyboard?.enabled ? 'Umbra Director' : '',
-    video.mode === 'video_to_video' ? 'VID2VID' : video.mode === 'reference_to_video' ? 'REF2VID' : video.mode === 'image_to_video' ? 'IMG2VID' : 'TXT2VID',
-    `${video.width}x${video.height}`,
-    `${resolveUmbraVideoDurationSeconds(video.frames, video.fps).toFixed(1)} seconds`,
-    `${video.fps} FPS`,
-    `Seed ${seed}`,
-    seedMode !== 'fixed'
-      ? `Seed ${seedMode}${seedMode === 'increment'
-        ? ` +${seedIncrement.toLocaleString('en-US')}`
-        : seedMode === 'decrement'
-          ? ` -${seedIncrement.toLocaleString('en-US')}`
-          : ''}`
-      : '',
-    video.mode === 'video_to_video' ? `Denoise ${video.denoise.toFixed(2)}` : '',
-  ].filter(Boolean);
-  return (
-    <div className="flex flex-wrap gap-1">
-      {chips.map((chip) => <span key={chip} className="border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500">{chip}</span>)}
-    </div>
-  );
-}
-
 function resolveMiniMaxH3FramesForDuration(durationSeconds: number): number {
   const requested = Math.max(5, Math.round(Math.max(0.25, durationSeconds) * 24));
   const remainder = requested % 17;
@@ -324,69 +327,6 @@ function resolveVideoFramesForDurationChange(
     return currentFrames + stride;
   }
   return requestedFrames;
-}
-
-function VideoJobCard({ job, onOpen }: { job: UmbraVideoReviewJob; onOpen: () => void }) {
-  const video = job.generation.video!;
-  const primary = getPrimaryOutput(job.outputs);
-  const visibleOutputs = job.outputs.slice(0, 4);
-  const protectedMedia = classifyUmbraPrompt(job.prompt) === 'nsfw';
-  return (
-    <article
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') onOpen();
-      }}
-      className="group overflow-hidden rounded-md border border-white/10 bg-white/[0.025] outline-none transition-colors hover:border-fuchsia-300/25 hover:bg-fuchsia-500/[0.025] focus:border-fuchsia-300/40"
-      style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}
-    >
-      <div className="flex min-h-9 items-center gap-2 border-b border-white/10 px-2.5">
-        <span className={cn('inline-flex h-6 items-center gap-1 rounded-sm border px-1.5 text-[9px] font-black uppercase tracking-[0.08em]', statusTone(job.status))}>
-          <StatusIcon status={job.status} /> {job.status}
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[9px] text-zinc-500">{job.apiWorkflowName || job.requestId}</span>
-        {job.outputs.length > 1 ? <span className="font-mono text-[9px] text-fuchsia-200">{job.outputs.length} outputs</span> : null}
-      </div>
-      <ReferenceStrip video={video} />
-      <div className={cn('relative bg-black/45', visibleOutputs.length > 1 ? 'grid grid-cols-2 gap-px bg-white/10' : 'h-56')}>
-        {visibleOutputs.length > 0 ? visibleOutputs.map((output) => (
-          <div key={output.id} data-umbra-queue-preview="" className={cn('relative overflow-hidden bg-black/70', visibleOutputs.length > 1 ? 'h-40' : 'h-full')}>
-            <CardOutputPreview output={output} protectedMedia={protectedMedia} />
-            {output.type === 'image' || output.type === 'video' ? <NsfwPrivacyShield compact={visibleOutputs.length > 1} protectedMedia={protectedMedia} /> : null}
-            <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/65 px-1.5 py-1 font-mono text-[8px] text-zinc-400">{output.name}</span>
-          </div>
-        )) : primary?.type === 'image' ? (
-          <img data-umbra-nsfw-media={protectedMedia ? '' : undefined} src={mediaUrl(primary.path)} alt={primary.name} loading="lazy" className="h-full w-full object-contain" />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center text-zinc-700">
-            {job.status === 'running' || job.status === 'submitting'
-              ? <Loader2 size={24} className="mb-2 animate-spin text-cyan-300/50" />
-              : <Clapperboard size={25} className="mb-2 text-fuchsia-300/25" />}
-            <span className="text-[9px] font-black uppercase tracking-[0.13em]">{job.status === 'pending' ? 'Queued for generation' : job.status === 'failed' ? 'Generation failed' : 'No video output yet'}</span>
-          </div>
-        )}
-        <div className="pointer-events-none absolute right-2 top-2 inline-flex h-7 items-center gap-1 border border-white/10 bg-black/75 px-2 text-[9px] font-black uppercase tracking-[0.09em] text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100">
-          <Pencil size={10} /> Review
-        </div>
-        {job.outputs.length > visibleOutputs.length ? (
-          <span className="pointer-events-none absolute bottom-2 right-2 border border-white/10 bg-black/75 px-2 py-1 font-mono text-[9px] text-zinc-300">+{job.outputs.length - visibleOutputs.length}</span>
-        ) : null}
-      </div>
-      <div className="space-y-2 border-t border-white/10 p-2.5">
-        {job.status === 'failed' && job.error ? <p className="line-clamp-2 text-[10px] leading-relaxed text-red-200/80" title={job.error}>{job.error}</p> : null}
-        <p className="line-clamp-3 text-[11px] leading-relaxed text-zinc-300">{job.prompt || 'No prompt recorded.'}</p>
-        <SettingsChips
-          video={video}
-          sequence={job.sequence}
-          seed={job.generation.seed}
-          seedMode={job.generation.controlAfterGenerate}
-          seedIncrement={job.generation.seedIncrement}
-        />
-      </div>
-    </article>
-  );
 }
 
 function NumberEditor({ label, value, onChange, min = 0, step = 1 }: {
@@ -426,8 +366,12 @@ function NumberEditor({ label, value, onChange, min = 0, step = 1 }: {
   );
 }
 
-export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadIntoEditor, onRefresh, onClear }: UmbraVideoQueuePanelProps) {
+export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading, error, queueVideo, onLoadIntoEditor, onRefresh, onClear }: UmbraVideoQueuePanelProps) {
   const showToast = useStore((state) => state.showToast);
+  const [tab, setTab] = React.useState<'queue' | 'results'>('queue');
+  const queuedJobs = jobs.filter((job) => unfinishedVideoStatuses.has(job.status));
+  const resultJobs = jobs.filter((job) => !unfinishedVideoStatuses.has(job.status));
+  const visibleJobs = tab === 'queue' ? queuedJobs : resultJobs;
   const [selected, setSelected] = React.useState<UmbraVideoReviewJob | null>(null);
   const liveSelectedJob = selected ? jobs.find((job) => job.id === selected.id) || selected : null;
   const [drawerVisible, setDrawerVisible] = React.useState(false);
@@ -629,10 +573,10 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
   }, [draftNegative, draftOutputFolder, draftPrompt, draftVideo, onRefresh, queueVideo, requeueing, selected?.sequence, showToast]);
 
   return (
-    <main data-umbra-ui-video-queue="" className="relative flex min-h-0 min-w-0 flex-col bg-black/15">
+    <main data-umbra-ui-video-queue="" className="relative flex h-full min-h-0 min-w-0 flex-col bg-black/15">
       <div className="flex min-h-11 items-center gap-2 border-b border-white/10 px-3">
         <Clapperboard size={13} className="text-fuchsia-300" />
-        <span className="text-[11px] font-black uppercase tracking-[0.14em] text-zinc-300">Video Review Queue</span>
+        <span className="text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300">Queue / Results</span>
         <span className="font-mono text-[10px] text-zinc-600">{jobs.length}</span>
         <button
           type="button"
@@ -661,17 +605,20 @@ export function UmbraVideoQueuePanel({ jobs, loading, error, queueVideo, onLoadI
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 custom-scrollbar">
+      <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-white/10 p-2" role="group" aria-label="Video job filter">
+        {(['queue', 'results'] as const).map((value) => <button key={value} type="button" aria-pressed={tab === value} onClick={() => setTab(value)} className={cn('rounded border px-2 py-2 text-[10px] font-bold uppercase tracking-wider', tab === value ? 'border-fuchsia-300/25 bg-fuchsia-500/[0.06] text-fuchsia-100' : 'border-white/10 text-zinc-500 hover:text-zinc-300')}>{value} <span className="ml-1 font-mono">{value === 'queue' ? queuedJobs.length : resultJobs.length}</span></button>)}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2 custom-scrollbar">
         {error ? <div className="mb-3 border border-red-300/20 bg-red-500/[0.04] p-3 font-mono text-[10px] text-red-200/80">{error}</div> : null}
         {loading && jobs.length <= 0 ? <div className="flex h-full items-center justify-center"><Loader2 size={20} className="animate-spin text-fuchsia-300/55" /></div> : null}
-        {!loading && jobs.length <= 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-zinc-700">
+        {!loading && visibleJobs.length <= 0 ? (
+          <div className="flex h-full min-h-32 flex-col items-center justify-center text-zinc-600">
             <Clapperboard size={32} className="mb-3 text-fuchsia-300/25" />
-            <span className="text-[10px] font-black uppercase tracking-[0.16em]">Queue a video to begin review</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.12em]">{tab === 'queue' ? 'No queued videos' : 'No results yet'}</span>
           </div>
         ) : null}
-        <div className="grid grid-cols-1 gap-3 min-[1500px]:grid-cols-2">
-          {jobs.map((job) => <VideoJobCard key={job.id} job={job} onOpen={() => openJob(job)} />)}
+        <div className="grid grid-cols-1 gap-2">
+          {visibleJobs.map((job) => <VideoSidecarCard key={job.id} job={job} selected={previewJobId === job.id} onPreview={() => onPreviewJob(job.id)} onReview={() => openJob(job)} />)}
         </div>
       </div>
 

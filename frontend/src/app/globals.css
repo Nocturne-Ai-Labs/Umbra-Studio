@@ -680,11 +680,8 @@ code.custom-scrollbar::-webkit-scrollbar {
   html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-ui-body][data-umbra-ui-active-mode="image"] {
     grid-template-columns: clamp(360px, 28.8vw, 456px) clamp(336px, 26.4vw, 432px) minmax(0, 1fr);
   }
-  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-ui-body]:is([data-umbra-ui-active-mode="img2img"], [data-umbra-ui-active-mode="extras"], [data-umbra-ui-active-mode="video"]) {
+  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-ui-body]:is([data-umbra-ui-active-mode="img2img"], [data-umbra-ui-active-mode="extras"]) {
     grid-template-columns: minmax(432px, 480px) minmax(0, 1fr);
-  }
-  html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-ui-body][data-umbra-ui-active-mode="video"][data-video-storyboard="open"] {
-    grid-template-columns: minmax(408px, 480px) minmax(384px, 456px) minmax(0, 1fr);
   }
   html:not([data-umbra-remote-mode="phone"]):not([data-umbra-remote-mode="tablet"]) [data-appbar-collapsed="1"] [data-umbra-inpaint-workspace] {
     grid-template-columns: clamp(278.4px, 21.6vw, 336px) clamp(264px, 20.4vw, 312px) minmax(0, 1fr);
@@ -7913,4 +7910,200 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-act
   display: inline-flex;
   grid-column: span 3;
   width: 100%;
+}
+
+/* Video shares the Censor workspace's viewer / bottom tray arrangement. */
+[data-umbra-ui-body][data-umbra-ui-active-mode="video"] {
+  grid-template-columns: minmax(0, 1fr) !important;
+  overflow: hidden;
+}
+[data-video-workspace-body] {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+[data-video-workspace-editor] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+[data-video-workspace-stage] {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 200px;
+  min-width: 0;
+}
+[data-video-workspace-settings] {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 320px;
+  width: 320px;
+  min-height: 0;
+  border-right: 1px solid #ffffff1a;
+  background: var(--umbra-panel-bg, #09090b);
+}
+[data-video-workspace-settings][hidden], [data-video-workspace-review][hidden], [data-video-review-resize][hidden] {
+  display: none;
+}
+[data-video-workspace-settings] [data-umbra-ui-video-controls] {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+}
+[data-video-workspace-viewer] > :is(section, main) {
+  min-height: 100%;
+}
+[data-video-workspace-preview] > div:nth-child(2) > div {
+  height: 100%;
+}
+[data-video-workspace-preview] [data-umbra-queue-preview] {
+  min-height: 0;
+  height: 100%;
+}
+[data-video-workspace-preview] :is(video, img) {
+  max-height: 100%;
+}
+[data-video-workspace-tray] {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  height: min(var(--video-tray-height), 42%);
+  flex: 0 0 min(var(--video-tray-height), 42%);
+  min-height: 180px;
+  border-top: 1px solid #ffffff1a;
+  background: #00000020;
+}
+[data-video-workspace-review] {
+  flex: 0 0 var(--video-review-width);
+  width: var(--video-review-width);
+  min-height: 0;
+  min-width: 0;
+  background: var(--umbra-panel-bg, #09090b);
+}
+[data-video-workspace-review] [data-umbra-ui-video-queue] {
+  flex: 1;
+}
+[data-video-generation-action-controls] {
+  grid-template-columns: minmax(130px, 1fr) minmax(190px, 1fr) minmax(150px, .8fr) auto;
+  align-items: end;
+}
+[data-video-workspace-actions] .mb-2 {
+  margin-bottom: 0;
+}
+[data-video-workspace-actions] > div > div:first-child {
+  padding-block: 4px;
+}
+[data-video-tray-resize], [data-video-review-resize] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  touch-action: none;
+  background: #ffffff03;
+  outline-offset: -2px;
+}
+[data-video-tray-resize] {
+  height: 7px;
+  cursor: row-resize;
+}
+[data-video-review-resize] {
+  width: 7px;
+  cursor: col-resize;
+  border-left: 1px solid #ffffff1a;
+}
+[data-video-tray-resize] > span {
+  width: 48px;
+  height: 2px;
+  background: #ffffff25;
+}
+[data-video-review-resize] > span {
+  height: 48px;
+  width: 2px;
+  background: #ffffff25;
+}
+[data-video-tray-resize]:hover, [data-video-review-resize]:hover {
+  background: #e879f915;
+}
+@media (max-width: 1550px) {
+  [data-video-workspace-settings] {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(340px, 100%);
+    box-shadow: 12px 0 40px #0008;
+  }
+  [data-video-generation-action-controls] {
+    grid-template-columns: minmax(130px, 1fr) minmax(190px, 1fr);
+  }
+}
+@media (max-width: 1150px) {
+  [data-video-workspace-review] {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 30;
+    width: min(var(--video-review-width), 100%);
+    box-shadow: -12px 0 40px #0008;
+    border-left: 1px solid #ffffff1a;
+  }
+  [data-video-review-resize] {
+    display: none;
+  }
+  [data-video-workspace-tray] {
+    grid-template-columns: minmax(0, 1.3fr) minmax(250px, 1fr);
+  }
+}
+@media (max-width: 650px) {
+  [data-video-workspace-stage] {
+    position: static;
+    flex: 0 0 260px;
+  }
+  [data-video-workspace-editor] {
+    overflow-y: auto;
+  }
+  [data-video-workspace-tray] {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    height: auto;
+    min-height: 0;
+  }
+  [data-video-workspace-tray] > section {
+    overflow: visible;
+  }
+  [data-video-workspace-references] {
+    border-left: 0;
+    border-top: 1px solid #ffffff1a;
+  }
+  [data-video-tray-resize] {
+    display: none;
+  }
+  [data-video-workspace-review] {
+    width: 100%;
+  }
+  [data-video-generation-action-controls] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-video-workspace-actions] {
+    position: relative;
+  }
+}
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="video"] {
+  padding-bottom: 0;
+  scroll-padding-bottom: 0;
+  overflow: hidden;
+}
+html[data-umbra-remote-mode="phone"] [data-umbra-video-workspace] {
+  min-height: 0;
+  height: 100%;
+}
+html[data-umbra-remote-mode="phone"] [data-video-workspace-settings] [data-umbra-ui-video-controls] {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
 }

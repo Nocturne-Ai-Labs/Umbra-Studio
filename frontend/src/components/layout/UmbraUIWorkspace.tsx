@@ -66,7 +66,7 @@ import {
   UmbraVideoGenerationControls,
   type UmbraVideoEditorDraft,
 } from '@/components/umbra-ui/UmbraVideoGenerationControls';
-import { UmbraVideoQueuePanel } from '@/components/umbra-ui/UmbraVideoQueuePanel';
+import { UmbraVideoQueuePanel, UmbraVideoWorkspacePreview } from '@/components/umbra-ui/UmbraVideoQueuePanel';
 import { UmbraExtrasWorkspace } from '@/components/umbra-ui/UmbraExtrasWorkspace';
 import { UmbraInpaintWorkspace } from '@/components/umbra-ui/UmbraInpaintWorkspace';
 import { UmbraCanvasWorkspace } from '@/features/canvas/UmbraCanvasWorkspace';
@@ -885,8 +885,10 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [imageGenerationInfoOpen, setImageGenerationInfoOpen] = React.useState(false);
   const [queuedImageGenerationInfo, setQueuedImageGenerationInfo] = React.useState<Record<string, UmbraImageGenerationInfo>>({});
   const [lastImageGenerationInfo, setLastImageGenerationInfo] = React.useState<UmbraImageGenerationInfo | null>(null);
-  const [videoStoryboardOpen, setVideoStoryboardOpen] = React.useState(false);
-  const [videoDirectorOpen, setVideoDirectorOpen] = React.useState(false);
+  const [videoPreviewJobId, setVideoPreviewJobId] = React.useState<string | null>(null);
+  const [videoPreviewRevision, setVideoPreviewRevision] = React.useState(0);
+  const videoPreviewJob = videoJobs.find((job) => job.id === videoPreviewJobId)
+    || videoJobs.find((job) => job.outputs.length > 0) || videoJobs[0];
   const [videoEditorDraft, setVideoEditorDraft] = React.useState<UmbraVideoEditorDraft | null>(null);
   const inheritedControlsAppliedRef = React.useRef(false);
   const attemptedLoraInfoRef = React.useRef(new Set<string>());
@@ -3078,15 +3080,12 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       <div
         data-umbra-ui-body=""
         data-umbra-ui-active-mode={activeMode}
-        data-video-storyboard={videoStoryboardOpen ? 'open' : 'closed'}
         data-tablet-generation={tabletPanels.generation ? 'shown' : 'hidden'}
         data-tablet-prompt={tabletPanels.prompt ? 'shown' : 'hidden'}
         className={cn(
           'grid min-h-0 flex-1',
-          activeMode === 'video' && videoDirectorOpen
-            ? 'grid-cols-[minmax(340px,390px)_minmax(460px,1.2fr)_minmax(300px,0.8fr)] max-[1500px]:grid-cols-[minmax(340px,390px)_minmax(460px,1fr)]'
-            : activeMode === 'video' && videoStoryboardOpen
-            ? 'grid-cols-[minmax(340px,400px)_minmax(320px,380px)_minmax(320px,1fr)]'
+          activeMode === 'video'
+            ? 'grid-cols-[minmax(0,1fr)]'
             : activeMode === 'canvas' || activeMode === 'comfyui' || prompterSurfaceActive
               ? 'grid-cols-[minmax(0,1fr)]'
             : activeMode === 'image'
@@ -3790,7 +3789,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           </div>
         ) : null}
         {modeIsMounted('video') ? (
-          <div className={activeMode === 'video' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'video'}>
+          <div className={activeMode === 'video' ? 'flex min-h-0 min-w-0 flex-col' : 'hidden'} aria-hidden={activeMode !== 'video'}>
             <UmbraVideoGenerationControls
               workflows={workflows}
               catalog={videoModelCatalog}
@@ -3802,28 +3801,19 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               queueVideo={queueVideo}
               editorDraft={videoEditorDraft}
               onEditorDraftApplied={(draftId) => setVideoEditorDraft((current) => current?.id === draftId ? null : current)}
-              onStoryboardOpenChange={setVideoStoryboardOpen}
-              onDirectorOpenChange={setVideoDirectorOpen}
-            />
-            <UmbraMobileWorkspaceSheet
-              active={activeMode === 'video'}
-              className={videoDirectorOpen ? 'md:max-[1500px]:hidden' : undefined}
-              title="Video Review"
-              subtitle={videoJobs.length > 0 ? `${videoJobs.length} recent job${videoJobs.length === 1 ? '' : 's'}` : 'Waiting for output'}
-              badge={videoJobs.length > 0 ? `${videoJobs.length}` : undefined}
-              icon={<Clapperboard size={14} />}
-              tone="fuchsia"
-            >
-              <div data-umbra-ui-video-review-drawer="" className="contents">
+              previewPanel={<UmbraVideoWorkspacePreview key={videoPreviewJob?.id || 'empty'} job={videoPreviewJob} />}
+              previewRevision={videoPreviewRevision}
+              reviewPanel={<div className="flex h-full min-h-0 flex-col">
                 <UmbraQueueEmergencyControls
                   queueSummary={queueSummary}
                   queueConnected={queueConnected}
                   busyAction={queueControlBusy}
                   onSkip={() => void handleSkipUmbraJob()}
                   onStopAll={() => void handleStopAllUmbraJobs()}
-                  mobileOnly
                 />
                 <UmbraVideoQueuePanel
+                  previewJobId={videoPreviewJob?.id || null}
+                  onPreviewJob={(id) => { setVideoPreviewJobId(id); setVideoPreviewRevision((revision) => revision + 1); }}
                   jobs={videoJobs}
                   loading={videoJobsLoading}
                   error={videoJobsError}
@@ -3832,8 +3822,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                   onRefresh={refreshVideoJobs}
                   onClear={clearVideoJobs}
                 />
-              </div>
-            </UmbraMobileWorkspaceSheet>
+              </div>}
+            />
           </div>
         ) : null}
 
