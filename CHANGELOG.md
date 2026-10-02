@@ -2,10 +2,29 @@
 
 ## Unreleased
 
-- Restore the native Canvas workspace on desktop and tablet, including saved projects, image and mask layers, editing tools, restore points, and portable project/PNG export. Phone Remote continues to use the supported generation workspaces.
-- Give Video a large central viewer, bottom prompt/reference tray, collapsible settings, and a resizable Queue/Results panel while preserving generation controls and queue behavior.
-- Canvas remains experimental. Current local checks cover editing and project durability; fresh GPU generation and model-based background removal qualification remain pending.
-- Keep autosave scoped to each Canvas project, preserve newer edits during asynchronous cropping/merging, and upload shared image data once when duplicate layers are saved.
+### Canvas Restored On Desktop And Tablet
+
+- Restore the native Canvas workspace with saved projects, image and mask layers, transforms, erasing, mask tools, snapping, crop controls, restore points, and portable project/PNG export. Existing Canvas projects remain in `User/UmbraUI/CanvasProjects`; no project migration or model download is required to use the editing tools.
+- Open **Prompt**, **Generation**, or **Layers** from the Canvas toolbar. Close those panels or use **Hide Strip** to free editing space in short windows. See the [Canvas walkthrough](UMBRA_UI_TOUR.md#canvas) for project saves, recovery, tools, and exports.
+- Keep Canvas hidden in Phone Remote, including Gallery Send destinations. A saved Canvas navigation state opens TXT2IMG on a phone. Desktop and tablet Gallery handoffs remain available.
+
+### Canvas Reliability
+
+- Preserve newer edits and newly opened projects when an asynchronous crop or merge finishes. Undo/redo and project replacement also invalidate stale edits. Source layers and pre-edit restore points remain recoverable.
+- Track autosave by project identity and revision, so a new project still saves when its revision number matches the previous project. Retry the required save after an overlapping older autosave before switching projects.
+- Upload a shared temporary image once when duplicate layers are saved, retaining every layer's identity and transforms. Missing sources still block the save; existing request-size limits remain in place for projects with many distinct image payloads.
+- Keep failed-save drafts open with **Retry Save**. A conflicting saved revision exposes **Save project as a new copy** and **Reload saved project**, which asks before discarding the local draft.
+
+### Video Workspace
+
+- Give Video a large central viewer, bottom prompt/reference tray, collapsible settings, and a resizable **Queue / Results** panel while preserving generation controls and queue behavior. Director and OmniForge drafts remain mounted when a result preview is opened or a panel is collapsed.
+
+### Validation And Remaining Gaps
+
+- Local verification covers project create/open/save/reload, asset recovery, transforms and masks, crop/merge undo, PNG and portable archive export/import, corrupt imports, failed saves, conflicts, project-scoped autosave, delayed edit races, and desktop/tablet layouts. A synthetic project with 25 shared 4096-by-4096 raster layers remains editable and saves without coordinate drift.
+- Frontend types, lint, production build, pipeline audit, focused persistence/editing tests, and an independent audit pass. The image-upload optimization keeps the existing storage format and generation pipeline contracts.
+- **Canvas remains experimental and is not ready for feedback.** Fresh GPU generation and model-based background removal have not been qualified in this pass. Tablet layouts were checked in browser emulation; physical touch and pinch/pen interaction remain unqualified. Complete localization and broader model-specific documentation remain pending.
+- **Video generation remains in beta.** The layout checks use simulated jobs and media; they do not establish fresh GPU rendering qualification for LTX, WAN, MiniMax H3, or advanced model combinations.
 
 ## v0.32.44 - OmniForge, Live Gallery Folders, And Media Workflow Updates
 

@@ -75,6 +75,7 @@ current releases.
 - Model Manager for local model organization and snapshot-based CivitAI import
 - Data Forge for dataset collection and curation workflows
 - Umbra UI for model-aware image, video, img2img, inpaint, and upscale pipelines
+- Experimental Canvas for desktop/tablet layer editing, masks, saved projects, restore points, and portable project export
 - Optional LTX 2.3 Storyboard mode for timed per-shot prompts, multiple guide images, and selective agent prompt enhancement
 - Managed tool runtime support for ComfyUI and AI Toolkit
 - Local Servers for opening localhost/LAN tools inside Umbra
@@ -85,7 +86,7 @@ The screenshots below use safe demonstration media and omit the embedded
 ComfyUI workspace. Select an image to open the full-size view.
 
 See the [Umbra UI Tour](UMBRA_UI_TOUR.md) for a guided walkthrough of the shared
-model-aware pipeline, TXT2IMG, IMG2IMG, Inpaint, Video, Extras, and the Power
+model-aware pipeline, TXT2IMG, IMG2IMG, Inpaint, Canvas, Video, Extras, and the Power
 Prompter handoff.
 
 | Umbra UI TXT2IMG | Umbra UI Inpaint |
