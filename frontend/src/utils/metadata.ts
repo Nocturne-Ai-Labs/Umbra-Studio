@@ -703,7 +703,8 @@ export function syntaxHighlightJson(json: string): string {
 /**
  * Extract metadata from image file (client-side)
  */
-export async function extractMetadataFromFile(file: File): Promise<ImageMetadata> {
+export async function extractMetadataFromFile(file: File, signal?: AbortSignal): Promise<ImageMetadata> {
+  signal?.throwIfAborted();
   const metadata: ImageMetadata = {
     type: 'image',
     name: file.name,
@@ -723,25 +724,41 @@ export async function extractMetadataFromFile(file: File): Promise<ImageMetadata
     const response = await fetch('/api/metadata/scan-upload', {
       method: 'POST',
       body: formData,
+      signal,
     });
     if (response.ok) {
       const payload = await response.json().catch(() => ({}));
+      signal?.throwIfAborted();
       if (payload && typeof payload === 'object') {
         Object.assign(metadata, payload);
+        // The backend normalizes legacy parameters. Keep embedded source values
+        // available for exact copy/export without replacing its parsed fields.
+        if (file.type === 'image/png') {
+          const original = await extractPngMetadata(file);
+          signal?.throwIfAborted();
+          for (const key of ['parameters', 'workflow', 'prompt', 'umbra_api_workflow', 'umbra_power_prompter', 'umbra_inpaint', 'umbra_metadata', 'cozyui'] as const) {
+            if (metadata[key] === undefined && original?.[key] !== undefined) {
+              Object.assign(metadata, { [key]: original[key] });
+            }
+          }
+        }
         return metadata;
       }
     }
   } catch {
+    signal?.throwIfAborted();
     // Fall back to local PNG parser.
   }
 
   try {
     const buffer = await file.arrayBuffer();
     const extracted = await extractPngMetadata(buffer);
+    signal?.throwIfAborted();
     if (extracted) {
       Object.assign(metadata, extracted);
     }
   } catch (err) {
+    signal?.throwIfAborted();
     console.error('[Metadata] Extraction error:', err);
   }
 
@@ -751,12 +768,14 @@ export async function extractMetadataFromFile(file: File): Promise<ImageMetadata
 /**
  * Extract metadata from image path (via backend API)
  */
-export async function extractMetadataFromPath(imagePath: string): Promise<ImageMetadata | null> {
+export async function extractMetadataFromPath(imagePath: string, signal?: AbortSignal): Promise<ImageMetadata | null> {
+  signal?.throwIfAborted();
   try {
     const res = await fetch('/api/metadata/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: imagePath })
+      body: JSON.stringify({ path: imagePath }),
+      signal,
     });
 
     if (!res.ok) {
@@ -764,8 +783,11 @@ export async function extractMetadataFromPath(imagePath: string): Promise<ImageM
       return null;
     }
 
-    return await res.json();
+    const payload = await res.json();
+    signal?.throwIfAborted();
+    return payload;
   } catch (err) {
+    signal?.throwIfAborted();
     console.error('[Metadata] Failed to extract metadata:', err);
     return null;
   }

@@ -6,6 +6,7 @@ import { MergeBlueprints, getMergeBlueprint, type MergeBlueprintSetup } from './
 import { nextMergeRevisionName } from '@/lib/modelMergeBlueprint';
 import { normalizeMergeDraft } from '@/lib/modelMergeDraft';
 import { MergeBlockEditor, MergeLoraStack, mergeButtonClass as buttonClass, mergeInputClass as inputClass, type MergeLora, type MergeLoraModel } from './ModelMergeControls';
+import { modelMergeStyles } from './ModelMergeStyles';
 
 type Model = { id: string; name: string; bytes: number; family: string; umbra?: boolean; blueprintId?: string };
 type Inspection = { compatible: boolean; blocks: number; blockLabels: string[]; combined: boolean; family: string; tensorCount: number; bytes: number; precision: string[]; estimatedRamBytes: number };
@@ -175,80 +176,86 @@ export function ModelMergeTab() {
   const loraBytes = [...lorasA, ...(baking ? [] : lorasB)].filter(entry => entry.enabled && entry.strength !== 0).reduce((sum, entry) => sum + (loras.find(item => item.id === entry.model)?.bytes || 0), 0);
 
   return (
-    <div className="h-full overflow-y-auto" data-model-merge data-test-view={testView ? 'test' : 'merge'} style={{ containerType: 'inline-size', containerName: 'umbra-model-merge', '--umbra-border': 'color-mix(in srgb, var(--umbra-accent) 12%, rgba(255,255,255,0.1))', '--umbra-text-muted': 'color-mix(in srgb, var(--umbra-text) 60%, transparent)' } as CSSProperties}>
+    <div className="h-full overflow-y-auto bg-[var(--umbra-bg)] text-[var(--umbra-text)]" data-model-merge data-test-view={testView ? 'test' : 'merge'} style={{ containerType: 'inline-size', containerName: 'umbra-model-merge', '--umbra-border': 'color-mix(in srgb, var(--umbra-accent) 12%, color-mix(in srgb, var(--umbra-text) 10%, transparent))', '--umbra-text-muted': 'color-mix(in srgb, var(--umbra-text) 60%, transparent)' } as CSSProperties}>
+      <style>{modelMergeStyles}</style>
       <nav aria-label="Merge workspace view" data-model-merge-view className="hidden gap-2 border-b border-[var(--umbra-border)] p-3">
         <button className={buttonClass} aria-pressed={!testView} onClick={() => setTestView(false)}><Combine size={16} />Merge controls</button>
         <button className={buttonClass} aria-pressed={testView} onClick={() => setTestView(true)}><Workflow size={16} />Test generation{testBusy && <Loader2 size={15} className="animate-spin" />}</button>
       </nav>
-      <div data-model-merge-layout className="grid w-full min-w-0">
-      <div data-model-merge-editor className="min-w-0 space-y-7 p-4 md:p-6" style={{ containerType: 'inline-size', containerName: 'umbra-model-merge-editor' }}>
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--umbra-border)] pb-4">
-          <div className="flex flex-wrap items-center gap-3"><Combine size={22} className="text-[var(--umbra-accent)]" /><h2 className="text-lg font-semibold">Model Merge</h2><span className="rounded border border-[var(--umbra-border)] px-2 py-1 text-xs">{inspection?.family || 'Safetensors'}</span></div>
+      <div data-model-merge-layout className="grid w-full min-w-0 gap-3 p-3">
+      <div data-model-merge-editor className="glass-panel merge-panel min-w-0 space-y-4 p-3" style={{ containerType: 'inline-size', containerName: 'umbra-model-merge-editor' }}>
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--umbra-border)] pb-3">
+          <div className="flex flex-wrap items-center gap-2"><Combine size={17} className="text-[var(--umbra-accent)]" /><h2 className="merge-title">Model Merge</h2><span className="merge-badge">{inspection?.family || 'Safetensors'}</span><span className="merge-badge">CPU</span></div>
           <div className="flex gap-2"><button className={buttonClass} title="Clear merge setup" aria-label="Clear merge setup" disabled={locked} onClick={() => { setA(''); setB(''); setName(''); setRatio(50); setFilter(''); setError(''); setLorasA([]); setLorasB([]); setBlocks({}); setCleanMetadata(true); setRecipeId(''); setRecipeTitle(''); setConfirmDelete(false); }}><RotateCcw size={16} /></button><button className={buttonClass} title="Refresh local models" aria-label="Refresh local models" disabled={loading || locked} onClick={() => void refresh()}><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button></div>
         </header>
 
-        <section aria-label="Merge recipes" className="flex flex-wrap items-end gap-2 border-b border-[var(--umbra-border)] pb-5">
-          <div className="min-w-44 flex-1 space-y-2"><label className="block text-sm" htmlFor="merge-recipe">Recipe</label><UmbraSelect triggerId="merge-recipe" value={recipeId} options={recipes.map(recipe => ({ value: recipe.id, label: recipe.title }))} ariaLabel="Merge recipe" placeholder="Choose recipe" disabled={locked || recipeBusy} onValueChange={value => { setRecipeId(value); setConfirmDelete(false); }} buttonClassName="!min-h-11 !text-sm" /></div>
+        <section aria-label="Merge recipes" className="flex flex-wrap items-end gap-2 border-b border-[var(--umbra-border)] pb-3">
+          <div className="min-w-44 flex-1 space-y-1.5"><label className="merge-label block" htmlFor="merge-recipe">Recipe</label><UmbraSelect triggerId="merge-recipe" value={recipeId} options={recipes.map(recipe => ({ value: recipe.id, label: recipe.title }))} ariaLabel="Merge recipe" placeholder="Choose recipe" disabled={locked || recipeBusy} onValueChange={value => { setRecipeId(value); setConfirmDelete(false); }} buttonClassName="merge-select !text-xs" /></div>
           <button className={buttonClass} title="Load recipe" aria-label="Load recipe" disabled={locked || recipeBusy || !recipeId} onClick={applyRecipe}><FolderOpen size={17} /></button>
-          <div className="min-w-44 flex-1 space-y-2"><label className="block text-sm" htmlFor="merge-recipe-title">Recipe name</label><input id="merge-recipe-title" className={inputClass} value={recipeTitle} maxLength={100} disabled={locked || recipeBusy} onChange={event => setRecipeTitle(event.target.value)} /></div>
+          <div className="min-w-44 flex-1 space-y-1.5"><label className="merge-label block" htmlFor="merge-recipe-title">Recipe name</label><input id="merge-recipe-title" className={inputClass} value={recipeTitle} maxLength={100} disabled={locked || recipeBusy} onChange={event => setRecipeTitle(event.target.value)} /></div>
           <button className={buttonClass} title="Save recipe" aria-label="Save recipe" disabled={locked || recipeBusy || !recipeTitle.trim()} onClick={() => void saveRecipe()}><Save size={17} /></button>
           <button className={`${buttonClass} text-red-400`} title={confirmDelete ? 'Confirm recipe deletion' : 'Delete recipe'} aria-label={confirmDelete ? 'Confirm recipe deletion' : 'Delete recipe'} disabled={locked || recipeBusy || !recipeId} onClick={() => void deleteRecipe()}><Trash2 size={17} />{confirmDelete && 'Confirm'}</button>
           {confirmDelete && <button className={buttonClass} disabled={recipeBusy} onClick={() => setConfirmDelete(false)}>Cancel</button>}
         </section>
 
         <MergeBlueprints refreshKey={`${job?.id}:${job?.phase === 'completed'}`} locked={locked || recipeBusy} onLoad={continueBlueprint} />
-        <div role="group" aria-label="Model operation" className="flex flex-wrap gap-2">
-          <button className={buttonClass} style={!baking ? { borderColor: 'var(--umbra-accent)', color: 'var(--umbra-accent)' } : undefined} aria-pressed={!baking} disabled={locked} onClick={() => setMode('merge')}><Combine size={16} />Merge models</button>
-          <button className={buttonClass} style={baking ? { borderColor: 'var(--umbra-accent)', color: 'var(--umbra-accent)' } : undefined} aria-pressed={baking} disabled={locked} onClick={() => setMode('lora_bake')}><Save size={16} />Bake LoRAs</button>
+        <section aria-label="Source configuration" className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="merge-label">Source configuration</h3><span className="merge-badge">{models.length} local models</span></div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="group" aria-label="Model operation" className="flex flex-wrap gap-1.5">
+            <button className={buttonClass} aria-pressed={!baking} disabled={locked} onClick={() => setMode('merge')}><Combine size={15} />Merge models</button>
+            <button className={buttonClass} aria-pressed={baking} disabled={locked} onClick={() => setMode('lora_bake')}><Save size={15} />Bake LoRAs</button>
+          </div>
+          <input type="search" aria-label="Filter models" placeholder="Filter local models..." title="Full-precision Safetensors models; quantized and pickle checkpoints are excluded" value={filter} onChange={event => setFilter(event.target.value)} className={`${inputClass} !w-auto min-w-36 flex-1`} />
         </div>
-        <input type="search" aria-label="Filter models" placeholder="Filter local models..." title="Full-precision Safetensors models; quantized and pickle checkpoints are excluded" value={filter} onChange={event => setFilter(event.target.value)} className={`${inputClass} max-w-md`} />
-        <section data-model-merge-sources className={`grid min-w-0 grid-cols-1 items-start gap-4 ${baking ? '' : 'md:grid-cols-[minmax(0,1fr)_44px_minmax(0,1fr)]'}`} aria-label="Source models">
-          <div className="min-w-0 space-y-2"><label className="block text-sm font-semibold" htmlFor="merge-model-a">{baking ? 'Base model' : 'Model A'} <span className="float-right text-[var(--umbra-accent)]">{baking ? 100 : 100 - ratio}%</span></label>
-            <UmbraSelect triggerId="merge-model-a" triggerTitle={a} value={a} options={options} onValueChange={value => { setA(value); setBlocks({}); }} ariaLabel="Model A" placeholder="Choose base model" disabled={locked || loading} buttonClassName="!min-h-11 !h-auto !text-sm" />
+        <section data-model-merge-sources className={`grid min-w-0 grid-cols-1 items-start gap-2 ${baking ? '' : 'md:grid-cols-[minmax(0,1fr)_36px_minmax(0,1fr)]'}`} aria-label="Source models">
+          <div className="umbra-surface-soft min-w-0 space-y-2 rounded-md border border-[var(--umbra-border)] p-2.5"><label className="merge-label block" htmlFor="merge-model-a">{baking ? 'Base model' : 'Model A'} <span className="float-right text-[var(--umbra-accent)]">{baking ? 100 : 100 - ratio}%</span></label>
+            <UmbraSelect triggerId="merge-model-a" triggerTitle={a} value={a} options={options} onValueChange={value => { setA(value); setBlocks({}); }} ariaLabel="Model A" placeholder="Choose base model" disabled={locked || loading} buttonClassName="merge-select !h-auto !text-xs" />
             {a && <p className="break-all text-xs text-[var(--umbra-text-muted)]">{a}</p>}
             {models.find(model => model.id === a)?.umbra && <div className="flex flex-wrap items-center gap-2 text-xs"><span>Made with Umbra</span>{models.find(model => model.id === a)?.blueprintId && <button className={buttonClass} disabled={locked || recipeBusy} onClick={() => void loadModelBlueprint(models.find(model => model.id === a)!.blueprintId!)}><FolderOpen size={16} />Load A blueprint</button>}</div>}
             <MergeLoraStack side="A" entries={lorasA} models={loras} locked={locked} onChange={setLorasA} />
           </div>
-          {!baking && <><button className={`${buttonClass} w-11 self-start mt-7 justify-self-center !px-0`} title="Swap models and LoRA stacks" aria-label="Swap models" disabled={locked || !a || !b} onClick={() => { setA(b); setB(a); setRatio(100 - ratio); setLorasA(lorasB); setLorasB(lorasA); setBlocks(Object.fromEntries(Object.entries(blocks).map(([key, value]) => [key, 1 - value]))); }}><ArrowRightLeft size={18} /></button>
-          <div className="min-w-0 space-y-2"><label className="block text-sm font-semibold" htmlFor="merge-model-b">Model B <span className="float-right text-emerald-400">{ratio}%</span></label>
-            <UmbraSelect triggerId="merge-model-b" triggerTitle={b} value={b} options={options} onValueChange={value => { setB(value); setBlocks({}); }} ariaLabel="Model B" placeholder="Choose blend model" disabled={locked || loading} buttonClassName="!min-h-11 !h-auto !text-sm" />
+          {!baking && <><button className={`${buttonClass} merge-swap w-9 self-start mt-7 justify-self-center !px-0`} title="Swap models and LoRA stacks" aria-label="Swap models" disabled={locked || !a || !b} onClick={() => { setA(b); setB(a); setRatio(100 - ratio); setLorasA(lorasB); setLorasB(lorasA); setBlocks(Object.fromEntries(Object.entries(blocks).map(([key, value]) => [key, 1 - value]))); }}><ArrowRightLeft size={16} /></button>
+          <div className="umbra-surface-soft min-w-0 space-y-2 rounded-md border border-[var(--umbra-border)] p-2.5"><label className="merge-label block" htmlFor="merge-model-b">Model B <span className="float-right text-emerald-400">{ratio}%</span></label>
+            <UmbraSelect triggerId="merge-model-b" triggerTitle={b} value={b} options={options} onValueChange={value => { setB(value); setBlocks({}); }} ariaLabel="Model B" placeholder="Choose blend model" disabled={locked || loading} buttonClassName="merge-select !h-auto !text-xs" />
             {b && <p className="break-all text-xs text-[var(--umbra-text-muted)]">{b}</p>}
             {models.find(model => model.id === b)?.umbra && <div className="flex flex-wrap items-center gap-2 text-xs"><span>Made with Umbra</span>{models.find(model => model.id === b)?.blueprintId && <button className={buttonClass} disabled={locked || recipeBusy} onClick={() => void loadModelBlueprint(models.find(model => model.id === b)!.blueprintId!)}><FolderOpen size={16} />Load B blueprint</button>}</div>}
             <MergeLoraStack side="B" entries={lorasB} models={loras} locked={locked} onChange={setLorasB} />
           </div></>}
         </section>
-
-        {!baking && <><section className="space-y-4 border-y border-[var(--umbra-border)] py-5" aria-label="Blend ratio">
-          <div className="flex items-center justify-between gap-4"><label htmlFor="merge-ratio" className="text-sm font-semibold">Model B contribution</label><div className="flex items-center gap-2"><input aria-label="Model B percentage" type="number" min={0} max={100} step={1} value={ratio} disabled={locked} onChange={event => setRatio(Math.max(0, Math.min(100, Number(event.target.value) || 0)))} className={`${inputClass} !w-20 text-center`} /><span>%</span></div></div>
-          <input id="merge-ratio" type="range" min={0} max={100} step={1} value={ratio} disabled={locked} onChange={event => setRatio(Number(event.target.value))} className="min-h-11 w-full" />
-          <div className="flex items-center justify-between gap-3 text-xs text-[var(--umbra-text-muted)]"><span>100% Model A</span><button className="min-h-9 px-3 hover:text-[var(--umbra-text)] disabled:opacity-40" disabled={locked} onClick={() => setRatio(50)}>50 / 50</button><span>100% Model B</span></div>
-          <div className="flex h-2 overflow-hidden rounded-sm" aria-hidden="true"><div className="bg-[var(--umbra-accent)]" style={{ width: `${100 - ratio}%` }} /><div className="bg-emerald-400" style={{ width: `${ratio}%` }} /></div>
         </section>
 
-        <section className="space-y-4 border-b border-[var(--umbra-border)] pb-5">
+        {!baking && <><section className="space-y-2 border-y border-[var(--umbra-border)] py-3" aria-label="Blend ratio">
+          <div className="flex flex-wrap items-center justify-between gap-2"><label htmlFor="merge-ratio" className="merge-label">Global blend · Model B</label><div className="flex items-center gap-2 text-xs"><input aria-label="Model B percentage" type="number" min={0} max={100} step={1} value={ratio} disabled={locked} onChange={event => setRatio(Math.max(0, Math.min(100, Number(event.target.value) || 0)))} className={`${inputClass} !w-20 text-center`} /><span>%</span></div></div>
+          <input id="merge-ratio" type="range" min={0} max={100} step={1} value={ratio} disabled={locked} onChange={event => setRatio(Number(event.target.value))} className="merge-range w-full accent-[var(--umbra-accent)]" />
+          <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--umbra-text-muted)]"><span>A · {100 - ratio}%</span><button className={`${buttonClass} !border-transparent`} disabled={locked} onClick={() => setRatio(50)}>50 / 50</button><span>B · {ratio}%</span></div>
+          <div className="flex h-1 overflow-hidden rounded-sm opacity-70" aria-hidden="true"><div className="bg-[var(--umbra-accent)]" style={{ width: `${100 - ratio}%` }} /><div className="bg-emerald-400" style={{ width: `${ratio}%` }} /></div>
+        </section>
+
+        <section className="space-y-3 border-b border-[var(--umbra-border)] pb-3">
           <button className={`${buttonClass} w-full justify-between`} aria-expanded={advanced} onClick={() => setAdvanced(value => !value)}>Advanced block mix <span className="ml-auto text-xs text-[var(--umbra-text-muted)]">{Object.keys(blocks).length} overrides</span>{advanced ? <ChevronUp size={17} /> : <ChevronDown size={17} />}</button>
           {advanced && (inspection ? inspection.blocks > 0 ? <><div className="text-xs text-[var(--umbra-text-muted)]">Non-block weights: global mix{inspection.combined ? ' · Includes VAE / text encoder weights' : ''}</div><MergeBlockEditor key={inspection.blockLabels?.join('|') || inspection.blocks} count={inspection.blocks} labels={inspection.blockLabels} ratio={ratio} values={blocks} locked={locked} onChange={setBlocks} /></> : <p className="text-sm text-[var(--umbra-text-muted)]">No indexed blocks · Global mix only</p> : <p className="text-sm text-[var(--umbra-text-muted)]">Select compatible source models</p>)}
         </section>
 
         </>}
-        <div className="flex min-h-12 items-start gap-2 text-sm" role="status">
+        <div className="umbra-surface-soft flex items-center gap-2 rounded-md border border-[var(--umbra-border)] p-2.5 text-xs" role="status">
           {checking ? <><Loader2 size={18} className="shrink-0 animate-spin" />Checking tensor compatibility...</> : checkError ? <><CircleAlert size={18} className="shrink-0 text-amber-400" /><span>{checkError}</span></> : inspection ? <><CheckCircle2 size={18} className="shrink-0 text-emerald-400" /><span>{inspection.family} · {inspection.tensorCount.toLocaleString()} tensors · {inspection.precision.join(', ')}</span></> : <><Workflow size={18} className="shrink-0" /><span>{models.length ? baking ? 'Select a base model' : 'Select two compatible models' : loading ? 'Loading local models...' : 'No local full-precision Safetensors models found'}</span></>}
         </div>
 
-        <section data-model-merge-output className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(200px,0.6fr)]" aria-label="Merge output">
-          <div className="min-w-0 space-y-2"><label htmlFor="merge-name" className="block text-sm font-semibold">Output filename</label><div className="flex items-center gap-2"><input id="merge-name" placeholder="My Model Merge" value={name} maxLength={100} onChange={event => setName(event.target.value)} disabled={locked} className={`${inputClass} min-w-0`} /><span className="text-xs">.safetensors</span></div><div className="break-all text-xs text-[var(--umbra-text-muted)]">models / {a.split('/')[0] || 'diffusion_models'} / Merges</div></div>
-          <dl className="space-y-2 text-sm"><div className="flex justify-between gap-3"><dt className="flex items-center gap-2"><Cpu size={15} />Processing</dt><dd>CPU</dd></div><div className="flex justify-between gap-3"><dt>Estimated output</dt><dd>{inspection ? size(inspection.bytes) : '--'}</dd></div><div className="flex justify-between gap-3"><dt>Free RAM required</dt><dd>{inspection ? size(inspection.estimatedRamBytes + loraBytes * 2) : '--'}</dd></div></dl>
+        <section data-model-merge-output className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(200px,0.6fr)]" aria-label="Merge output">
+          <div className="min-w-0 space-y-2"><label htmlFor="merge-name" className="merge-label block">Output filename</label><div className="flex items-center gap-2"><input id="merge-name" placeholder="My Model Merge" value={name} maxLength={100} onChange={event => setName(event.target.value)} disabled={locked} className={`${inputClass} min-w-0`} /><span className="text-[11px] text-[var(--umbra-text-muted)]">.safetensors</span></div><div className="break-all text-[11px] text-[var(--umbra-text-muted)]">models / {a.split('/')[0] || 'diffusion_models'} / Merges</div></div>
+          <dl className="umbra-surface-soft space-y-2 rounded-md border border-[var(--umbra-border)] p-2.5 text-[11px]"><div className="flex justify-between gap-3"><dt className="flex items-center gap-2 text-[var(--umbra-text-muted)]"><Cpu size={13} />Processing</dt><dd>CPU</dd></div><div className="flex justify-between gap-3"><dt className="text-[var(--umbra-text-muted)]">Estimated output</dt><dd className="tabular-nums">{inspection ? size(inspection.bytes) : '--'}</dd></div><div className="flex justify-between gap-3"><dt className="text-[var(--umbra-text-muted)]">Free RAM required</dt><dd className="tabular-nums">{inspection ? size(inspection.estimatedRamBytes + loraBytes * 2) : '--'}</dd></div></dl>
         </section>
-        <section className="space-y-2 border-b border-[var(--umbra-border)] pb-4" aria-label="Model metadata">
-          <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={cleanMetadata} disabled={locked} onChange={event => setCleanMetadata(event.target.checked)} className="h-5 w-5 accent-[var(--umbra-accent)]" />Clean model metadata</label>
+        <section className="space-y-2 border-b border-[var(--umbra-border)] pb-3" aria-label="Model metadata">
+          <label className="merge-check flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={cleanMetadata} disabled={locked} onChange={event => setCleanMetadata(event.target.checked)} className="h-4 w-4 accent-[var(--umbra-accent)]" />Clean model metadata</label>
           <p className="text-xs text-[var(--umbra-text-muted)]">{cleanMetadata ? 'Format, runtime architecture metadata, Umbra creator marker, and blueprint ID are retained. Personal source metadata and the recipe stay out of the model.' : 'Source metadata and the full merge recipe will be embedded in the model.'}</p>
           <p className="text-xs text-[var(--umbra-text-muted)]">A private blueprint is saved automatically in User / Config / DataForge / MergeJobs / Blueprints. Back it up separately; the model ID alone cannot restore it.</p>
         </section>
         {error && <div role="alert" className="break-words text-sm text-red-400">{error}</div>}
-        <div className="flex flex-wrap justify-end gap-3"><button className={`${buttonClass} border-[var(--umbra-accent)] text-[var(--umbra-accent)]`} disabled={locked || checking || !inspection || !name.trim() || (baking && !lorasA.some(entry => entry.enabled && entry.strength !== 0))} onClick={() => void start()}>{submitting ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}{baking ? 'Save baked model' : 'Save merged model'}</button></div>
+        <div className="flex flex-wrap justify-end gap-2"><button className={`${buttonClass} merge-primary`} disabled={locked || checking || !inspection || !name.trim() || (baking && !lorasA.some(entry => entry.enabled && entry.strength !== 0))} onClick={() => void start()}>{submitting ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}{baking ? 'Save baked model' : 'Save merged model'}</button></div>
 
-        {job && <section className="space-y-3 border-t border-[var(--umbra-border)] pt-5" aria-label="Merge job">
-          <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold capitalize">{job.phase}</h3><span className="text-sm tabular-nums">{job.progress}%</span></div>
+        {job && <section className="umbra-surface-soft space-y-2 rounded-md border border-[var(--umbra-border)] p-3" aria-label="Merge job">
+          <div className="flex items-center justify-between gap-3"><h3 className="merge-label">{job.phase}</h3><span className="text-xs tabular-nums">{job.progress}%</span></div>
           <progress className="h-2 w-full accent-[var(--umbra-accent)]" aria-label="Merge progress" max={100} value={job.progress} />
           {job.total && <p className="text-xs tabular-nums">{job.processed?.toLocaleString() || 0} / {job.total.toLocaleString()} tensors</p>}
           <p className="break-all text-xs">{job.mode === 'lora_bake' ? `${job.a} + LoRAs` : `${job.a} (${Math.round((1 - job.ratio) * 100)}%) + ${job.b} (${Math.round(job.ratio * 100)}%)`}</p>

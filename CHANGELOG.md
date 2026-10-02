@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Workspace Interface Alignment
+
+- Metadata Viewer and Image Analysis now share an image preview, bottom media strip, compact toolbar, and inspector pane with the existing Extras tools. Pan, zoom, Fit, and panel visibility work independently of metadata and analysis results; narrow layouts stack the inspector below the image.
+- Keep embedded workflow/API JSON and original legacy parameter text available for accurate copy and export. Clear or leaving the tool invalidates interrupted imports so late scans cannot restore removed media.
+- Preserve Image Analysis tagger and caption models, thresholds, export formatting, presets, per-image results, batch controls, and all four Umbra UI handoffs. Interrupted client requests cannot replace cleared results; this does not guarantee stopping inference already accepted by the server.
+- Model Manager and Data Forge Datasets adopt Gallery-style browsing controls, search/filter/sort, selection, context actions, and details. Existing downloads, model management, dataset imports, captions, tagging, archives, and file-operation confirmations remain available. Data Forge keeps its existing Phone Remote restriction.
+- Model Merge uses compact OLED glass panels and quieter internal trays while retaining merge/bake controls, source and LoRA stacks, recipes, blueprints, validation, progress, cancellation, and test-preview options. Layout qualification uses mocked model operations; fresh inference and model-file merges remain unqualified.
+
 ### Extras Transparency
 
 - Add **Transparency** beside Image Censor in Extras, with a before/after mask editor and checkerboard preview. Import images, erase or restore pixels with size, hardness and strength controls, pan/zoom, and keep independent masks and Undo/Redo histories when switching images.

@@ -1,6 +1,8 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
-import { useState, useEffect, useRef, type DragEvent } from 'react';
-import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef, type DragEvent, type MouseEvent, type KeyboardEvent } from 'react';
+import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen, Search, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, ArrowUpAZ, ArrowDownAZ, PanelRight, FolderTree, ZoomIn, MoreHorizontal } from 'lucide-react';
+import { ContextMenu } from '@/components/ui/ContextMenu';
+import type { ContextMenuItem } from '@/hooks/useContextMenu';
 import { useStore } from '@/store/useStore';
 import { useDropZone } from '@/lib/dnd';
 import type { DroppedImage } from '@/lib/dnd/SimpleDragDrop';
@@ -17,6 +19,7 @@ import { redownloadDatasetImage } from './datasetMedia';
 import { DatasetRedownloadButton } from './components/DatasetRedownloadButton';
 import { DatasetThumbnail } from './components/DatasetThumbnail';
 import { createConceptSettingsSession, type ConceptSaveStatus } from './conceptSettingsSession';
+import { browseDatasetImages, selectDatasetImageRange, type DatasetCaptionFilter, type DatasetImageSort } from './datasetBrowse';
 
 const IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|webp)$/i;
 const DATASET_IMAGE_PAGE_SIZE = 120;
@@ -113,6 +116,8 @@ export function DatasetsTab() {
   const { showToast } = useStore();
   const {
     datasets,
+    isLoading: isLoadingDatasets,
+    fetchDatasets,
     deleteDataset,
     renameDataset,
     archiveDataset,
@@ -133,6 +138,17 @@ export function DatasetsTab() {
   const [visibleImageCount, setVisibleImageCount] = useState(DATASET_IMAGE_PAGE_SIZE);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [focusedImage, setFocusedImage] = useState<DatasetImage | null>(null);
+  const [imageQuery, setImageQuery] = useState('');
+  const [captionFilter, setCaptionFilter] = useState<DatasetCaptionFilter>('all');
+  const [imageSort, setImageSort] = useState<DatasetImageSort>('source');
+  const [sortDescending, setSortDescending] = useState(false);
+  const [tagSettingsOpen, setTagSettingsOpen] = useState(false);
+  const [folderRailOpen, setFolderRailOpen] = useState(() => window.innerWidth >= 1024);
+  const [captionPaneOpen, setCaptionPaneOpen] = useState(() => window.innerWidth >= 1280);
+  const [imageContextMenu, setImageContextMenu] = useState<{ x: number; y: number; filename: string } | null>(null);
+  const selectionAnchor = useRef<string | null>(null);
+  const browsedImages = useMemo(() => browseDatasetImages(images, imageQuery, captionFilter, imageSort, sortDescending), [images, imageQuery, captionFilter, imageSort, sortDescending]);
+  const filteredSelectionCount = browsedImages.filter(image => selectedImages.has(image.filename)).length;
   const [isLoadingImages, setIsLoadingImages] = useState(false);
   const [imageLoadError, setImageLoadError] = useState(false);
   const [repairingImages, setRepairingImages] = useState<Set<string>>(new Set());
@@ -380,6 +396,8 @@ export function DatasetsTab() {
     setImageLoadError(false);
     setVisibleImageCount(DATASET_IMAGE_PAGE_SIZE);
     setSelectedImages(new Set());
+    selectionAnchor.current = null;
+    setImageContextMenu(null);
     setFlaggedForDeletion(new Set());
     setFocusedImage(null);
     setLightboxOpen(false);
@@ -393,6 +411,11 @@ export function DatasetsTab() {
     }
     return () => { imageLoadSequence.current++; };
   }, [selectedDataset, selectedConcept]);
+
+  useEffect(() => {
+    setVisibleImageCount(DATASET_IMAGE_PAGE_SIZE);
+    if (imageScrollRef.current) imageScrollRef.current.scrollTop = 0;
+  }, [imageQuery, captionFilter, imageSort, sortDescending]);
 
   useEffect(() => {
     let cancelled = false;
@@ -507,6 +530,10 @@ export function DatasetsTab() {
         if (imgs === null) setImageLoadError(true);
         else {
           setImages(imgs);
+          const currentNames = new Set(imgs.map(image => image.filename));
+          setSelectedImages(previous => new Set([...previous].filter(name => currentNames.has(name))));
+          setFlaggedForDeletion(previous => new Set([...previous].filter(name => currentNames.has(name))));
+          setFocusedImage(previous => previous ? imgs.find(image => image.filename === previous.filename) || null : null);
           return imgs;
         }
       }
@@ -733,6 +760,7 @@ export function DatasetsTab() {
 
   // Selection helpers
   const toggleImageSelect = (filename: string) => {
+    selectionAnchor.current = filename;
     setSelectedImages(prev => {
       const next = new Set(prev);
       if (next.has(filename)) {
@@ -744,8 +772,18 @@ export function DatasetsTab() {
     });
   };
 
-  const selectAll = () => setSelectedImages(new Set(images.map(i => i.filename)));
-  const selectNone = () => setSelectedImages(new Set());
+  const selectAll = () => setSelectedImages(new Set(browsedImages.map(image => image.filename)));
+  const selectNone = () => { setSelectedImages(new Set()); selectionAnchor.current = null; };
+  const focusImage = (image: DatasetImage, event: MouseEvent | KeyboardEvent) => {
+    setFocusedImage(image);
+    setCaptionPaneOpen(true);
+    if (event.shiftKey) {
+      setSelectedImages(previous => selectDatasetImageRange(browsedImages.map(item => item.filename), previous, selectionAnchor.current, image.filename, event.ctrlKey || event.metaKey));
+    } else if (event.ctrlKey || event.metaKey) {
+      toggleImageSelect(image.filename);
+    }
+    selectionAnchor.current = image.filename;
+  };
 
   // Lightbox handlers
   const openLightbox = (index: number) => {
@@ -863,10 +901,31 @@ export function DatasetsTab() {
     }
   };
 
+  const contextImage = images.find(image => image.filename === imageContextMenu?.filename);
+  const runImageContextAction = (action: () => void) => { setImageContextMenu(null); action(); };
+  const imageContextItems: ContextMenuItem[] = contextImage ? [
+    { label: 'Open Preview', icon: <ZoomIn size={14} />, action: () => runImageContextAction(() => openLightbox(images.indexOf(contextImage))) },
+    { label: 'Edit Caption', icon: <Tag size={14} />, action: () => runImageContextAction(() => { setFocusedImage(contextImage); setCaptionPaneOpen(true); }) },
+    { label: flaggedForDeletion.has(contextImage.filename) ? 'Clear Deletion Flag' : 'Flag for Deletion', icon: <Flag size={14} />, action: () => runImageContextAction(() => toggleFlag(contextImage.filename)) },
+    { separator: true },
+    { label: `Move Selected (${selectedImages.size})`, icon: <Move size={14} />, disabled: selectedImages.size === 0 || otherConcepts.length === 0, action: () => runImageContextAction(() => setShowMoveModal(true)) },
+    { label: `Delete Selected (${selectedImages.size})`, icon: <Trash2 size={14} />, danger: true, disabled: selectedImages.size === 0, action: () => runImageContextAction(() => { void handleDeleteSelected(); }) },
+  ] : [];
+  const openImageContext = (image: DatasetImage, x: number, y: number) => {
+    if (!selectedImages.has(image.filename)) setSelectedImages(new Set([image.filename]));
+    selectionAnchor.current = image.filename;
+    setImageContextMenu({ x, y, filename: image.filename });
+  };
+
   return (
-    <div className="h-full flex bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
+    <div data-umbra-datasets-workspace className="relative flex h-full min-h-0 overflow-hidden bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
       {/* Left sidebar - Dataset tree */}
-      <div className="glass-panel custom-scrollbar w-52 flex-shrink-0 overflow-y-auto rounded-none border-y-0 border-l-0">
+      <div id="dataset-folder-rail" className={`glass-panel absolute inset-y-0 left-0 z-30 w-52 shrink-0 rounded-none border-y-0 border-l-0 lg:relative lg:z-auto ${folderRailOpen ? 'flex flex-col' : 'hidden'}`}>
+        <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400"><FolderTree size={14} /> Dataset Library</span>
+          <button type="button" aria-label="Close dataset folders" onClick={() => setFolderRailOpen(false)} className="umbra-icon-button rounded p-1"><X size={14} /></button>
+        </div>
+        <div className="min-h-0 flex-1">
         <DatasetTree
           datasets={datasets}
           selectedDataset={selectedDataset}
@@ -905,20 +964,48 @@ export function DatasetsTab() {
           }}
           archivingDataset={archivingDataset}
         />
+        </div>
+        <div role="status" className="border-t border-white/10 px-3 py-2 text-[10px] text-zinc-500">{isLoadingDatasets ? 'Loading folders...' : `${datasets.length} folder${datasets.length === 1 ? '' : 's'}`}</div>
       </div>
 
       {/* Center - Image grid */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="glass-panel flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-1 text-xs text-zinc-300" aria-label="Dataset location">
+              <FolderOpen size={14} className="mr-1 shrink-0 text-zinc-500" />
+              <span className="truncate" title={selectedDataset || undefined}>{selectedDataset || 'Datasets'}</span>
+              {selectedConcept && selectedConcept !== selectedDataset && <><ChevronRight size={12} className="shrink-0 text-zinc-600" /><span className="truncate" title={selectedConcept}>{selectedConcept}</span></>}
+            </div>
+            <div className="mt-1 truncate text-[11px] text-zinc-500" title={selectedConceptPath || undefined}>{selectedConcept ? `${images.length} images loaded` : 'Select a concept folder'}</div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button type="button" aria-label="Toggle dataset folders" aria-expanded={folderRailOpen} aria-controls="dataset-folder-rail" onClick={() => setFolderRailOpen(value => !value)} className="umbra-icon-button flex h-8 w-8 items-center justify-center rounded"><FolderTree size={15} /></button>
+            <button type="button" aria-label="Toggle caption panel" aria-expanded={captionPaneOpen} aria-controls="dataset-caption-panel" onClick={() => setCaptionPaneOpen(value => !value)} className="umbra-icon-button flex h-8 w-8 items-center justify-center rounded"><PanelRight size={15} /></button>
+            <button type="button" aria-label="Refresh dataset view" disabled={isLoadingImages || isLoadingDatasets} onClick={() => { void fetchDatasets(); if (selectedConcept) void loadImages(); }} className="umbra-icon-button flex h-8 w-8 items-center justify-center rounded disabled:opacity-40"><RefreshCw size={15} className={isLoadingImages || isLoadingDatasets ? 'animate-spin' : ''} /></button>
+          </div>
+        </header>
+        {datasetError && !selectedConcept && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200"><span>{datasetError}</span><button type="button" onClick={() => void fetchDatasets()} className="umbra-icon-button shrink-0 rounded px-2 py-1">Retry folders</button></div>}
+        {selectedConcept && <div className="umbra-surface-soft flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
+          <div className="flex min-w-[160px] flex-1 items-center rounded border border-white/10 focus-within:border-[var(--umbra-accent)]">
+            <Search size={13} className="ml-2 shrink-0 text-zinc-500" />
+            <input aria-label="Search dataset images" value={imageQuery} onChange={event => setImageQuery(event.target.value)} placeholder="Search filenames, captions, tags..." className="h-7 min-w-0 flex-1 bg-transparent px-2 text-xs outline-none placeholder:text-zinc-600" />
+            {imageQuery && <button type="button" aria-label="Clear dataset search" onClick={() => setImageQuery('')} className="umbra-icon-button mr-1 rounded p-1"><X size={12} /></button>}
+          </div>
+          <UmbraSelectControl value={captionFilter} aria-label="Filter dataset captions" onChange={event => setCaptionFilter(event.target.value as DatasetCaptionFilter)} className="umbra-input h-7 rounded px-2 text-xs"><option value="all">All captions</option><option value="captioned">Captioned</option><option value="uncaptioned">Uncaptioned</option></UmbraSelectControl>
+          <UmbraSelectControl value={imageSort} aria-label="Sort dataset images" onChange={event => setImageSort(event.target.value as DatasetImageSort)} className="umbra-input h-7 rounded px-2 text-xs"><option value="source">Folder order</option><option value="name">Name</option></UmbraSelectControl>
+          <button type="button" aria-label={sortDescending ? 'Sort dataset ascending' : 'Sort dataset descending'} onClick={() => setSortDescending(value => !value)} className="umbra-icon-button flex h-7 w-7 items-center justify-center rounded">{sortDescending ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button>
+        </div>}
         {/* Toolbar */}
-        <div className="glass-panel flex-shrink-0 flex items-center justify-between rounded-none border-x-0 border-t-0 px-3 py-2">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-400">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+          <div className="min-w-0 text-xs text-zinc-500" role="status">
+            <span>
               {selectedConcept ? (
                 <>
-                  {images.length} images
+                  {browsedImages.length} visible
                   {selectedImages.size > 0 && (
-                    <span className="ml-2 text-cyan-300">
-                      ({selectedImages.size} selected)
+                    <span className="ml-2 text-[var(--umbra-accent)]">
+                      {selectedImages.size} selected{selectedImages.size > filteredSelectionCount ? ` (${selectedImages.size - filteredSelectionCount} hidden)` : ''}
                     </span>
                   )}
                 </>
@@ -929,7 +1016,7 @@ export function DatasetsTab() {
           </div>
 
           {selectedConcept && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 onClick={() => selectedDataset && void createDatasetZip(selectedDataset)}
                 disabled={!selectedDataset || Boolean(archivingDataset)}
@@ -956,17 +1043,19 @@ export function DatasetsTab() {
 
               <button
                 onClick={selectAll}
+                disabled={browsedImages.length === 0}
+                title="Select all images matching the current view, including those not yet displayed"
                 className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
               >
                 <CheckSquare className="w-3.5 h-3.5" />
-                All
+                {imageQuery.trim() || captionFilter !== 'all' ? 'Select matches' : 'Select all'}
               </button>
               <button
                 onClick={selectNone}
                 className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
               >
                 <Square className="w-3.5 h-3.5" />
-                None
+                Clear
               </button>
 
               <button
@@ -1008,6 +1097,8 @@ export function DatasetsTab() {
                 Move
               </button>
 
+              <button type="button" aria-expanded={tagSettingsOpen} aria-controls="dataset-tag-settings" onClick={() => setTagSettingsOpen(value => !value)} className={`umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs ${tagSettingsOpen ? 'text-[var(--umbra-accent)]' : ''}`}><SlidersHorizontal size={13} /> Caption tools <ChevronDown size={12} className={tagSettingsOpen ? 'rotate-180' : ''} /></button>
+
               {/* Delete Flagged button - only shows when images are flagged */}
               {flaggedForDeletion.size > 0 && (
                 <>
@@ -1033,7 +1124,7 @@ export function DatasetsTab() {
         </div>
 
         {selectedConcept && (
-          <div className="glass-panel flex-shrink-0 rounded-none border-x-0 border-t-0 px-3 py-2">
+          <div id="dataset-tag-settings" hidden={!tagSettingsOpen} className="glass-panel custom-scrollbar max-h-[45%] shrink-0 overflow-y-auto rounded-none border-x-0 border-t-0 px-3 py-2">
             {conceptSettingsReadyKey !== selectedConceptSettingsKey && <div role="status" className="mb-2 flex items-center gap-2 text-xs text-zinc-400">
               <span>{conceptSettingsFailed ? 'Could not load concept settings.' : 'Loading concept settings...'}</span>
               {conceptSettingsFailed && <button type="button" className="umbra-icon-button rounded px-2 py-1" onClick={() => setConceptSettingsRetry(value => value + 1)}>Retry</button>}
@@ -1060,7 +1151,7 @@ export function DatasetsTab() {
                   onChange={(e) => setTriggerTags(e.target.value)}
                   placeholder="unique token for this concept..."
                   rows={3}
-                  className="umbra-input min-h-20 w-full resize-none rounded px-2 py-2 text-xs leading-relaxed placeholder:text-zinc-600 focus:border-cyan-400/60 focus:outline-none"
+                  className="umbra-input min-h-20 w-full resize-none rounded px-2 py-2 text-xs leading-relaxed placeholder:text-zinc-600 focus:border-[var(--umbra-accent)] focus:outline-none"
                 />
               </label>
               <label className="min-w-0">
@@ -1072,7 +1163,7 @@ export function DatasetsTab() {
                   onChange={(e) => setPrependTags(e.target.value)}
                   placeholder="best quality, style tags..."
                   rows={3}
-                  className="umbra-input min-h-20 w-full resize-none rounded px-2 py-2 text-xs leading-relaxed placeholder:text-zinc-600 focus:border-cyan-400/60 focus:outline-none"
+                  className="umbra-input min-h-20 w-full resize-none rounded px-2 py-2 text-xs leading-relaxed placeholder:text-zinc-600 focus:border-[var(--umbra-accent)] focus:outline-none"
                 />
               </label>
               <div className="min-w-0 space-y-1.5">
@@ -1080,14 +1171,16 @@ export function DatasetsTab() {
                   <button
                     type="button"
                     onClick={() => setCaptionMode('tags')}
-                    className={`h-7 rounded border text-[10px] font-bold uppercase tracking-[0.12em] ${captionMode === 'tags' ? 'border-cyan-400/35 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-zinc-500'}`}
+                    aria-pressed={captionMode === 'tags'}
+                    className={`h-7 rounded border text-[10px] font-bold uppercase tracking-[0.12em] ${captionMode === 'tags' ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]' : 'border-white/10 text-zinc-500'}`}
                   >
                     Tag list
                   </button>
                   <button
                     type="button"
                     onClick={() => setCaptionMode('natural')}
-                    className={`h-7 rounded border text-[10px] font-bold uppercase tracking-[0.12em] ${captionMode === 'natural' ? 'border-cyan-400/35 bg-cyan-500/15 text-cyan-100' : 'border-white/10 text-zinc-500'}`}
+                    aria-pressed={captionMode === 'natural'}
+                    className={`h-7 rounded border text-[10px] font-bold uppercase tracking-[0.12em] ${captionMode === 'natural' ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]' : 'border-white/10 text-zinc-500'}`}
                   >
                     Natural
                   </button>
@@ -1104,7 +1197,7 @@ export function DatasetsTab() {
                     setGeneralMcutEnabled(false);
                     setCharacterMcutEnabled(false);
                   }}
-                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-cyan-400/60 focus:outline-none"
+                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-[var(--umbra-accent)] focus:outline-none"
                   title="Caption model"
                 >
                   {(captionMode === 'natural' ? NATURAL_MODEL_OPTIONS : WAIFU_MODEL_OPTIONS).map(option => (
@@ -1135,7 +1228,7 @@ export function DatasetsTab() {
                 <button
                   onClick={() => void handleBatchCaption(true)}
                   disabled={autoTagging || images.length === 0}
-                  className="flex h-8 items-center gap-1.5 rounded border border-cyan-400/35 bg-cyan-500/15 px-2 text-xs font-bold uppercase tracking-[0.12em] text-cyan-100 transition-colors hover:bg-cyan-500/22 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-8 items-center gap-1.5 rounded border border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] px-2 text-xs font-bold uppercase tracking-[0.12em] text-[var(--umbra-text)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   title={captionMode === 'natural' ? 'Replace captions with new natural-language captions' : 'Replace captions with newly generated tags'}
                 >
                   {autoTagging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
@@ -1145,7 +1238,7 @@ export function DatasetsTab() {
                 </button>
               </div>
             </div>
-            <div className={`${captionMode === 'tags' ? 'grid' : 'hidden'} mt-2 grid-cols-[repeat(6,minmax(90px,1fr))_auto_auto] items-end gap-2`}>
+            <div className={`${captionMode === 'tags' ? 'grid' : 'hidden'} mt-2 grid-cols-2 items-end gap-2 xl:grid-cols-3 2xl:grid-cols-[repeat(6,minmax(90px,1fr))_auto_auto]`}>
               <label className="min-w-0">
                 <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                   General
@@ -1291,7 +1384,7 @@ export function DatasetsTab() {
                     className="umbra-input h-8 w-full rounded px-2 text-xs"
                   />
                 </label>
-                <p className="min-w-64 flex-1 text-[10px] leading-relaxed text-zinc-500">
+                <p className="min-w-0 flex-1 text-[10px] leading-relaxed text-zinc-500">
                   Runs locally and writes factual prose captions, including explicit content. The model loads once for the selected batch.
                 </p>
                 <div className="h-8 min-w-[120px] rounded border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
@@ -1330,10 +1423,11 @@ export function DatasetsTab() {
           onScroll={(event) => {
             const view = event.currentTarget;
             if (view.scrollHeight - view.scrollTop - view.clientHeight < 160) {
-              setVisibleImageCount(count => Math.min(images.length, count + DATASET_IMAGE_PAGE_SIZE));
+              setVisibleImageCount(count => Math.min(browsedImages.length, count + DATASET_IMAGE_PAGE_SIZE));
             }
           }}
-          className={`custom-scrollbar relative flex-1 overflow-y-auto p-3 transition-colors ${isOver || nativeDropActive ? 'bg-cyan-500/10' : ''}`}
+          aria-label="Dataset images"
+          className={`custom-scrollbar relative min-h-0 flex-1 overflow-y-auto p-3 transition-colors ${isOver || nativeDropActive ? 'bg-[var(--umbra-accent-glow)]' : ''}`}
         >
           {/* Drop overlay */}
           {(isOver || nativeDropActive) && selectedConcept && (
@@ -1357,8 +1451,8 @@ export function DatasetsTab() {
           )}
 
           {isLoadingImages ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-8 w-8 animate-spin text-cyan-300" />
+            <div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-zinc-500">
+              <Loader2 size={18} className="animate-spin" /> Loading concept images
             </div>
           ) : imageLoadError ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400">
@@ -1366,16 +1460,20 @@ export function DatasetsTab() {
               <button type="button" className="rounded border border-white/20 px-3 py-2 text-xs text-cyan-300 hover:bg-white/5" onClick={() => void loadImages()}>Retry</button>
             </div>
           ) : !selectedConcept ? (
-            <div className="flex items-center justify-center h-full text-zinc-500">
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-zinc-500">
+              <FolderOpen size={24} />
               <p>Select a concept folder, then drag images from filmstrip</p>
+              {!folderRailOpen && <button type="button" onClick={() => setFolderRailOpen(true)} className="umbra-icon-button rounded px-3 py-2 text-xs">Browse folders</button>}
             </div>
           ) : images.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-zinc-500">
+            <div className="flex items-center justify-center h-full text-center text-sm text-zinc-500">
               <p>No images - drag from filmstrip or download from Search</p>
             </div>
+          ) : browsedImages.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-zinc-500"><p>No matching images</p><button type="button" className="umbra-icon-button rounded px-3 py-2 text-xs" onClick={() => { setImageQuery(''); setCaptionFilter('all'); }}>Clear filters</button></div>
           ) : (<>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
-              {images.slice(0, visibleImageCount).map((img, index) => {
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-2">
+              {browsedImages.slice(0, visibleImageCount).map(img => {
                 const isSelected = selectedImages.has(img.filename);
                 const isFocused = focusedImage?.filename === img.filename;
                 const isFlagged = flaggedForDeletion.has(img.filename);
@@ -1384,29 +1482,34 @@ export function DatasetsTab() {
                   <div
                     key={img.filename}
                     data-umbra-dataset-image
-                    className={`relative aspect-square rounded overflow-hidden bg-zinc-800
-                               border cursor-pointer transition-all
+                    className={`umbra-surface-soft group relative overflow-hidden rounded border cursor-pointer transition-colors
                                ${isFlagged ? 'ring-2 ring-red-500' : ''}
-                               ${isFocused ? 'border-cyan-400 ring-1 ring-cyan-400/30' :
-                                 isSelected ? 'border-cyan-300' : 'border-white/10 hover:border-white/25'}`}
-                    onClick={() => setFocusedImage(img)}
-                    onDoubleClick={() => openLightbox(index)}
+                               ${isFocused || isSelected ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)]' : 'border-white/10 hover:border-white/25'}`}
+                    onContextMenu={event => { event.preventDefault(); openImageContext(img, event.clientX, event.clientY); }}
                   >
+                    <div className="relative aspect-square overflow-hidden">
+                    <button type="button" aria-label={`Edit caption: ${img.filename}`} aria-pressed={isFocused} className="absolute inset-0 z-10 rounded focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--umbra-accent)]" onClick={event => focusImage(img, event)} onDoubleClick={() => openLightbox(images.indexOf(img))} onKeyDown={event => {
+                      if (event.key === ' ' && (event.shiftKey || event.ctrlKey || event.metaKey)) { event.preventDefault(); focusImage(img, event); }
+                      if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); openImageContext(img, bounds.left, bounds.top); }
+                    }} />
                     {/* Checkbox */}
                     <button
+                      type="button"
+                      aria-label={`Select image: ${img.filename}`}
+                      aria-pressed={isSelected}
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleImageSelect(img.filename);
                       }}
-                      className={`absolute top-2 left-2 z-50 w-5 h-5 rounded border-2 flex items-center justify-center
-                                 ${isSelected ? 'border-cyan-300/70 bg-cyan-500/30' : 'border-white/20 bg-black/65'}`}
+                      className={`absolute top-2 left-2 z-20 flex h-6 w-6 items-center justify-center rounded border
+                                 ${isSelected ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent)] text-[var(--umbra-bg)]' : 'border-white/20 bg-black/65'}`}
                     >
-                      {isSelected && <Check className="h-3 w-3 text-cyan-50" />}
+                      {isSelected && <Check size={14} />}
                     </button>
 
                     {/* Flag indicator */}
                     {isFlagged && (
-                      <div className="absolute top-2 right-2 z-10 w-5 h-5 rounded bg-red-500 flex items-center justify-center">
+                      <div className="absolute top-2 right-2 z-20 w-5 h-5 rounded bg-red-500 flex items-center justify-center" title="Flagged for deletion">
                         <Trash2 className="w-3 h-3 text-white" />
                       </div>
                     )}
@@ -1419,16 +1522,21 @@ export function DatasetsTab() {
                         <Tag className="w-3 h-3 text-green-400" />
                       </div>
                     )}
-                    <div className="absolute bottom-1 right-1 z-50">
+                    <div className="absolute bottom-1 right-1 z-20">
                       <DatasetRedownloadButton image={img} busy={repairingImages.has(repairKey(img.filename))} onRedownload={handleRedownload} compact />
+                    </div>
+                    </div>
+                    <div className="flex items-center gap-1 border-t border-white/10 px-2 py-1.5">
+                      <span className="min-w-0 flex-1 truncate text-[10px] text-zinc-400" title={img.filename}>{img.filename}</span>
+                      <button type="button" aria-label={`Image actions: ${img.filename}`} onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); openImageContext(img, bounds.right, bounds.bottom); }} className="umbra-icon-button shrink-0 rounded p-1"><MoreHorizontal size={13} /></button>
                     </div>
                   </div>
                 );
               })}
             </div>
-            {visibleImageCount < images.length && (
-              <button type="button" className="mt-3 w-full rounded border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5" onClick={() => setVisibleImageCount(count => Math.min(images.length, count + DATASET_IMAGE_PAGE_SIZE))}>
-                Show more images ({Math.min(visibleImageCount, images.length)} of {images.length})
+            {visibleImageCount < browsedImages.length && (
+              <button type="button" className="mt-3 w-full rounded border border-white/10 px-3 py-2 text-xs text-zinc-300 hover:bg-white/5" onClick={() => setVisibleImageCount(count => Math.min(browsedImages.length, count + DATASET_IMAGE_PAGE_SIZE))}>
+                Show more images ({Math.min(visibleImageCount, browsedImages.length)} of {browsedImages.length})
               </button>
             )}
           </>)}
@@ -1436,7 +1544,9 @@ export function DatasetsTab() {
       </div>
 
       {/* Right sidebar - Caption editor */}
-      <div className="glass-panel w-72 flex-shrink-0 rounded-none border-y-0 border-r-0">
+      <div id="dataset-caption-panel" className={`glass-panel absolute inset-y-0 right-0 z-30 w-72 shrink-0 flex-col rounded-none border-y-0 border-r-0 xl:relative xl:z-auto ${captionPaneOpen ? 'flex' : 'hidden'}`}>
+        <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2"><span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">Image Details</span><button type="button" aria-label="Close caption panel" onClick={() => setCaptionPaneOpen(false)} className="umbra-icon-button rounded p-1"><X size={14} /></button></div>
+        <div className="min-h-0 flex-1">
         <CaptionEditor
           image={focusedImage}
           datasetName={selectedDataset || ''}
@@ -1445,7 +1555,10 @@ export function DatasetsTab() {
           onRedownload={handleRedownload}
           isRedownloading={!!focusedImage && repairingImages.has(repairKey(focusedImage.filename))}
         />
+        </div>
       </div>
+
+      <ContextMenu isOpen={Boolean(imageContextMenu)} position={{ x: imageContextMenu?.x || 0, y: imageContextMenu?.y || 0 }} items={imageContextItems} onClose={() => setImageContextMenu(null)} />
 
       {/* Modals */}
       {/* Rename Dataset Modal */}

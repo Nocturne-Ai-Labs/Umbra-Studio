@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { FileJson, Upload, Trash2, X, Copy, Download } from 'lucide-react';
+import { FileJson, Copy, Download } from 'lucide-react';
+import { UmbraMediaInspectorFrame } from '@/components/umbra-ui/UmbraMediaInspectorFrame';
 import { useStore } from '@/store/useStore';
 import { loadAppSettings, subscribeToAppSettings } from '@/lib/appSettings';
-import { extractMetadataFromPath, getComfyUiJsonText, getLegacyGenerationParametersText, getWorkflowJsonExport } from '@/utils/metadata';
-import { useI18n } from '@/i18n';
+import { extractMetadataFromFile, extractMetadataFromPath, getComfyUiJsonText, getLegacyGenerationParametersText, getWorkflowJsonExport } from '@/utils/metadata';
 
 interface ScanItem {
   id: string;
@@ -65,6 +65,9 @@ export function ScannerWorkspace({
   const [isDragging, setIsDragging] = useState(false);
   const itemsRef = useRef<ScanItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false), [error, setError] = useState(''), [feedback, setFeedback] = useState('');
+  const importEpoch = useRef(0), mounted = useRef(true), activeRef = useRef(false);
+  const imports = useRef(new Set<AbortController>());
   const [scannerPrefs, setScannerPrefs] = useState(() => {
     const settings = loadAppSettings();
     return {
@@ -73,11 +76,11 @@ export function ScannerWorkspace({
     };
   });
   const { activeWorkspace, ui, clearScannedImport } = useStore();
-  const { t } = useI18n();
 
   const copyExportText = useCallback(async (text: string | null) => {
-    if (!text || !navigator?.clipboard?.writeText) return;
-    await navigator.clipboard.writeText(text);
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); setFeedback('Copied metadata'); setError(''); }
+    catch { setError('Metadata could not be copied to the clipboard.'); }
   }, []);
 
   const downloadExportText = useCallback((text: string | null, filename: string) => {
@@ -90,12 +93,18 @@ export function ScannerWorkspace({
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }, []);
 
   const isActive = activeOverride
     ?? (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'scanner');
-  const scannerCardClass = 'glass-panel umbra-surface-soft rounded-lg border-white/10 p-3';
+  const cancelImports = useCallback(() => {
+    importEpoch.current += 1;
+    for (const controller of imports.current) controller.abort();
+    imports.current.clear(); setImporting(false); setIsDragging(false);
+  }, []);
+  useEffect(() => { activeRef.current = isActive; if (!isActive) cancelImports(); }, [isActive, cancelImports]);
+  const scannerCardClass = 'umbra-surface-soft rounded border border-white/10 p-3';
   const scannerLabelClass = 'text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint';
   const scannerToolButtonClass = 'inline-flex items-center gap-2 rounded-md border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-300 transition hover:border-[var(--umbra-accent)]/45 hover:text-white';
 
@@ -105,7 +114,10 @@ export function ScannerWorkspace({
 
   useEffect(() => {
     clearLegacyScannerPersistence();
+    mounted.current = true;
     return () => {
+      mounted.current = false; importEpoch.current += 1;
+      for (const controller of imports.current) controller.abort();
       for (const item of itemsRef.current) {
         if (item.ownsBlobUrl) URL.revokeObjectURL(item.blobUrl);
       }
@@ -138,79 +150,63 @@ export function ScannerWorkspace({
 
   // Load file as blob and extract metadata
   const loadFile = useCallback(async (blob: Blob, filename: string, path?: string) => {
+    const epoch = importEpoch.current, controller = new AbortController();
+    imports.current.add(controller); setImporting(true); setError(''); setFeedback('');
     const isVideo = filename.match(/\.(mp4|webm|mov)$/i);
     const blobUrl = URL.createObjectURL(blob);
     const nextPath = path || filename;
     const nextPathNormalized = normalizePersistPath(nextPath);
 
-    // Extract metadata for images
     let metadata: any = {
       type: isVideo ? 'video' : 'image',
       name: filename,
       size: blob.size,
     };
 
-    if (!isVideo) {
-      // Try to extract PNG metadata
-      try {
-        const buffer = await blob.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        metadata = await extractPNGMetadata(bytes, metadata);
-      } catch (error) {
-        console.error('[ScannerWorkspace] Failed to extract metadata:', error);
-      }
-    }
+    try {
+      if (!isVideo) metadata = await extractMetadataFromFile(new File([blob], filename, { type: blob.type || 'image/png' }), controller.signal);
+      if (!mounted.current || epoch !== importEpoch.current || !activeRef.current) { URL.revokeObjectURL(blobUrl); return; }
 
-    if (!isVideo && scannerPrefs.autoCopyWorkflow && (metadata.workflow || metadata.prompt)) {
-      try {
-        const workflowValue = metadata.workflow || metadata.prompt;
-        const workflowText = typeof workflowValue === 'string'
-          ? workflowValue
-          : JSON.stringify(workflowValue, null, 2);
-        if (workflowText && navigator?.clipboard?.writeText) {
-          await navigator.clipboard.writeText(workflowText);
+      if (!isVideo && scannerPrefs.autoCopyWorkflow && (metadata.workflow || metadata.prompt)) {
+        try {
+          const workflowValue = metadata.workflow || metadata.prompt;
+          const workflowText = typeof workflowValue === 'string' ? workflowValue : JSON.stringify(workflowValue, null, 2);
+          if (workflowText && navigator?.clipboard?.writeText) await navigator.clipboard.writeText(workflowText);
+        } catch (error) {
+          console.warn('[ScannerWorkspace] Failed to auto-copy workflow:', error);
         }
-      } catch (error) {
-        console.warn('[ScannerWorkspace] Failed to auto-copy workflow:', error);
       }
+      if (!mounted.current || epoch !== importEpoch.current || !activeRef.current) { URL.revokeObjectURL(blobUrl); return; }
+      const item: ScanItem = {
+        id: Date.now().toString() + Math.random(), path: nextPath, name: filename, blob, blobUrl, previewUrl: blobUrl,
+        ownsBlobUrl: true, metadata, isVideo: !!isVideo,
+      };
+      setItems((prev) => {
+        const existing = prev.find((entry) => normalizePersistPath(entry.path) === nextPathNormalized);
+        if (existing) { URL.revokeObjectURL(blobUrl); setSelectedId(existing.id); return prev; }
+        setSelectedId(item.id);
+        return [item, ...prev];
+      });
+    } catch (error) {
+      URL.revokeObjectURL(blobUrl);
+      if (!controller.signal.aborted && mounted.current) setError(error instanceof Error ? error.message : 'Metadata import failed.');
+    } finally {
+      imports.current.delete(controller); if (mounted.current) setImporting(imports.current.size > 0);
     }
-
-    const item: ScanItem = {
-      id: Date.now().toString() + Math.random(),
-      path: nextPath,
-      name: filename,
-      blob,
-      blobUrl,
-      previewUrl: blobUrl,
-      ownsBlobUrl: true,
-      metadata,
-      isVideo: !!isVideo,
-    };
-
-    setItems((prev) => {
-      const existing = prev.find((entry) => normalizePersistPath(entry.path) === nextPathNormalized);
-      if (existing) {
-        URL.revokeObjectURL(blobUrl);
-        setSelectedId(existing.id);
-        return prev;
-      }
-      setSelectedId(item.id);
-      return [item, ...prev];
-    });
   }, [scannerPrefs.autoCopyWorkflow]);
 
   // Load file from filesystem path
   const loadFromPath = useCallback(async (path: string) => {
+    const epoch = importEpoch.current, controller = new AbortController();
+    imports.current.add(controller); setImporting(true); setError(''); setFeedback('');
     try {
       const filename = path.split(/[/\\]/).pop() || 'unknown';
       const normalizedPath = normalizePersistPath(path);
       if (!normalizedPath) return;
       const isVideo = /\.(mp4|webm|mov)$/i.test(filename);
-      const metadata = await extractMetadataFromPath(normalizedPath) || {
-        type: isVideo ? 'video' : 'image',
-        name: filename,
-        size: 0,
-      };
+      const metadata = await extractMetadataFromPath(normalizedPath, controller.signal);
+      if (!mounted.current || epoch !== importEpoch.current || !activeRef.current) return;
+      if (!metadata) throw new Error('The selected file metadata could not be read.');
       const item: ScanItem = {
         id: Date.now().toString() + Math.random(),
         path: normalizedPath,
@@ -236,13 +232,15 @@ export function ScannerWorkspace({
         return [item, ...prev];
       });
     } catch (error) {
-      console.error('[ScannerWorkspace] Failed to load from path:', error);
-    }
+      if (!controller.signal.aborted && mounted.current) setError(error instanceof Error ? error.message : 'The selected file metadata could not be read.');
+    } finally { imports.current.delete(controller); if (mounted.current) setImporting(imports.current.size > 0); }
   }, []);
 
   const importFiles = useCallback(async (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
+    const epoch = importEpoch.current;
     for (const file of files) {
+      if (epoch !== importEpoch.current) break;
       const osPath = String((file as File & { path?: string })?.path || '').trim();
       if (osPath) {
         await loadFromPath(osPath);
@@ -281,13 +279,14 @@ export function ScannerWorkspace({
     }
 
     let cancelled = false;
+    const epoch = importEpoch.current;
     const importQueuedPaths = async () => {
       for (const path of uniquePaths) {
-        if (cancelled) return;
+        if (cancelled || epoch !== importEpoch.current) return;
         await loadFromPath(path);
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
-      if (!cancelled) clearScannedImport();
+      if (!cancelled && epoch === importEpoch.current) clearScannedImport();
     };
     void importQueuedPaths();
 
@@ -299,10 +298,12 @@ export function ScannerWorkspace({
     e.stopPropagation();
     setIsDragging(false);
     if (!isActive) return;
+    const epoch = importEpoch.current;
 
-      const galleryPaths = readGalleryDragPaths(e.dataTransfer);
+    const galleryPaths = readGalleryDragPaths(e.dataTransfer);
     if (galleryPaths.length > 0) {
       for (const path of galleryPaths) {
+        if (epoch !== importEpoch.current) return;
         await loadFromPath(path);
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
@@ -333,6 +334,7 @@ export function ScannerWorkspace({
         if (data.type === 'multi-select' && data.images) {
           const images = Array.isArray(data.images) ? data.images : [];
           for (const image of images) {
+            if (epoch !== importEpoch.current) return;
             const path = image?.path || image?.relativePath;
             if (path) {
               await loadFromPath(path);
@@ -349,6 +351,8 @@ export function ScannerWorkspace({
   const selectedItem = items.find(i => i.id === selectedId);
 
   const clearAll = () => {
+    cancelImports(); setError(''); setFeedback('');
+    clearScannedImport();
     items.forEach(item => {
       if (item.ownsBlobUrl) URL.revokeObjectURL(item.blobUrl);
     });
@@ -536,7 +540,7 @@ export function ScannerWorkspace({
 
         {workflowExport && (
           <div className={`${scannerCardClass} border-orange-500/20`}>
-            <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h4 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-orange-300">
                   <FileJson size={13} />
@@ -597,182 +601,17 @@ export function ScannerWorkspace({
     );
   };
 
-  return (
-    <div
-      data-umbra-image-inspector="metadata"
-      data-umbra-image-inspector-remote-mode={remoteMode}
-      className="relative flex h-full bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,video/*"
-        multiple
-        className="hidden"
-        onChange={(event) => void handleFileSelection(event)}
-      />
-      {/* Drop Overlay */}
-      {isDragging && (
-        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center border-4 border-dashed border-[var(--umbra-accent)] bg-[var(--umbra-accent)]/15 backdrop-blur-sm">
-          <div className="text-center">
-            <Upload className="mx-auto mb-4 h-16 w-16 animate-bounce text-[var(--umbra-accent)] drop-shadow-[0_0_18px_var(--umbra-accent-glow)]" />
-            <p className="text-2xl font-bold text-white">Scan Metadata</p>
-            <p className="mt-2 text-sm text-zinc-300">Drop images to analyze</p>
-          </div>
-        </div>
-      )}
+  return <UmbraMediaInspectorFrame kind="metadata" title={hideHeader ? 'Metadata Viewer' : 'Metadata Scanner'} remoteMode={remoteMode}
+    items={items} selectedId={selectedId} onSelect={id => { setSelectedId(id); setFeedback(''); }}
+    onAdd={() => fileInputRef.current?.click()} onRemove={removeItem} onClear={clearAll}
+    busy={importing} status={importing ? 'Scanning metadata' : feedback || selectedItem?.name} error={error}
+    input={<input ref={fileInputRef} aria-label="Import metadata media" type="file" accept="image/*,video/*" multiple hidden onChange={event => void handleFileSelection(event)} />}
+    isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
+    detailsTitle="Metadata" details={<>
+      <label className="mb-3 flex min-h-8 items-center gap-2 text-xs text-zinc-400"><input type="checkbox" checked={scannerPrefs.showRawMetadata} onChange={event => setScannerPrefs(current => ({ ...current, showRawMetadata: event.target.checked }))} />Show raw metadata</label>
+      {selectedItem ? renderMetadata(selectedItem) : <p className="text-xs text-zinc-500">Select media to inspect generation metadata.</p>}
+    </>} />;
 
-      {/* Sidebar - History */}
-      {items.length > 0 ? (
-        <div data-umbra-image-inspector-history="" className="custom-scrollbar w-24 space-y-2 overflow-y-auto border-r border-white/10 p-2 umbra-surface-deep">
-          <div data-umbra-image-inspector-history-count="" className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint">
-            {items.length} Scans
-          </div>
-          {items.map(item => (
-            <div
-              key={item.id}
-              data-umbra-image-inspector-thumbnail=""
-              onClick={() => setSelectedId(item.id)}
-              className={`h-20 w-20 cursor-pointer overflow-hidden rounded-md border transition ${selectedId === item.id
-                  ? 'border-[var(--umbra-accent)] opacity-100 shadow-[0_0_16px_var(--umbra-accent-glow)]'
-                  : 'border-white/10 opacity-60 hover:border-white/25 hover:opacity-100'
-                }`}
-            >
-              {item.isVideo ? (
-                <video
-                  src={item.blobUrl}
-                  className="h-full w-full object-cover"
-                  muted
-                />
-              ) : (
-                <img
-                  src={item.previewUrl || item.blobUrl}
-                  alt={item.name}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {/* Main Content */}
-      <div data-umbra-image-inspector-main="" className="flex min-w-0 flex-1 flex-col">
-        {/* Header */}
-        {!hideHeader && (
-          <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl">
-            <div>
-              <h2 className="text-sm font-black uppercase tracking-[0.18em] text-white">Metadata Scanner</h2>
-              <p className="mt-0.5 text-xs umbra-text-muted">Extract image generation metadata</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className={scannerToolButtonClass}
-                title={t('common.addMedia')}
-              >
-                <Upload size={14} />
-                {t('common.addMedia')}
-              </button>
-              <button
-                onClick={clearAll}
-                className="rounded-md border border-white/10 bg-black/25 p-2 text-zinc-400 transition hover:border-red-500/35 hover:bg-red-500/10 hover:text-red-300"
-                title="Clear All"
-              >
-                <Trash2 size={18} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Content Area */}
-        {hideHeader && items.length > 0 && (
-          <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-end gap-2 border-b border-white/10 bg-black/20 px-3 py-1.5 backdrop-blur-xl z-10">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className={scannerToolButtonClass}
-              title={t('common.addMedia')}
-            >
-              <Upload size={13} />
-              {t('common.addMedia')}
-            </button>
-            <button
-              onClick={clearAll}
-              className="rounded-md border border-white/10 bg-black/25 p-1.5 text-zinc-400 transition hover:border-red-500/35 hover:bg-red-500/10 hover:text-red-300"
-              title="Clear All"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        )}
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {!selectedItem ? (
-            <div className="flex h-full items-center justify-center text-zinc-600">
-              <div className="text-center">
-                <Upload size={64} className="mx-auto mb-4 opacity-20" />
-                <p className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-400">{t('extras.addImagesMetadata')}</p>
-                <p className="mt-2 text-xs text-zinc-600">{t('extras.metadataHint')}</p>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`${scannerToolButtonClass} mt-4`}
-                >
-                  <Upload size={14} />
-                  {t('common.addMedia')}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="grid h-full grid-cols-1 lg:grid-cols-2">
-              {/* Preview */}
-              <div className="flex min-h-0 items-center justify-center overflow-hidden border-r border-white/10 p-4 umbra-surface-deep">
-                {selectedItem.isVideo ? (
-                  <video
-                    src={selectedItem.blobUrl}
-                    controls
-                    autoPlay
-                    loop
-                    muted
-                    className="h-full max-h-full w-full max-w-full rounded-md border border-white/10 object-contain shadow-2xl shadow-black/50"
-                  />
-                ) : (
-                  <img
-                    src={selectedItem.blobUrl}
-                    alt={selectedItem.name}
-                    className="h-full max-h-full w-full max-w-full rounded-md border border-white/10 object-contain shadow-2xl shadow-black/50"
-                    decoding="async"
-                  />
-                )}
-              </div>
-
-              {/* Metadata */}
-              <div className="custom-scrollbar overflow-y-auto bg-[var(--umbra-bg)]/60 p-4">
-                <div className="mb-4 flex items-center justify-between gap-2">
-                  <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-white">{selectedItem.name}</h3>
-                  <button
-                    onClick={() => removeItem(selectedItem.id)}
-                    className="rounded p-1 text-zinc-500 transition hover:bg-red-500/10 hover:text-red-300"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                {/* Parse and display generation parameters */}
-                {renderMetadata(selectedItem)}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // Helper: Parse generation parameters from metadata
@@ -1022,92 +861,9 @@ function parseGenerationParams(metadata: any) {
   return result;
 }
 
-// Helper: Extract PNG metadata
-async function extractPNGMetadata(bytes: Uint8Array, metadata: any): Promise<any> {
-  // Check PNG signature
-  if (bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4E || bytes[3] !== 0x47) {
-    return metadata;
-  }
-
-  let offset = 8; // Skip PNG signature
-
-  while (offset < bytes.length) {
-    // Read chunk length
-    const length = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
-    offset += 4;
-
-    // Read chunk type
-    const type = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
-    offset += 4;
-
-    // Check for text chunks
-    if (type === 'tEXt' || type === 'iTXt') {
-      const chunkData = bytes.slice(offset, offset + length);
-
-      // For tEXt: keyword\0text
-      // For iTXt: keyword\0compression_flag\0compression_method\0language\0translated_keyword\0text
-      let text: string;
-      let keyword: string;
-
-      if (type === 'tEXt') {
-        text = new TextDecoder('latin1').decode(chunkData);
-        const nullIndex = text.indexOf('\0');
-        if (nullIndex > 0) {
-          keyword = text.substring(0, nullIndex);
-          const value = text.substring(nullIndex + 1);
-
-          // Try to parse as JSON for known metadata fields
-          try {
-            if (keyword === 'workflow' || keyword === 'prompt') {
-              metadata[keyword] = JSON.parse(value);
-            } else {
-              metadata[keyword] = value;
-            }
-          } catch (e) {
-            // Not JSON, store as string
-            metadata[keyword] = value;
-          }
-        }
-      } else if (type === 'iTXt') {
-        // iTXt chunks can have compression, but we'll handle uncompressed for now
-        text = new TextDecoder('utf-8').decode(chunkData);
-        const nullIndex = text.indexOf('\0');
-        if (nullIndex > 0) {
-          keyword = text.substring(0, nullIndex);
-          // Skip compression flag and method (2 bytes after first null)
-          const textStart = text.indexOf('\0', nullIndex + 3);
-          if (textStart > 0) {
-            const value = text.substring(textStart + 1);
-
-            // Try to parse as JSON
-            try {
-              if (keyword === 'workflow' || keyword === 'prompt') {
-                metadata[keyword] = JSON.parse(value);
-              } else {
-                metadata[keyword] = value;
-              }
-            } catch (e) {
-              // Not JSON, store as string
-              metadata[keyword] = value;
-            }
-          }
-        }
-      }
-    }
-
-    offset += length + 4; // Skip chunk data and CRC
-
-    // Stop at IEND
-    if (type === 'IEND') break;
-  }
-
-  return metadata;
-}
-
 // Helper: Format bytes
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
-

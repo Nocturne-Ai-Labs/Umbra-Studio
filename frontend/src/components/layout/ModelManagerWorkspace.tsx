@@ -2,13 +2,20 @@
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { LazyModelMedia } from '@/components/ui/LazyModelMedia';
+import { ContextMenu } from '@/components/ui/ContextMenu';
+import type { ContextMenuItem } from '@/hooks/useContextMenu';
+import { browseModelManagerEntries, selectModelManagerPaths, type ModelManagerSortBy, type ModelManagerView } from './modelManagerBrowser';
+import { MODEL_MANAGER_BROWSER_STYLES } from './modelManagerBrowserStyles';
 import React from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ArrowDownAZ,
+  ArrowUpAZ,
   Boxes,
   Check,
+  CheckSquare,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -23,9 +30,12 @@ import {
   Globe,
   Image as ImageIcon,
   KeyRound,
+  Grid3X3,
+  List,
   Loader2,
   Menu,
   Move,
+  MoreHorizontal,
   Pencil,
   RefreshCw,
   Search,
@@ -1084,6 +1094,9 @@ export function ModelManagerWorkspace() {
   });
 
   const [sourceTab, setSourceTab] = React.useState<SourceTab>('local');
+  const workspaceRef = React.useRef<HTMLDivElement | null>(null);
+  const localDetailsCloseRef = React.useRef<HTMLButtonElement | null>(null);
+  const [compactBrowser, setCompactBrowser] = React.useState(false);
   const [isPhoneRemote, setIsPhoneRemote] = React.useState(false);
   const [mobileFolderSheetOpen, setMobileFolderSheetOpen] = React.useState(false);
   const [mobileActionsSheetOpen, setMobileActionsSheetOpen] = React.useState(false);
@@ -1120,6 +1133,7 @@ export function ModelManagerWorkspace() {
   const [localRootKey, setLocalRootKey] = React.useState<LocalRootKey>('user');
   const [roots, setRoots] = React.useState<ModelRoot[]>([]);
   const [rootsLoading, setRootsLoading] = React.useState(false);
+  const [rootsError, setRootsError] = React.useState('');
   const [treeByPath, setTreeByPath] = React.useState<Record<string, TreeNodeState>>({});
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(new Set());
   const [currentFolderPath, setCurrentFolderPath] = React.useState('');
@@ -1130,17 +1144,45 @@ export function ModelManagerWorkspace() {
     counts: { folders: 0, files: 0 },
   });
   const [localFilterQuery, setLocalFilterQuery] = React.useState('');
+  const [localTypeFilter, setLocalTypeFilter] = React.useState('');
+  const [localSortBy, setLocalSortBy] = React.useState<ModelManagerSortBy>('name');
+  const [localSortDescending, setLocalSortDescending] = React.useState(false);
+  const [localView, setLocalView] = React.useState<ModelManagerView>('grid');
+  const [localSelectionMode, setLocalSelectionMode] = React.useState(false);
   const [renderedLocalCount, setRenderedLocalCount] = React.useState(200);
   const localListScrollRef = React.useRef<HTMLDivElement | null>(null);
   const [localLoading, setLocalLoading] = React.useState(false);
+  const [localError, setLocalError] = React.useState('');
+  const localListPathRef = React.useRef('');
   const [selectedPaths, setSelectedPaths] = React.useState<Set<string>>(new Set());
   const [selectionAnchorPath, setSelectionAnchorPath] = React.useState('');
   const [localInfoPanelClosed, setLocalInfoPanelClosed] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState<ContextMenuState>(null);
   const [dropActionMenu, setDropActionMenu] = React.useState<DropActionMenuState>(null);
   const [actionDialog, setActionDialog] = React.useState<LocalActionDialogState>(null);
+  const localActionDialogOpen = Boolean(actionDialog);
   const [draggingPaths, setDraggingPaths] = React.useState<string[]>([]);
   const [dropTargetPath, setDropTargetPath] = React.useState('');
+
+  React.useEffect(() => {
+    if (!mobileFolderSheetOpen && !mobileActionsSheetOpen && !localActionDialogOpen) return;
+    const selector = localActionDialogOpen ? '[data-umbra-model-manager-file-dialog]' : mobileActionsSheetOpen ? '[data-umbra-model-manager-actions-sheet]' : '[data-umbra-model-manager-folder-sheet]';
+    const dialog = workspaceRef.current?.querySelector<HTMLElement>(selector);
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const firstControl = dialog?.querySelector<HTMLElement>('input, button:not(:disabled), [tabindex="0"]');
+    firstControl?.focus();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, [localActionDialogOpen, mobileActionsSheetOpen, mobileFolderSheetOpen]);
+
+  React.useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const syncWidth = () => setCompactBrowser(workspace.getBoundingClientRect().width <= 1150);
+    syncWidth();
+    const observer = new ResizeObserver(syncWidth);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, []);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') return undefined;
@@ -1477,26 +1519,16 @@ export function ModelManagerWorkspace() {
     return [...folders, ...files];
   }, [localList.files, localList.folders]);
 
-  const visibleLocalEntries = React.useMemo<LocalListEntry[]>(() => {
-    const query = String(localFilterQuery || '').trim().toLowerCase();
-    if (!query) return localEntries;
-    return localEntries.filter((entry) => {
-      const name = String(entry.name || '').toLowerCase();
-      const path = String(entry.path || '').toLowerCase();
-      if (name.includes(query) || path.includes(query)) return true;
-      if (entry.kind === 'file') {
-        const modelType = String(entry.modelType || '').toLowerCase();
-        const extension = String(entry.extension || '').toLowerCase();
-        return modelType.includes(query) || extension.includes(query);
-      }
-      return false;
-    });
-  }, [localEntries, localFilterQuery]);
+  const localModelTypes = React.useMemo(() => Array.from(new Set(localList.files.map((entry) => entry.modelType || entry.extension || 'Model')))
+    .sort((left, right) => left.localeCompare(right)), [localList.files]);
+  const visibleLocalEntries = React.useMemo<LocalListEntry[]>(() => browseModelManagerEntries(
+    localEntries, localFilterQuery, localTypeFilter, localSortBy, localSortDescending,
+  ), [localEntries, localFilterQuery, localSortBy, localSortDescending, localTypeFilter]);
 
   React.useEffect(() => {
     setRenderedLocalCount(200);
     if (localListScrollRef.current) localListScrollRef.current.scrollTop = 0;
-  }, [currentFolderPath, localFilterQuery]);
+  }, [currentFolderPath, localFilterQuery, localSortBy, localSortDescending, localTypeFilter, localView]);
 
   const selectedPathsArray = React.useMemo(() => Array.from(selectedPaths), [selectedPaths]);
   const nsfwBlurPx = React.useMemo(() => (nsfwThumbnailBlurIntensity / 100) * 20, [nsfwThumbnailBlurIntensity]);
@@ -1515,7 +1547,13 @@ export function ModelManagerWorkspace() {
   const selectedLocalCivitaiUrl = React.useMemo(() => (
     getSnapshotCivitaiUrl(selectedLocalSnapshot)
   ), [selectedLocalSnapshot]);
-  const localInfoPanelOpen = Boolean(selectedLocalFile && !localInfoPanelClosed);
+  const localInfoPanelOpen = Boolean(selectedLocalFile && !localInfoPanelClosed && !localSelectionMode);
+  React.useEffect(() => {
+    if (!localInfoPanelOpen || (!isPhoneRemote && !compactBrowser)) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    localDetailsCloseRef.current?.focus();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, [compactBrowser, isPhoneRemote, localInfoPanelOpen]);
   const selectedLocalUpdate = React.useMemo<ModelUpdateInfo | null>(() => {
     if (!selectedLocalEntry || selectedLocalEntry.kind !== 'file') return null;
     return modelUpdateByPath[normalizePath(selectedLocalEntry.path)] || null;
@@ -1697,10 +1735,12 @@ export function ModelManagerWorkspace() {
 
   const loadRoots = React.useCallback(async () => {
     setRootsLoading(true);
+    setRootsError('');
     try {
       const data = await fetchJson<{ roots?: ModelRoot[] }>('/api/model-manager/roots');
       setRoots(Array.isArray(data.roots) ? data.roots : []);
     } catch (error: any) {
+      setRootsError(error?.message || 'Failed to load model roots');
       addToast({
         type: 'error',
         message: error?.message || 'Failed to load model roots',
@@ -1804,7 +1844,18 @@ export function ModelManagerWorkspace() {
     listAbortRef.current?.abort();
     const controller = new AbortController();
     listAbortRef.current = controller;
+    const switchingFolder = localListPathRef.current !== normalizedPath;
+    localListPathRef.current = normalizedPath;
     setLocalLoading(true);
+    setLocalError('');
+    setLocalList((previous) => normalizePath(previous.path) === normalizedPath ? previous : {
+      path: normalizedPath, folders: [], files: [], counts: { folders: 0, files: 0 },
+    });
+    if (!options?.preserveSelection || switchingFolder) {
+      setSelectedPaths(new Set());
+      setSelectionAnchorPath('');
+      setLocalSelectionMode(false);
+    }
     try {
       const response = await fetch(`/api/model-manager/list?path=${encodeURIComponent(normalizedPath)}&fast=1`, {
         signal: controller.signal,
@@ -1823,6 +1874,9 @@ export function ModelManagerWorkspace() {
       if (!options?.preserveSelection) {
         setSelectedPaths(new Set());
         setSelectionAnchorPath('');
+      } else {
+        const paths = new Set([...nextList.folders, ...nextList.files].map((entry) => normalizePath(entry.path)));
+        setSelectedPaths((previous) => new Set(Array.from(previous).filter((path) => paths.has(path))));
       }
       setLocalLoading(false);
 
@@ -1842,6 +1896,7 @@ export function ModelManagerWorkspace() {
       }
     } catch (error: any) {
       if (!controller.signal.aborted) {
+        setLocalError(error?.message || 'Failed to load folder');
         addToast({
           type: 'error',
           message: error?.message || 'Failed to load folder',
@@ -2042,7 +2097,8 @@ export function ModelManagerWorkspace() {
   }, [currentFolderPath, localRootKey, resolveRootForPath]);
 
   React.useEffect(() => {
-    const handlePointerDown = () => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-umbra-context-menu-layer="true"]')) return;
       setContextMenu(null);
       setDropActionMenu(null);
     };
@@ -2475,40 +2531,19 @@ export function ModelManagerWorkspace() {
     }
   }, [actionDialog, ensureTreeLoaded, postFsAction, startLocalTransfer]);
 
-  const handleSelectEntry = React.useCallback((entry: LocalListEntry, event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleSelectEntry = React.useCallback((entry: LocalListEntry, event: Pick<React.MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>) => {
     const path = normalizePath(entry.path);
     if (!path) return;
 
-    const isMultiToggle = event.ctrlKey || event.metaKey;
-    const isRange = event.shiftKey && selectionAnchorPath;
-    if (isRange) {
-      const anchorIndex = visibleLocalEntries.findIndex((item) => normalizePath(item.path) === normalizePath(selectionAnchorPath));
-      const currentIndex = visibleLocalEntries.findIndex((item) => normalizePath(item.path) === path);
-      if (anchorIndex >= 0 && currentIndex >= 0) {
-        const [start, end] = anchorIndex < currentIndex ? [anchorIndex, currentIndex] : [currentIndex, anchorIndex];
-        const next = new Set(selectedPaths);
-        for (const item of visibleLocalEntries.slice(start, end + 1)) {
-          next.add(normalizePath(item.path));
-        }
-        setSelectedPaths(next);
-        return;
-      }
-    }
-
-    if (isMultiToggle) {
-      setSelectedPaths((prev) => {
-        const next = new Set(prev);
-        if (next.has(path)) next.delete(path);
-        else next.add(path);
-        return next;
-      });
-      setSelectionAnchorPath(path);
-      return;
-    }
-
-    setSelectedPaths(new Set([path]));
-    setSelectionAnchorPath(path);
-  }, [selectedPaths, selectionAnchorPath, visibleLocalEntries]);
+    const toggle = event.ctrlKey || event.metaKey || localSelectionMode;
+    if (event.ctrlKey || event.metaKey || event.shiftKey) setLocalSelectionMode(true);
+    setSelectedPaths((previous) => selectModelManagerPaths(
+      visibleLocalEntries.map((item) => normalizePath(item.path)), previous, path, normalizePath(selectionAnchorPath),
+      { toggle, range: event.shiftKey },
+    ));
+    if (!event.shiftKey || !visibleLocalEntries.some((item) => normalizePath(item.path) === normalizePath(selectionAnchorPath))) setSelectionAnchorPath(path);
+    if (!toggle && !event.shiftKey) setLocalInfoPanelClosed(false);
+  }, [localSelectionMode, selectionAnchorPath, visibleLocalEntries]);
 
   const handleContextMenu = React.useCallback((event: React.MouseEvent, entry: LocalListEntry) => {
     event.preventDefault();
@@ -2527,6 +2562,31 @@ export function ModelManagerWorkspace() {
       targetPath,
     });
   }, [selectedPaths, selectedPathsArray]);
+
+  const localContextMenuItems = React.useMemo<ContextMenuItem[]>(() => {
+    if (!contextMenu) return [];
+    const count = contextMenu.selectedPaths.length;
+    const items: ContextMenuItem[] = [{
+      label: contextMenu.isFolder ? 'Open Folder' : 'Model Details',
+      icon: contextMenu.isFolder ? <FolderOpen size={14} /> : <Eye size={14} />,
+      action: () => {
+        if (contextMenu.isFolder) handleOpenFolder(contextMenu.targetPath);
+        else {
+          setSelectedPaths(new Set([contextMenu.targetPath]));
+          setSelectionAnchorPath(contextMenu.targetPath);
+          setLocalSelectionMode(false);
+          setLocalInfoPanelClosed(false);
+        }
+      },
+    }, { separator: true },
+    { label: count > 1 ? `Copy ${count} Items` : 'Copy', icon: <Copy size={14} />, action: () => handleCopy(contextMenu.targetPath) },
+    { label: count > 1 ? `Move ${count} Items` : 'Move', icon: <Move size={14} />, action: () => handleMove(contextMenu.targetPath) },
+    { label: 'Rename', icon: <Pencil size={14} />, disabled: count !== 1, action: () => handleRename(contextMenu.targetPath) }];
+    if (contextMenu.isFolder) items.push({ label: 'New Subfolder', icon: <FolderPlus size={14} />, action: () => handleCreateFolder(contextMenu.targetPath) });
+    if (!isUmbraRemoteClient()) items.push({ label: 'Show in File Explorer', icon: <ExternalLink size={14} />, disabled: count !== 1, action: () => void handleReveal(contextMenu.targetPath) });
+    items.push({ separator: true }, { label: count > 1 ? `Delete ${count} Items...` : 'Delete...', icon: <Trash2 size={14} />, danger: true, action: () => handleDelete(contextMenu.targetPath) });
+    return items;
+  }, [contextMenu, handleCopy, handleCreateFolder, handleDelete, handleMove, handleOpenFolder, handleRename, handleReveal]);
 
   React.useEffect(() => {
     if (sourceTab === 'civitai') return;
@@ -3730,6 +3790,17 @@ export function ModelManagerWorkspace() {
   const browserActiveDownloads = browserDownloads.filter((item) => item.state === 'progressing').length;
   const browserOpenBookmarkFolder = browserBookmarks.find((item) => item.type === 'folder' && item.id === browserOpenBookmarkFolderId);
 
+  const handleLocalDialogKeyDown = (event: React.KeyboardEvent<HTMLElement>, close: () => void) => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (event.key !== 'Tab') return;
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]'))
+      .filter((control) => control.getClientRects().length > 0);
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  };
+
   const renderBrowserBookmarkLink = (link: BrowserBookmarkItem, compact = false) => {
     if (link.type !== 'link' || !link.url) return null;
     return (
@@ -3753,16 +3824,19 @@ export function ModelManagerWorkspace() {
 
   return (
     <div
+      ref={workspaceRef}
       data-umbra-model-manager
       data-umbra-model-manager-phone={isPhoneRemote ? '1' : '0'}
       className="relative h-full w-full bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
     >
+      <style>{MODEL_MANAGER_BROWSER_STYLES}</style>
       <div className="flex h-full min-h-0 flex-col">
         {isPhoneRemote ? (
           <div data-umbra-model-manager-mobile-header className="shrink-0 border-b border-[var(--umbra-border)] bg-black/30 px-3 pb-3 pt-2">
             <div className="grid grid-cols-2 rounded-lg border border-white/10 bg-black/30 p-1">
               <button
                 type="button"
+                aria-pressed={sourceTab === 'local'}
                 onClick={() => setSourceTab('local')}
                 className={cn(
                   'flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold',
@@ -3776,6 +3850,7 @@ export function ModelManagerWorkspace() {
               </button>
               <button
                 type="button"
+                aria-pressed={sourceTab === 'civitai'}
                 onClick={() => setSourceTab('civitai')}
                 className={cn(
                   'flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold',
@@ -3827,6 +3902,7 @@ export function ModelManagerWorkspace() {
                   <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                   <input
                     type="search"
+                    aria-label="Search local models in this folder"
                     value={localFilterQuery}
                     onChange={(event) => setLocalFilterQuery(event.target.value)}
                     placeholder="Search this folder"
@@ -3900,6 +3976,7 @@ export function ModelManagerWorkspace() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              aria-pressed={sourceTab === 'local'}
               onClick={() => setSourceTab('local')}
               className={cn(
                 'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
@@ -3913,6 +3990,7 @@ export function ModelManagerWorkspace() {
             </button>
             <button
               type="button"
+              aria-pressed={sourceTab === 'civitai'}
               onClick={() => setSourceTab('civitai')}
               className={cn(
                 'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
@@ -4196,15 +4274,17 @@ export function ModelManagerWorkspace() {
         </div>
 
         {sourceTab === 'local' ? (
-          <div data-umbra-model-manager-local className="flex min-h-0 flex-1">
+          <div data-umbra-model-manager-local className="model-manager-local-shell flex min-h-0 flex-1">
             <aside
               data-umbra-model-manager-folder-tree
+              aria-label="Model libraries"
               className={cn(
-                'w-[320px] shrink-0 border-r border-[var(--umbra-border)] bg-black/20',
+                'model-manager-folder-sidebar shrink-0 border-r border-[var(--umbra-border)] bg-[var(--umbra-panel-bg)]',
                 isPhoneRemote ? 'hidden' : '',
               )}
             >
               <div className="h-full overflow-y-auto custom-scrollbar p-2">
+                <div className="px-2 pb-2 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Model library</div>
                 {rootsLoading ? (
                   <div className="flex items-center gap-2 px-2 py-2 text-xs text-zinc-400">
                     <Loader2 size={13} className="animate-spin" />
@@ -4290,250 +4370,262 @@ export function ModelManagerWorkspace() {
               </div>
             </aside>
 
-            <main data-umbra-model-manager-list className="flex min-h-0 flex-1 flex-col">
-              <div
+            <main
+              data-umbra-model-manager-list
+              aria-label="Local model library"
+              aria-busy={localLoading}
+              className="flex min-h-0 min-w-0 flex-1 flex-col"
+              onKeyDown={(event) => {
+                if (contextMenu) {
+                  if (event.key === 'Escape') { event.preventDefault(); setContextMenu(null); }
+                  return;
+                }
+                const target = event.target instanceof HTMLElement ? event.target : null;
+                if (target?.closest('input, textarea, [contenteditable="true"], [role="combobox"]')) return;
+                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+                  event.preventDefault();
+                  setSelectedPaths(new Set(visibleLocalEntries.map((entry) => normalizePath(entry.path))));
+                  setLocalSelectionMode(true);
+                  return;
+                }
+                if (event.key === 'Escape') {
+                  setSelectedPaths(new Set());
+                  setSelectionAnchorPath('');
+                  setLocalSelectionMode(false);
+                  return;
+                }
+                if (event.key === 'F2' && selectedPaths.size === 1 && !localLoading) {
+                  event.preventDefault();
+                  handleRename();
+                  return;
+                }
+                if (event.key === 'Delete' && selectedPaths.size > 0 && !localLoading && !event.repeat) {
+                  event.preventDefault();
+                  handleDelete();
+                  return;
+                }
+                const tile = target?.closest<HTMLButtonElement>('[data-umbra-model-entry]');
+                if (!tile) return;
+                const entry = visibleLocalEntries.find((item) => normalizePath(item.path) === tile.dataset.umbraModelEntryPath);
+                if (!entry) return;
+                if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
+                  event.preventDefault();
+                  const rect = tile.getBoundingClientRect();
+                  handleContextMenu({ preventDefault() {}, clientX: rect.left + 16, clientY: rect.top + 16 } as React.MouseEvent, entry);
+                  return;
+                }
+                if (event.key === 'Enter' && entry.kind === 'folder' && !localSelectionMode) {
+                  event.preventDefault();
+                  handleOpenFolder(entry.path);
+                  return;
+                }
+                if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+                event.preventDefault();
+                const container = tile.parentElement?.parentElement;
+                const columns = localView === 'grid' && container ? getComputedStyle(container).gridTemplateColumns.split(' ').length : 1;
+                const step = event.key === 'ArrowDown' ? columns : event.key === 'ArrowUp' ? -columns : event.key === 'ArrowRight' ? 1 : -1;
+                const index = visibleLocalEntries.indexOf(entry);
+                const next = visibleLocalEntries[index + step];
+                if (!next) return;
+                if (index + step >= renderedLocalCount) setRenderedLocalCount((count) => Math.min(visibleLocalEntries.length, count + 200));
+                if (event.shiftKey) handleSelectEntry(next, event);
+                requestAnimationFrame(() => {
+                  const nextTile = Array.from(localListScrollRef.current?.querySelectorAll<HTMLButtonElement>('[data-umbra-model-entry]') || [])
+                    .find((button) => button.dataset.umbraModelEntryPath === normalizePath(next.path));
+                  nextTile?.focus();
+                });
+              }}
+            >
+              <header
                 data-umbra-model-manager-desktop-local-toolbar
-                className={cn(
-                  'border-b border-[var(--umbra-border)] bg-black/10 px-3 py-2',
-                  isPhoneRemote ? 'hidden' : '',
-                )}
+                className={cn('model-manager-browse-toolbar', isPhoneRemote && 'hidden')}
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!canNavigateUp}
-                    onClick={() => {
-                      const currentPath = normalizePath(currentFolderPath || '');
-                      const parentPath = currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '';
-                      if (!parentPath) return;
-                      handleOpenFolder(parentPath);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-xs text-zinc-300 hover:text-white disabled:opacity-50"
-                  >
-                    <ArrowUp size={12} />
-                    Up
-                  </button>
-                  <div className="min-w-[280px] flex-1 rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
-                    <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-zinc-300">
-                      {breadcrumbPaths.map((crumb, index) => (
-                        <React.Fragment key={crumb.path}>
-                          {index > 0 ? <span className="text-zinc-500">/</span> : null}
-                          <button
-                            type="button"
-                            className={cn(
-                              'truncate rounded px-1 py-0.5',
-                              normalizePath(currentFolderPath) === normalizePath(crumb.path)
-                                ? 'bg-[var(--umbra-accent)]/25 text-white'
-                                : 'text-zinc-300 hover:bg-white/10 hover:text-white',
-                            )}
-                            onClick={() => handleOpenFolder(crumb.path)}
-                            title={crumb.path}
-                          >
-                            {crumb.label}
-                          </button>
-                        </React.Fragment>
-                      ))}
-                    </div>
-                    <div className="mt-1 text-[11px] text-zinc-500">
-                      {rootSummary.folders} folders - {rootSummary.files} files
-                      {selectedPathsArray.length > 0 ? ` - ${selectedPathsArray.length} selected` : ''}
-                    </div>
+                <button type="button" className="model-manager-tool model-manager-folder-toggle" aria-label="Browse model folders" onClick={() => setMobileFolderSheetOpen(true)}>
+                  <FolderOpen size={14} />
+                  Folders
+                </button>
+                <button
+                  type="button"
+                  className="model-manager-tool"
+                  disabled={!canNavigateUp}
+                  aria-label="Up one model folder"
+                  onClick={() => {
+                    const parentPath = getClientParentPath(currentFolderPath);
+                    if (parentPath) handleOpenFolder(parentPath);
+                  }}
+                >
+                  <ArrowUp size={13} />
+                  Up
+                </button>
+                <nav className="model-manager-breadcrumbs" aria-label="Model folder breadcrumbs">
+                  <div className="flex min-w-0 items-center gap-1 overflow-x-auto custom-scrollbar text-xs">
+                    {breadcrumbPaths.map((crumb, index) => (
+                      <React.Fragment key={crumb.path}>
+                        {index > 0 ? <ChevronRight size={11} className="shrink-0 text-zinc-600" /> : null}
+                        <button
+                          type="button"
+                          aria-current={normalizePath(currentFolderPath) === normalizePath(crumb.path) ? 'page' : undefined}
+                          className="max-w-[180px] shrink-0 truncate rounded px-1.5 py-1 text-zinc-400 hover:bg-white/5 hover:text-white aria-[current=page]:text-white"
+                          onClick={() => handleOpenFolder(crumb.path)}
+                          title={crumb.path}
+                        >{crumb.label}</button>
+                      </React.Fragment>
+                    ))}
                   </div>
-                  <div className="relative min-w-[220px] flex-1">
-                    <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
-                    <input
-                      type="text"
-                      value={localFilterQuery}
-                      onChange={(event) => setLocalFilterQuery(event.target.value)}
-                      placeholder="Filter current folder..."
-                      className="w-full rounded-md border border-white/10 bg-black/30 px-7 py-1.5 text-xs text-white outline-none focus:border-[var(--umbra-accent)]/70"
-                    />
+                  <div className="mt-0.5 text-[10px] text-zinc-500">{rootSummary.folders} folders · {rootSummary.files} models</div>
+                </nav>
+                <div className="model-manager-search">
+                  <Search size={13} className="shrink-0 text-zinc-500" />
+                  <input type="search" value={localFilterQuery} onChange={(event) => setLocalFilterQuery(event.target.value)} placeholder="Search this folder..." aria-label="Search local models in this folder" />
+                  {localFilterQuery ? <button type="button" aria-label="Clear model search" className="shrink-0 text-zinc-400" onClick={() => setLocalFilterQuery('')}><X size={13} /></button> : null}
+                </div>
+                <button type="button" className="model-manager-tool" disabled={!currentFolderPath || localLoading} onClick={() => handleCreateFolder()} title="New folder" aria-label="Create model folder"><FolderPlus size={14} /></button>
+              </header>
+
+              <div className="model-manager-browse-toolbar" aria-label="Model browsing controls">
+                <UmbraSelectControl value={localTypeFilter} aria-label="Filter model type" controlSize="xs" className="model-manager-tool max-w-[190px]" onChange={(event) => setLocalTypeFilter(event.target.value)}>
+                  <option value="">All model types</option>
+                  {localTypeFilter && !localModelTypes.includes(localTypeFilter) ? <option value={localTypeFilter}>{localTypeFilter}</option> : null}
+                  {localModelTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                </UmbraSelectControl>
+                <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                  <UmbraSelectControl value={localSortBy} aria-label="Sort local models" controlSize="xs" className="model-manager-tool" onChange={(event) => setLocalSortBy(event.target.value as ModelManagerSortBy)}>
+                    <option value="name">Name</option><option value="modified">Modified</option><option value="size">Size</option><option value="type">Type</option>
+                  </UmbraSelectControl>
+                  <button type="button" className="model-manager-tool" onClick={() => setLocalSortDescending((value) => !value)} aria-label={localSortDescending ? 'Sort ascending' : 'Sort descending'} title={localSortDescending ? 'Descending' : 'Ascending'}>
+                    {localSortDescending ? <ArrowDownAZ size={15} /> : <ArrowUpAZ size={15} />}
+                  </button>
+                  <div className="flex gap-1" role="group" aria-label="Model view">
+                    <button type="button" className="model-manager-tool" aria-pressed={localView === 'grid'} aria-label="Model grid view" title="Grid view" onClick={() => setLocalView('grid')}><Grid3X3 size={15} /></button>
+                    <button type="button" className="model-manager-tool" aria-pressed={localView === 'list'} aria-label="Model list view" title="List view" onClick={() => setLocalView('list')}><List size={15} /></button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleCreateFolder()}
-                    className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-xs text-zinc-300 hover:text-white"
-                  >
-                    <FolderPlus size={12} />
-                    New Folder
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRename()}
-                    className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-xs text-zinc-300 hover:text-white"
-                  >
-                    <Pencil size={12} />
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleReveal()}
-                    className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-xs text-zinc-300 hover:text-white"
-                  >
-                    <ExternalLink size={12} />
-                    Reveal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete()}
-                    className="inline-flex items-center gap-1 rounded-md border border-red-500/35 bg-red-500/10 px-2 py-1 text-xs text-red-200 hover:bg-red-500/20"
-                  >
-                    <Trash2 size={12} />
-                    Delete
-                  </button>
                 </div>
               </div>
 
-              <div ref={localListScrollRef} className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar" onScroll={(event) => {
+              <div className="model-manager-action-strip" aria-label="Model selection actions">
+                <div className="text-xs text-zinc-500" role="status" aria-live="polite">
+                  {selectedPaths.size ? selectedPaths.size + ' selected' : visibleLocalEntries.length + ' visible'}
+                  {selectedPaths.size > 0 && Array.from(selectedPaths).some((path) => !visibleLocalEntries.some((entry) => normalizePath(entry.path) === path)) ? ' · includes hidden items' : ''}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {isPhoneRemote ? <button type="button" className="model-manager-tool" aria-pressed={localSelectionMode} onClick={() => setLocalSelectionMode((value) => !value)}><CheckSquare size={13} />{localSelectionMode ? 'Done' : 'Select'}</button> : null}
+                  <button type="button" className="model-manager-tool" disabled={localLoading || visibleLocalEntries.length === 0} onClick={() => {
+                    setSelectedPaths(new Set(visibleLocalEntries.map((entry) => normalizePath(entry.path))));
+                    setSelectionAnchorPath(normalizePath(visibleLocalEntries[0]?.path || ''));
+                    setLocalSelectionMode(true);
+                  }}><CheckSquare size={13} />Select all</button>
+                  {selectedPaths.size > 0 ? <>
+                    <button type="button" className="model-manager-tool" onClick={() => { setSelectedPaths(new Set()); setSelectionAnchorPath(''); setLocalSelectionMode(false); }}><X size={13} />Clear</button>
+                    <button type="button" className="model-manager-tool" disabled={localLoading} onClick={() => handleCopy()} title="Copy selected models" aria-label="Copy selected models"><Copy size={13} /><span className="hidden sm:inline">Copy</span></button>
+                    <button type="button" className="model-manager-tool" disabled={localLoading} onClick={() => handleMove()} title="Move selected models" aria-label="Move selected models"><Move size={13} /><span className="hidden sm:inline">Move</span></button>
+                    <button type="button" className="model-manager-tool model-manager-tool-danger" disabled={localLoading} onClick={() => handleDelete()} title="Delete selected models" aria-label="Delete selected models"><Trash2 size={13} /><span className="hidden sm:inline">Delete</span></button>
+                  </> : null}
+                </div>
+              </div>
+
+              {rootsError || localError ? (
+                <div role="alert" className="flex items-center gap-2 border-b border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                  <span className="min-w-0 flex-1 break-words">{localError || rootsError}</span>
+                  <button type="button" className="model-manager-tool shrink-0" disabled={localLoading || rootsLoading} onClick={() => { if (localError && currentFolderPath) void loadFolder(currentFolderPath, { preserveSelection: true }); else void loadRoots(); }}>Retry</button>
+                </div>
+              ) : null}
+              <div ref={localListScrollRef} className="relative min-h-0 min-w-0 flex-1 overflow-y-auto custom-scrollbar" onScroll={(event) => {
                 const view = event.currentTarget;
-                if (view.scrollHeight - view.scrollTop - view.clientHeight < 160) {
-                  setRenderedLocalCount(count => Math.min(visibleLocalEntries.length, count + 200));
-                }
+                if (view.scrollHeight - view.scrollTop - view.clientHeight < 160) setRenderedLocalCount((count) => Math.min(visibleLocalEntries.length, count + 200));
               }}>
-                {localLoading ? (
-                  <div className="flex items-center gap-2 px-4 py-3 text-xs text-zinc-400">
-                    <Loader2 size={13} className="animate-spin" />
-                    <span>Loading files...</span>
-                  </div>
-                ) : null}
-
-                {localFilterQuery.trim() ? (
-                  <div className="px-3 py-1.5 text-[11px] text-zinc-500">
-                    Showing {visibleLocalEntries.length} of {localEntries.length} entries
-                  </div>
-                ) : null}
-
-                <div className="divide-y divide-white/5">
+                {localLoading ? <div role="status" className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400"><Loader2 size={13} className="animate-spin" /><span>Loading models...</span></div> : null}
+                <div className="model-manager-items" data-view={localView}>
                   {visibleLocalEntries.slice(0, renderedLocalCount).map((entry) => {
                     const path = normalizePath(entry.path);
                     const isSelected = selectedPaths.has(path);
-                    const isDropTarget = entry.kind === 'folder' && dropTargetPath === path;
+                    const thumbnail = entry.kind === 'file' ? getModelThumbnailSrc(entry.snapshot) : '';
+                    const update = entry.kind === 'file' ? modelUpdateByPath[path] : null;
                     return (
-                      <button
-                        key={path}
-                        type="button"
-                        data-umbra-model-entry
-                        data-umbra-model-entry-kind={entry.kind}
-                        onClick={(event) => {
-                          if (isPhoneRemote && entry.kind === 'folder') {
-                            handleOpenFolder(entry.path);
-                            return;
-                          }
-                          handleSelectEntry(entry, event);
-                        }}
-                        onDoubleClick={() => {
-                          if (entry.kind === 'folder') handleOpenFolder(entry.path);
-                          else void handleReveal(entry.path);
-                        }}
-                        onContextMenu={(event) => handleContextMenu(event, entry)}
-                        draggable={!isPhoneRemote}
-                        onDragStart={(event) => handleEntryDragStart(event, entry)}
-                        onDragEnd={handleEntryDragEnd}
-                        onDragOver={entry.kind === 'folder' ? (event) => handleFolderDragOver(event, entry.path) : undefined}
-                        onDragEnter={entry.kind === 'folder' ? (event) => handleFolderDragOver(event, entry.path) : undefined}
-                        onDragLeave={entry.kind === 'folder' ? () => {
-                          if (dropTargetPath === path) setDropTargetPath('');
-                        } : undefined}
-                        onDrop={entry.kind === 'folder' ? (event) => { void handleFolderDrop(event, entry.path); } : undefined}
-                        className={cn(
-                          'w-full items-center gap-3 text-left text-sm transition-colors',
-                          isPhoneRemote
-                            ? 'flex min-h-[78px] px-3 py-2.5'
-                            : 'grid grid-cols-[64px_minmax(260px,2fr)_120px_130px_140px_190px] px-3 py-2',
-                          isSelected ? 'bg-[var(--umbra-accent)]/20 text-white' : 'text-zinc-300 hover:bg-white/5 hover:text-white',
-                          isDropTarget ? 'ring-1 ring-[var(--umbra-accent)] bg-[var(--umbra-accent)]/25 text-white' : '',
-                        )}
-                      >
-                        <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-black/30">
-                          {entry.kind === 'file' && getModelThumbnailSrc(entry.snapshot) ? (
-                            <img
-                              src={getModelThumbnailSrc(entry.snapshot)}
-                              alt=""
-                              width={320}
-                              height={320}
-                              className="h-full w-full object-cover"
-                              loading="lazy"
-                              decoding="async"
-                              draggable={false}
-                            />
-                          ) : entry.kind === 'folder' ? (
-                            <Folder size={22} className="text-zinc-500" />
-                          ) : (
-                            <Boxes size={20} className="text-zinc-500" />
-                          )}
-                        </div>
-                        <div className={cn('min-w-0 truncate font-medium', isPhoneRemote ? 'flex-1' : '')}>
-                          <span className="inline-flex items-center gap-2">
-                            {!isPhoneRemote ? (entry.kind === 'folder' ? <Folder size={14} /> : <Boxes size={14} />) : null}
-                            <span className="truncate">{entry.name}</span>
-                            {entry.kind === 'file' && entry.snapshot ? (
-                              <span className="rounded bg-emerald-500/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
-                                Snap
-                              </span>
-                            ) : null}
-                            {entry.kind === 'file' && modelUpdateByPath[path]?.status === 'available' ? (
-                              <span className="rounded bg-cyan-500/20 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-cyan-100">
-                                Update
-                              </span>
-                            ) : null}
-                          </span>
-                          {isPhoneRemote ? (
-                            <span className="mt-1 block truncate text-xs font-normal text-zinc-500">
-                              {entry.kind === 'folder'
-                                ? formatFolderSummary(entry)
-                                : `${String(entry.modelType || entry.extension || 'Model')} · ${formatBytes(entry.size)}`}
+                      <div key={path} className="model-manager-item">
+                        <button
+                          type="button"
+                          data-umbra-model-entry
+                          data-umbra-model-entry-kind={entry.kind}
+                          data-umbra-model-entry-path={path}
+                          data-drop-target={entry.kind === 'folder' && dropTargetPath === path}
+                          aria-pressed={isSelected}
+                          className="model-manager-entry umbra-surface-soft"
+                          title={entry.name + (entry.kind === 'file' ? '\n' + formatBytes(entry.size) + ' · ' + formatDateTime(entry.modifiedMs) : '\n' + formatFolderSummary(entry))}
+                          onClick={(event) => {
+                            if (isPhoneRemote && entry.kind === 'folder' && !localSelectionMode) handleOpenFolder(entry.path);
+                            else handleSelectEntry(entry, event);
+                          }}
+                          onDoubleClick={() => {
+                            if (entry.kind === 'folder') handleOpenFolder(entry.path);
+                            else { setSelectedPaths(new Set([path])); setLocalSelectionMode(false); setLocalInfoPanelClosed(false); }
+                          }}
+                          onContextMenu={(event) => handleContextMenu(event, entry)}
+                          draggable={!isPhoneRemote}
+                          onDragStart={(event) => handleEntryDragStart(event, entry)}
+                          onDragEnd={handleEntryDragEnd}
+                          onDragOver={entry.kind === 'folder' ? (event) => handleFolderDragOver(event, entry.path) : undefined}
+                          onDragEnter={entry.kind === 'folder' ? (event) => handleFolderDragOver(event, entry.path) : undefined}
+                          onDragLeave={entry.kind === 'folder' ? () => { if (dropTargetPath === path) setDropTargetPath(''); } : undefined}
+                          onDrop={entry.kind === 'folder' ? (event) => { void handleFolderDrop(event, entry.path); } : undefined}
+                        >
+                          <div className="model-manager-preview">
+                            {thumbnail ? <img src={thumbnail} alt="" width={320} height={320} loading="lazy" decoding="async" draggable={false} /> : entry.kind === 'folder' ? <Folder size={30} className="text-zinc-500" /> : <Boxes size={28} className="text-zinc-500" />}
+                          </div>
+                          <div className="model-manager-entry-info">
+                            <span className="model-manager-entry-type text-zinc-500">{entry.kind === 'folder' ? 'Folder' : entry.modelType || entry.extension || 'Model'}</span>
+                            <span className="model-manager-entry-name">{entry.name}</span>
+                            <span className="model-manager-entry-meta">
+                              <span>{entry.kind === 'folder' ? formatFolderSummary(entry) : formatBytes(entry.size)}</span>
+                              {entry.kind === 'file' && entry.snapshot ? <span className="text-emerald-300/80" title="Saved model metadata">Snapshot</span> : null}
+                              {update?.status === 'available' ? <span className="text-[var(--umbra-accent)]">Update available</span> : update?.status === 'current' ? <span className="text-emerald-300/80">Current</span> : null}
                             </span>
-                          ) : null}
-                        </div>
-                        <div className={cn('text-xs text-zinc-400', isPhoneRemote ? 'hidden' : '')}>
-                          {entry.kind === 'folder'
-                            ? formatFolderSummary(entry)
-                            : String(entry.modelType || entry.extension || 'file')}
-                        </div>
-                        <div className={cn('text-xs text-zinc-400', isPhoneRemote ? 'hidden' : '')}>
-                          {entry.kind === 'folder' ? '-' : formatBytes(entry.size)}
-                        </div>
-                        <div className={cn('text-xs text-zinc-400', isPhoneRemote ? 'hidden' : '')}>
-                          {entry.kind === 'folder'
-                            ? '-'
-                            : modelUpdateByPath[path]?.status === 'available'
-                              ? `New: ${modelUpdateByPath[path]?.latestVersionName || `#${modelUpdateByPath[path]?.latestVersionId}`}`
-                              : modelUpdateByPath[path]?.status === 'current'
-                                ? 'Current'
-                                : entry.snapshot
-                                  ? 'Not checked'
-                                  : '-'}
-                        </div>
-                        <div className={cn('text-xs text-zinc-500', isPhoneRemote ? 'hidden' : '')}>
-                          {entry.kind === 'folder' ? '-' : formatDateTime(entry.modifiedMs)}
-                        </div>
-                        {isPhoneRemote ? <ChevronRight size={18} className="shrink-0 text-zinc-600" /> : null}
-                      </button>
+                          </div>
+                          {entry.kind === 'file' ? <div className="model-manager-entry-extra"><span className="block truncate">{formatDateTime(entry.modifiedMs)}</span>{update?.status === 'available' ? <span className="block truncate">{'New: ' + (update.latestVersionName || '#' + update.latestVersionId)}</span> : null}</div> : null}
+                        </button>
+                        <label className="model-manager-check" title={'Select ' + entry.name}>
+                          <input type="checkbox" checked={isSelected} aria-label={'Select ' + entry.name} onChange={() => {
+                            setLocalSelectionMode(true);
+                            handleSelectEntry(entry, { ctrlKey: true, metaKey: false, shiftKey: false });
+                          }} />
+                        </label>
+                        <button type="button" className="model-manager-tool model-manager-item-menu" aria-label={'Actions for ' + entry.name} title="Model actions" onClick={(event) => handleContextMenu(event, entry)}><MoreHorizontal size={14} /></button>
+                      </div>
                     );
                   })}
-                  {renderedLocalCount < visibleLocalEntries.length ? (
-                    <button type="button" className="w-full border-t border-white/10 px-3 py-3 text-center text-xs text-zinc-400 hover:bg-white/5" onClick={() => setRenderedLocalCount(count => Math.min(visibleLocalEntries.length, count + 200))}>
-                      Show more models ({renderedLocalCount} of {visibleLocalEntries.length})
-                    </button>
-                  ) : null}
-                  {!localLoading && visibleLocalEntries.length <= 0 ? (
-                    <div className="px-4 py-6 text-center text-xs text-zinc-500">
-                      {localFilterQuery.trim() ? 'No matches in this folder.' : 'This folder is empty.'}
-                    </div>
-                  ) : null}
                 </div>
+                {renderedLocalCount < visibleLocalEntries.length ? <button type="button" className="w-full border-t border-white/10 px-3 py-3 text-center text-xs text-zinc-400 hover:bg-white/5" onClick={() => setRenderedLocalCount((count) => Math.min(visibleLocalEntries.length, count + 200))}>Show more models ({renderedLocalCount} of {visibleLocalEntries.length})</button> : null}
+                {!localLoading && visibleLocalEntries.length === 0 && !localError && !rootsError ? (
+                  <div className="model-manager-state">
+                    {localFilterQuery.trim() || localTypeFilter ? <Search size={25} className="text-zinc-600" /> : <Boxes size={28} className="text-zinc-600" />}
+                    <span>{localFilterQuery.trim() || localTypeFilter ? 'No models match these filters.' : rootsLoading ? 'Loading model libraries...' : !effectiveLocalRoot ? 'No model libraries available.' : 'This model folder is empty.'}</span>
+                    {localFilterQuery.trim() || localTypeFilter ? <button type="button" className="model-manager-tool" onClick={() => { setLocalFilterQuery(''); setLocalTypeFilter(''); }}>Clear filters</button> : effectiveLocalRoot ? <button type="button" className="model-manager-tool" onClick={() => handleCreateFolder()}><FolderPlus size={14} />New folder</button> : !rootsLoading ? <button type="button" className="model-manager-tool" onClick={() => void loadRoots()}><RefreshCw size={14} />Refresh libraries</button> : null}
+                  </div>
+                ) : null}
               </div>
-
             </main>
 
             {localInfoPanelOpen ? (
               <aside
                 data-umbra-model-manager-details
+                role={isPhoneRemote || compactBrowser ? 'dialog' : 'region'}
+                aria-label="Model details"
+                aria-modal={isPhoneRemote || compactBrowser ? true : undefined}
+                onKeyDown={(event) => {
+                  if (isPhoneRemote || compactBrowser) {
+                    handleLocalDialogKeyDown(event, () => setLocalInfoPanelClosed(true));
+                    return;
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setLocalInfoPanelClosed(true);
+                    return;
+                  }
+                }}
                 className={cn(
-                  'flex shrink-0 flex-col bg-[var(--umbra-bg)]',
+                  'model-manager-info-panel flex shrink-0 flex-col bg-[var(--umbra-bg)]',
                   isPhoneRemote
                     ? 'fixed inset-0 z-[1500] w-full pb-[env(safe-area-inset-bottom)]'
-                    : 'w-[420px] border-l border-[var(--umbra-border)] bg-black/25',
+                    : 'border-l border-[var(--umbra-border)] bg-black/25',
                 )}
               >
                 <div className="flex items-start gap-3 border-b border-[var(--umbra-border)] p-3">
@@ -4567,12 +4659,14 @@ export function ModelManagerWorkspace() {
                   </div>
                   <button
                     type="button"
+                    ref={localDetailsCloseRef}
                     onClick={() => setLocalInfoPanelClosed(true)}
                     className={cn(
                       'flex items-center justify-center rounded-md border border-white/10 bg-black/25 text-zinc-400 hover:text-white',
                       isPhoneRemote ? 'h-11 w-11' : 'p-1',
                     )}
-                    title="Close"
+                    title="Close model details"
+                    aria-label="Close model details"
                   >
                     {isPhoneRemote ? <ArrowLeft size={20} /> : <X size={14} />}
                   </button>
@@ -5218,7 +5312,7 @@ export function ModelManagerWorkspace() {
           </div>
         ) : (
           <div data-umbra-model-manager-civitai className="relative min-h-0 flex-1 overflow-y-auto custom-scrollbar p-4">
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="glass-panel overflow-hidden rounded-lg border border-white/10 p-3">
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,460px)]">
                 <div>
                   <div className="text-sm font-semibold text-white">CivitAI Downloader</div>
@@ -5232,7 +5326,7 @@ export function ModelManagerWorkspace() {
                   </p>
                 </div>
 
-                <div className="rounded-lg border border-white/10 bg-black/25 p-3">
+                <div className="umbra-surface-soft rounded-md border border-white/10 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-300">
                       <KeyRound size={13} className="text-[var(--umbra-accent)]" />
@@ -5258,6 +5352,7 @@ export function ModelManagerWorkspace() {
                     <input
                       ref={civitaiTokenInputRef}
                       type="password"
+                      aria-label="CivitAI API token"
                       value={civitaiTokenInput}
                       onChange={(event) => setCivitaiTokenInput(event.target.value)}
                       onKeyDown={(event) => {
@@ -5292,18 +5387,18 @@ export function ModelManagerWorkspace() {
             </div>
 
             {groupedCivitaiModels.length > 0 ? (
-              <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="mt-3">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Opened This Session</div>
                 <div className="space-y-3">
                   {groupedCivitaiModels.map((group) => (
-                    <div key={`group:${group.label}`} className="rounded-lg border border-white/10 bg-black/25 p-2">
+                    <div key={`group:${group.label}`} className="pt-1">
                       <div className="mb-2 flex items-center justify-between gap-2 px-1">
                         <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-300">{group.label}</div>
                         <div className="rounded border border-white/10 bg-black/30 px-1.5 py-0.5 text-[10px] text-zinc-400">
                           {group.items.length}
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="model-manager-saved-grid">
                         {group.items.map((model) => {
                           const preview = getModelPreviewImage(model);
                           const flagged = isLikelyNsfw(model, preview || undefined);
@@ -5313,14 +5408,14 @@ export function ModelManagerWorkspace() {
                           return (
                             <div
                               key={`opened:${model.id}`}
-                              className="flex items-center gap-2 rounded-md border border-white/10 bg-black/30 px-2 py-2 hover:border-white/20 hover:bg-black/40"
+                              className="model-manager-saved-card umbra-surface-soft"
                             >
                               <button
                                 type="button"
                                 onClick={() => void openModelViewer(model)}
-                                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                className="model-manager-saved-open"
                               >
-                                <div className="h-12 w-16 shrink-0 overflow-hidden rounded border border-white/10 bg-black/40">
+                                <div className="model-manager-saved-preview">
                                   {preview?.url ? (
                                     <LazyModelMedia
                                       src={getModelMediaSrc(preview.url)}
@@ -5334,11 +5429,11 @@ export function ModelManagerWorkspace() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="min-w-0 flex-1">
+                                <div className="w-full min-w-0">
                                   <div className="truncate text-xs font-semibold text-zinc-100">{model.name || `Model ${model.id}`}</div>
                                   <div className="truncate text-[11px] text-zinc-500">#{model.id} {model.type ? `| ${model.type}` : ''}</div>
                                 </div>
-                                <Eye size={13} className="text-zinc-400" />
+                                <span className="sr-only">Open model details</span>
                               </button>
                               <button
                                 type="button"
@@ -5386,10 +5481,14 @@ export function ModelManagerWorkspace() {
           </div>
         )}
 
-        {isPhoneRemote && mobileFolderSheetOpen ? (
+        {mobileFolderSheetOpen ? (
           <div className="fixed inset-0 z-[1600] flex items-end bg-black/65" onClick={() => setMobileFolderSheetOpen(false)}>
             <div
               data-umbra-model-manager-folder-sheet
+              role="dialog"
+              aria-modal="true"
+              aria-label="Model folders"
+              onKeyDown={(event) => handleLocalDialogKeyDown(event, () => setMobileFolderSheetOpen(false))}
               className="flex max-h-[82dvh] w-full flex-col rounded-t-xl border border-b-0 border-white/10 bg-zinc-950 pb-[env(safe-area-inset-bottom)] shadow-2xl"
               onClick={(event) => event.stopPropagation()}
             >
@@ -5401,6 +5500,7 @@ export function ModelManagerWorkspace() {
                 </div>
                 <button
                   type="button"
+                  aria-label="Close model folders"
                   onClick={() => setMobileFolderSheetOpen(false)}
                   className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 text-zinc-300"
                 >
@@ -5487,6 +5587,10 @@ export function ModelManagerWorkspace() {
           <div className="fixed inset-0 z-[1600] flex items-end bg-black/65" onClick={() => setMobileActionsSheetOpen(false)}>
             <div
               data-umbra-model-manager-actions-sheet
+              role="dialog"
+              aria-modal="true"
+              aria-label="Model actions"
+              onKeyDown={(event) => handleLocalDialogKeyDown(event, () => setMobileActionsSheetOpen(false))}
               className="w-full rounded-t-xl border border-b-0 border-white/10 bg-zinc-950 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 shadow-2xl"
               onClick={(event) => event.stopPropagation()}
             >
@@ -5978,7 +6082,14 @@ export function ModelManagerWorkspace() {
 
         {actionDialog ? (
           <div className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-[520px] rounded-xl border border-white/15 bg-[#0f1118] p-4 shadow-2xl shadow-black/60">
+            <div
+              data-umbra-model-manager-file-dialog
+              role="dialog"
+              aria-modal="true"
+              aria-label={actionDialog.title}
+              onKeyDown={(event) => handleLocalDialogKeyDown(event, () => setActionDialog(null))}
+              className="glass-panel w-full max-w-[520px] rounded-lg border border-white/15 p-4"
+            >
               <div className="text-sm font-semibold text-white">{actionDialog.title}</div>
               <div className="mt-1 break-all text-xs text-zinc-400">{actionDialog.description}</div>
 
@@ -6032,86 +6143,16 @@ export function ModelManagerWorkspace() {
           </div>
         ) : null}
 
-        {contextMenu ? (
-          <div
-            className="umbra-context-menu-panel umbra-context-menu-legacy-actions fixed z-[1500] w-max min-w-[188px] p-1"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {(contextMenu.isFolder || !isUmbraRemoteClient()) ? (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
-                onClick={() => {
-                  setContextMenu(null);
-                  if (contextMenu.isFolder) handleOpenFolder(contextMenu.targetPath);
-                  else void handleReveal(contextMenu.targetPath);
-                }}
-              >
-                {contextMenu.isFolder ? <Folder size={12} /> : <ExternalLink size={12} />}
-                <span>{contextMenu.isFolder ? 'Open Folder' : 'Reveal in Explorer'}</span>
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
-              onClick={() => {
-                setContextMenu(null);
-                void handleCopy(contextMenu.targetPath);
-              }}
-            >
-              <Copy size={12} />
-              <span>Copy</span>
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
-              onClick={() => {
-                setContextMenu(null);
-                void handleMove(contextMenu.targetPath);
-              }}
-            >
-              <Move size={12} />
-              <span>Move</span>
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
-              onClick={() => {
-                setContextMenu(null);
-                void handleRename(contextMenu.targetPath);
-              }}
-            >
-              <Pencil size={12} />
-              <span>Rename</span>
-            </button>
-            {contextMenu.isFolder ? (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
-                onClick={() => {
-                  setContextMenu(null);
-                  void handleCreateFolder(contextMenu.targetPath);
-                }}
-              >
-                <FolderPlus size={12} />
-                <span>New Subfolder</span>
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-red-200 hover:bg-red-500/20"
-              onClick={() => {
-                setContextMenu(null);
-                void handleDelete(contextMenu.targetPath);
-              }}
-            >
-              <Trash2 size={12} />
-              <span>Delete</span>
-            </button>
-          </div>
-        ) : null}
+        <ContextMenu
+          isOpen={Boolean(contextMenu)}
+          position={{ x: contextMenu?.x || 0, y: contextMenu?.y || 0 }}
+          items={localContextMenuItems}
+          onClose={() => setContextMenu(null)}
+          boundarySelector="[data-umbra-model-manager]"
+          title={contextMenu?.targetPath.split('/').pop() || 'Model selection'}
+          subtitle={(contextMenu?.selectedPaths.length || 0) + ' selected'}
+          presentation={isPhoneRemote ? 'touch-sheet' : 'anchored'}
+        />
 
         {dropActionMenu ? (
           <div

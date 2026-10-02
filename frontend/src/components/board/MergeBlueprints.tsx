@@ -57,10 +57,10 @@ export function MergeBlueprints({ refreshKey, locked, onLoad }: { refreshKey: st
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
   };
-  return <section aria-label="Saved merge blueprints" className="space-y-2 border-b border-[var(--umbra-border)] pb-5">
-    <label htmlFor="merge-blueprint" className="block text-sm font-semibold">Merge history / blueprints</label>
+  return <section aria-label="Saved merge blueprints" className="space-y-2 border-b border-[var(--umbra-border)] pb-3">
+    <div className="flex flex-wrap items-center justify-between gap-2"><label htmlFor="merge-blueprint" className="merge-label block">History / blueprints</label><span className="merge-badge">{entries.length} saved</span></div>
     <div className="flex flex-wrap items-center gap-2">
-      <div className="min-w-44 flex-1"><UmbraSelect triggerId="merge-blueprint" ariaLabel="Saved merge blueprint" value={id} onValueChange={setId} disabled={locked || busy} placeholder="Choose a completed merge" options={entries.map(item => ({ value: item.id, label: item.title, description: `${item.family} | ${new Date(item.createdAt).toLocaleString()}` }))} buttonClassName="!min-h-11 !text-sm" /></div>
+      <div className="min-w-44 flex-1"><UmbraSelect triggerId="merge-blueprint" ariaLabel="Saved merge blueprint" value={id} onValueChange={setId} disabled={locked || busy} placeholder="Choose a completed merge" options={entries.map(item => ({ value: item.id, label: item.title, description: `${item.family} | ${new Date(item.createdAt).toLocaleString()}` }))} buttonClassName="merge-select !text-xs" /></div>
       <button className={buttonClass} disabled={locked || busy || !id} title="Restore this blueprint into the editable merge controls" onClick={() => void read(false)}>{busy ? <Loader2 size={17} className="animate-spin" /> : <FolderOpen size={17} />}Continue editing</button>
       <button className={buttonClass} disabled={busy || !id} title="Export private blueprint (includes source models and LoRAs)" aria-label="Export private blueprint" onClick={() => void read(true)}><Download size={17} /></button>
       <button className={buttonClass} disabled={locked || busy} title="Import blueprint backup" aria-label="Import blueprint backup" onClick={() => fileInput.current?.click()}><Upload size={17} /></button>

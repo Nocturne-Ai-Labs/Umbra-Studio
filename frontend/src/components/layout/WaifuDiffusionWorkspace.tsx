@@ -12,7 +12,6 @@ import {
   Sparkles,
   Tags,
   Trash2,
-  Upload,
   X,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
@@ -28,7 +27,8 @@ import {
   setWaifuPrependPresets,
   subscribeWaifuPrependPresets,
 } from '@/lib/waifuPrependPresets';
-import { useI18n } from '@/i18n';
+import { UmbraMediaInspectorFrame } from '@/components/umbra-ui/UmbraMediaInspectorFrame';
+import { CensorIconButton, censorButton } from '@/components/umbra-ui/UmbraCensorReviewViewer';
 
 interface WaifuTagScore {
   tag: string;
@@ -160,6 +160,8 @@ export function WaifuDiffusionWorkspace({
   const [analysisMode, setAnalysisMode] = useState<VisualAnalysisMode>('tags');
   const itemsRef = useRef<WaifuItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [inspectorTab, setInspectorTab] = useState<'settings' | 'results'>('settings');
+  const requests = useRef(new Map<string, AbortController>()), stopBatch = useRef(false), mounted = useRef(true), importEpoch = useRef(0);
   const [waifuOptions, setWaifuOptions] = useState(() => ({
     modelRepo: WAIFU_MODEL_OPTIONS[0].id,
     generalThreshold: 0.35,
@@ -183,7 +185,6 @@ export function WaifuDiffusionWorkspace({
     maxNewTokens: 192,
   });
   const { activeWorkspace, setActiveWorkspace, showToast, ui, clearScannedImport } = useStore();
-  const { t } = useI18n();
   const prependPresets = useSyncExternalStore(
     subscribeWaifuPrependPresets,
     getWaifuPrependPresetsSnapshot,
@@ -192,6 +193,18 @@ export function WaifuDiffusionWorkspace({
 
   const isActive = activeOverride
     ?? (activeWorkspace === 'imageinspector' && ui.imageInspectorTab === 'waifu');
+  const interruptAnalysis = useCallback((itemId?: string) => {
+    for (const [key, controller] of requests.current) {
+      if (!itemId || key.endsWith(`:${itemId}`)) { controller.abort(); requests.current.delete(key); }
+    }
+    if (!itemId) { stopBatch.current = true; importEpoch.current += 1; setIsDragging(false); }
+    setItems(current => current.map(item => itemId && item.id !== itemId ? item : {
+      ...item,
+      waifuTagger: item.waifuTagger.status === 'loading' ? { status: item.waifuTagger.result ? 'done' : 'idle', result: item.waifuTagger.result } : item.waifuTagger,
+      naturalCaption: item.naturalCaption.status === 'loading' ? { status: item.naturalCaption.result ? 'done' : 'idle', result: item.naturalCaption.result } : item.naturalCaption,
+    }));
+  }, []);
+  useEffect(() => { if (!isActive) interruptAnalysis(); }, [isActive, interruptAnalysis]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -199,7 +212,10 @@ export function WaifuDiffusionWorkspace({
 
   useEffect(() => {
     clearLegacyWaifuPersistence();
+    mounted.current = true;
     return () => {
+      mounted.current = false; stopBatch.current = true; importEpoch.current += 1;
+      for (const controller of requests.current.values()) controller.abort(); requests.current.clear();
       for (const item of itemsRef.current) {
         revokeWaifuItemUrl(item);
       }
@@ -275,7 +291,9 @@ export function WaifuDiffusionWorkspace({
 
   const importFiles = useCallback(async (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
+    const epoch = importEpoch.current;
     for (const file of files) {
+      if (epoch !== importEpoch.current) break;
       const osPath = String((file as File & { path?: string })?.path || '').trim();
       if (osPath) {
         await loadFromPath(osPath);
@@ -314,13 +332,14 @@ export function WaifuDiffusionWorkspace({
     }
 
     let cancelled = false;
+    const epoch = importEpoch.current;
     const importQueuedPaths = async () => {
       for (const path of uniquePaths) {
-        if (cancelled) return;
+        if (cancelled || epoch !== importEpoch.current) return;
         await loadFromPath(path);
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
-      if (!cancelled) clearScannedImport();
+      if (!cancelled && epoch === importEpoch.current) clearScannedImport();
     };
     void importQueuedPaths();
     return () => { cancelled = true; };
@@ -344,10 +363,12 @@ export function WaifuDiffusionWorkspace({
     e.stopPropagation();
     setIsDragging(false);
     if (!isActive) return;
+    const epoch = importEpoch.current;
 
     const galleryPaths = readGalleryDragPaths(e.dataTransfer);
     if (galleryPaths.length > 0) {
       for (const path of galleryPaths) {
+        if (epoch !== importEpoch.current) return;
         await loadFromPath(path);
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
@@ -365,6 +386,7 @@ export function WaifuDiffusionWorkspace({
       const data = JSON.parse(jsonData);
       if (data.type === 'multi-select' && Array.isArray(data.images)) {
         for (const image of data.images) {
+          if (epoch !== importEpoch.current) return;
           const path = image?.path || image?.relativePath;
           if (path) {
             await loadFromPath(path);
@@ -385,13 +407,16 @@ export function WaifuDiffusionWorkspace({
   const selectedItem = items.find((item) => item.id === selectedId);
 
   const clearAll = useCallback(() => {
+    interruptAnalysis();
+    clearScannedImport();
     for (const item of items) revokeWaifuItemUrl(item);
     setItems([]);
     setSelectedId(null);
     clearLegacyWaifuPersistence();
-  }, [items]);
+  }, [clearScannedImport, interruptAnalysis, items]);
 
   const removeItem = useCallback((id: string) => {
+    interruptAnalysis(id);
     setItems((prev) => {
       const target = prev.find((item) => item.id === id);
       if (target) revokeWaifuItemUrl(target);
@@ -399,7 +424,7 @@ export function WaifuDiffusionWorkspace({
       setSelectedId((current) => (current === id ? (next[0]?.id || null) : current));
       return next;
     });
-  }, []);
+  }, [interruptAnalysis]);
 
   const setItemTaggerState = useCallback((itemId: string, nextState: WaifuTaggerState) => {
     setItems((prev) => prev.map((item) => (
@@ -435,12 +460,15 @@ export function WaifuDiffusionWorkspace({
   }, [showToast]);
 
   const runWaifuTaggerForItem = useCallback(async (item: WaifuItem) => {
+    const key = `tags:${item.id}`;
+    if (requests.current.has(key) || !mounted.current || !itemsRef.current.some(entry => entry.id === item.id)) return false;
     if (item.isVideo) {
       showToast('Waifu tagger only supports images', 'error');
       return;
     }
 
-    setItemTaggerState(item.id, { status: 'loading' });
+    const controller = new AbortController(); requests.current.set(key, controller);
+    setItemTaggerState(item.id, { status: 'loading', result: item.waifuTagger.result });
 
     try {
       const normalizedPath = String(item.path || '').trim();
@@ -451,6 +479,7 @@ export function WaifuDiffusionWorkspace({
       if (hasPath) {
         response = await fetch(endpoint, {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             path: normalizedPath,
@@ -476,10 +505,12 @@ export function WaifuDiffusionWorkspace({
         formData.append('generalMcutEnabled', String(waifuOptions.generalMcutEnabled));
         formData.append('characterMcutEnabled', String(waifuOptions.characterMcutEnabled));
         formData.append('maxTags', String(waifuOptions.maxTags));
-        response = await fetch(endpoint, { method: 'POST', body: formData });
+        response = await fetch(endpoint, { method: 'POST', body: formData, signal: controller.signal });
       }
 
       const payload = await response.json().catch(() => null) as (WaifuTagResult & { error?: string; success?: boolean }) | null;
+      controller.signal.throwIfAborted();
+      if (requests.current.get(key) !== controller || !mounted.current) return false;
       if (!response.ok || !payload || payload.error || payload.success === false) {
         const message = payload?.error || `Tagging failed (${response.status})`;
         throw new Error(message);
@@ -488,20 +519,24 @@ export function WaifuDiffusionWorkspace({
       setItemTaggerState(item.id, { status: 'done', result: payload });
       return true;
     } catch (error: any) {
+      if (controller.signal.aborted || requests.current.get(key) !== controller || !mounted.current) return false;
       const errorMessage = error?.message || 'Tagging failed';
       setItemTaggerState(item.id, { status: 'error', error: errorMessage });
       showToast(errorMessage, 'error');
       return false;
-    }
+    } finally { if (requests.current.get(key) === controller) requests.current.delete(key); }
   }, [setItemTaggerState, showToast, waifuOptions]);
 
   const runNaturalCaptionForItem = useCallback(async (item: WaifuItem) => {
+    const key = `caption:${item.id}`;
+    if (requests.current.has(key) || !mounted.current || !itemsRef.current.some(entry => entry.id === item.id)) return false;
     if (item.isVideo) {
       showToast('Natural captioning only supports images', 'error');
       return;
     }
 
-    setItemCaptionState(item.id, { status: 'loading' });
+    const controller = new AbortController(); requests.current.set(key, controller);
+    setItemCaptionState(item.id, { status: 'loading', result: item.naturalCaption.result });
     try {
       const normalizedPath = String(item.path || '').trim();
       const hasPath = normalizedPath.length > 0 && /[\\/]/.test(normalizedPath);
@@ -509,6 +544,7 @@ export function WaifuDiffusionWorkspace({
       if (hasPath) {
         response = await fetch('/api/metadata/caption-image', {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             path: normalizedPath,
@@ -526,24 +562,27 @@ export function WaifuDiffusionWorkspace({
         formData.append('modelRepo', captionOptions.modelRepo);
         formData.append('device', captionOptions.device);
         formData.append('maxNewTokens', String(captionOptions.maxNewTokens));
-        response = await fetch('/api/metadata/caption-image', { method: 'POST', body: formData });
+        response = await fetch('/api/metadata/caption-image', { method: 'POST', body: formData, signal: controller.signal });
       }
 
       const payload = await response.json().catch(() => null) as (NaturalCaptionResult & {
         error?: string;
         success?: boolean;
       }) | null;
+      controller.signal.throwIfAborted();
+      if (requests.current.get(key) !== controller || !mounted.current) return false;
       if (!response.ok || !payload || payload.error || payload.success === false) {
         throw new Error(payload?.error || `Captioning failed (${response.status})`);
       }
       setItemCaptionState(item.id, { status: 'done', result: payload });
       return true;
     } catch (error: any) {
+      if (controller.signal.aborted || requests.current.get(key) !== controller || !mounted.current) return false;
       const errorMessage = error?.message || 'Captioning failed';
       setItemCaptionState(item.id, { status: 'error', error: errorMessage });
       showToast(errorMessage, 'error');
       return false;
-    }
+    } finally { if (requests.current.get(key) === controller) requests.current.delete(key); }
   }, [captionOptions, setItemCaptionState, showToast]);
 
   const runSelectedAnalysis = useCallback(async () => {
@@ -568,21 +607,25 @@ export function WaifuDiffusionWorkspace({
       return;
     }
     setBatchTagging(true);
+    stopBatch.current = false;
     try {
       let completed = 0;
       for (const item of analyzableItems) {
+        if (stopBatch.current || !mounted.current) break;
+        if (!itemsRef.current.some(current => current.id === item.id)) continue;
         const success = analysisMode === 'caption'
           ? await runNaturalCaptionForItem(item)
           : await runWaifuTaggerForItem(item);
         if (success) completed += 1;
       }
+      if (stopBatch.current || !mounted.current) return;
       const failed = analyzableItems.length - completed;
       showToast(
         `${analysisMode === 'caption' ? 'Captioned' : 'Tagged'} ${completed} image${completed === 1 ? '' : 's'}${failed ? `. ${failed} failed; retained for retry.` : ''}`,
         failed ? 'error' : 'success',
       );
     } finally {
-      setBatchTagging(false);
+      if (mounted.current) setBatchTagging(false);
     }
   }, [analysisMode, batchTagging, runNaturalCaptionForItem, runWaifuTaggerForItem, showToast]);
 
@@ -725,239 +768,24 @@ export function WaifuDiffusionWorkspace({
     }
   }, [showToast]);
 
-  return (
-    <div
-      data-umbra-image-inspector="visual"
-      data-umbra-image-inspector-remote-mode={remoteMode}
-      className="relative h-full flex bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,video/*"
-        multiple
-        className="hidden"
-        onChange={(event) => void handleFileSelection(event)}
-      />
-      {isDragging && (
-        <div className="absolute inset-0 z-50 bg-[var(--umbra-accent)]/15 border-4 border-dashed border-[var(--umbra-accent)] backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="text-center">
-            <Upload className="w-16 h-16 text-[var(--umbra-accent)] mx-auto mb-4 animate-bounce" />
-            <p className="text-[var(--umbra-text)] text-2xl font-bold">Drop To Tag</p>
-            <p className="umbra-text-muted text-sm mt-2">Images from filmstrip or your file explorer</p>
-          </div>
-        </div>
-      )}
-
-      {items.length > 0 ? (
-        <div data-umbra-image-inspector-history="" className="custom-scrollbar w-24 space-y-2 overflow-y-auto border-r border-white/10 p-2 umbra-surface-deep">
-          <div data-umbra-image-inspector-history-count="" className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] umbra-text-faint">
-            {items.length} Media
-          </div>
-          {items.map((item) => (
-            <div
-              key={item.id}
-              data-umbra-image-inspector-thumbnail=""
-              onClick={() => setSelectedId(item.id)}
-              className={`relative h-20 w-20 cursor-pointer overflow-hidden rounded-md border transition ${selectedId === item.id
-                ? 'border-[var(--umbra-accent)] shadow-[0_0_16px_var(--umbra-accent-glow)]'
-                : 'border-white/10 opacity-60 hover:border-white/25 hover:opacity-100'
-                }`}
-            >
-              {item.isVideo ? (
-                <video src={item.blobUrl} className="h-full w-full object-cover" muted preload="metadata" />
-              ) : (
-                <img src={item.previewUrl || item.blobUrl} alt={item.name} className="h-full w-full object-cover" loading="lazy" decoding="async" />
-              )}
-              {(analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status) !== 'idle' ? (
-                <div className="absolute bottom-1 right-1 rounded border border-black/40 bg-black/70 px-1 text-[9px] font-semibold uppercase tracking-wide text-zinc-200">
-                  {analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status}
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-        <div data-umbra-image-inspector-main="" className="flex-1 flex flex-col min-w-0">
-          {!hideHeader && (
-            <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-xl">
-              <div>
-                <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.18em] text-[var(--umbra-text)]">
-                  <Sparkles size={16} className="text-[var(--umbra-accent)]" />
-                  Visual Analysis
-                </h2>
-                <p className="mt-0.5 text-xs umbra-text-muted">Booru tagging and natural-language captions for generation</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 rounded border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10"
-                  title={t('common.addMedia')}
-                >
-                  <Upload size={14} />
-                  {t('common.addMedia')}
-                </button>
-                <button
-                  onClick={() => void runSelectedAnalysis()}
-                  disabled={batchTagging || !selectedItem || selectedItem.isVideo || (
-                    analysisMode === 'caption'
-                      ? selectedItem.naturalCaption.status === 'loading'
-                      : selectedItem.waifuTagger.status === 'loading'
-                  )}
-                  className="inline-flex items-center gap-1.5 rounded border border-[var(--umbra-accent)]/45 bg-[var(--umbra-accent)]/25 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:brightness-110 disabled:border-white/10 disabled:bg-zinc-800/60 disabled:text-zinc-500"
-                >
-                  {(analysisMode === 'caption'
-                    ? selectedItem?.naturalCaption.status
-                    : selectedItem?.waifuTagger.status) === 'loading'
-                    ? <Loader2 size={13} className="animate-spin" />
-                    : analysisMode === 'caption' ? <FileText size={13} /> : <Tags size={13} />}
-                  {(analysisMode === 'caption'
-                    ? selectedItem?.naturalCaption.status
-                    : selectedItem?.waifuTagger.status) === 'loading'
-                    ? 'Analyzing'
-                    : analysisMode === 'caption' ? 'Caption Selected' : 'Tag Selected'}
-                </button>
-                <button
-                  onClick={() => void runAnalysisForAll()}
-                  disabled={batchTagging || items.every((item) => item.isVideo)}
-                  className="inline-flex items-center gap-1.5 rounded border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {batchTagging ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                  {batchTagging ? 'Analyzing Batch' : analysisMode === 'caption' ? 'Caption All' : 'Tag All'}
-                </button>
-                {!isUmbraRemoteClient() ? (
-                  <button
-                    onClick={() => void revealInExplorer(selectedItem?.path)}
-                    disabled={!selectedItem}
-                    className="inline-flex items-center gap-1.5 rounded border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                    title="Show selected file in file explorer"
-                  >
-                    <FolderOpen size={14} />
-                    Show in File Explorer
-                  </button>
-                ) : null}
-                <button
-                  onClick={clearAll}
-                  className="p-2 rounded transition umbra-icon-button hover:text-red-400"
-                  title="Clear All"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-            </div>
-          )}
-          {hideHeader && items.length > 0 && (
-            <div data-umbra-image-inspector-toolbar="" className="flex items-center justify-end gap-2 border-b border-white/10 bg-black/20 px-3 py-1.5 backdrop-blur-xl z-10">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 rounded border border-white/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10"
-                title={t('common.addMedia')}
-              >
-                <Upload size={12} />
-                {t('common.addMedia')}
-              </button>
-              <button
-                onClick={() => void runSelectedAnalysis()}
-                disabled={batchTagging || !selectedItem || selectedItem.isVideo || (
-                  analysisMode === 'caption'
-                    ? selectedItem.naturalCaption.status === 'loading'
-                    : selectedItem.waifuTagger.status === 'loading'
-                )}
-                className="inline-flex items-center gap-1.5 rounded border border-[var(--umbra-accent)]/45 bg-[var(--umbra-accent)]/25 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white transition hover:brightness-110 disabled:border-white/10 disabled:bg-zinc-800/60 disabled:text-zinc-500"
-              >
-                {(analysisMode === 'caption'
-                  ? selectedItem?.naturalCaption.status
-                  : selectedItem?.waifuTagger.status) === 'loading'
-                  ? <Loader2 size={12} className="animate-spin" />
-                  : analysisMode === 'caption' ? <FileText size={12} /> : <Tags size={12} />}
-                {(analysisMode === 'caption'
-                  ? selectedItem?.naturalCaption.status
-                  : selectedItem?.waifuTagger.status) === 'loading'
-                  ? 'Analyzing'
-                  : analysisMode === 'caption' ? 'Caption' : 'Tag Selected'}
-              </button>
-              <button
-                onClick={() => void runAnalysisForAll()}
-                disabled={batchTagging || items.every((item) => item.isVideo)}
-                className="inline-flex items-center gap-1.5 rounded border border-white/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {batchTagging ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                {batchTagging ? 'Batch' : analysisMode === 'caption' ? 'Caption All' : 'Tag All'}
-              </button>
-              {remoteMode !== 'phone' && !isUmbraRemoteClient() ? (
-                <button
-                  onClick={() => void revealInExplorer(selectedItem?.path)}
-                  disabled={!selectedItem}
-                  className="inline-flex items-center gap-1.5 rounded border border-white/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  title="Show selected file in file explorer"
-                >
-                  <FolderOpen size={12} />
-                  Explorer
-                </button>
-              ) : null}
-              <button
-                onClick={clearAll}
-                className="p-1.5 rounded transition umbra-icon-button hover:text-red-400"
-                title="Clear All"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          )}
-
-        <div
-          data-umbra-visual-analysis-grid=""
-          data-umbra-visual-analysis-empty={selectedItem ? 'false' : 'true'}
-          className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(320px,1.15fr)_minmax(360px,1fr)]"
-        >
-          <div className="flex min-h-0 items-center justify-center overflow-hidden border-r border-white/10 p-4 umbra-surface-deep">
-            {!selectedItem ? (
-              <div className="text-center umbra-text-faint">
-                <Upload size={56} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-semibold uppercase tracking-[0.12em] text-zinc-400">{t('extras.addImagesVisual')}</p>
-                <p className="mt-1 text-xs umbra-text-muted">{t('extras.visualAnalysisHint')}</p>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition umbra-surface-soft hover:bg-white/10"
-                >
-                  <Upload size={14} />
-                  {t('common.addMedia')}
-                </button>
-              </div>
-            ) : selectedItem.isVideo ? (
-              <video src={selectedItem.blobUrl} controls className="h-full max-h-full w-full max-w-full rounded-md border border-white/10 object-contain shadow-2xl shadow-black/50 umbra-surface-soft" preload="metadata" />
-            ) : (
-              <img src={selectedItem.blobUrl} alt={selectedItem.name} className="h-full max-h-full w-full max-w-full rounded-md border border-white/10 object-contain shadow-2xl shadow-black/50 umbra-surface-soft" decoding="async" />
-            )}
-          </div>
-
-          <div data-umbra-visual-analysis-controls="" className="custom-scrollbar space-y-3 overflow-y-auto bg-[var(--umbra-bg)]/60 p-4">
-            {!selectedItem ? null : (
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <h3 className="text-[var(--umbra-text)] text-sm font-semibold truncate">{selectedItem.name}</h3>
-                  <p className="text-[11px] umbra-text-faint">
-                    {selectedItem.size > 0 ? formatBytes(selectedItem.size) : 'Path-backed media'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => removeItem(selectedItem.id)}
-                  className="ml-2 p-1 rounded transition umbra-icon-button hover:text-red-400"
-                  title="Remove from queue"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            )}
-
-            <div className="glass-panel rounded-lg border-white/10 p-3 umbra-surface-soft">
+  const selectedStatus = analysisMode === 'caption' ? selectedItem?.naturalCaption.status : selectedItem?.waifuTagger.status;
+  const runDisabled = batchTagging || !selectedItem || selectedItem.isVideo || selectedStatus === 'loading';
+  return <UmbraMediaInspectorFrame kind="visual" title={hideHeader ? 'Image Analysis' : 'Visual Analysis'} remoteMode={remoteMode}
+    items={items.map(item => ({ ...item, status: analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status }))}
+    selectedId={selectedId} onSelect={setSelectedId} onAdd={() => fileInputRef.current?.click()} onRemove={removeItem} onClear={clearAll}
+    status={batchTagging ? 'Analyzing batch' : selectedStatus === 'loading' ? 'Analyzing selected image' : selectedItem ? selectedItem.name + (selectedItem.size ? ' · ' + formatBytes(selectedItem.size) : '') : undefined}
+    input={<input ref={fileInputRef} aria-label="Import analysis media" type="file" accept="image/*,video/*" multiple hidden onChange={event => void handleFileSelection(event)} />}
+    isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
+    actions={<>
+      <button type="button" className={censorButton} disabled={runDisabled} onClick={() => { setInspectorTab('results'); void runSelectedAnalysis(); }}>{selectedStatus === 'loading' ? <Loader2 size={15} className="animate-spin" /> : analysisMode === 'caption' ? <FileText size={15} /> : <Tags size={15} />}{analysisMode === 'caption' ? 'Caption selected' : 'Tag selected'}</button>
+      <button type="button" className={censorButton} disabled={batchTagging || !items.some(item => !item.isVideo)} onClick={() => { setInspectorTab('results'); void runAnalysisForAll(); }}><Sparkles size={15} />{analysisMode === 'caption' ? 'Caption all' : 'Tag all'}</button>
+      {batchTagging && <button type="button" className={censorButton} onClick={() => { stopBatch.current = true; }}>Stop after current</button>}
+      {remoteMode !== 'phone' && !isUmbraRemoteClient() && <CensorIconButton title="Show selected file in file explorer" disabled={!selectedItem || !/[\\/]/.test(selectedItem.path)} onClick={() => void revealInExplorer(selectedItem?.path)}><FolderOpen size={15} /></CensorIconButton>}
+    </>}
+    detailsTitle="Analysis inspector" details={<div data-umbra-visual-analysis-controls="" className="space-y-3">
+      <div className="flex gap-1 border-b border-white/10 pb-2"><button type="button" className={censorButton} aria-pressed={inspectorTab === 'settings'} onClick={() => setInspectorTab('settings')}>Settings</button><button type="button" className={censorButton} aria-pressed={inspectorTab === 'results'} onClick={() => setInspectorTab('results')}>Results</button></div>
+      <div className={inspectorTab === 'settings' ? 'space-y-3' : 'hidden'}>
+            <div className="rounded border border-white/10 p-3 umbra-surface-soft">
               <p className="mb-2 text-[11px] uppercase tracking-wide umbra-text-faint">Analysis Type</p>
               <div className="mb-3 grid grid-cols-2 rounded border border-white/10 bg-black/30 p-1">
                 <button
@@ -1140,7 +968,7 @@ export function WaifuDiffusionWorkspace({
             </div>
 
             {analysisMode === 'tags' ? (
-            <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
+            <div className="rounded border p-3 border-white/10 umbra-surface-soft">
               <p className="text-[11px] umbra-text-faint uppercase tracking-wide mb-2">Booru Export Format</p>
               <div className="flex flex-wrap gap-3 text-[11px] umbra-text-muted mb-2">
                 <label className="inline-flex items-center gap-1.5">
@@ -1229,14 +1057,19 @@ export function WaifuDiffusionWorkspace({
             </div>
             ) : null}
 
+
+      </div>
+      <div data-umbra-analysis-results="" className={inspectorTab === 'results' ? 'space-y-3' : 'hidden'}>
+        {selectedStatus === 'loading' && <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={14} className="animate-spin" />Analyzing image</p>}
+        {(!selectedItem || (selectedItem.waifuTagger.status === 'idle' && selectedItem.naturalCaption.status === 'idle')) && <p className="text-xs text-zinc-500">Choose settings, then analyze an image to view its tags or caption.</p>}
             {selectedItem?.naturalCaption.status === 'error' ? (
-              <div className="rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
+              <div role="alert" className="rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
                 {selectedItem.naturalCaption.error || 'Captioning failed'}
               </div>
             ) : null}
 
             {selectedItem?.naturalCaption.status === 'done' && naturalCaptionText ? (
-              <div className="glass-panel rounded-lg border-white/10 p-3 umbra-surface-soft">
+              <div className="rounded border border-white/10 p-3 umbra-surface-soft">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-[11px] uppercase tracking-wide umbra-text-faint">Natural Caption</p>
@@ -1258,7 +1091,7 @@ export function WaifuDiffusionWorkspace({
             ) : null}
 
             {selectedItem && !selectedItem.isVideo ? (
-              <div className="glass-panel rounded-lg border-[var(--umbra-accent)]/25 p-3 umbra-surface-soft">
+              <div className="rounded border border-[var(--umbra-accent)]/25 p-3 umbra-surface-soft">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--umbra-accent)]">Send To Umbra UI</p>
@@ -1309,14 +1142,14 @@ export function WaifuDiffusionWorkspace({
             ) : null}
 
             {selectedItem && selectedItem.waifuTagger.status === 'error' && (
-              <div className="rounded bg-red-500/10 border border-red-500/30 p-2 text-xs text-red-300">
+              <div role="alert" className="rounded bg-red-500/10 border border-red-500/30 p-2 text-xs text-red-300">
                 {selectedItem.waifuTagger.error || 'Tagging failed'}
               </div>
             )}
 
             {selectedItem?.waifuTagger.status === 'done' && selectedItem.waifuTagger.result && (
               <div className="space-y-3">
-                <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
+                <div className="rounded border p-3 border-white/10 umbra-surface-soft">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[11px] umbra-text-faint uppercase tracking-wide">Booru Tags</p>
                     <button
@@ -1331,7 +1164,7 @@ export function WaifuDiffusionWorkspace({
                 </div>
 
                 {Object.keys(selectedItem.waifuTagger.result.rating || {}).length > 0 && (
-                  <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
+                  <div className="rounded border p-3 border-white/10 umbra-surface-soft">
                     <p className="text-[11px] umbra-text-faint uppercase tracking-wide mb-1">Rating</p>
                     <div className="flex flex-wrap gap-1.5">
                       {Object.entries(selectedItem.waifuTagger.result.rating).map(([tag, score]) => (
@@ -1344,7 +1177,7 @@ export function WaifuDiffusionWorkspace({
                 )}
 
                 {selectedItem.waifuTagger.result.character.length > 0 && (
-                  <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
+                  <div className="rounded border p-3 border-white/10 umbra-surface-soft">
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <p className="text-[11px] umbra-text-faint uppercase tracking-wide">Character Tags</p>
                       <button
@@ -1366,7 +1199,7 @@ export function WaifuDiffusionWorkspace({
                 )}
 
                 {selectedItem.waifuTagger.result.general.length > 0 && (
-                  <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
+                  <div className="rounded border p-3 border-white/10 umbra-surface-soft">
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <p className="text-[11px] umbra-text-faint uppercase tracking-wide">General Tags</p>
                       <button
@@ -1387,7 +1220,7 @@ export function WaifuDiffusionWorkspace({
                   </div>
                 )}
                 {(selectedItem.waifuTagger.result.style?.length || 0) > 0 && (
-                  <div className="glass-panel rounded-lg p-3 border-white/10 umbra-surface-soft">
+                  <div className="rounded border p-3 border-white/10 umbra-surface-soft">
                     <p className="text-[11px] umbra-text-faint uppercase tracking-wide mb-1">Style Tags</p>
                     <div className="flex flex-wrap gap-1.5">
                       {selectedItem.waifuTagger.result.style?.map(({ tag, score }) => (
@@ -1400,11 +1233,10 @@ export function WaifuDiffusionWorkspace({
                 )}
               </div>
             )}
-          </div>
-        </div>
+
       </div>
-    </div>
-  );
+    </div>} />;
+
 }
 
 function formatBytes(bytes: number): string {

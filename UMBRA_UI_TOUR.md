@@ -169,6 +169,32 @@ inputs are processed one image at a time so an entire batch is not loaded into
 VRAM simultaneously. Local clients can choose output folders with the native
 file picker; host-only filesystem actions remain unavailable to remote clients.
 
+### Metadata Viewer And Image Analysis
+
+Open **Extras > Metadata Scanner** or **Visual Analysis** and choose **Add media**.
+Select an image or video from the bottom strip. The central preview supports
+pan, zoom and **Fit image**; the toolbar can hide or show the inspector. The
+inspector stacks below the preview on narrow screens, including Phone Remote.
+
+Metadata Viewer displays generation prompts, parameters and file information.
+**Copy JSON** and **Save JSON** export the embedded visual workflow or API prompt
+graph. Enable **Show raw metadata** to access ComfyUI and legacy parameter
+exports. Legacy PNG parameter exports retain their original text. Clear cancels
+the import batch so a delayed scan cannot put cleared media back into the strip.
+
+Image Analysis separates **Settings** and **Results** while preserving tagger
+models, thresholds, MCut options, tag formatting, prepend presets, caption model,
+device and length. Analyze the selected image or the image batch. **Stop after
+current** prevents the next batch item; clearing media or leaving the tool blocks
+late client results. An inference request already accepted by the server may
+continue. Videos can be previewed but the tagger and captioner require images.
+
+Copy tags or captions from Results, or send the selected source and current
+analysis prompt to **TXT2IMG**, **IMG2IMG**, **Inpaint**, or **IMG2VID**. File Explorer
+remains a local-host action. Imported media and results stay in the current app
+session; reloading clears them. Model inference requires the existing installed
+weights and dependencies; the interface does not change their setup.
+
 ### Transparency
 
 Open **Extras > Transparency** and choose **Add images**. Select an image in the
@@ -210,6 +236,30 @@ detailer stages, optional final upscale, and metadata behavior.
 Before a public release, the packaged build must visibly expose and validate
 Power Prompter's hires-fix, detailer, and output-upscale controls for every
 pipeline that declares those capabilities.
+
+## Model Manager And Data Forge
+
+Model Manager uses the Gallery browsing pattern: folders, search, type filters,
+sort, grid/list view, Ctrl/Shift selection, and selection details. Select visible
+matches or open item/bulk context actions. Downloads, installs, metadata and
+folder controls retain their existing behavior. Removal still requires its
+confirmation. Narrow layouts expose folders and details in reachable panels;
+remote clients retain their existing limits on local-host actions.
+
+In **Data Forge > Datasets**, select a dataset and concept, then search filenames
+or tags, filter, sort, and select images in the browser. Filtering keeps the
+selection and reports selected images hidden from the current view. Caption
+editing and the collapsible caption/tagging controls preserve the original
+dataset, concept and filename. Imports, archives, moves, deletes and repairs use
+the existing controls and confirmations. Data Forge remains unavailable in
+Phone Remote.
+
+**Data Forge > Model Merge** uses the same dark OLED glass surfaces and compact
+controls as the rest of the workspace. Its source models, independent LoRA
+stacks, ratios and blocks, recipes, blueprints, output validation, progress and
+cancellation retain their existing behavior. Tablet layouts provide separate
+merge-controls and test-preview views. Interface checks use mocked operations;
+they do not qualify a new model merge or generation run.
 
 ## Release Media Safety
 

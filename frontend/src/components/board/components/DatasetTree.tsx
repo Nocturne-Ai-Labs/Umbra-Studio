@@ -1,5 +1,5 @@
 import { useMemo, useState, type MouseEvent } from 'react';
-import { Archive, ChevronRight, ChevronDown, Folder, FolderOpen, Plus, Trash2, Image, Pencil, FolderPlus, Loader2, MousePointer2 } from 'lucide-react';
+import { Archive, ChevronRight, ChevronDown, Folder, FolderOpen, Plus, Trash2, Image, Pencil, FolderPlus, Loader2, MousePointer2, MoreHorizontal } from 'lucide-react';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
 import type { Dataset } from '../types';
@@ -177,6 +177,8 @@ export function DatasetTree({
           Concepts
         </span>
         <button
+          type="button"
+          aria-label="New dataset concept"
           onClick={onCreateRootConcept}
           className="umbra-icon-button rounded p-1 transition-colors hover:text-cyan-300"
           title="New Concept"
@@ -200,10 +202,13 @@ export function DatasetTree({
               {/* Dataset row */}
               <div
                 className={`group flex cursor-pointer items-center gap-1 rounded-md border px-1.5 py-1.5 transition-colors
-                           ${isSelected ? 'border-cyan-400/35 bg-cyan-500/12 text-cyan-100' : 'border-transparent text-zinc-300 hover:border-white/10 hover:bg-white/5'}`}
+                           ${isSelected ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]' : 'border-transparent text-zinc-300 hover:border-white/10 hover:bg-white/5'}`}
                 onContextMenu={(event) => openDatasetMenu(event, dataset)}
               >
                 {!isFlat && <button
+                  type="button"
+                  aria-label={`${isExpanded ? 'Collapse' : 'Expand'} dataset: ${dataset.name}`}
+                  aria-expanded={isExpanded}
                   onClick={() => toggleExpand(dataset.name)}
                   className="umbra-icon-button rounded p-0.5 transition-colors"
                 >
@@ -215,6 +220,9 @@ export function DatasetTree({
                 </button>}
 
                 <button
+                  type="button"
+                  aria-label={`Open ${isFlat ? 'concept' : 'dataset'}: ${dataset.name}`}
+                  aria-current={isSelected ? 'true' : undefined}
                   onClick={() => {
                     if (isFlat) onSelectConcept(dataset.name, dataset.name);
                     else {
@@ -222,7 +230,7 @@ export function DatasetTree({
                       if (!isExpanded) toggleExpand(dataset.name);
                     }
                   }}
-                  className="flex-1 flex items-center gap-2 text-left"
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 >
                   {isExpanded ? (
                     <FolderOpen className="w-4 h-4 text-amber-400" />
@@ -233,20 +241,23 @@ export function DatasetTree({
                   {isFlat && <span className="text-xs text-zinc-500">{dataset.concepts[0]?.imageCount || 0}</span>}
                 </button>
 
-                <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="flex shrink-0 gap-1">
                   <button
+                    type="button"
+                    aria-label={`Dataset actions: ${dataset.name}`}
+                    onClick={event => openDatasetMenu(event, dataset)}
+                    className="umbra-icon-button rounded p-1 transition-colors"
+                  >
+                    <MoreHorizontal size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Add concept to: ${dataset.name}`}
                     onClick={onCreateRootConcept}
                     className="umbra-icon-button rounded p-1 transition-colors hover:text-cyan-300"
                     title="Add Concept"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => onDeleteDataset(dataset.name)}
-                    className="umbra-icon-button rounded p-1 transition-colors hover:text-red-400"
-                    title="Delete Dataset"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
@@ -262,11 +273,11 @@ export function DatasetTree({
                       <div
                         key={conceptKey}
                         className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1 transition-colors
-                                   ${isConceptSelected ? 'border-cyan-400/35 bg-cyan-500/12 text-cyan-100' : 'border-transparent text-zinc-300 hover:border-white/10 hover:bg-white/5'}`}
-                        onClick={() => onSelectConcept(dataset.name, conceptKey)}
+                                   ${isConceptSelected ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]' : 'border-transparent text-zinc-300 hover:border-white/10 hover:bg-white/5'}`}
                         onContextMenu={(event) => openConceptMenu(event, dataset, conceptKey, concept.name)}
                       >
-                        <Image className="w-3.5 h-3.5 text-zinc-500" />
+                        <button type="button" aria-label={`Open concept: ${concept.name}`} aria-current={isConceptSelected ? 'true' : undefined} onClick={() => onSelectConcept(dataset.name, conceptKey)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <Image className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
                         <span className={`rounded border px-1.5 py-0.5 text-[10px] ${
                           concept.isReg ? 'border-cyan-400/30 bg-cyan-500/12 text-cyan-200' : 'border-emerald-400/30 bg-emerald-500/12 text-emerald-300'
                         }`}>
@@ -279,14 +290,14 @@ export function DatasetTree({
                         <span className="text-xs text-zinc-500">
                           {concept.imageCount}
                         </span>
+                        </button>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteConcept(dataset.name, conceptKey);
-                          }}
-                          className="rounded p-0.5 text-zinc-500 opacity-0 transition-colors hover:text-red-400 group-hover:opacity-100"
+                          type="button"
+                          aria-label={`Concept actions: ${concept.name}`}
+                          onClick={event => openConceptMenu(event, dataset, conceptKey, concept.name)}
+                          className="umbra-icon-button shrink-0 rounded p-1 transition-colors"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <MoreHorizontal size={13} />
                         </button>
                       </div>
                     );
