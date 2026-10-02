@@ -10,12 +10,15 @@ import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { MODEL_MANIFESTS, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
+import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
+import { compareUmbraVersions } from '../shared/appUpdate';
+import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
 
 const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
 const MAX_LOG_LINES = 500;
 
-type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support';
+type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools';
 type SetupJobState = {
   id: string;
   kind: SetupJobKind;
@@ -125,13 +128,14 @@ function appendOutput(job: SetupJobState, value: string) {
   }
 }
 
-async function runScript(runtimeRoot: string, scriptPath: string, args: string[], job: SetupJobState, hfToken = '') {
+async function runScript(runtimeRoot: string, scriptPath: string, args: string[], job: SetupJobState, hfToken = '', sourceRoot = '') {
   if (!existsSync(scriptPath)) throw new Error(`Required installer script is missing: ${scriptPath}`);
   const child = spawn(process.execPath, [scriptPath, ...args], {
     cwd: runtimeRoot,
     env: {
       ...process.env,
       UMBRA_ROOT: runtimeRoot,
+      ...(sourceRoot ? { UMBRA_SOURCE_ROOT: sourceRoot } : {}),
       ...(hfToken ? { HF_TOKEN: hfToken } : {}),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -235,6 +239,16 @@ async function main() {
   if (!existsSync(htmlPath)) throw new Error(`Setup page is missing: ${htmlPath}`);
   const html = readFileSync(htmlPath, 'utf8').replace('/* MODEL_SETUP_SCRIPT */', () => readFileSync(join(sourceRoot, 'setup', 'models.js'), 'utf8'));
   let activeJob: SetupJobState | null = null;
+  let managedRepairState = readManagedRepairState(runtimeRoot);
+  const persistManagedRepair = async (state: ManagedRepairState) => { managedRepairState = state; writeJsonAtomic(managedRepairStatePath(runtimeRoot), state); };
+  const umbraOrigin = () => {
+    const settings = readSettings(join(runtimeRoot, 'User', 'Config', 'settings.json'));
+    const servers = settings.servers as { umbra?: { port?: number } } | undefined;
+    const appPort = Number(process.env.UMBRA_PORT || servers?.umbra?.port || 8212);
+    if (!Number.isInteger(appPort) || appPort < 1 || appPort > 65535) throw new Error('The Umbra Studio listener port is invalid.');
+    return `http://127.0.0.1:${appPort}`;
+  };
+  const assertDependencyIdle = () => assertManagedDependencyRepairIdle({ runtimeRoot, origin: umbraOrigin() });
   const hasRunningInstaller = () => activeJob?.phase === 'running';
 
   const server = Bun.serve({
@@ -253,6 +267,99 @@ async function main() {
       if (url.pathname === '/api/models' && request.method === 'GET') {
         try { return json({ success: true, ...await modelSetupCatalog(sourceRoot, runtimeRoot) }); }
         catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
+      if (url.pathname === '/api/dependencies' && request.method === 'GET') {
+        try {
+          const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
+          return json({ success: true, ...status, repairState: managedRepairState,
+            repairPlans: managedWorkflowRepairPlans(status) });
+        }
+        catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
+      if (url.pathname === '/api/dependencies/action' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        try {
+          const target = String(body.target || '');
+          const kind = String(body.kind || '');
+          const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
+          const args = kind === 'comfyui' && target === 'ComfyUI' ? ['managed-comfyui']
+            : kind === 'node' && status.features.some((feature) => feature.customNodes.some((node) => node.name === target)) ? ['comfy-node', target]
+            : null;
+          if (!args) return json({ success: false, error: 'Choose a dependency declared by this Umbra Studio build.' }, 400);
+          await assertDependencyIdle();
+          if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
+          const job: SetupJobState = {
+            id: randomUUID(), kind: 'managed-tools', phase: 'running', step: `Installing ${target}`,
+            lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false,
+          };
+          activeJob = job;
+          void runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), args, job, '', sourceRoot)
+            .then(() => {
+              if (!job.lines.some((line) => line === 'UMBRA_VERIFY_OK|setup-tools')) throw new Error('Managed tool installation did not complete verification. Review the log.');
+              const verified = inspectManagedDependencies(sourceRoot, runtimeRoot);
+              const failed = kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === target && node.status !== 'ready')) : [];
+              if (failed.length) throw new Error(failed.map((node) => node.reason || node.status).join(' '));
+              if (kind === 'comfyui' && (!verified.comfyui.installed || (verified.comfyui.minimumRequired
+                && compareUmbraVersions(verified.comfyui.version, verified.comfyui.minimumRequired) < 0)
+                || (verified.comfyui.minimumFrontendRequired && compareUmbraVersions(verified.comfyui.frontendVersion || '0.0.0', verified.comfyui.minimumFrontendRequired) < 0))) {
+                throw new Error(`ComfyUI ${verified.comfyui.minimumRequired || 'installation'} is still required. Review the setup log.`);
+              }
+              appendOutput(job, 'Managed files verified. Restart managed ComfyUI and refresh its frontend before opening the workflow. Runtime class registration remains to be checked.');
+              job.phase = 'complete'; job.step = 'Managed tool files verified'; job.completedAt = new Date().toISOString();
+            })
+            .catch((error) => {
+              job.phase = 'failed'; job.step = 'Managed tool repair failed'; job.completedAt = new Date().toISOString();
+              job.error = error instanceof Error ? error.message : String(error); appendOutput(job, job.error);
+            });
+          return json({ success: true, accepted: true, job }, 202);
+        } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
+      if (url.pathname === '/api/dependencies/repair' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        try {
+          const plan = createManagedWorkflowRepairPlan(inspectManagedDependencies(sourceRoot, runtimeRoot), String(body.featureId || ''));
+          if (body.planId !== plan.id) return json({ success: false, error: 'Review and approve the current managed dependency plan.' }, 409);
+          await assertDependencyIdle();
+          if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
+          const prior = managedRepairState;
+          const state: ManagedRepairState = prior?.planId === plan.id && prior.featureId === plan.featureId
+            ? { ...prior, completedTargets: [...prior.completedTargets], priorVersions: { ...prior.priorVersions }, lines: [...prior.lines] }
+            : { schemaVersion: 1, planId: plan.id, featureId: plan.featureId, phase: 'held', completedTargets: [], priorVersions: {}, lines: [], error: '', updatedAt: new Date().toISOString() };
+          const job: SetupJobState = { id: randomUUID(), kind: 'managed-tools', phase: 'running', step: `Preparing ${plan.label}`,
+            lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false };
+          activeJob = job;
+          void runManagedWorkflowRepair(plan, state, {
+            assertIdle: assertDependencyIdle, persist: persistManagedRepair,
+            install: async (step) => {
+              job.step = `Installing ${step.target}`;
+              job.lines = [];
+              try {
+                await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), step.kind === 'comfyui' ? ['managed-comfyui'] : ['comfy-node', step.target], job, '', sourceRoot);
+                if (!job.lines.some((line) => line === 'UMBRA_VERIFY_OK|setup-tools')) throw new Error(`${step.target} did not finish managed verification.`);
+                const verified = inspectManagedDependencies(sourceRoot, runtimeRoot);
+                const failed = step.kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === step.target && node.status !== 'ready')) : [];
+                if (failed.length) throw new Error(failed.map((node) => node.reason || node.status).join(' '));
+                if (step.kind === 'comfyui' && (!verified.comfyui.installed || compareUmbraVersions(verified.comfyui.version || '0.0.0', verified.comfyui.minimumRequired || '0.0.0') < 0
+                  || compareUmbraVersions(verified.comfyui.frontendVersion || '0.0.0', verified.comfyui.minimumFrontendRequired || '0.0.0') < 0)) throw new Error('The core/frontend bundle still needs repair.');
+              } finally { state.lines.push(...job.lines.slice(-20)); }
+            },
+          }).then(() => { job.phase = 'complete'; job.step = 'Restart required; runtime preflight pending'; job.completedAt = new Date().toISOString(); })
+            .catch((error) => { job.phase = 'failed'; job.step = 'Managed repair held'; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); });
+          return json({ success: true, accepted: true, job, repairState: state }, 202);
+        } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
+      }
+      if (url.pathname === '/api/dependencies/preflight' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation before refreshing readiness.' }, 409);
+        try {
+          const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+          const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
+          const plan = createManagedWorkflowRepairPlan(status, String(body.featureId || ''));
+          const issues = await preflightManagedWorkflowRepair(plan, status, umbraOrigin());
+          if (managedRepairState?.planId === plan.id) await persistManagedRepair({ ...managedRepairState, phase: issues.length ? 'preflight-held' : 'preflight-passed', error: issues.join(' '), updatedAt: new Date().toISOString() });
+          return json({ success: true, ready: issues.length === 0, issues, qualification: 'Installed files and owned runtime classes only. Refresh/import the native workflow; frontend hooks, GPU execution and quality remain unqualified. Queue Resume is explicit.' });
+        } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
       if (url.pathname === '/api/cancel' && request.method === 'POST') {
         if (!activeJob || activeJob.phase !== 'running' || !activeJob.cancellable) return json({ success: false, error: 'No cancellable download is running.' }, 409);

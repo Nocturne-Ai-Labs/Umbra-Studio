@@ -198,6 +198,8 @@ import { getComfyBridgeUnavailableError } from './backend/comfyBridgeAvailabilit
 import { createComfyStartup, validateComfyAutoStartSetting } from './backend/comfyStartup';
 import { getComfyHttpBaseUrl, getComfyWebSocketUrl, resolveComfyEndpoint } from './backend/comfyEndpoint';
 import { getTrackedComfyProcessPids } from './backend/comfyProcessOwnership';
+import { officialComfySessionFromEnvironment, officialComfySessionMutationIssue } from './backend/OfficialComfySession';
+import { inspectActiveManagedWorkflowRuntimePackages } from './updater/ManagedDependencyStatus';
 import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges } from './backend/hostOnlySettings';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 import {
@@ -315,6 +317,7 @@ const gzipAsync = promisify(gzip);
 
 const SOURCE_DIR = import.meta.dir;
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
+const officialComfySession = officialComfySessionFromEnvironment(ROOT_DIR, SOURCE_DIR);
 const canvasBackgroundRemoval = new UmbraUiCanvasBackgroundRemovalService(ROOT_DIR, SOURCE_DIR);
 const censorReviewService = new UmbraUiCensorReviewService(ROOT_DIR, SOURCE_DIR);
 const ROOT_PUBLIC_DIR = join(ROOT_DIR, 'public');
@@ -4353,6 +4356,9 @@ function isManagedComfyTarget(target: ReturnType<typeof getComfyProxyTarget>): b
 }
 function getOfficialComfyExecutionTarget() {
   const target = getComfyProxyTarget();
+  if (typeof officialComfySession !== 'undefined' && officialComfySession) {
+    return officialComfySession.target(getComfyHttpBaseUrl(target));
+  }
   const args = comfyProcess?.spawnargs || [];
   const portIndex = args.indexOf('--port');
   const listenIndex = args.indexOf('--listen');
@@ -4367,13 +4373,14 @@ function getOfficialComfyExecutionTarget() {
   return { baseUrl: getComfyHttpBaseUrl(target), pid: comfyProcess!.pid!, inputRoot: getComfyInputRootFast(), toolRoot };
 }
 function sameOfficialComfyTarget(left: ReturnType<typeof getOfficialComfyExecutionTarget>, right: ReturnType<typeof getOfficialComfyExecutionTarget>) {
-  return left.baseUrl === right.baseUrl && left.pid === right.pid && left.inputRoot === right.inputRoot && left.toolRoot === right.toolRoot;
+  return left.baseUrl === right.baseUrl && left.pid === right.pid && left.inputRoot === right.inputRoot && left.toolRoot === right.toolRoot
+    && ('sessionId' in left ? left.sessionId : undefined) === ('sessionId' in right ? right.sessionId : undefined);
 }
 async function getOfficialComfyRuntime() {
   const target = getOfficialComfyExecutionTarget();
   let objectInfo: Record<string, any> | null = null;
   try {
-    const response = await fetch(`${target.baseUrl}/object_info`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    const response = await fetch(`${target.baseUrl}/object_info`, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(5000) });
     if (response.ok) {
       const value = await response.json();
       if (value && typeof value === 'object' && !Array.isArray(value)) objectInfo = value;
@@ -4423,6 +4430,7 @@ function validateHostOnlyServiceSettings(
 }
 
 function getComfyToolRootFast(): string {
+  if (officialComfySession) return officialComfySession.binding.toolRoot;
   const configuredPath = resolveConfiguredPath(getAppSettingString('comfyui.path'));
   if (configuredPath && existsSync(configuredPath)) return configuredPath;
   const bundledPath = join(ROOT_DIR, 'Tools', 'ComfyUI');
@@ -4797,11 +4805,12 @@ async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string):
 
   let upstream: Response;
   try {
+    if (officialComfySession) officialComfySession.target(targetUrl.origin);
     upstream = await fetch(targetUrl.toString(), {
       method: req.method,
       headers,
       body: req.method === 'GET' || req.method === 'HEAD' ? undefined : req.body,
-      redirect: 'manual',
+      redirect: officialComfySession ? 'error' : 'manual',
     });
   } catch (error: any) {
     return json({
@@ -9625,6 +9634,7 @@ function readComfyQueuePromptId(entry: any): string {
 
 async function getComfyQueuePromptIdSet(signal?: AbortSignal, getBaseUrl = getComfyProxyBaseUrl): Promise<Set<string>> {
   const response = await fetch(`${getBaseUrl()}/queue`, {
+    redirect: 'error',
     cache: 'no-store',
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
   });
@@ -10127,6 +10137,7 @@ async function waitForBackendPowerPrompterHistoryOutcome(promptId: string, signa
     signal?.throwIfAborted();
     try {
       const response = await fetch(`${getBaseUrl()}/history/${encodeURIComponent(normalizedPromptId)}`, {
+        redirect: 'error',
         cache: 'no-store',
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
       });
@@ -10168,6 +10179,7 @@ async function fetchBackendPowerPrompterSavedOutputs(promptId: string, signal?: 
     signal?.throwIfAborted();
     try {
       const response = await fetch(`${getBaseUrl()}/history/${encodeURIComponent(normalizedPromptId)}`, {
+        redirect: 'error',
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3_000)]) : AbortSignal.timeout(3_000),
       });
       if (response.ok) {
@@ -11995,10 +12007,30 @@ async function runBackendPowerPrompterPipelineQueue(
         task.officialExecutionTarget = queuedWorkflow.officialExecutionTarget;
         startBackendPowerPrompterPreviewMonitor(requestId, task, sourceWs);
       }
+      if (typeof officialComfySession !== 'undefined' && officialComfySession
+        && (!queuedWorkflow.officialExecutionTarget || !('sessionId' in queuedWorkflow.officialExecutionTarget))) {
+        throw new Error('This temporary Comfy session accepts only its validated official workflow capture. Other jobs remain held.');
+      }
+      if (queuedWorkflow.officialExecutionTarget && 'sessionId' in queuedWorkflow.officialExecutionTarget) {
+        const pinned = queuedWorkflow.officialExecutionTarget;
+        const queueResponse = await fetch(`${pinned.baseUrl}/queue`, { redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(5000) });
+        if (!queueResponse.ok) throw new Error('Existing Comfy queue could not be checked. This session has not submitted.');
+        const queue = await queueResponse.json() as { queue_running?: unknown[]; queue_pending?: unknown[] };
+        throwIfBackendPowerPrompterQueueCanceled(task);
+        if (finishBeforeNextPromptIfStopped()) return;
+        if (task.removedPromptIndices.has(index)) continue;
+        if (task.interruptCurrentRequested) throw new Error(`${BACKEND_PP_QUEUE_CANCELLED} Reason: stop_all`);
+        assertVideoGenerationPolicy(generation, getVideoRoutePolicy(), queuedWorkflow.promptGraph);
+        if (!Array.isArray(queue?.queue_running) || !Array.isArray(queue?.queue_pending)
+          || queue.queue_running.length || queue.queue_pending.length) throw new Error('Existing Comfy is busy. Wait for its other jobs; this session has not submitted.');
+        if (!sameOfficialComfyTarget(pinned, getOfficialComfyExecutionTarget())) throw new Error('Existing Comfy identity changed before submission.');
+        officialComfySession!.claimSingleSubmission(pinned.sessionId);
+      }
       let response: Response;
       try {
         response = await fetch(`${queuedWorkflow.officialExecutionTarget?.baseUrl || getComfyProxyBaseUrl()}/prompt`, {
           method: 'POST',
+          redirect: queuedWorkflow.officialExecutionTarget ? 'error' : 'follow',
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(30_000),
           body: JSON.stringify({
@@ -17836,6 +17868,10 @@ const startComfyUI = () => comfyStartup.start();
 
 async function startComfyUIProcess() {
   try {
+    if (officialComfySession) {
+      const target = getOfficialComfyExecutionTarget();
+      return { success: true, message: 'Using the explicit existing-runtime test session; lifecycle control is disabled.', running: true, ownership: 'external-compatible', pid: target.pid, port: new URL(target.baseUrl).port };
+    }
     if (isChildProcessAlive(comfyProcess)) {
       return { success: true, message: 'Already running' };
     }
@@ -18022,6 +18058,7 @@ async function startComfyUIProcess() {
 }
 
 async function stopComfyUI() {
+  if (officialComfySession) return { success: false, error: 'Lifecycle control is disabled for the explicit existing-runtime session. Cancel only the acknowledged Umbra job.', ownership: 'external-compatible' };
   comfyStopRequested = true;
   comfyStartup.clearError();
   const endpoint = getComfyProxyTarget();
@@ -19672,7 +19709,13 @@ const PP_QUEUE_HISTORY_DIR = join(PP_QUEUE_DIR, 'History');
 const PP_PROMPTS_ROOT_PATH = 'User/PowerPrompter/Prompts';
 const PP_PROMPTS_ROOT_ABS = join(USER_DIR, 'PowerPrompter', 'Prompts');
 const PP_API_WORKFLOWS_DIR = join(USER_DIR, 'PowerPrompter', 'API Workflows');
-const officialVideoWorkflows = new OfficialVideoWorkflowService(join(ROOT_DIR, 'defaults', 'PowerPrompter', 'Official Workflows', 'DaSiWa'), PP_API_WORKFLOWS_DIR, getComfyInputRootFast);
+const officialVideoWorkflows = new OfficialVideoWorkflowService(join(SOURCE_DIR, 'defaults', 'PowerPrompter', 'Official Workflows', 'DaSiWa'), PP_API_WORKFLOWS_DIR, getComfyInputRootFast, join(USER_DIR, 'PowerPrompter', 'Official Native Exports'), async (graph, id) => {
+  const target = getOfficialComfyExecutionTarget();
+  const dependencies = inspectActiveManagedWorkflowRuntimePackages(SOURCE_DIR, target.toolRoot, id, new Set(Object.values(graph).map(node => node.class_type)));
+  const holds = dependencies.filter(dependency => dependency.status !== 'present');
+  if (holds.length) throw new Error(`Official active-branch dependency readiness is held: ${holds.map(dependency => dependency.detail).join(' ')}`);
+  if (!sameOfficialComfyTarget(target, getOfficialComfyExecutionTarget())) throw new Error('The official Comfy runtime changed during conditional dependency verification. Refresh readiness.');
+});
 const PP_BUNDLED_API_WORKFLOWS_DIR = join(SOURCE_DIR, 'defaults', 'PowerPrompter', 'API Workflows');
 const PP_API_WORKFLOW_TARGET_PREFIX = 'api-workflow:';
 const PP_CARD_DOC_EXT = '.ppcards.json';
@@ -33596,6 +33639,8 @@ const server = Bun.serve<UmbraSocketData>({
         if (method === 'OPTIONS') return new Response(null, { headers: getCorsHeaders() });
 
         const hostRequest = isHostRequest(req, url, server);
+        const sessionMutationIssue = officialComfySession ? officialComfySessionMutationIssue(path, method, isComfyRootProxyPath(path)) : null;
+        if (sessionMutationIssue) return json({ success: false, error: sessionMutationIssue }, 409);
         const remoteConnectionSettings = loadRemoteConnectionSettings();
         let tailscaleRequest = !hostRequest && isTailscaleRequest(req, url, server);
         if (tailscaleRequest && remoteConnectionSettings.enabled && !IS_UMBRA_DEV_MODE) {
@@ -34009,10 +34054,17 @@ const server = Bun.serve<UmbraSocketData>({
 
         if ((path === '/ws' || path === '/comfy/ws') && method === 'GET') {
           let targetUrl: string;
-          try { targetUrl = getComfyProxyWsUrl(url.search); }
+          try {
+            if (officialComfySession) officialComfySession.target(getComfyProxyBaseUrl());
+            targetUrl = getComfyProxyWsUrl(url.search);
+          }
           catch (error) { return json({ error: error instanceof Error ? error.message : 'Invalid ComfyUI proxy target.' }, 502); }
           if (await isUmbraListenerTarget(new URL(targetUrl))) {
             return json({ error: 'ComfyUI cannot proxy back to Umbra Studio.' }, 502);
+          }
+          if (officialComfySession) {
+            try { officialComfySession.target(new URL(targetUrl).origin.replace(/^ws:/, 'http:')); }
+            catch (error) { return json({ error: error instanceof Error ? error.message : 'Existing runtime identity changed.' }, 409); }
           }
           const upgraded = server.upgrade(req, {
             data: {
@@ -34031,19 +34083,21 @@ const server = Bun.serve<UmbraSocketData>({
           return json({ success: true, items: await officialVideoWorkflows.catalog(runtime?.objectInfo || null, !!runtime) });
         }
         if (path === '/api/video/official-workflows/bridge.js' && method === 'GET') {
-          return new Response(Bun.file(join(ROOT_DIR, 'backend', 'OfficialWorkflowBridge.js')), { headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' } });
+          return new Response(Bun.file(join(SOURCE_DIR, 'backend', 'OfficialWorkflowBridge.js')), { headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' } });
         }
-        const officialRoute = path.match(/^\/api\/video\/official-workflows\/([^/]+)\/(source|capture|captures\/([^/]+))$/);
+        const officialRoute = path.match(/^\/api\/video\/official-workflows\/([^/]+)\/(source|capture|import|captures\/([^/]+))$/);
         if (officialRoute) {
           const id = officialRoute[1];
           if (!isOfficialVideoWorkflowId(id)) return json({ success: false, error: 'Unknown pinned official workflow.' }, 404);
           try {
             if (officialRoute[2] === 'source' && method === 'GET') return new Response(await officialVideoWorkflows.source(id), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
-            if (officialRoute[2] === 'capture' && method === 'POST') {
+            if (['capture', 'import'].includes(officialRoute[2]) && method === 'POST') {
               if (isRemoteRequest(req, url, server)) return json({ success: false, error: 'Native official captures must be made on this Umbra host.' }, 403);
               const payload = await req.json();
               const runtime = await getOfficialComfyRuntime();
-              const capture = await officialVideoWorkflows.capture(id, payload, runtime.objectInfo);
+              const capture = officialRoute[2] === 'import'
+                ? await officialVideoWorkflows.importNativeExports(id, payload, runtime.objectInfo)
+                : await officialVideoWorkflows.capture(id, payload, runtime.objectInfo);
               if (!sameOfficialComfyTarget(runtime.target, getOfficialComfyExecutionTarget())) return json({ success: false, error: 'The owned ComfyUI runtime changed during capture. Refresh readiness and capture again.' }, 409);
               const { document: _document, ...summary } = capture;
               return json({ success: true, ...summary });
@@ -40039,6 +40093,7 @@ const server = Bun.serve<UmbraSocketData>({
               return;
             }
             if (ws.readyState !== 1) return;
+            if (officialComfySession) officialComfySession.target(new URL(targetUrl).origin.replace(/^ws:/, 'http:'));
             const upstream = new WebSocket(targetUrl, { headers: { 'x-forwarded-for': '0.0.0.0' } });
             (ws.data as any).upstream = upstream;
             upstream.binaryType = 'arraybuffer';

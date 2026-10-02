@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { inspectManagedDependencies } from './ManagedDependencyStatus';
+import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from './ManagedDependencyRepair';
 import { AppUpdateService, compareUmbraVersions, readUmbraAppVersion } from '../backend/AppUpdateService';
 import {
   createIdleUmbraUpdateState,
@@ -62,7 +63,7 @@ function json(value: unknown, status = 200): Response {
 
 type DependencyAction = {
   id: string;
-  kind: 'comfyui' | 'node';
+  kind: 'comfyui' | 'node' | 'workflow';
   target: string;
   phase: 'running' | 'complete' | 'failed';
   lines: string[];
@@ -307,6 +308,20 @@ async function runDependencyAction(session: UpdaterSession, action: DependencyAc
   if (code !== 0 || !output.includes('UMBRA_VERIFY_OK|setup-tools')) {
     throw new Error(`Managed ${action.target} setup failed (exit ${code}). Review the log and retry.`);
   }
+  const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+  if (action.kind === 'node') {
+    const requirements = status.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === action.target));
+    const failed = requirements.filter((node) => node.status !== 'ready');
+    if (!requirements.length || failed.length) {
+      throw new Error(`Managed ${action.target} verification failed. ${failed.map((node) => node.reason || node.status).join(' ')}`);
+    }
+  } else if (status.comfyui.minimumRequired && compareUmbraVersions(status.comfyui.version, status.comfyui.minimumRequired) < 0) {
+    throw new Error(`ComfyUI ${status.comfyui.minimumRequired}+ is still required by the declared workflows. Review the setup log.`);
+  } else if (action.kind === 'comfyui' && status.comfyui.minimumFrontendRequired
+    && compareUmbraVersions(status.comfyui.frontendVersion || '0.0.0', status.comfyui.minimumFrontendRequired) < 0) {
+    throw new Error(`ComfyUI frontend ${status.comfyui.minimumFrontendRequired}+ is still required. Repair the core/frontend bundle and review the setup log.`);
+  }
+  action.lines.push('Managed files verified. Restart managed ComfyUI and refresh its frontend before opening the workflow. Runtime node registration is checked when the workflow runs.');
 }
 
 async function openModelSetup(session: UpdaterSession): Promise<{ url: string; child: ReturnType<typeof spawn> }> {
@@ -390,6 +405,9 @@ async function main() {
   let activeRelaunch: Promise<void> | null = null;
   let activeDependency: Promise<void> | null = null;
   let dependencyAction: DependencyAction | null = null;
+  let managedRepairState = readManagedRepairState(session.runtimeRoot);
+  const persistManagedRepair = async (state: ManagedRepairState) => { managedRepairState = state; await writeJsonAtomic(managedRepairStatePath(session.runtimeRoot), state); };
+  const assertDependencyIdle = () => assertManagedDependencyRepairIdle({ runtimeRoot: session.runtimeRoot, origin: localUmbraOrigin(session), serverPid: session.serverPid });
   let modelSetup: { url: string; child: ReturnType<typeof spawn> } | null = null;
   const modelSetupRunning = () => Boolean(modelSetup?.child.exitCode === null && modelSetup.child.signalCode === null && !modelSetup.child.killed);
   let admittingOperation = false;
@@ -429,10 +447,58 @@ async function main() {
       }
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
         try {
-          return json({ success: true, ...inspectManagedDependencies(session.sourceRoot, session.runtimeRoot), action: dependencyAction, modelSetupRunning: modelSetupRunning() });
+          const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+          return json({ success: true, ...status, action: dependencyAction, repairState: managedRepairState,
+            repairPlans: managedWorkflowRepairPlans(status), modelSetupRunning: modelSetupRunning() });
         } catch (error) {
           return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
         }
+      }
+      if (url.pathname === '/api/dependencies/repair' && request.method === 'POST') {
+        if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) return json({ success: false, error: 'Finish the current operation first.' }, 409);
+        if (!['idle', 'complete'].includes(readState(service, session).phase)) return json({ success: false, error: 'Complete the app update before repairing workflow dependencies.' }, 409);
+        admittingOperation = true;
+        try {
+          const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+          const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+          const plan = createManagedWorkflowRepairPlan(status, String(body.featureId || ''));
+          if (body.planId !== plan.id) return json({ success: false, error: 'Review and approve the current managed dependency plan before installing.' }, 409);
+          await assertDependencyIdle();
+          const prior = managedRepairState;
+          const state: ManagedRepairState = prior?.planId === plan.id && prior.featureId === plan.featureId
+            ? { ...prior, completedTargets: [...prior.completedTargets], priorVersions: { ...prior.priorVersions }, lines: [...prior.lines] }
+            : { schemaVersion: 1, planId: plan.id, featureId: plan.featureId, phase: 'held', completedTargets: [], priorVersions: {}, lines: [], error: '', updatedAt: new Date().toISOString() };
+          const action: DependencyAction = { id: randomUUID(), kind: 'workflow', target: plan.label, phase: 'running', lines: [], error: '' };
+          dependencyAction = action;
+          activeDependency = runManagedWorkflowRepair(plan, state, {
+            assertIdle: assertDependencyIdle, persist: persistManagedRepair,
+            install: async (step) => {
+              action.kind = step.kind; action.target = step.target;
+              try { await runDependencyAction(session, action, step.kind === 'comfyui' ? ['managed-comfyui'] : ['comfy-node', step.target]); }
+              finally { state.lines.push(...action.lines.slice(-20)); }
+            },
+          }).then(() => { action.phase = 'complete'; action.lines = state.lines; })
+            .catch((error) => { action.phase = 'failed'; action.error = error instanceof Error ? error.message : String(error); action.lines = state.lines; })
+            .finally(() => { activeDependency = null; });
+          return json({ success: true, accepted: true, action, repairState: state }, 202);
+        } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
+        finally { admittingOperation = false; }
+      }
+      if (url.pathname === '/api/dependencies/preflight' && request.method === 'POST') {
+        if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) return json({ success: false, error: 'Finish the current operation before refreshing readiness.' }, 409);
+        admittingOperation = true;
+        try {
+          const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+          const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+          const plan = createManagedWorkflowRepairPlan(status, String(body.featureId || ''));
+          const issues = await preflightManagedWorkflowRepair(plan, status, localUmbraOrigin(session));
+          if (managedRepairState?.planId === plan.id) {
+            await persistManagedRepair({ ...managedRepairState, phase: issues.length ? 'preflight-held' : 'preflight-passed',
+              error: issues.join(' '), updatedAt: new Date().toISOString() });
+          }
+          return json({ success: true, ready: issues.length === 0, issues, qualification: 'Installed files and owned runtime class readiness only. Native GPU execution and quality remain unqualified; queue Resume is explicit.' });
+        } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
+        finally { admittingOperation = false; }
       }
       if (url.pathname === '/api/dependencies/action' && request.method === 'POST') {
         if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) {
@@ -455,6 +521,7 @@ async function main() {
           } else {
             return json({ success: false, error: 'This managed dependency is not declared by the installed Umbra Studio build.' }, 400);
           }
+          await assertDependencyIdle();
           const action: DependencyAction = { id: randomUUID(), kind, target, phase: 'running', lines: [], error: '' };
           dependencyAction = action;
           activeDependency = runDependencyAction(session, action, args)

@@ -15,8 +15,13 @@ import { spawn, spawnSync, execSync } from 'child_process';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
+import { readManagedToolRequirements, requirementsForManagedNode } from './setup/ManagedToolRequirements';
+import { repairManagedNodeCheckout } from './setup/ManagedNodeRepair';
+import { inspectManagedDependencies, inspectManagedNode } from './updater/ManagedDependencyStatus';
+import { compareUmbraVersions } from './shared/appUpdate';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
+const MANAGED_SOURCE_ROOT = process.env.UMBRA_SOURCE_ROOT || import.meta.dir;
 const TOOLS_DIR = join(ROOT_DIR, 'Tools');
 const IS_WINDOWS = process.platform === 'win32';
 const IS_LINUX = process.platform === 'linux';
@@ -1289,6 +1294,12 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
 
     try {
         ensureDir(nodesDir);
+        const declared = requirementsForManagedNode(readManagedToolRequirements(MANAGED_SOURCE_ROOT), 'Umbra-Nodes');
+        if (declared.length) {
+            repairManagedNodeCheckout(nodesDir, { name: 'Umbra-Nodes', repo: UMBRA_NODES_REPO }, declared,
+                { log: (message) => log('->', message) });
+            return hasUmbraNodesPayload(targetUmbraNodes);
+        }
         if (hasUmbraNodesPayload(targetUmbraNodes) && existsSync(join(targetUmbraNodes, '.git'))) {
             configureGitRepoForPortableUpdates(targetUmbraNodes);
             execSync(`git remote set-url origin ${UMBRA_NODES_REPO}`, { cwd: targetUmbraNodes, stdio: 'ignore' });
@@ -1299,7 +1310,8 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
         }
 
         if (existsSync(targetUmbraNodes)) {
-            rmSync(targetUmbraNodes, { recursive: true, force: true });
+            log('X', 'Existing Umbra-Nodes files are not a managed checkout. They were preserved; review them before retrying Setup.');
+            return false;
         }
 
         log('->', 'Installing Umbra-Nodes from public repository...');
@@ -1877,6 +1889,7 @@ function refreshComfySubmodules(toolDir: string, phase: string): boolean {
 // ============================================
 
 const COMFY_NODES = [
+    { name: 'Umbra-Nodes', repo: 'https://github.com/Nocturne-Ai-Labs/Umbra-Nodes.git', required: true },
     { name: 'ComfyUI-Manager', repo: 'https://github.com/ltdrdata/ComfyUI-Manager.git', required: true },
     { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', required: true },
     { name: 'comfyui-tooling-nodes', repo: 'https://github.com/Acly/comfyui-tooling-nodes.git', required: true },
@@ -1886,6 +1899,8 @@ const COMFY_NODES = [
     { name: 'ComfyUI-Anima-LLLite', repo: 'https://github.com/kohya-ss/ComfyUI-Anima-LLLite.git', required: true },
     { name: 'ComfyUI-Anima-2.9B', repo: 'https://github.com/gazingstars123/ComfyUI-Anima-2.9B.git', required: true },
     { name: 'ComfyUI-DaSiWa-Nodes', repo: 'https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes.git' },
+    { name: 'Comfyui-MMH3-UltimateUpscale', repo: 'https://github.com/bbaudio-2025/Comfyui-MMH3-UltimateUpscale.git' },
+    { name: 'rgthree-comfy', repo: 'https://github.com/rgthree/rgthree-comfy.git' },
     { name: 'whatdreamscost-comfyui', repo: 'https://github.com/PodJamz/whatdreamscost-comfyui.git' },
     { name: 'ComfyUI-LTXVideo', repo: 'https://github.com/Lightricks/ComfyUI-LTXVideo.git', defaultEnabled: false },
     { name: 'comfyui-WhiteRabbit', repo: 'https://github.com/Artificial-Sweetener/comfyui-WhiteRabbit.git', defaultEnabled: false },
@@ -1980,11 +1995,26 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
     if (!existsSync(nodesDir)) mkdirSync(nodesDir, { recursive: true });
 
     console.log(`\n${c.cyan}--- Installing ComfyUI Custom Nodes ---${c.reset}`);
-    syncUmbraNodesToComfy(nodesDir);
-    const umbraAnimaCpuReady = syncUmbraAnimaCpuNode(nodesDir);
+    const umbraAnimaCpuReady = Boolean(onlyNames) || syncUmbraAnimaCpuNode(nodesDir);
 
     // Get enabled nodes from config
+    const managedRequirements = readManagedToolRequirements(MANAGED_SOURCE_ROOT);
+    const supportedRequiredNodes = new Set(managedRequirements.filter((feature) => feature.workflowIds?.length && !feature.optional)
+        .flatMap((feature) => feature.customNodes.map((node) => node.name)));
     const enabledNodes = onlyNames ? new Set(onlyNames) : getEnabledNodes();
+    if (!onlyNames) {
+        // Supported workflow dependencies are installed even before their model files arrive.
+        for (const feature of managedRequirements) {
+            if (feature.workflowIds?.length && !feature.optional) {
+                for (const node of feature.customNodes) enabledNodes.add(node.name);
+            }
+        }
+    }
+    const undeclaredInstallers = [...supportedRequiredNodes].filter((name) => !COMFY_NODES.some((node) => node.name === name));
+    if (undeclaredInstallers.length) {
+        log('X', `Managed dependency installer is unavailable for: ${undeclaredInstallers.join(', ')}`);
+        return false;
+    }
     const nodes = onlyNames ? COMFY_NODES.filter((node) => enabledNodes.has(node.name)) : COMFY_NODES;
     let requiredFailure = false;
 
@@ -2000,6 +2030,23 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
         }
 
         const nodePath = join(nodesDir, node.name);
+        const declared = requirementsForManagedNode(managedRequirements, node.name);
+        if (declared.length) {
+            try {
+                repairManagedNodeCheckout(nodesDir, node, declared, {
+                    ...(node.name === 'ComfyUI-DaSiWa-Nodes' ? {
+                        beforeUpdate: removeDaSiWaForgeComputePatchForUpdate,
+                        afterUpdate: ensureDaSiWaForgeComputePatch,
+                    } : {}),
+                    log: (message) => log('->', message),
+                });
+                configureGitRepoForPortableUpdates(nodePath);
+            } catch (error) {
+                log('X', error instanceof Error ? error.message : String(error));
+                requiredFailure = true;
+            }
+            continue;
+        }
         if (!existsSync(nodePath)) {
             log('->', `Installing ${node.name}...`);
             try {
@@ -2050,7 +2097,7 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
     for (const node of nodes) {
         if ('nvidiaOnly' in node && node.nvidiaOnly && !GPU_NAME) continue;
 
-        const required = Boolean(onlyNames) || ('required' in node && node.required);
+        const required = Boolean(onlyNames) || supportedRequiredNodes.has(node.name) || ('required' in node && node.required);
         if (!enabledNodes.has(node.name) && !required) continue;
 
         const nodePath = join(nodesDir, node.name);
@@ -2085,6 +2132,13 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                 log(`${c.yellow}WARN${c.reset}`, `${node.name} was installed without all optional dependencies`);
             }
         }
+        for (const requirement of requirementsForManagedNode(managedRequirements, node.name)) {
+            const status = inspectManagedNode(MANAGED_SOURCE_ROOT, comfyDir, requirement);
+            if (status.status !== 'ready') {
+                log('X', `${node.name}: ${status.reason || status.status}`);
+                requiredFailure = true;
+            }
+        }
     }
 
     // Confirm Umbra-Nodes exists in ComfyUI custom_nodes.
@@ -2095,7 +2149,7 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
         log(`${c.red}X${c.reset}`, 'Umbra-Nodes installation failed');
     }
 
-    if (!hasUmbraNodesPayload(umbraNodesPath) || !umbraAnimaCpuReady) requiredFailure = true;
+    if ((!onlyNames && !hasUmbraNodesPayload(umbraNodesPath)) || !umbraAnimaCpuReady) requiredFailure = true;
     if (requiredFailure) {
         return failWithVerify(
             'comfy-required-nodes-failed',
@@ -2232,6 +2286,41 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
 
     log(c.green + 'OK' + c.reset, cfg.name + ' is ready');
     return true;
+}
+
+async function repairManagedComfyCore(): Promise<void> {
+    const cfg = CONFIG.comfyui;
+    const toolDir = join(TOOLS_DIR, cfg.dir);
+    const status = inspectManagedDependencies(MANAGED_SOURCE_ROOT, ROOT_DIR);
+    const minimum = status.comfyui.minimumRequired;
+    if (!minimum) throw new Error('This build does not declare a reviewed ComfyUI core version.');
+    if (!existsSync(toolDir)) {
+        if (findToolPath(cfg.search)) throw new Error('A differently named ComfyUI installation exists. It was preserved; review its managed path before repairing.');
+        const originalBranch = cfg.branch;
+        try {
+            cfg.branch = `v${minimum}`;
+            if (!await processTool('comfyui', true, true, true)) exitWithExistingVerifyFailure();
+        } finally { cfg.branch = originalBranch; }
+        return;
+    }
+    if (!isOwnGitCheckout(toolDir)) throw new Error('Existing ComfyUI is not an independent managed Git checkout. Its files were preserved.');
+    const checkedGit = (args: string[]) => {
+        const result = spawnSync('git', args, { cwd: toolDir, encoding: 'utf8', windowsHide: true });
+        if (result.status !== 0) throw new Error(`Managed ComfyUI repair failed: git ${args[0]}. ${String(result.stderr || '').trim()}`);
+        return result.stdout.trim();
+    };
+    if (checkedGit(['status', '--porcelain', '--untracked-files=no'])) throw new Error('ComfyUI contains local tracked changes or modified submodules. They were preserved; review them before repairing the core/frontend bundle.');
+    const previous = checkedGit(['rev-parse', 'HEAD']);
+    log('->', `ComfyUI prior commit retained for recovery: ${previous}`);
+    if (compareUmbraVersions(status.comfyui.version || '0.0.0', minimum) < 0) {
+        checkedGit(['fetch', '--no-tags', cfg.repo!, `v${minimum}`]);
+        const target = checkedGit(['rev-parse', 'FETCH_HEAD']);
+        const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', previous, target], { cwd: toolDir, windowsHide: true, stdio: 'ignore' });
+        if (ancestor.status !== 0) throw new Error('ComfyUI has divergent or local commits. Its version was preserved; review it before retrying.');
+        checkedGit(['checkout', '--detach', target]);
+    }
+    // Keep already-newer source and use its own pinned requirements. No reset, forced checkout or branch rewrite.
+    if (!setupPythonEnv(toolDir, cfg.id) || !refreshComfyPinnedPackages(toolDir)) exitWithExistingVerifyFailure();
 }
 
 async function updateTool(key: keyof typeof CONFIG, coreOnly = false) {
@@ -2981,7 +3070,7 @@ async function main() {
     } else if (arg === 'update-comfyui') {
         await updateTool('comfyui');
     } else if (arg === 'managed-comfyui') {
-        await updateTool('comfyui', true);
+        await repairManagedComfyCore();
     } else if (arg === 'update-aitoolkit') {
         await updateTool('aitoolkit');
     } else if (arg === 'set-comfyui-version' || arg === 'downgrade-comfyui') {

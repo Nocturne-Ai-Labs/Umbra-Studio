@@ -18,20 +18,79 @@ export const officialGraphSha256 = (value: unknown): string => createHash('sha25
 function uiNodes(document: any): any[] {
   return [...(document.nodes || []), ...(document.definitions?.subgraphs || []).flatMap((graph: any) => uiNodes(graph))];
 }
-function linkShape(link: any): unknown[] {
-  return Array.isArray(link) ? link.slice(1, 5).map(String)
-    : [link.origin_id, link.origin_slot, link.target_id, link.target_slot].map(String);
-}
 export function officialUiTopology(document: any): string {
   if (!Array.isArray(document?.nodes) || !Array.isArray(document?.links)) throw new Error('The native serializer did not return an editable ComfyUI workflow.');
-  const graph = (value: any): unknown => ({
-    nodes: value.nodes.map((node: any) => ({ id: String(node.id), type: node.type,
-      inputs: (node.inputs || []).filter((input: any) => input.link != null).map((input: any) => [input.name, String(input.link)]).sort(),
-    })).sort((a: any, b: any) => a.id.localeCompare(b.id)),
-    links: (value.links || []).map(linkShape).sort((a: unknown[], b: unknown[]) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-    subgraphs: (value.definitions?.subgraphs || []).map((entry: any) => ({ id: entry.id, graph: graph(entry) })).sort((a: any, b: any) => a.id.localeCompare(b.id)),
+  const graphs: any[] = [], definitionIds = new Set<string>();
+  let count = 0;
+  // Native frontend1.53.6 removes only unlabeled, unconnected widget slots in
+  // result.workflow. Normalize that representation without changing the graph.
+  const nativeInputs = (values: any[] = []) => (values || []).filter(input => !(input.widget && input.link === null && !input.label));
+  const id = (value: unknown) => { if ((typeof value === 'string' && value.length > 0 && value.length <= 128) || (typeof value === 'number' && Number.isSafeInteger(value))) return String(value); throw new Error('Official workflow contains an invalid node or link ID.'); };
+  const ids = (values?: unknown[] | null) => [...new Set((values || []).map(id))].sort();
+  const ports = (values: any[] = [], boundary = false) => (values || []).map(port => {
+    if (!port || typeof port.name !== 'string') throw new Error('Official workflow contains invalid connection slots.');
+    return boundary ? { id: port.id, name: port.name, type: port.type, links: ids(port.linkIds) }
+      : { name: port.name, type: port.type, link: port.link == null ? null : id(port.link), links: ids(port.links) };
   });
-  return JSON.stringify(graph(document));
+  const walk = (value: any, scope: string, depth: number) => {
+    if (depth > 32 || !Array.isArray(value?.nodes) || !Array.isArray(value?.links)) throw new Error('Official workflow contains invalid nested graph data.');
+    const seen = new Set<string>();
+    const nodes = value.nodes.map((node: any) => {
+      const key = id(node?.id);
+      if (!node || typeof node.type !== 'string' || !node.type || seen.has(key) || ++count > 8192) throw new Error('Official workflow contains invalid or duplicate nodes.');
+      seen.add(key);
+      if (node.subgraph) walk(node.subgraph, `${scope}/node:${key}`, depth + 1);
+      return { id: key, type: node.type, inputs: ports(nativeInputs(node.inputs)), outputs: ports(node.outputs) };
+    }).sort((a: any, b: any) => a.id.localeCompare(b.id));
+    const links = value.links.map((link: any) => {
+      const parts = Array.isArray(link) ? link : [link.id, link.origin_id, link.origin_slot, link.target_id, link.target_slot, link.type];
+      if (parts.length < 6 || !Number.isSafeInteger(parts[2]) || !Number.isSafeInteger(parts[4])) throw new Error('Official workflow contains invalid connections.');
+      const target = value.nodes.find((node: any) => String(node.id) === String(parts[3]));
+      let slot = parts[4];
+      if (target) {
+        const input = target.inputs?.[slot];
+        slot = input ? nativeInputs(target.inputs).indexOf(input) : -1;
+        if (slot < 0) throw new Error('Official workflow topology targets a missing native input slot.');
+      }
+      return [id(parts[0]), id(parts[1]), parts[2], id(parts[3]), slot, parts[5]];
+    }).sort((a: any[], b: any[]) => a[0].localeCompare(b[0]));
+    graphs.push({ scope, nodes, links, inputs: ports(value.inputs, true), outputs: ports(value.outputs, true),
+      inputNode: value.inputNode?.id == null ? null : id(value.inputNode.id), outputNode: value.outputNode?.id == null ? null : id(value.outputNode.id) });
+    for (const definition of value.definitions?.subgraphs || []) {
+      const key = id(definition?.id);
+      if (definitionIds.has(key)) throw new Error('Official workflow contains duplicate subgraph definitions.');
+      definitionIds.add(key); walk(definition, `definition:${key}`, depth + 1);
+    }
+  };
+  walk(document, 'root', 0);
+  return JSON.stringify(graphs.sort((a, b) => a.scope.localeCompare(b.scope)));
+}
+
+/** Correlate native execution IDs with UI instances; never construct an API graph. */
+export function officialUiExecutionNodes(document: any): Map<string, { type: string; inactive: boolean; node: any; graph: any; path: string[] }> {
+  const definitions = new Map<string, any>(), result = new Map<string, { type: string; inactive: boolean; node: any; graph: any; path: string[] }>();
+  const collect = (graph: any, depth: number) => {
+    if (depth > 32) throw new Error('Official subgraph nesting is unsupported.');
+    for (const definition of graph.definitions?.subgraphs || []) { definitions.set(String(definition.id), definition); collect(definition, depth + 1); }
+    for (const node of graph.nodes || []) if (node.subgraph) collect(node.subgraph, depth + 1);
+  };
+  collect(document, 0);
+  const walk = (graph: any, path: string[], inactive: boolean, ancestors: Set<any>) => {
+    if (path.length > 32 || ancestors.has(graph)) throw new Error('Official subgraph nesting is recursive or unsupported.');
+    const nextAncestors = new Set(ancestors).add(graph);
+    for (const node of graph.nodes || []) {
+      const parts = [...path, String(node.id)], key = parts.join(':');
+      const held = inactive || node.mode === 2 || node.mode === 4;
+      const nested = node.subgraph || definitions.get(node.type);
+      if (nested) walk(nested, parts, held, nextAncestors);
+      else {
+        if (result.has(key)) throw new Error('Official workflow contains duplicate execution IDs.');
+        result.set(key, { type: node.type, inactive: held, node, graph, path });
+      }
+    }
+  };
+  walk(document, [], false, new Set());
+  return result;
 }
 export interface OfficialWorkflowCapture {
   workflowId: OfficialVideoWorkflowId;
@@ -41,6 +100,39 @@ export interface OfficialWorkflowCapture {
   graphSha256: string;
   workflowSha256: string;
   capturedAt: number;
+  nativeExport?: { workflowTextSha256: string; apiTextSha256: string };
+}
+export function parseNativeExportText(text: unknown, label: string): unknown {
+  if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text, 'utf8') > 16 * 1024 * 1024) throw new Error(`${label} must be a native JSON export of at most 16 MiB.`);
+  try {
+    // Check original tokens before JSON.parse can round a fractional seed into
+    // an apparently safe integer. Skip quoted JSON strings, including escapes.
+    for (const match of text.matchAll(/"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g)) {
+      const token = match[0];
+      if (token.startsWith('"')) continue;
+      const value = Number(token);
+      if (!Number.isFinite(value)) throw new Error('Non-finite numeric token.');
+      if (!Number.isInteger(value)) continue;
+      const parts = token.match(/^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/)!;
+      const digits = (parts[2] + (parts[3] || '')).replace(/^0+/, '');
+      if (!digits) continue;
+      const scale = Number(parts[4] || 0) - (parts[3]?.length || 0);
+      let integerDigits: string;
+      if (scale >= 0) {
+        if (!Number.isSafeInteger(scale) || digits.length + scale > 16) throw new Error('Unsafe numeric precision. Preserve decimal seed strings or use a fixed safe native seed.');
+        integerDigits = digits + '0'.repeat(scale);
+      } else {
+        if (!Number.isSafeInteger(scale) || -scale >= digits.length || !digits.endsWith('0'.repeat(Math.min(-scale, digits.length)))) throw new Error('Numeric precision was lost before import. No fraction will be rounded into an integer.');
+        integerDigits = digits.slice(0, scale);
+      }
+      const exact = BigInt((parts[1] || '') + integerDigits);
+      if (exact !== BigInt(value) || exact > BigInt(Number.MAX_SAFE_INTEGER) || exact < BigInt(Number.MIN_SAFE_INTEGER)) throw new Error('Unsafe numeric precision. Preserve decimal seed strings or use a fixed safe native seed.');
+    }
+    return JSON.parse(text.replace(/^\uFEFF/, ''), (_key, value) => {
+      if (typeof value === 'number' && (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)))) throw new Error('Unsafe numeric precision. Preserve decimal seed strings or re-export with a fixed safe native seed; no number will be rounded or converted.');
+      return value;
+    });
+  } catch (error) { throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`); }
 }
 export function officialCaptureMetadata(document: unknown): OfficialWorkflowCapture | null {
   const meta = record(record(document).umbra_official_workflow);
@@ -72,14 +164,36 @@ export function applyOfficialVideoBindings(original: OfficialApiGraph, bindings:
 }
 export function assertOfficialApiGraph(graph: OfficialApiGraph, workflowId: OfficialVideoWorkflowId, sourceUi: unknown): void {
   const allowedTypes = new Set(uiNodes(sourceUi).map(node => node.type));
+  const executionNodes = officialUiExecutionNodes(sourceUi);
   const nodes = Object.entries(graph);
   if (!nodes.length || nodes.length > 1000) throw new Error('The native serializer returned no valid API graph.');
   for (const [id, node] of nodes) {
+    const uiNode = executionNodes.get(id);
     if (['__proto__', 'constructor', 'prototype'].includes(id) || !node || !allowedTypes.has(node.class_type)
-      || !node.inputs || typeof node.inputs !== 'object' || Array.isArray(node.inputs)) throw new Error(`Official graph contains an unexpected node (${id}). Reload the pinned workflow and capture it again.`);
+      || !uiNode || uiNode.type !== node.class_type || uiNode.inactive
+      || ['Note', 'MarkdownNote', 'Reroute', 'Lable (DaSiWa)', 'DaSiWa_NodeStatusSwitch'].includes(node.class_type)
+      || !node.inputs || typeof node.inputs !== 'object' || Array.isArray(node.inputs)) throw new Error(`Official graph contains an unexpected node (${id}). The API export must match this native UI snapshot; export both files together again.`);
     for (const [name, value] of Object.entries(node.inputs)) {
+      if (/^target_\d+$/.test(name)) throw new Error('The native status-switch hooks did not finish pruning the API graph. Export again after repairing the DaSiWa frontend suite.');
       if (/seed/i.test(name) && typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error('Native seed precision was lost. Use DaSiWa Seed Control with lossless decimal seed state and capture again.');
       if (Array.isArray(value) && value.length === 2 && typeof value[0] === 'string' && Number.isInteger(value[1]) && !graph[value[0]]) throw new Error(`Official graph input ${id}.${name} has a missing node link.`);
+    }
+  }
+  // Direct edges between emitted executable nodes have no virtual/subgraph
+  // transformation. Check them without reimplementing the native serializer.
+  for (const [id, node] of nodes) {
+    const ui = executionNodes.get(id)!;
+    for (const input of ui.node.inputs || []) {
+      if (input.link == null) continue;
+      const link = (ui.graph.links || []).find((entry: any) => String(Array.isArray(entry) ? entry[0] : entry.id) === String(input.link));
+      if (!link) throw new Error('Official native UI input has a missing connection.');
+      const origin = Array.isArray(link) ? link[1] : link.origin_id;
+      const slot = Array.isArray(link) ? link[2] : link.origin_slot;
+      const originId = [...ui.path, String(origin)].join(':');
+      const originUi = executionNodes.get(originId);
+      if (!originUi || originUi.inactive || !graph[originId]) continue;
+      const actual = node.inputs[input.name];
+      if (!Array.isArray(actual) || actual.length !== 2 || actual[0] !== originId || actual[1] !== slot) throw new Error(`Official API connection ${id}.${input.name} differs from its native UI export. Export both files together again.`);
     }
   }
   const route = dasiwaVideoGraphRoute(graph);
@@ -170,7 +284,9 @@ export async function assertOfficialStagedMedia(graph: OfficialApiGraph, inputRo
   }
 }
 export class OfficialVideoWorkflowService {
-  constructor(private sourceRoot: string, private captureRoot: string, private inputRoot?: () => string) {}
+  constructor(private sourceRoot: string, private captureRoot: string, private inputRoot?: () => string,
+    private nativeExportRoot = join(captureRoot, '..', 'OfficialNativeExports'),
+    private runtimePackages?: (graph: OfficialApiGraph, id: OfficialVideoWorkflowId) => Promise<void>) {}
   async source(id: OfficialVideoWorkflowId): Promise<string> {
     const text = await readFile(join(this.sourceRoot, `${id}.json`), 'utf8');
     if (createHash('sha256').update(text).digest('hex') !== OFFICIAL_VIDEO_SOURCES[id].sha256) throw new Error('Pinned official workflow integrity failed. Restore its original source file.');
@@ -186,25 +302,39 @@ export class OfficialVideoWorkflowService {
         const subgraphs = new Set((document.definitions?.subgraphs || []).map((entry: any) => entry.id));
         nodeTypes.push(...new Set<string>(uiNodes(document).map(node => node.type).filter(type => !subgraphs.has(type))));
       } catch (error) { issues.push(String((error as Error).message)); }
-      if (!managed) issues.push('Official workflows require this Umbra instance’s managed ComfyUI. External runtimes are not qualified.');
+      if (!managed) issues.push('Official workflows require an owned ComfyUI process or an explicit verified local test session. Unbound runtimes are held.');
       if (!objectInfo) issues.push('Managed ComfyUI catalogs are unavailable. Open its workspace, then refresh readiness.');
       const runtimeTypes = nodeTypes.filter(type => !['Note', 'MarkdownNote', 'Reroute', 'Lable (DaSiWa)'].includes(type));
       if (objectInfo) for (const type of runtimeTypes) if (!objectInfo[type]) issues.push(`Missing installed node: ${type}. This workflow is held; no adapted fallback.`);
       return { id, ...definition, sourceUrl: `https://github.com/darksidewalker/dasiwa-comfyui-workflows/blob/${SOURCE_COMMIT}/${encodeURI(definition.path)}`, sourceCommit: SOURCE_COMMIT, license: 'GPL-3.0', nodeTypes, requiredRuntimeNodes: runtimeTypes, readiness: { ready: issues.length === 0, issues }, qualification: 'GPU execution and quality are unverified.' };
     }));
   }
-  async capture(id: OfficialVideoWorkflowId, payload: any, objectInfo: Record<string, any> | null) {
+  async importNativeExports(id: OfficialVideoWorkflowId, payload: any, objectInfo: Record<string, any> | null) {
+    const workflow = parseNativeExportText(payload?.workflowText, 'Workflow JSON');
+    const promptGraph = parseNativeExportText(payload?.apiText, 'API JSON');
+    return this.capture(id, { sourceSha256: payload?.sourceSha256, serializer: 'comfy-native-v1', workflow, promptGraph }, objectInfo,
+      { workflowText: payload.workflowText, apiText: payload.apiText });
+  }
+  async capture(id: OfficialVideoWorkflowId, payload: any, objectInfo: Record<string, any> | null, nativeExports?: { workflowText: string; apiText: string }) {
     const sourceUi = JSON.parse(await this.source(id));
     if (payload?.sourceSha256 !== OFFICIAL_VIDEO_SOURCES[id].sha256 || payload?.serializer !== 'comfy-native-v1') throw new Error('Capture requires the pinned source and the native ComfyUI serializer.');
     if (officialUiTopology(payload.workflow) !== officialUiTopology(sourceUi)) throw new Error('The upstream workflow wiring changed. Reload its pinned original and configure native controls without editing the graph.');
     const graph = videoGraphNodes(payload.promptGraph) as OfficialApiGraph;
-    assertOfficialApiGraph(graph, id, sourceUi);
+    assertOfficialApiGraph(graph, id, payload.workflow);
     assertOfficialApiRuntime(graph, objectInfo);
+    if (this.runtimePackages) await this.runtimePackages(graph, id);
     if (this.inputRoot) await assertOfficialStagedMedia(graph, this.inputRoot());
     const captureId = `official-dasiwa-${id}-${randomUUID()}`;
     const metadata: OfficialWorkflowCapture = { workflowId: id, sourceCommit: SOURCE_COMMIT, sourceSha256: OFFICIAL_VIDEO_SOURCES[id].sha256, serializer: 'comfy-native-v1', graphSha256: officialGraphSha256(graph), workflowSha256: officialGraphSha256(payload.workflow), capturedAt: Date.now() };
+    if (nativeExports) metadata.nativeExport = { workflowTextSha256: createHash('sha256').update(nativeExports.workflowText).digest('hex'), apiTextSha256: createHash('sha256').update(nativeExports.apiText).digest('hex') };
     const document = { prompt: graph, workflow: payload.workflow, umbra_official_workflow: metadata };
     await mkdir(this.captureRoot, { recursive: true });
+    if (nativeExports) {
+      const rawRoot = join(this.nativeExportRoot, captureId);
+      await mkdir(rawRoot, { recursive: true });
+      await writeFile(join(rawRoot, 'workflow.json'), nativeExports.workflowText, { encoding: 'utf8', flag: 'wx' });
+      await writeFile(join(rawRoot, 'api.json'), nativeExports.apiText, { encoding: 'utf8', flag: 'wx' });
+    }
     await writeFile(join(this.captureRoot, `${captureId}.json`), JSON.stringify(document), { encoding: 'utf8', flag: 'wx' });
     return { captureId, document, ...this.describe(document) };
   }
@@ -226,11 +356,17 @@ export class OfficialVideoWorkflowService {
     catch { throw new Error('Saved official workflow capture is unavailable. Its queued work is retained; open the pinned original and capture it again.'); }
     const metadata = officialCaptureMetadata(document);
     if (!metadata || metadata.workflowId !== normalized.workflowId) throw new Error('The selected official capture belongs to a different workflow.');
+    if (metadata.nativeExport) {
+      for (const [name, expected] of [['workflow', metadata.nativeExport.workflowTextSha256], ['api', metadata.nativeExport.apiTextSha256]]) {
+        const raw = await readFile(join(this.nativeExportRoot, normalized.captureId, `${name}.json`), 'utf8');
+        if (createHash('sha256').update(raw).digest('hex') !== expected) throw new Error('The retained native export changed. Import both original exports again.');
+      }
+    }
     if (officialGraphSha256(document.prompt) !== metadata.graphSha256) throw new Error('The saved native API graph changed. Capture the upstream workflow again.');
     if (officialGraphSha256(document.workflow) !== metadata.workflowSha256) throw new Error('The saved native UI snapshot changed. Capture the upstream workflow again.');
     const sourceUi = JSON.parse(await this.source(normalized.workflowId));
     if (officialUiTopology(document.workflow) !== officialUiTopology(sourceUi)) throw new Error('The saved upstream workflow wiring changed. Capture its original again.');
-    assertOfficialApiGraph(document.prompt, normalized.workflowId, sourceUi);
+    assertOfficialApiGraph(document.prompt, normalized.workflowId, document.workflow);
     return document;
   }
   async compile(document: any, selection: OfficialVideoWorkflowSelection, objectInfo: Record<string, any> | null) {
@@ -238,6 +374,7 @@ export class OfficialVideoWorkflowService {
     if (officialGraphSha256(stored.prompt) !== officialGraphSha256(document.prompt)) throw new Error('The queued official capture changed. Resume only after reviewing the capture.');
     const graph = applyOfficialVideoBindings(stored.prompt, selection.bindings);
     assertOfficialApiRuntime(graph, objectInfo);
+    if (this.runtimePackages) await this.runtimePackages(graph, stored.umbra_official_workflow.workflowId);
     if (this.inputRoot) await assertOfficialStagedMedia(graph, this.inputRoot());
     return { promptGraph: graph, workflowPayload: structuredClone(stored.workflow), officialProvenance: { ...stored.umbra_official_workflow, captureId: selection.captureId, bindings: structuredClone(selection.bindings), submittedGraphSha256: officialGraphSha256(graph) } };
   }

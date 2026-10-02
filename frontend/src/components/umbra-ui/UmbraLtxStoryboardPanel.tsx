@@ -31,6 +31,7 @@ interface UmbraLtxStoryboardPanelProps {
   onShotsChange: (shots: UmbraLtxStoryboardShot[]) => void;
   onAddShot: () => void;
   onClose: () => void;
+  onDraftBusyChange?: (busy: boolean) => void;
 }
 
 export function UmbraLtxStoryboardPanel({
@@ -40,6 +41,7 @@ export function UmbraLtxStoryboardPanel({
   onShotsChange,
   onAddShot,
   onClose,
+  onDraftBusyChange,
 }: UmbraLtxStoryboardPanelProps) {
   const showToast = useStore((state) => state.showToast);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -95,6 +97,7 @@ export function UmbraLtxStoryboardPanel({
 
   const uploadImage = React.useCallback(async (file: File) => {
     if (!selectedShot || uploadingShotId) return;
+    onDraftBusyChange?.(true);
     setUploadingShotId(selectedShot.id);
     try {
       const response = await fetch('/api/comfy/upload-media', {
@@ -120,8 +123,9 @@ export function UmbraLtxStoryboardPanel({
     } finally {
       setUploadingShotId('');
       if (inputRef.current) inputRef.current.value = '';
+      onDraftBusyChange?.(false);
     }
-  }, [selectedShot, showToast, updateShot, uploadingShotId]);
+  }, [onDraftBusyChange, selectedShot, showToast, updateShot, uploadingShotId]);
 
   const dropImage = React.useCallback((dataTransfer: DataTransfer) => {
     if (!selectedShot || uploadingShotId) return;

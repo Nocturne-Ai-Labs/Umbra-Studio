@@ -4,7 +4,7 @@ export async function cancelComfyJobById(baseUrl: string, promptId: string): Pro
   if (!promptId.trim()) throw new Error('The generation is still submitting. Try again once it is queued.');
   // Never fall back to /interrupt: it can hit another owner's generation.
   const response = await fetch(`${baseUrl}/api/jobs/${encodeURIComponent(promptId)}/cancel`, {
-    method: 'POST', signal: AbortSignal.timeout(15_000),
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000),
   });
   const raw: unknown = await response.json().catch(() => ({}));
   const payload = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};

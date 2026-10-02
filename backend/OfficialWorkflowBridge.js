@@ -18,6 +18,9 @@
   const stable = value => JSON.stringify(value, (_key, item) => record(item)
     ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
   const sortedIds = values => [...new Set(values || [])].sort((a, b) => String(a).localeCompare(String(b)));
+  // graphToPrompt compresses unlabeled, unconnected widget slots in its UI
+  // result. Compare the same representation while retaining all linked slots.
+  const nativeInputs = values => (values || []).filter(input => !(input.widget && input.link === null && !input.label));
   const nodeId = value => {
     if (typeof value === 'string' && value.length > 0 && value.length <= 128) return value;
     if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
@@ -52,7 +55,7 @@
         if (++totalNodes > MAX_NODES) fail('The workflow exceeds the supported graph size.');
         types.add(node.type);
         if (node.subgraph) walk(node.subgraph, `${scope}/node:${id}`, depth + 1);
-        return { id, type: node.type, inputs: ports(node.inputs), outputs: ports(node.outputs) };
+        return { id, type: node.type, inputs: ports(nativeInputs(node.inputs)), outputs: ports(node.outputs) };
       }).sort((a, b) => String(a.id).localeCompare(String(b.id)));
       const links = graph.links.map(link => {
         const values = Array.isArray(link) ? link : record(link)
@@ -60,7 +63,14 @@
         if (values.length < 6 || !Number.isSafeInteger(values[2]) || !Number.isSafeInteger(values[4])) {
           fail('The workflow has an invalid connection.');
         }
-        return [nodeId(values[0]), nodeId(values[1]), values[2], nodeId(values[3]), values[4], values[5]];
+        const target = graph.nodes.find(node => String(node.id) === String(values[3]));
+        let slot = values[4];
+        if (target) {
+          const input = target.inputs?.[slot];
+          slot = input ? nativeInputs(target.inputs).indexOf(input) : -1;
+          if (slot < 0) fail('The workflow topology targets a missing native input slot.');
+        }
+        return [nodeId(values[0]), nodeId(values[1]), values[2], nodeId(values[3]), slot, values[5]];
       }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
       graphs.push({ scope, nodes, links, inputs: ports(graph.inputs, true), outputs: ports(graph.outputs, true),
         inputNode: graph.inputNode?.id ?? null, outputNode: graph.outputNode?.id ?? null });

@@ -39,6 +39,7 @@ interface Props {
   comfyConnected: boolean;
   onApplyPrompt: (prompt: string) => void;
   onClose: () => void;
+  onDraftBusyChange?: (busy: boolean) => void;
 }
 
 const fieldClass = 'w-full min-w-0 rounded border border-white/10 bg-black/35 px-2 py-2 text-xs text-zinc-100 outline-none focus:border-fuchsia-300/50';
@@ -59,7 +60,7 @@ function newItem(kind: MiniMaxH3DirectorMediaKind): MiniMaxH3DirectorItem {
   };
 }
 
-export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeChange, onModeChange, controls, onChange, prompt, durationSeconds, width, height, comfyConnected, onApplyPrompt, onClose }: Props) {
+export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeChange, onModeChange, controls, onChange, prompt, durationSeconds, width, height, comfyConnected, onApplyPrompt, onClose, onDraftBusyChange }: Props) {
   const directorMode = miniMaxH3DirectorMode(mode, frameGuideMode, controls);
   const [forgeCatalog, setForgeCatalog] = React.useState<ForgeCatalog | null>(null);
   const [forgeError, setForgeError] = React.useState('');
@@ -138,6 +139,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   }, [comfyConnected, continuity.session, continuity.sourceKind, continuitySource, continuity.overlapFrames, directorMode, width, height, durationSeconds]);
 
   const uploadContinuityVideo = async (file: File) => {
+    onDraftBusyChange?.(true);
     setSourceVideoUploading(true);
     try {
       const uploadResponse = await fetch('/api/comfy/upload-media', {
@@ -156,7 +158,10 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
       setCheckpointError('');
     } catch (error) {
       setCheckpointError(error instanceof Error ? error.message : 'Video preparation failed.');
-    } finally { setSourceVideoUploading(false); }
+    } finally {
+      setSourceVideoUploading(false);
+      onDraftBusyChange?.(false);
+    }
   };
 
   React.useEffect(() => {
@@ -237,6 +242,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   }, [comfyConnected, forgeCatalogRefresh]);
 
   const upload = async (item: MiniMaxH3DirectorItem, file: File) => {
+    onDraftBusyChange?.(true);
     setUploadingId(item.id);
     try {
       const response = await fetch('/api/comfy/upload-media', {
@@ -256,6 +262,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
       setForgeError(error instanceof Error ? error.message : 'Media upload failed.');
     } finally {
       setUploadingId('');
+      onDraftBusyChange?.(false);
     }
   };
 
@@ -284,6 +291,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
   };
 
   const loadPack = async (file: File) => {
+    onDraftBusyChange?.(true);
     try {
       if (file.size > 1024 * 1024) throw new Error('Reference pack is larger than 1 MB.');
       const parsed = parseMiniMaxH3ReferencePack(JSON.parse(await file.text()), controls, packScope, packLoadMode);
@@ -294,6 +302,8 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
       setPackStatus('Reference pack loaded. Missing media must be uploaded again before queueing.');
     } catch (error) {
       setPackStatus(error instanceof Error ? error.message : 'Reference pack could not be loaded.');
+    } finally {
+      onDraftBusyChange?.(false);
     }
   };
 
@@ -301,6 +311,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
     if (drafting || (!brief.trim() && !continuitySource) || !model) return;
     const requestId = crypto.randomUUID();
     requestIdRef.current = requestId;
+    onDraftBusyChange?.(true);
     setDrafting(true);
     setForgeError('');
     setForgeRawResponse('');
@@ -354,6 +365,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
     } finally {
       if (requestIdRef.current === requestId) requestIdRef.current = '';
       setDrafting(false);
+      onDraftBusyChange?.(false);
     }
   };
 

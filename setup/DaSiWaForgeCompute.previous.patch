@@ -1,13 +1,8 @@
-# Umbra adapted Prompt Forge compute patch.
-# Upstream: https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes
-# Reviewed version: 0.4.73; commit: 87096db297585657507bb626a37b6a30b1955082
-# Upstream license: GPL-3.0; upstream notices and LICENSE remain unchanged.
-
 diff --git a/nodes/h3_forge.py b/nodes/h3_forge.py
-index e4a413d..864dd3d 100644
+index 7911deb..38f2b9d 100644
 --- a/nodes/h3_forge.py
 +++ b/nodes/h3_forge.py
-@@ -716,7 +716,7 @@ def _half_dtype():
+@@ -569,7 +569,7 @@ def _half_dtype():
  
  
  class Local:
@@ -16,7 +11,7 @@ index e4a413d..864dd3d 100644
      kind = "local"
  
      def _llm(self):
-@@ -725,61 +725,24 @@ class Local:
+@@ -578,61 +578,24 @@ class Local:
  
      def models(self):
          llm = self._llm()
@@ -90,7 +85,7 @@ index e4a413d..864dd3d 100644
  
      def loaded(self):
          return set()
-@@ -788,70 +751,47 @@ class Local:
+@@ -641,70 +604,47 @@ class Local:
          self._llm()._release_all_model_memory()
          return True
  
@@ -190,33 +185,33 @@ index e4a413d..864dd3d 100644
                  except Exception:
                      pass
                  del loaded
-@@ -994,6 +934,9 @@ def _generate(body, input_directory, release_memory, stop):
-         if mode == "REF2VA" and existing_definitions.strip():
-             user += ("\n\nApproved existing definitions: preserve explicit Subject IDs and allocate new IDs "
-                      "after existing ones; verify current media citations:\n" + existing_definitions)
+@@ -836,6 +776,9 @@ def _generate(body, input_directory, release_memory, stop):
+ 
+     def run(with_images):
+         user = build_user_message(bundle, brief, mode, duration, detail, creativity, references, bool(with_images))
 +        if kind == "local":
 +            return backend.chat(name, spec["system"], user, with_images, sampling, num_ctx,
 +                                timeout, stop, compute_device=body.get("compute_device") or "gpu")
          return backend.chat(name, spec["system"], user, with_images, sampling, num_ctx, timeout, stop)
  
      if kind != "local":
-@@ -1200,8 +1143,13 @@ def generate_continuity_draft(metadata, idea, directory, model, settings,
+@@ -984,8 +927,13 @@ def generate_continuity_draft(metadata, idea, directory, model, settings,
          if cancel is not None and cancel.is_set():
              raise ForgeError("cancelled", CANCELLED)
          try:
--            raw, stats = backend.chat(name, system, user, images,
+-            raw, stats = backend.chat(name, CONTINUATION_SYSTEM, user, images,
 -                                       sampling, bundle["context_length"], 600, cancel)
 +            if kind == "local":
-+                raw, stats = backend.chat(name, system, user, images,
++                raw, stats = backend.chat(name, CONTINUATION_SYSTEM, user, images,
 +                                          sampling, bundle["context_length"], 600, cancel,
 +                                          compute_device=options.get("compute_device") or "gpu")
 +            else:
-+                raw, stats = backend.chat(name, system, user, images,
++                raw, stats = backend.chat(name, CONTINUATION_SYSTEM, user, images,
 +                                          sampling, bundle["context_length"], 600, cancel)
          except urlerror.HTTPError as exc:
              if _key_refused(exc):
                  raise ForgeError("backend", KEY_REFUSED.format(where=backend.base, code=exc.code))
-@@ -1265,6 +1213,8 @@ def register_routes():
+@@ -1040,6 +988,8 @@ def register_routes():
          bundle = load_bundle()
          return web.json_response({
              "models": models,

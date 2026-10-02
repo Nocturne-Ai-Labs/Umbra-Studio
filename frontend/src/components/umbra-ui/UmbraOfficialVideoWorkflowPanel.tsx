@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Camera, Clapperboard, ExternalLink, Loader2, PanelRight, Play, RefreshCw } from 'lucide-react';
+import { Camera, Clapperboard, ExternalLink, Loader2, PanelRight, Play, RefreshCw, Upload } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { pushAppSettingsToBackend, saveAppSettings } from '@/lib/appSettings';
 import { cn } from '@/lib/utils';
@@ -41,6 +41,7 @@ interface UmbraOfficialVideoWorkflowPanelProps {
 
 const buttonClass = 'inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/15 px-3 text-[11px] font-bold text-[var(--umbra-text)] hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:cursor-not-allowed disabled:opacity-40';
 const labelClass = 'text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400';
+const MAX_NATIVE_EXPORT_BYTES = 16 * 1024 * 1024;
 const isWorkflowId = (value: unknown): value is OfficialWorkflowId => value === 'h3-26' || value === 'ltx23-50';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error || 'Official workflow action failed.');
 
@@ -51,15 +52,19 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const [catalogError, setCatalogError] = React.useState('');
   const [actionError, setActionError] = React.useState('');
   const [status, setStatus] = React.useState('');
-  const [busy, setBusy] = React.useState<'opening' | 'capturing' | 'queueing' | ''>('');
+  const [busy, setBusy] = React.useState<'opening' | 'capturing' | 'importing' | 'queueing' | ''>('');
   const [policySaving, setPolicySaving] = React.useState(false);
   const [loadedId, setLoadedId] = React.useState<OfficialWorkflowId | null>(null);
   const [captured, setCaptured] = React.useState<CapturedWorkflow | null>(null);
+  const [workflowFile, setWorkflowFile] = React.useState<File | null>(null);
+  const [apiFile, setApiFile] = React.useState<File | null>(null);
   const [reviewOpen, setReviewOpen] = React.useState(() => window.innerWidth >= 1100);
   const loadRequestRef = React.useRef('');
   const mountedRef = React.useRef(true);
   const reviewId = React.useId();
   const selected = items.find(item => item.id === selectedId);
+
+  React.useEffect(() => { setWorkflowFile(null); setApiFile(null); }, [selectedId]);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -140,6 +145,24 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     finally { if (mountedRef.current) setBusy(''); }
   };
 
+  const importWorkflow = async () => {
+    if (!selected || !workflowFile || !apiFile || busy || policySaving) return;
+    setBusy('importing'); setActionError(''); setStatus(''); setCaptured(null);
+    try {
+      if (workflowFile.size > MAX_NATIVE_EXPORT_BYTES || apiFile.size > MAX_NATIVE_EXPORT_BYTES) throw new Error('Each native JSON export must be 16 MiB or smaller.');
+      const [workflowText, apiText] = await Promise.all([workflowFile.text(), apiFile.text()]);
+      if (!mountedRef.current) return;
+      const response = await fetch(`/api/video/official-workflows/${selected.id}/import`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workflowText, apiText, sourceSha256: selected.sha256 }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload?.success === false) throw new Error(String(payload?.error || 'The native exports could not be imported.'));
+      if (!payload?.captureId || payload.workflowId !== selected.id) throw new Error('The import response did not identify the selected official workflow.');
+      if (mountedRef.current) { setCaptured({ captureId: String(payload.captureId), workflowId: selected.id, prompt: String(payload.prompt || ''), name: String(payload.name || selected.name) }); setStatus('Native exports imported. Review the captured snapshot before queueing.'); }
+    } catch (error) { if (mountedRef.current) setActionError(errorText(error)); }
+    finally { if (mountedRef.current) setBusy(''); }
+  };
+
   const changePolicy = async (value: string) => {
     if (policySaving || busy) return;
     setPolicySaving(true); setActionError('');
@@ -150,7 +173,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     } catch (error) { setActionError(errorText(error)); }
     finally { if (mountedRef.current) setPolicySaving(false); }
   };
-  const queueReason = !selected?.readiness.ready ? 'Resolve the workflow readiness issues first.' : !captured ? 'Capture the configured workflow from ComfyUI first.' : !queueConnected ? 'Connecting to the shared queue.' : !comfyConnected ? 'ComfyUI is not connected.' : '';
+  const queueReason = !selected?.readiness.ready ? 'Resolve the workflow readiness issues first.' : !captured ? 'Capture from ComfyUI or import native exports first.' : !queueConnected ? 'Connecting to the shared queue.' : !comfyConnected ? 'ComfyUI is not connected.' : '';
   const queueCapture = async () => {
     if (!captured || queueReason || busy || policySaving) return;
     setBusy('queueing'); setActionError(''); setStatus('');
@@ -187,10 +210,19 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
             <p className="text-xs leading-relaxed text-zinc-400">Configure prompts, seeds, resources, and stages in ComfyUI. Loading replaces the graph currently open there.</p>
             <div className="flex flex-wrap gap-2"><button type="button" className={buttonClass} disabled={!!busy || !comfyConnected} onClick={() => void openWorkflow()}><ExternalLink size={13} />Load official workflow in ComfyUI</button><button type="button" className={buttonClass} onClick={openComfy}>Open ComfyUI</button><button type="button" className={buttonClass} disabled={!!busy || !selected.readiness.ready || loadedId !== selectedId || !comfyConnected} onClick={() => void captureWorkflow()}><Camera size={13} />Capture from ComfyUI</button></div>
           </section> : null}
-          {busy ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={14} className="animate-spin" />{busy === 'opening' ? 'Opening official workflow…' : busy === 'capturing' ? 'Capturing native configuration…' : 'Waiting for queue acknowledgement…'}</p> : null}
+          {selected ? <section key={selected.id} className="space-y-2 rounded border border-white/10 bg-black/15 p-3" aria-label="Import native ComfyUI exports">
+            <h3 className={labelClass}>Import native exports</h3>
+            <p className="text-[11px] text-zinc-400">Choose Workflow JSON and API JSON exported from the same configured workflow in ComfyUI. Maximum 16 MiB per file.</p>
+            <div className="grid min-w-0 gap-3 md:grid-cols-2">
+              <label className="min-w-0 space-y-1"><span className={labelClass}>Workflow JSON</span><input type="file" accept=".json,application/json" disabled={!!busy || policySaving} onChange={event => { setWorkflowFile(event.target.files?.[0] || null); setActionError(''); }} className="block min-w-0 w-full max-w-full rounded border border-white/15 bg-black/20 p-2 text-[11px] text-zinc-300 file:mr-2 file:rounded file:border-0 file:bg-white/10 file:px-2 file:py-1 file:text-[11px] file:text-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-40" /></label>
+              <label className="min-w-0 space-y-1"><span className={labelClass}>API JSON</span><input type="file" accept=".json,application/json" disabled={!!busy || policySaving} onChange={event => { setApiFile(event.target.files?.[0] || null); setActionError(''); }} className="block min-w-0 w-full max-w-full rounded border border-white/15 bg-black/20 p-2 text-[11px] text-zinc-300 file:mr-2 file:rounded file:border-0 file:bg-white/10 file:px-2 file:py-1 file:text-[11px] file:text-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-40" /></label>
+            </div>
+            <button type="button" className={buttonClass} disabled={!!busy || policySaving || !workflowFile || !apiFile} onClick={() => void importWorkflow()}><Upload size={13} />Import native exports</button>
+          </section> : null}
+          {busy ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={14} className="animate-spin" />{busy === 'opening' ? 'Opening official workflow…' : busy === 'capturing' ? 'Capturing native configuration…' : busy === 'importing' ? 'Importing native exports…' : 'Waiting for queue acknowledgement…'}</p> : null}
           {actionError ? <p role="alert" className="break-words text-xs text-red-300">{actionError}</p> : null}
           {status ? <p role="status" className="text-xs text-zinc-400">{status}</p> : null}
-          {captured ? <section data-official-capture="" className="space-y-2 rounded border border-white/10 bg-black/15 p-3"><h3 className={labelClass}>Captured prompt · {captured.name}</h3><textarea readOnly aria-label="Captured native prompt" value={captured.prompt || 'No text prompt in this native workflow.'} className="min-h-20 w-full resize-y rounded border border-white/10 bg-black/25 p-2 text-xs text-zinc-300" /><p className="text-[11px] text-zinc-500">Queue uses this captured snapshot. Capture again after changing the graph in ComfyUI.</p></section> : null}
+          {captured ? <section data-official-capture="" className="space-y-2 rounded border border-white/10 bg-black/15 p-3"><h3 className={labelClass}>Captured prompt · {captured.name}</h3><textarea readOnly aria-label="Captured native prompt" value={captured.prompt || 'No text prompt in this native workflow.'} className="min-h-20 w-full resize-y rounded border border-white/10 bg-black/25 p-2 text-xs text-zinc-300" /><p className="text-[11px] text-zinc-500">Queue uses this captured snapshot. Capture or import again after changing the graph in ComfyUI.</p></section> : null}
           <div className="min-h-44 overflow-hidden rounded border border-white/10">{preview}</div>
         </main>
         <aside id={reviewId} hidden={!reviewOpen} aria-label="Video queue and results" className="min-h-72 min-w-0 shrink-0 border-t border-white/10 xl:w-80 xl:border-l xl:border-t-0">{review}</aside>

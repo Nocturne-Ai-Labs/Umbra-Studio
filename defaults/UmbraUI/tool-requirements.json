@@ -7,11 +7,20 @@
       "optional": true,
       "activationFile": "diffusion_models/Anima-3.8B-v1.1.safetensors",
       "minimumComfyVersion": "0.37.0",
-      "modelProfiles": ["anima-3.8b"],
+      "modelProfiles": [
+        "anima-3.8b"
+      ],
       "customNodes": [
         {
           "name": "ComfyUI-Anima-3.8B-LoRA-Bridge",
-          "minimumCommit": "fbd0850a7d641ad898cddb112d0617ec5d6c0497"
+          "minimumCommit": "fbd0850a7d641ad898cddb112d0617ec5d6c0497",
+          "repository": "https://github.com/Lakeside529/ComfyUI-Anima-3.8B-LoRA-Bridge",
+          "version": "1.0.0",
+          "license": "MIT",
+          "requiredClasses": [
+            "Anima38LoRALoader",
+            "Anima38LoRALoaderModelOnly"
+          ]
         }
       ]
     },
@@ -20,7 +29,9 @@
       "label": "MiniMax H3 video",
       "activationFile": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
       "minimumComfyVersion": "0.37.0",
-      "modelProfiles": ["minimax-h3"],
+      "modelProfiles": [
+        "minimax-h3"
+      ],
       "customNodes": []
     },
     {
@@ -29,11 +40,39 @@
       "optional": true,
       "activationFile": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
       "minimumComfyVersion": "0.37.0",
-      "modelProfiles": ["minimax-h3"],
+      "modelProfiles": [
+        "minimax-h3"
+      ],
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "9f5aef4a2748bba9486dda0a7efec7689462d7e0",
+          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
+          "version": "0.4.73",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/node_status_switch.js",
+              "registration": "DaSiWa.NodeStatusSwitch"
+            },
+            {
+              "path": "js/dasiwa_seed_control.js",
+              "registration": "DaSiWa.SeedControl"
+            },
+            {
+              "path": "js/advanced_lora_loader_ui.js",
+              "registration": "DaSiWa.LTX2LoraLoader"
+            },
+            {
+              "path": "js/enhanced_video_combine_preview.js",
+              "registration": "DaSiWa.EnhancedVideoCombinePreview"
+            },
+            {
+              "path": "js/minimax_h3_director.js",
+              "registration": "DaSiWa.MiniMaxH3Director"
+            }
+          ],
           "requiredPatch": "DaSiWaForgeCompute.patch"
         }
       ]
@@ -44,11 +83,39 @@
       "optional": true,
       "activationFile": "llm/Llama-3.2-3B-Instruct/config.json",
       "minimumComfyVersion": "0.37.0",
-      "modelProfiles": ["minimax-h3-autoprompter"],
+      "modelProfiles": [
+        "minimax-h3-autoprompter"
+      ],
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "9f5aef4a2748bba9486dda0a7efec7689462d7e0",
+          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
+          "version": "0.4.73",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/node_status_switch.js",
+              "registration": "DaSiWa.NodeStatusSwitch"
+            },
+            {
+              "path": "js/dasiwa_seed_control.js",
+              "registration": "DaSiWa.SeedControl"
+            },
+            {
+              "path": "js/advanced_lora_loader_ui.js",
+              "registration": "DaSiWa.LTX2LoraLoader"
+            },
+            {
+              "path": "js/enhanced_video_combine_preview.js",
+              "registration": "DaSiWa.EnhancedVideoCombinePreview"
+            },
+            {
+              "path": "js/minimax_h3_director.js",
+              "registration": "DaSiWa.MiniMaxH3Director"
+            }
+          ],
           "requiredPatch": "DaSiWaForgeCompute.patch"
         }
       ]
@@ -59,19 +126,65 @@
       "optional": true,
       "activationFile": "diffusion_models/ltx-2.3-22b-dev_transformer_only_bf16.safetensors",
       "minimumComfyVersion": "0.37.0",
-      "modelProfiles": ["ltx-2.3"],
+      "modelProfiles": [
+        "ltx-2.3"
+      ],
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "db34bc1129155e3d1683cfcea850ab59c1f191b2"
+          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
+          "version": "0.4.73",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/node_status_switch.js",
+              "registration": "DaSiWa.NodeStatusSwitch"
+            },
+            {
+              "path": "js/dasiwa_seed_control.js",
+              "registration": "DaSiWa.SeedControl"
+            },
+            {
+              "path": "js/advanced_lora_loader_ui.js",
+              "registration": "DaSiWa.LTX2LoraLoader"
+            },
+            {
+              "path": "js/enhanced_video_combine_preview.js",
+              "registration": "DaSiWa.EnhancedVideoCombinePreview"
+            },
+            {
+              "path": "js/minimax_h3_director.js",
+              "registration": "DaSiWa.MiniMaxH3Director"
+            }
+          ]
         },
         {
           "name": "whatdreamscost-comfyui",
-          "minimumCommit": "fe09f73756df202d08341c66b4dc5fc8d2acca22"
+          "minimumCommit": "fe09f73756df202d08341c66b4dc5fc8d2acca22",
+          "repository": "https://github.com/PodJamz/whatdreamscost-comfyui",
+          "version": "2.0.5",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/ltx_director.js",
+              "registration": "LTXDirector"
+            },
+            {
+              "path": "js/ltx_director_guide.js",
+              "registration": "Comfy.LTXDirectorGuide"
+            }
+          ]
         },
         {
           "name": "ComfyUI-KJNodes",
-          "minimumCommit": "d3cfe21625e5170126ce06fbfcfe1d88108688c3"
+          "minimumCommit": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
+          "repository": "https://github.com/kijai/ComfyUI-KJNodes",
+          "version": "1.5.2",
+          "license": "GPL-3.0",
+          "webDirectory": "./web"
         }
       ]
     },
@@ -85,7 +198,10 @@
       "customNodes": [
         {
           "name": "ComfyUI-LTXVideo",
-          "minimumCommit": "5722b53a08daec57f5442347b235cb84df0afbe7"
+          "minimumCommit": "5722b53a08daec57f5442347b235cb84df0afbe7",
+          "repository": "https://github.com/Lightricks/ComfyUI-LTXVideo",
+          "license": "LTX-2 Community License",
+          "webDirectory": "./web"
         }
       ]
     },
@@ -99,7 +215,589 @@
       "customNodes": [
         {
           "name": "comfyui-WhiteRabbit",
-          "minimumCommit": "4815da41473c99400da6ca4127f0e324dbfd865a"
+          "minimumCommit": "4815da41473c99400da6ca4127f0e324dbfd865a",
+          "repository": "https://github.com/Artificial-Sweetener/comfyui-WhiteRabbit",
+          "version": "1.2.0",
+          "license": "AGPL-3.0-only"
+        }
+      ]
+    },
+    {
+      "id": "declared-umbra-workflows",
+      "label": "Declared Umbra UI workflows",
+      "workflowIds": [
+        "[Umbra UI] Anima 2.9B Image Pipeline",
+        "[Umbra UI] Anima 2.9B Image to Image Pipeline",
+        "[Umbra UI] Anima 3.8B Image to Image Pipeline",
+        "[Umbra UI] Anima 3.8B v1.1 Image Pipeline",
+        "[Umbra UI] Anima Image Pipeline",
+        "[Umbra UI] Anima Image to Image Pipeline",
+        "[Umbra UI] Chroma 1 Image Pipeline",
+        "[Umbra UI] Chroma 1 Image to Image Pipeline",
+        "[Umbra UI] ERNIE Image Pipeline",
+        "[Umbra UI] ERNIE Image to Image Pipeline",
+        "[Umbra UI] FLUX.1 Image Pipeline",
+        "[Umbra UI] FLUX.1 Image to Image Pipeline",
+        "[Umbra UI] FLUX.2 Edit Inpaint Pipeline",
+        "[Umbra UI] FLUX.2 Image Pipeline",
+        "[Umbra UI] HiDream O1 Image Pipeline",
+        "[Umbra UI] HiDream O1 Image to Image Pipeline",
+        "[Umbra UI] HiDream O1 Inpaint Pipeline",
+        "[Umbra UI] Ideogram 4 Image Pipeline",
+        "[Umbra UI] Illustrious XL Image Pipeline",
+        "[Umbra UI] Illustrious XL Image to Image Pipeline",
+        "[Umbra UI] Krea 2 Image Pipeline",
+        "[Umbra UI] Krea 2 Image to Image Pipeline",
+        "[Umbra UI] Krea 2 Inpaint Pipeline",
+        "[Umbra UI] LTX-2.3 Image to Video",
+        "[Umbra UI] LTX-2.3 OmniForge",
+        "[Umbra UI] LTX-2.3 Text to Video",
+        "[Umbra UI] LTX-2.3 Video to Video",
+        "[Umbra UI] LTX-2.5 Image to Video",
+        "[Umbra UI] LTX-2.5 Text to Video",
+        "[Umbra UI] LTX-2.5 Video to Video",
+        "[Umbra UI] MiniMax H3 Director",
+        "[Umbra UI] MiniMax H3 Image to Video",
+        "[Umbra UI] MiniMax H3 Reference to Video",
+        "[Umbra UI] MiniMax H3 Text to Video",
+        "[Umbra UI] NoobAI XL V-Pred Image Pipeline",
+        "[Umbra UI] NoobAI XL V-Pred Image to Image Pipeline",
+        "[Umbra UI] OmniGen2 Image Pipeline",
+        "[Umbra UI] OmniGen2 Image to Image Pipeline",
+        "[Umbra UI] Ovis Image Pipeline",
+        "[Umbra UI] Ovis Image to Image Pipeline",
+        "[Umbra UI] Qwen Image 2.1 Image Pipeline",
+        "[Umbra UI] Qwen Image Edit Inpaint Pipeline",
+        "[Umbra UI] Qwen Image Pipeline",
+        "[Umbra UI] Qwen Image to Image Pipeline",
+        "[Umbra UI] Stable Diffusion 3.5 Image Pipeline",
+        "[Umbra UI] Stable Diffusion 3.5 Image to Image Pipeline",
+        "[Umbra UI] Stable Diffusion Image Pipeline",
+        "[Umbra UI] Stable Diffusion Image to Image Pipeline",
+        "[Umbra UI] WAN 2.2 Image to Video",
+        "[Umbra UI] WAN 2.2 Text to Video",
+        "[Umbra UI] WAN 2.2 Video to Video",
+        "[Umbra UI] Z-Image Base Image to Image Pipeline",
+        "[Umbra UI] Z-Image Base Pipeline",
+        "[Umbra UI] Z-Image Turbo Image to Image Pipeline",
+        "[Umbra UI] Z-Image Turbo Inpaint Pipeline",
+        "[Umbra UI] Z-Image Turbo Pipeline"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "minimumFrontendVersion": "1.53.6",
+      "frontendSource": "https://github.com/comfyanonymous/ComfyUI/blob/v0.38.0/requirements.txt",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CFGGuider",
+        "CFGNorm",
+        "CFGOverride",
+        "CLIPLoader",
+        "CLIPSetLastLayer",
+        "CLIPTextEncode",
+        "CLIPTextEncodeFlux",
+        "CLIPVisionEncode",
+        "CLIPVisionLoader",
+        "CheckpointLoaderSimple",
+        "ConditioningZeroOut",
+        "ControlNetLoader",
+        "CreateVideo",
+        "DualCFGGuider",
+        "DualCLIPLoader",
+        "DualModelGuider",
+        "EmptyFlux2LatentImage",
+        "EmptyHiDreamO1LatentImage",
+        "EmptyHunyuanLatentVideo",
+        "EmptyLTXVLatentVideo",
+        "EmptyLatentImage",
+        "EmptySD3LatentImage",
+        "Flux2Scheduler",
+        "FluxGuidance",
+        "GetVideoComponents",
+        "HiDreamO1ReferenceImages",
+        "Ideogram4Scheduler",
+        "ImageCompositeMasked",
+        "ImageFromBatch",
+        "ImageScale",
+        "KSampler",
+        "KSamplerAdvanced",
+        "KSamplerSelect",
+        "LTXAVTextEncoderLoader",
+        "LTXVAudioVAEDecode",
+        "LTXVAudioVAELoader",
+        "LTXVConcatAVLatent",
+        "LTXVConditioning",
+        "LTXVCropGuides",
+        "LTXVDualCFGGuider",
+        "LTXVEmptyLatentAudio",
+        "LTXVImgToVideoInplace",
+        "LTXVLatentUpsampler",
+        "LTXVPreprocess",
+        "LTXVSeparateAVLatent",
+        "LatentUpscaleModelLoader",
+        "LoadImage",
+        "LoadImageMask",
+        "LoadVideo",
+        "LoraLoader",
+        "LoraLoaderModelOnly",
+        "ManualSigmas",
+        "MiniMaxH3ImageToVideo",
+        "MiniMaxH3ReferenceToVideo",
+        "MiniMaxH3SigmaShift",
+        "ModelNoiseScale",
+        "ModelPatchLoader",
+        "ModelSamplingAuraFlow",
+        "ModelSamplingDiscrete",
+        "ModelSamplingSD3",
+        "PrimitiveStringMultiline",
+        "RandomNoise",
+        "ReferenceLatent",
+        "SamplerCustom",
+        "SamplerCustomAdvanced",
+        "SamplerLCM",
+        "SaveVideo",
+        "SetLatentNoiseMask",
+        "SplitSigmasDenoise",
+        "T5TokenizerOptions",
+        "TextEncodeQwenImage21",
+        "TextEncodeQwenImageEditPlus",
+        "TextGenerateLTX2Prompt",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAEDecodeTiled",
+        "VAEEncode",
+        "VAEEncodeForInpaint",
+        "VAELoader",
+        "Video Slice",
+        "VideoFrameSample",
+        "WanImageToVideo",
+        "ZImageFunControlnet"
+      ],
+      "customNodes": [
+        {
+          "name": "comfyui-anima-3-8B",
+          "minimumCommit": "381c13af328b958febf86c155d2f4b007cd0f55b",
+          "repository": "https://github.com/GumGum10/comfyui-anima-3-8B",
+          "version": "0.2.0",
+          "license": "MIT",
+          "requiredClasses": [
+            "Anima38BV2Loader",
+            "Anima38BV2Prompt",
+            "AnimaQwen35Loader"
+          ]
+        },
+        {
+          "name": "ComfyUI-DaSiWa-Nodes",
+          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
+          "version": "0.4.73",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/advanced_lora_loader_ui.js",
+              "registration": "DaSiWa.LTX2LoraLoader"
+            },
+            {
+              "path": "js/enhanced_video_combine_preview.js",
+              "registration": "DaSiWa.EnhancedVideoCombinePreview"
+            },
+            {
+              "path": "js/minimax_h3_director.js",
+              "registration": "DaSiWa.MiniMaxH3Director"
+            }
+          ],
+          "requiredClasses": [
+            "DaSiWaH3ContinuityAppend",
+            "DaSiWaH3ContinuityPublish",
+            "DaSiWa_EnhancedVideoCombine",
+            "DaSiWa_LTX2LoraLoader",
+            "MiniMaxH3Director",
+            "MiniMaxH3DirectorGuide"
+          ]
+        },
+        {
+          "name": "comfyui-inpaint-nodes",
+          "minimumCommit": "bd6d8fd5104d539187dfb172d07352215c09fcaa",
+          "repository": "https://github.com/Acly/comfyui-inpaint-nodes",
+          "version": "1.4.3",
+          "license": "GPL-3.0",
+          "requiredClasses": [
+            "INPAINT_ExpandMask"
+          ]
+        },
+        {
+          "name": "whatdreamscost-comfyui",
+          "minimumCommit": "fe09f73756df202d08341c66b4dc5fc8d2acca22",
+          "repository": "https://github.com/PodJamz/whatdreamscost-comfyui",
+          "version": "2.0.5",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/ltx_director.js",
+              "registration": "LTXDirector"
+            },
+            {
+              "path": "js/ltx_director_guide.js",
+              "registration": "Comfy.LTXDirectorGuide"
+            }
+          ],
+          "requiredClasses": [
+            "LTXDirector",
+            "LTXDirectorCropGuides",
+            "LTXDirectorGuide"
+          ]
+        },
+        {
+          "name": "ComfyUI-KJNodes",
+          "minimumCommit": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
+          "repository": "https://github.com/kijai/ComfyUI-KJNodes",
+          "version": "1.5.2",
+          "license": "GPL-3.0",
+          "webDirectory": "./web",
+          "requiredClasses": [
+            "ModelPatchTorchSettings",
+            "VAELoaderKJ"
+          ]
+        },
+        {
+          "name": "Umbra-Nodes",
+          "minimumCommit": "1a6aba4ac9021c0c0eb54e156c41bc4c4c856828",
+          "repository": "https://github.com/Nocturne-Ai-Labs/Umbra-Nodes",
+          "version": "0.1.1",
+          "license": "MIT",
+          "webDirectory": "./web",
+          "requiredClasses": [
+            "UmbraA1111LoraSyntax",
+            "UmbraFlux2DetailerSamplingProvider",
+            "UmbraHiDreamO1DetailerSamplingProvider",
+            "UmbraIdeogram4DetailerSamplingProvider",
+            "UmbraImageDetailer",
+            "UmbraImageUpscale",
+            "UmbraKSamplerHiResFix",
+            "UmbraLabSaveImage",
+            "UmbraLoadCheckpoint",
+            "UmbraOmniGen2DetailerSamplingProvider",
+            "UmbraPowerPrompter",
+            "UmbraPowerPrompterReader"
+          ]
+        }
+      ],
+      "notes": "Requirements for the shipped locked API workflow declarations, including installed model resources handled separately by Setup. Source and dependency checks do not qualify GPU execution."
+    },
+    {
+      "id": "official-dasiwa-h3-26",
+      "label": "Official DaSiWa H3 MythicAlchemy C-MMH3-26",
+      "workflowIds": [
+        "h3-26"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "minimumFrontendVersion": "1.53.6",
+      "frontendSource": "https://github.com/comfyanonymous/ComfyUI/blob/v0.38.0/requirements.txt",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ComfyMathExpression",
+        "FrameInterpolate",
+        "FrameInterpolationModelLoader",
+        "ImageFromBatch",
+        "ImageUpscaleWithModel",
+        "KSamplerSelect",
+        "MiniMaxH3SigmaShift",
+        "ModelAttentionBackend",
+        "SamplerCustomAdvanced",
+        "UNETLoader",
+        "UpscaleModelLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader"
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-DaSiWa-Nodes",
+          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
+          "version": "0.4.73",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/dasiwa_label.js",
+              "registration": "DaSiWa.Lable"
+            },
+            {
+              "path": "js/node_status_switch.js",
+              "registration": "DaSiWa.NodeStatusSwitch"
+            },
+            {
+              "path": "js/dasiwa_seed_control.js",
+              "registration": "DaSiWa.SeedControl"
+            },
+            {
+              "path": "js/advanced_lora_loader_ui.js",
+              "registration": "DaSiWa.LTX2LoraLoader"
+            },
+            {
+              "path": "js/enhanced_video_combine_preview.js",
+              "registration": "DaSiWa.EnhancedVideoCombinePreview"
+            },
+            {
+              "path": "js/minimax_h3_director.js",
+              "registration": "DaSiWa.MiniMaxH3Director"
+            }
+          ],
+          "requiredFrontendClasses": [
+            "Lable (DaSiWa)"
+          ],
+          "requiredClasses": [
+            "DaSiWaH3ContinuityAppend",
+            "DaSiWaH3ContinuityPublish",
+            "DaSiWa_EnhancedVideoCombine",
+            "DaSiWa_LTX2LoraLoader",
+            "DaSiWa_MetadataImageSaver",
+            "DaSiWa_NodeStatusSwitch",
+            "DaSiWa_RTX_UpscalerRefiner",
+            "DaSiWa_SeedControl",
+            "DaSiWa_TorchResize",
+            "DaSiWa_Watermark",
+            "MiniMaxH3Cache",
+            "MiniMaxH3Director",
+            "MiniMaxH3DirectorGuide"
+          ]
+        },
+        {
+          "name": "Comfyui-MMH3-UltimateUpscale",
+          "minimumCommit": "fe6658f6d144066f14150d3526247b417683ff2b",
+          "repository": "https://github.com/bbaudio-2025/Comfyui-MMH3-UltimateUpscale",
+          "version": "0.0.7",
+          "license": "MIT",
+          "webDirectory": "./web",
+          "frontendAssets": [
+            {
+              "path": "web/mmh3_spatial_params.js",
+              "registration": "MMH3UltimateUpscale.SpatialTileSizeMode"
+            }
+          ],
+          "requiredClasses": [
+            "MMH3LatentUpscaleWithModelParams",
+            "MMH3SpatialSplitParams",
+            "MMH3TemporalSplitParams",
+            "MMH3UltimateUpscale"
+          ]
+        },
+        {
+          "name": "ComfyUI-KJNodes",
+          "minimumCommit": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
+          "repository": "https://github.com/kijai/ComfyUI-KJNodes",
+          "version": "1.5.2",
+          "license": "GPL-3.0",
+          "webDirectory": "./web",
+          "requiredClasses": [
+            "MiniMaxChunkFeedForward",
+            "ModelPatchTorchSettings",
+            "ModelPreviewOverrideKJ"
+          ]
+        }
+      ],
+      "sourceSha256": "d13b404cc77860fb8284cd4276c8057f1714583304ed6b03357bda799d83ca0d",
+      "sourceCommit": "143bd6a47d844ddd7a68175db5c5ff3867f5febb",
+      "notes": "Load the pinned original in native ComfyUI. All serialized classes and frontend assets remain required even for currently bypassed stages; no adapted fallback. Model assets and GPU execution are separate readiness gates."
+    },
+    {
+      "id": "official-dasiwa-ltx23-50",
+      "label": "Official DaSiWa LTX OmniForge C-LTX23-50",
+      "workflowIds": [
+        "ltx23-50"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "minimumFrontendVersion": "1.53.6",
+      "frontendSource": "https://github.com/comfyanonymous/ComfyUI/blob/v0.38.0/requirements.txt",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": [
+        "BasicScheduler",
+        "CFGGuider",
+        "CLIPTextEncode",
+        "ColorTransfer",
+        "ComfySwitchNode",
+        "ConditioningZeroOut",
+        "DualCLIPLoader",
+        "KSamplerSelect",
+        "LTXVAudioVAEDecode",
+        "LTXVConcatAVLatent",
+        "LTXVConditioning",
+        "LTXVCropGuides",
+        "LTXVLatentUpsampler",
+        "LTXVSeparateAVLatent",
+        "LatentUpscaleModelLoader",
+        "LoadImage",
+        "LoraLoaderModelOnly",
+        "ModelAttentionBackend",
+        "PrimitiveBoolean",
+        "SamplerCustomAdvanced",
+        "UNETLoader",
+        "UpscaleModelLoader",
+        "VAEDecode",
+        "VAELoader"
+      ],
+      "customNodes": [
+        {
+          "name": "rgthree-comfy",
+          "minimumCommit": "449c58fcdd612f7733e54c51f6758ead63fa180b",
+          "repository": "https://github.com/rgthree/rgthree-comfy",
+          "version": "1.0.2608312342",
+          "license": "MIT",
+          "webDirectory": "./web/comfyui",
+          "frontendAssets": [
+            {
+              "path": "web/comfyui/context.js",
+              "registration": "rgthree.Context"
+            }
+          ],
+          "requiredClasses": [
+            "Context (rgthree)",
+            "Context Switch (rgthree)"
+          ]
+        },
+        {
+          "name": "ComfyUI-DaSiWa-Nodes",
+          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
+          "version": "0.4.73",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/dasiwa_label.js",
+              "registration": "DaSiWa.Lable"
+            },
+            {
+              "path": "js/node_status_switch.js",
+              "registration": "DaSiWa.NodeStatusSwitch"
+            },
+            {
+              "path": "js/dasiwa_seed_control.js",
+              "registration": "DaSiWa.SeedControl"
+            },
+            {
+              "path": "js/advanced_lora_loader_ui.js",
+              "registration": "DaSiWa.LTX2LoraLoader"
+            },
+            {
+              "path": "js/enhanced_video_combine_preview.js",
+              "registration": "DaSiWa.EnhancedVideoCombinePreview"
+            },
+            {
+              "path": "js/minimax_h3_director.js",
+              "registration": "DaSiWa.MiniMaxH3Director"
+            }
+          ],
+          "requiredFrontendClasses": [
+            "Lable (DaSiWa)"
+          ],
+          "requiredClasses": [
+            "DaSiWa_EnhancedVideoCombine",
+            "DaSiWa_LTX2LoraLoader",
+            "DaSiWa_NodeStatusSwitch",
+            "DaSiWa_RTX_UpscalerRefiner",
+            "DaSiWa_ResolutionScaleCalculator",
+            "DaSiWa_SeedControl",
+            "DaSiWa_TorchResize",
+            "DaSiWa_Watermark"
+          ]
+        },
+        {
+          "name": "ComfyUI-GGUF",
+          "minimumCommit": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
+          "repository": "https://github.com/city96/ComfyUI-GGUF",
+          "version": "2.0.0",
+          "license": "Apache-2.0",
+          "requiredClasses": [
+            "DualCLIPLoaderGGUF",
+            "UnetLoaderGGUF"
+          ]
+        },
+        {
+          "name": "ComfyUI-KJNodes",
+          "minimumCommit": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
+          "repository": "https://github.com/kijai/ComfyUI-KJNodes",
+          "version": "1.5.2",
+          "license": "GPL-3.0",
+          "webDirectory": "./web",
+          "requiredClasses": [
+            "LTX2AttentionTunerPatch",
+            "LTX2SamplingPreviewOverride",
+            "LTX2_NAG",
+            "LTXVChunkFeedForward",
+            "ModelPatchTorchSettings",
+            "PatchTritonVAE",
+            "VAELoaderKJ"
+          ]
+        },
+        {
+          "name": "whatdreamscost-comfyui",
+          "minimumCommit": "fe09f73756df202d08341c66b4dc5fc8d2acca22",
+          "repository": "https://github.com/PodJamz/whatdreamscost-comfyui",
+          "version": "2.0.5",
+          "license": "GPL-3.0",
+          "webDirectory": "./js",
+          "frontendAssets": [
+            {
+              "path": "js/ltx_director.js",
+              "registration": "LTXDirector"
+            },
+            {
+              "path": "js/ltx_director_guide.js",
+              "registration": "Comfy.LTXDirectorGuide"
+            }
+          ],
+          "requiredClasses": [
+            "LTXDirector",
+            "LTXDirectorCropGuides",
+            "LTXDirectorGuide"
+          ]
+        },
+        {
+          "name": "ComfyUI-LTXVideo",
+          "minimumCommit": "5722b53a08daec57f5442347b235cb84df0afbe7",
+          "repository": "https://github.com/Lightricks/ComfyUI-LTXVideo",
+          "license": "LTX-2 Community License",
+          "webDirectory": "./web",
+          "requiredClasses": [
+            "LTXVSpatioTemporalTiledVAEDecode"
+          ]
+        },
+        {
+          "name": "comfyui-WhiteRabbit",
+          "minimumCommit": "4815da41473c99400da6ca4127f0e324dbfd865a",
+          "repository": "https://github.com/Artificial-Sweetener/comfyui-WhiteRabbit",
+          "version": "1.2.0",
+          "license": "AGPL-3.0-only",
+          "requiredClasses": [
+            "UpscaleWithModelAdvanced"
+          ]
+        }
+      ],
+      "sourceSha256": "f4a9e0c3abfff2c4e94525b312c463981090da7e5cb8a41cd479bb9779ab6933",
+      "sourceCommit": "143bd6a47d844ddd7a68175db5c5ff3867f5febb",
+      "notes": "Load the pinned original in native ComfyUI. All serialized classes and frontend assets remain required even for currently bypassed stages; no adapted fallback. Model assets and GPU execution are separate readiness gates.",
+      "runtimePackages": [
+        {
+          "module": "triton",
+          "distribution": "triton",
+          "optional": true,
+          "requiredWhen": {
+            "workflowId": "ltx23-50",
+            "className": "PatchTritonVAE",
+            "defaultEnabled": true,
+            "controllerNodeId": 3676,
+            "controllerWidget": "enabled"
+          },
+          "reason": "Only the enabled PatchTritonVAE branch requires Triton; this pinned LTX original enables that branch by default. It is not required for H3 or the declared Umbra API workflows. On Windows use triton-windows matched to the installed Torch minor and supported GPU; Linux uses the compatible triton distribution. Installation is held until that platform pin is reviewed. Native loading separately requires every original node class to remain registered, including bypassed stages."
         }
       ]
     }

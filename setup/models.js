@@ -47,18 +47,20 @@ const modelBytes = value => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(
 function modelError(error) { status.textContent = error.message; status.classList.add('error'); }
 
 function showSetupTab(tab) {
-  ['general', 'models'].forEach(id => {
+  ['general', 'models', 'tools'].forEach(id => {
     modelElement(`${id}-panel`).hidden = tab !== id;
     modelElement(`tab-${id}`).setAttribute('aria-selected', String(tab === id));
     modelElement(`tab-${id}`).tabIndex = tab === id ? 0 : -1;
   });
 }
-['general', 'models'].forEach(tab => {
+const setupTabs = ['general', 'models', 'tools'];
+setupTabs.forEach(tab => {
   modelElement(`tab-${tab}`).addEventListener('click', () => showSetupTab(tab));
   modelElement(`tab-${tab}`).addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const next = event.key === 'Home' ? 'general' : event.key === 'End' ? 'models' : tab === 'general' ? 'models' : 'general';
+    const next = event.key === 'Home' ? setupTabs[0] : event.key === 'End' ? setupTabs.at(-1)
+      : setupTabs[(setupTabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : setupTabs.length - 1)) % setupTabs.length];
     showSetupTab(next); modelElement(`tab-${next}`).focus();
   });
 });
@@ -204,7 +206,104 @@ modelElement('model-cancel').addEventListener('click', async () => {
   catch (error) { modelError(error); }
 });
 language.addEventListener('change', renderModelFamilies);
-showSetupTab(new URLSearchParams(location.search).get('tab') === 'models' ? 'models' : 'general');
+showSetupTab(setupTabs.includes(new URLSearchParams(location.search).get('tab')) ? new URLSearchParams(location.search).get('tab') : 'general');
 modelElement(`pack-${modelPack}`).click();
 if (new URLSearchParams(location.search).get('pack') === 'data-forge') modelElement('data-forge-pack').scrollIntoView();
 void loadModelCatalog().catch(modelError);
+
+Object.assign(SETUP_TRANSLATIONS.en, {
+  toolsTab: 'Tools', managedTools: 'Managed tools', refreshTools: 'Refresh', repairTool: 'Install / repair',
+  toolsHint: 'Checks reviewed suite versions, compatibility patches and frontend registration files. Restart managed ComfyUI and refresh its frontend after repairs. Runtime registration is verified when the workflow runs.',
+  noManagedTools: 'This build does not declare managed tool requirements.',
+});
+let toolsBusy = false;
+let completedToolsJob = '';
+function setToolsBusy(busy) {
+  toolsBusy = busy;
+  modelElement('tools-list').querySelectorAll('button').forEach(button => { button.disabled = busy; });
+  modelElement('tools-refresh').disabled = busy;
+}
+function toolsRow(label, detail, kind = '', target = '', action = null, actionLabel = '') {
+  const row = document.createElement('div'); row.className = 'model-file';
+  const name = document.createElement('strong'); name.textContent = label; row.append(name);
+  const text = document.createElement('small'); text.textContent = detail; row.append(text);
+  if (kind || action) {
+    const button = document.createElement('button'); button.className = 'button'; button.type = 'button';
+    button.textContent = actionLabel || tr('repairTool'); button.disabled = toolsBusy;
+    button.addEventListener('click', async () => {
+      if (action) { await action(); return; }
+      setBusy(true);
+      try {
+        const result = await api('/api/dependencies/action', { method: 'POST', body: JSON.stringify({ kind, target }) });
+        renderJob(result.job); void poll();
+      } catch (error) { modelError(error); setBusy(false); }
+    });
+    row.append(button);
+  }
+  modelElement('tools-list').append(row);
+}
+async function loadManagedTools() {
+  const dependencies = await api('/api/dependencies');
+  modelElement('tools-list').replaceChildren();
+  modelElement('tools-summary').textContent = tr(dependencies.features.length ? 'toolsHint' : 'noManagedTools');
+  const core = dependencies.comfyui;
+  const isOutdated = (version, minimum) => {
+    if (!minimum) return false;
+    const installed = String(version || '0').split('.').map(Number), required = minimum.split('.').map(Number);
+    return required.some((part, index) => installed.slice(0, index).every((value, i) => value === required[i]) && (installed[index] || 0) < part);
+  };
+  const outdated = isOutdated(core.version, core.minimumRequired) || isOutdated(core.frontendVersion, core.minimumFrontendRequired);
+  toolsRow('ComfyUI', `${core.version || 'Missing'}${core.minimumRequired ? ` | Required ${core.minimumRequired}+` : ''} | Frontend ${core.frontendVersion || 'unverified'}${core.minimumFrontendRequired ? ` | Required ${core.minimumFrontendRequired}+` : ''}`,
+    !core.installed || outdated ? 'comfyui' : '', 'ComfyUI');
+  const suites = new Map();
+  for (const plan of dependencies.repairPlans || []) {
+    const saved = dependencies.repairState?.featureId === plan.featureId ? dependencies.repairState : null;
+    toolsRow(plan.label, saved ? `${saved.phase} | ${saved.completedTargets.length} steps completed | ${saved.error || ''}` : `${plan.steps.length} managed repair steps | Review suites and pins`, '', '',
+      async () => {
+        if (!window.confirm([plan.label, ...plan.steps.map(step => `${step.target}: ${step.pins.join(', ')}`), ...plan.holds,
+          'Install / verify these managed tools using existing Setup? Model downloads are separate. Local changes are preserved. Restart and native runtime preflight are required.'].join('\n\n'))) return;
+        setBusy(true);
+        try {
+          const result = await api('/api/dependencies/repair', { method: 'POST', body: JSON.stringify({ featureId: plan.featureId, planId: plan.id }) });
+          renderJob(result.job); void poll();
+        } catch (error) { modelError(error); setBusy(false); }
+      }, saved && ['held', 'failed'].includes(saved.phase) ? 'Review / Resume' : 'Review repair');
+    if (saved && ['restart-required', 'preflight-held', 'preflight-passed'].includes(saved.phase)) {
+      toolsRow('Runtime readiness', 'Start managed ComfyUI normally and refresh its frontend; native hooks and GPU remain unqualified.', '', '', async () => {
+        try {
+          const result = await api('/api/dependencies/preflight', { method: 'POST', body: JSON.stringify({ featureId: plan.featureId }) });
+          await loadManagedTools(); modelElement('tools-message').textContent = result.ready ? result.qualification : result.issues.join(' ');
+        } catch (error) { modelError(error); }
+      }, 'Recheck');
+    }
+  }
+  for (const feature of dependencies.features) {
+    const requiredClasses = feature.requiredBuiltinClasses || [];
+    const workflows = feature.workflowIds || [];
+    toolsRow(feature.label, `${workflows.length ? `${workflows.length} declared workflows | ` : ''}ComfyUI ${feature.minimumComfyVersion}+${requiredClasses.length ? ` | Runtime classes: ${requiredClasses.join(', ')}` : ''}`);
+    for (const dependency of feature.runtimePackages || []) {
+      toolsRow(`${dependency.distribution} | ${dependency.status === 'missing' ? 'Workflow held' : 'Runtime unqualified'}`,
+        `${dependency.detail} ${dependency.reason}`);
+    }
+    for (const node of feature.customNodes) {
+      const existing = suites.get(node.name);
+      if (!existing || existing.status === 'ready' && node.status !== 'ready') suites.set(node.name, node);
+    }
+  }
+  for (const node of suites.values()) {
+    const assets = node.frontendAssets || [];
+    toolsRow(node.name, `${node.status === 'ready' ? 'Installed files verified; runtime unchecked' : node.status} | Reviewed ${node.minimumCommit.slice(0, 12)}${node.reason ? ` | ${node.reason}` : ''}${assets.length ? ` | Frontend: ${assets.join(', ')}` : ''}`,
+      node.status === 'ready' ? '' : 'node', node.name);
+  }
+  setToolsBusy(toolsBusy);
+}
+function renderToolsProgress(job) {
+  if (job.kind !== 'managed-tools') return;
+  modelElement('tools-message').textContent = job.error || (job.phase === 'complete'
+    ? 'Managed files verified. Restart managed ComfyUI and refresh its frontend; runtime registration remains to be checked.' : job.step);
+  if (job.phase !== 'running' && completedToolsJob !== job.id) {
+    completedToolsJob = job.id; void loadManagedTools().catch(modelError);
+  }
+}
+modelElement('tools-refresh').addEventListener('click', () => { void loadManagedTools().catch(modelError); });
+void loadManagedTools().catch(modelError);

@@ -9,6 +9,16 @@
 - Retain legacy source, saved controls, custom workflows, queue data, history, and results. Unsupported saved work displays **Held**; loading a legacy saved queue keeps its original generation settings paused and held. Cancellation and viewing previous outputs remain available.
 - Restore the previous adapted choices through **Video > Video routing > All video routes**. Default mode holds all adapted/manual video jobs, including Umbra's earlier H3/OmniForge adapters. Routing changes do not convert saved settings or resume a live video queue; use **Resume** explicitly after rollback. No dependencies or weights are installed by this switch.
 - Missing nodes, native hooks, model selections, or staged media block capture/admission. Accepted official jobs that lose readiness pause with an actionable hold; restored saved official work stays paused. Actual installed frontend compatibility, GPU inference, and output quality remain unqualified; mocked checks do not qualify a release.
+- Import a paired native Workflow JSON/API JSON export without changing either retained text. Validate original topology, native root/subgraph instance IDs and direct executable links; accommodate only the frontend's documented unconnected widget-slot compression. Reject unsafe numeric seeds and changed exports instead of rounding or rebuilding the API graph.
+- Add a temporary Windows existing-runtime test binding with pinned PID, creation time, loopback endpoint and physical roots. It uses a separate test data folder, expires, permits one official submission and targeted job cancellation, and holds tool/lifecycle changes, direct Comfy writes and broad queue controls. Normal owned-runtime behavior remains the default.
+- Save the newest adapted controls and device prompts before changing routing. Hold editing during the transition; failed or uncertain policy acknowledgement exposes recovery without discarding the latest draft.
+
+### Managed Official Video Dependencies
+
+- Setup and the updater use the existing installer for a combined H3/LTX dependency repair plan. After an app update, review compatible core/frontend versions and reviewed node pins once; repairs run serially, deduplicate shared suites, retain progress, and require explicit retry/resume after interruption.
+- Honor declared pins, enable required LTX suites and add the missing MMH3 Ultimate Upscale and rgthree providers. Update normal DaSiWa to reviewed 0.4.73, including its virtual label, native status/seed hooks and refreshed Forge compatibility patch. Retain the prior patch for upgrade migration.
+- Preserve newer versions, divergent/local node work, non-Git folders, models, settings and user data. Busy or uncertain processes/queues hold repair. File verification, restart, owned runtime registration, native frontend capture and model readiness are separate states; dependency repair does not download generation weights or resume queues.
+- Diagnose Triton only for an enabled LTX TritonVAE branch. No universal or unqualified Triton install pin is assumed. Actual dependency installation, native exports and GPU output remain release qualification gates.
 
 ### Workspace Interface Alignment
 

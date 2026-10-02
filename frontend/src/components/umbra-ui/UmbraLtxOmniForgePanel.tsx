@@ -68,6 +68,7 @@ export interface UmbraLtxOmniForgePanelProps {
   lastFrame?: Ltx23UploadedImage | null;
   onFirstFrameChange?: (image: Ltx23UploadedImage | null) => void;
   onLastFrameChange?: (image: Ltx23UploadedImage | null) => void;
+  onDraftBusyChange?: (busy: boolean) => void;
 }
 
 function options(values: string[] | undefined, current: string) {
@@ -126,7 +127,7 @@ function readMediaDurationSeconds(file: File, kind: 'video' | 'audio'): Promise<
 
 export function UmbraLtxOmniForgePanel({
   controls, onChange, onClose, onUploadImage, onUploadMedia, frameRate, frames, globalPrompt, catalog = {}, wiredControls = [],
-  firstFrame, lastFrame, onFirstFrameChange, onLastFrameChange,
+  firstFrame, lastFrame, onFirstFrameChange, onLastFrameChange, onDraftBusyChange,
 }: UmbraLtxOmniForgePanelProps) {
   const latest = React.useRef(controls);
   latest.current = controls;
@@ -176,6 +177,7 @@ export function UmbraLtxOmniForgePanel({
   const uploadImage = async (file: File) => {
     const target = uploadTarget.current;
     if (!target || uploading) return;
+    onDraftBusyChange?.(true);
     setUploading(target);
     setUploadError(null);
     try {
@@ -199,12 +201,14 @@ export function UmbraLtxOmniForgePanel({
     } finally {
       setUploading('');
       if (fileRef.current) fileRef.current.value = '';
+      onDraftBusyChange?.(false);
     }
   };
   const uploadMedia = async (file: File) => {
     const request = mediaTarget.current;
     if (!request || !onUploadMedia || mediaUploading) return;
     const { target, kind } = request;
+    onDraftBusyChange?.(true);
     setMediaUploading(target);
     setMediaError(null);
     try {
@@ -240,6 +244,7 @@ export function UmbraLtxOmniForgePanel({
     } finally {
       setMediaUploading('');
       if (mediaRef.current) mediaRef.current.value = '';
+      onDraftBusyChange?.(false);
     }
   };
   const changePass = (index: number, patch: Partial<Ltx23OmniForgePass>) => {

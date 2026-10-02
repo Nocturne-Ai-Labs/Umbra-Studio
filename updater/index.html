@@ -446,6 +446,25 @@
         updateActions();
       }
     }
+    async function reviewWorkflowRepair(plan) {
+      if (dependencyRunning) return;
+      const description = [plan.label, ...plan.steps.map(step => `${step.target}: ${step.pins.join(', ')}`),
+        ...plan.holds, 'Install these managed dependencies using existing Setup? Models are separate. Local node changes are preserved. Restart and runtime preflight are required; queues do not resume automatically.'].join('\n\n');
+      if (!window.confirm(description)) return;
+      dependencyRunning = true; updateActions();
+      try {
+        await api('/api/dependencies/repair', { method: 'POST', body: JSON.stringify({ featureId: plan.featureId, planId: plan.id }) });
+        await loadDependencies();
+      } catch (error) { dependencyRunning = false; await loadDependencies(); dependencyMessage.className = 'message error'; dependencyMessage.textContent = error.message; }
+    }
+    async function recheckWorkflowRepair(featureId) {
+      try {
+        const result = await api('/api/dependencies/preflight', { method: 'POST', body: JSON.stringify({ featureId }) });
+        await loadDependencies();
+        dependencyMessage.className = result.ready ? 'message' : 'message error';
+        dependencyMessage.textContent = result.ready ? result.qualification : result.issues.join(' ');
+      } catch (error) { dependencyMessage.className = 'message error'; dependencyMessage.textContent = error.message; }
+    }
     async function launchModelSetup(profile) {
       const tab = window.open('', '_blank');
       dependencyList.querySelectorAll('button').forEach((button) => { button.disabled = true; });
@@ -478,7 +497,7 @@
         dependencyRunning = action?.phase === 'running' || status.modelSetupRunning;
         dependencyList.replaceChildren();
         const requiredVersion = status.comfyui.minimumRequired;
-        const outdatedComfy = Boolean(requiredVersion && compare(status.comfyui.version || '0.0.0', requiredVersion) < 0);
+        const outdatedComfy = Boolean(requiredVersion && compare(status.comfyui.version || '0.0.0', requiredVersion) < 0) || Boolean(status.comfyui.minimumFrontendRequired && compare(status.comfyui.frontendVersion || '0.0.0', status.comfyui.minimumFrontendRequired) < 0);
         const canManage = latestState?.phase === 'idle' || latestState?.phase === 'complete';
         dependencySummary.textContent = status.features.length
           ? canManage ? 'Checked against the installed build. Tool changes require your confirmation.' : 'Current installation shown. Finish the Umbra Studio update to unlock managed dependency actions.'
@@ -488,18 +507,32 @@
         }
         dependencyRow('ComfyUI', `${status.comfyui.installed ? `Installed v${status.comfyui.version}` : 'Not installed'}${requiredVersion ? ` · active features need v${requiredVersion}+` : ''}`,
           canManage ? !status.comfyui.installed ? 'Install' : outdatedComfy ? 'Update' : '' : '', () => startDependency('comfyui', 'ComfyUI'));
+        const managedSuites = new Map();
+        for (const plan of status.repairPlans || []) {
+          const saved = status.repairState?.featureId === plan.featureId ? status.repairState : null;
+          dependencyRow(plan.label, `${saved ? `${saved.phase} | ${saved.completedTargets.length} steps completed | ${saved.error || ''}` : 'Review required tool suites and pins'}${plan.holds.length ? ` | ${plan.holds.join(' ')}` : ''}`,
+            canManage ? saved && ['held', 'failed'].includes(saved.phase) ? 'Review / Resume' : 'Review repair' : '', () => reviewWorkflowRepair(plan));
+          if (saved && ['restart-required', 'preflight-held', 'preflight-passed'].includes(saved.phase)) {
+            dependencyRow('Runtime readiness', 'Start managed ComfyUI normally, refresh its frontend, then recheck. Native GPU execution remains unqualified.', canManage ? 'Recheck' : '', () => recheckWorkflowRepair(plan.featureId));
+          }
+        }
         for (const feature of status.features) {
           const prefix = feature.optional ? 'Optional' : feature.active ? 'In use' : 'Available';
           const missing = feature.missingModels.length;
           const missingDetail = missing ? ` · Missing: ${feature.missingModels.join(', ')}` : '';
           dependencyRow(feature.label, `${prefix} · ${feature.totalModels - missing}/${feature.totalModels} managed models present · ComfyUI v${feature.minimumComfyVersion}+${missingDetail}`,
             canManage && missing && (feature.active || feature.optional) ? 'Models' : '', () => launchModelSetup(feature.modelProfiles[0]));
-          for (const node of feature.customNodes) {
-            if (dependencyList.querySelector(`[data-node="${node.name}"]`)) continue;
-            dependencyRow(node.name, `${feature.optional ? 'Optional' : 'Required'} · ${node.status === 'ready' ? 'Ready' : node.status === 'unknown' ? 'Installed; version unverified' : node.status}${node.reason ? ` · ${node.reason}` : ''}`, !canManage || node.status === 'ready' ? '' : 'Install / Update',
-              () => startDependency('node', node.name));
-            dependencyList.lastElementChild.dataset.node = node.name;
+          for (const dependency of feature.runtimePackages || []) {
+            dependencyRow(dependency.distribution, `${dependency.status === 'missing' ? 'Workflow held' : 'Runtime unqualified'} | ${dependency.detail} ${dependency.reason}`, '', () => {});
           }
+          for (const node of feature.customNodes) {
+            const existing = managedSuites.get(node.name);
+            if (!existing || existing.status === 'ready' && node.status !== 'ready') managedSuites.set(node.name, node);
+          }
+        }
+        for (const node of managedSuites.values()) {
+          dependencyRow(node.name, `${node.status === 'ready' ? 'Installed files verified; runtime unchecked' : node.status}${node.reason ? ` | ${node.reason}` : ''}${node.frontendAssets?.length ? ` | Frontend: ${node.frontendAssets.join(', ')}` : ''}`, !canManage || node.status === 'ready' ? '' : 'Install / repair',
+            () => startDependency('node', node.name));
         }
         dependencyLog.hidden = !action?.lines?.length;
         dependencyLog.textContent = action?.lines?.join('\n') || '';
@@ -509,10 +542,16 @@
         } else if (action) {
           dependencyMessage.className = `message${action.phase === 'failed' ? ' error' : ''}`;
           dependencyMessage.textContent = action.phase === 'running' ? `Working on ${action.target}...`
-            : action.phase === 'complete' ? `${action.target} is ready. Reopen ComfyUI if it was running.`
+            : action.phase === 'complete' ? `${action.target} files verified. Restart managed ComfyUI and refresh its frontend; runtime registration remains to be checked.`
             : action.error;
         }
         updateActions();
+        const combined = status.repairPlans?.find(plan => plan.featureId === 'official-video-workflows');
+        const updatedVersion = latestState?.phase === 'complete' ? latestState.targetVersion : '';
+        if (combined && updatedVersion && !dependencyRunning && automaticRepairReviewVersion !== updatedVersion) {
+          automaticRepairReviewVersion = updatedVersion;
+          void reviewWorkflowRepair(combined);
+        }
         clearTimeout(dependencyTimer);
         if (dependencyRunning) dependencyTimer = setTimeout(loadDependencies, status.modelSetupRunning ? 2000 : 1000);
       } catch (error) {
@@ -588,6 +627,7 @@
         closeUpdaterButton.disabled = false;
       }
     });
+    let automaticRepairReviewVersion = '';
     void loadReleases().then(pollState);
     void loadDependencies();
   </script>

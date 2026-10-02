@@ -4,6 +4,8 @@ import { spawnSync } from 'node:child_process';
 
 const patchPath = join(import.meta.dir, 'DaSiWaForgeCompute.patch');
 const legacyPatchPath = join(import.meta.dir, 'DaSiWaForgeCompute.legacy.patch');
+const previousPatchPath = join(import.meta.dir, 'DaSiWaForgeCompute.previous.patch');
+const previousPatches = [previousPatchPath, legacyPatchPath];
 
 function gitApply(nodePath: string, patch: string, ...args: string[]): boolean {
     return spawnSync('git', ['apply', ...args, patch], {
@@ -13,7 +15,7 @@ function gitApply(nodePath: string, patch: string, ...args: string[]): boolean {
 }
 
 export function removeDaSiWaForgeComputePatchForUpdate(nodePath: string): void {
-    for (const patch of [patchPath, legacyPatchPath]) {
+    for (const patch of [patchPath, ...previousPatches]) {
         if (!gitApply(nodePath, patch, '--reverse', '--check')) continue;
         if (!gitApply(nodePath, patch, '--reverse')) {
             throw new Error('Could not temporarily remove the Umbra H3 Forge patch. DaSiWa was not updated.');
@@ -30,12 +32,12 @@ export function ensureDaSiWaForgeComputePatch(nodePath: string): void {
         throw new Error('DaSiWa H3 Prompt Forge is missing from this custom node installation.');
     }
     if (gitApply(nodePath, patchPath, '--reverse', '--check')) return;
-    const legacy = gitApply(nodePath, legacyPatchPath, '--reverse', '--check');
-    if (legacy && !gitApply(nodePath, legacyPatchPath, '--reverse')) {
+    const previous = previousPatches.find((patch) => gitApply(nodePath, patch, '--reverse', '--check'));
+    if (previous && !gitApply(nodePath, previous, '--reverse')) {
         throw new Error('Could not migrate the previous Umbra H3 Forge patch. Local files were preserved.');
     }
     if (!gitApply(nodePath, patchPath, '--check') || !gitApply(nodePath, patchPath)) {
-        if (legacy && !gitApply(nodePath, legacyPatchPath)) {
+        if (previous && !gitApply(nodePath, previous)) {
             throw new Error('Could not restore the previous Umbra H3 Forge patch after migration failed. Reinstall the managed DaSiWa H3 nodes.');
         }
         throw new Error('DaSiWa H3 Prompt Forge changed upstream; Umbra Llama support needs review before this node can be used.');

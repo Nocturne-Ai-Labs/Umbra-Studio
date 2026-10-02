@@ -95,6 +95,22 @@ requiring a host Node installation.
 | Umbra Remote | Tailscale installed and signed in on the host and client; Tailscale Serve is recommended for HTTPS. |
 | Video generation | ComfyUI, compatible video models/custom nodes, sufficient VRAM, and video encode/decode support. |
 
+The default official H3 C-MMH3-26 and LTX C-LTX23-50 workflows have explicit
+dependencies in `defaults/UmbraUI/tool-requirements.json`. Their reviewed baseline
+is ComfyUI 0.38.0 with frontend 1.53.6 and DaSiWa 0.4.73, plus the declared
+provider suites and frontend assets. Setup and the updater repair these through
+the existing managed installer after a dependency-plan review. Local conflicts,
+busy runtimes and unverified shutdowns hold the repair; generation models remain
+a separate user selection/setup step.
+
+Triton is required only when the native LTX API graph contains the active
+TritonVAE branch. Capture and queue compilation check module availability in that
+selected runtime's local Python environment. A missing or unverified module holds
+the job; finding the module does not establish Torch/GPU compatibility. H3 and an
+inactive LTX TritonVAE branch do not require this probe. Native frontend export,
+installed model compatibility and real GPU output remain separate qualification
+checks. See [the official video walkthrough](README.md#official-h3-and-ltx-video-workflows).
+
 ## Data Forge Model Pack
 
 The pinned caption pack is defined in

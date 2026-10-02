@@ -82,6 +82,59 @@ current releases.
 
 ## Interface Tour
 
+### Official H3 and LTX video workflows
+
+Video defaults to **DaSiWa only**, using the bundled, pinned originals
+**MiniMax H3 MythicAlchemy C-MMH3-26** and **LTX OmniForge C-LTX23-50**.
+The original files and their GPL provenance are under
+[`defaults/PowerPrompter/Official Workflows/DaSiWa`](defaults/PowerPrompter/Official%20Workflows/DaSiWa/PROVENANCE.md).
+Umbra does not substitute an adapted graph when an official workflow is held.
+
+1. Review the workflow dependency repair in Umbra Setup or the updater. It
+   uses the existing managed installer for compatible ComfyUI/frontend and node
+   suites. Finish queued work and stop managed ComfyUI before repair. Conflicting
+   local edits are retained and reported. Models are a separate selection/setup
+   step; dependency repair does not download generation weights.
+2. Start managed ComfyUI normally and refresh its frontend. In Umbra Video,
+   select the official workflow and **Check readiness**, then **Load official
+   workflow in ComfyUI**. Resolve missing nodes, models or frontend errors before
+   continuing. LTX's original TritonVAE option needs a compatible Triton runtime
+   when enabled; it does not make Triton an H3 requirement.
+3. Set prompt, installed models, duration and fixed seed through the original
+   native controls without editing wiring. Use **Capture from ComfyUI**.
+   Alternatively, export both **Workflow JSON** and **API JSON** from the same
+   configured native graph, then choose them under **Import native exports**.
+   Export again after any change. Each file must be at most 16 MiB; unsafe numeric
+   seeds are held rather than rounded. Decimal seed strings are retained.
+4. Review the captured prompt and queue one snapshot through **Queue captured
+   workflow**. Capture/import does not itself submit a job. Readiness is checked
+   again before submission. Missing resources or changed runtime identity hold
+   the work until reviewed; there is no automatic retry after an uncertain POST.
+
+The native serializer remains responsible for virtual nodes, status switches and
+subgraph expansion. Import checks source topology, execution IDs/classes, direct
+executable connections, runtime schemas and retained export hashes. A manual
+export pair is supplied by the host user; these checks do not prove that a browser
+produced it or qualify GPU execution. A real native export and generation test
+are still required to establish runtime compatibility and output quality.
+
+**All video routes** is the explicit legacy route choice. Switching policies saves
+the latest controls and device prompt first and pauses affected queue work until
+an explicit Resume. Existing adapter modules, settings, drafts, captures and
+history remain available. This route choice is separate from restoring an app
+source/build backup; app rollback does not silently downgrade Python packages or
+custom node suites.
+
+For a temporary Windows development test against an existing local ComfyUI
+process, `scripts/prepare-official-comfy-session.ts` can produce a fresh, read-only
+binding with `--base-url`, `--tool-root` and `--runtime-root`. The runtime root must
+already exist outside both source and the personal installation. Set
+`UMBRA_OFFICIAL_COMFY_SESSION` to its JSON and `UMBRA_ROOT` to that isolated folder
+only in the test process, with separate Umbra/Comfy ports. The binding expires
+after 30 minutes and accepts one official queue submission. PID, creation time,
+listener and physical roots are rechecked; tool changes, lifecycle controls,
+direct Comfy writes and broad interrupt/clear are held. No setting is persisted.
+
 The screenshots below use safe demonstration media and omit the embedded
 ComfyUI workspace. Select an image to open the full-size view.
 

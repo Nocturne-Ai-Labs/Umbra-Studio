@@ -161,6 +161,7 @@
       <nav class="setup-tabs" role="tablist" aria-label="Setup">
         <button id="tab-general" class="button" role="tab" aria-selected="true" aria-controls="general-panel" data-i18n="languageLabel">Language</button>
         <button id="tab-models" class="button" role="tab" aria-selected="false" aria-controls="models-panel" data-i18n="modelsTab">Models</button>
+        <button id="tab-tools" class="button" role="tab" aria-selected="false" aria-controls="tools-panel" data-i18n="toolsTab">Tools</button>
       </nav>
       <section id="general-panel" class="panel" role="tabpanel" aria-labelledby="tab-general">
         <div class="section-label" data-i18n="languageLabel">Language</div>
@@ -220,6 +221,15 @@
           </article>
         </div>
         </div>
+      </section>
+      <section id="tools-panel" class="panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
+        <div class="panel-head">
+          <h2 data-i18n="managedTools">Managed tools</h2>
+          <button id="tools-refresh" class="button" type="button" data-i18n="refreshTools">Refresh</button>
+        </div>
+        <p id="tools-summary" aria-live="polite"></p>
+        <div id="tools-list" class="model-files"></div>
+        <p id="tools-message" aria-live="polite"></p>
       </section>
       <section id="progress" class="progress">
         <div class="progress-head">
@@ -378,6 +388,7 @@
       document.getElementById('launch').disabled = busy;
       document.getElementById('close').disabled = busy;
       setModelBusy(busy);
+      setToolsBusy(busy);
     }
 
     function renderJob(job) {
@@ -391,7 +402,8 @@
       jobLog.scrollTop = jobLog.scrollHeight;
       setBusy(job.phase === 'running');
       renderModelProgress(job);
-      status.textContent = job.phase === 'running' ? tr('installingModels') : localizeJobStep(job.step);
+      renderToolsProgress(job);
+      status.textContent = job.phase === 'running' ? job.kind === 'managed-tools' ? job.step : tr('installingModels') : localizeJobStep(job.step);
       status.classList.toggle('error', job.phase === 'failed');
     }
 
