@@ -155,7 +155,7 @@ jobs:
           awk '
             BEGIN {
               mobile="**Umbra Studio Mobile is experimental and is not ready for feedback.**"
-              canvas="**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Fresh GPU generation, model-based background removal, physical touch interaction, and complete localization remain unqualified.**"
+              canvas="**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. CPU isnet-anime background removal was checked on illustrated fixtures; photographic subjects, GPU background-removal acceleration, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**"
               video="**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**"
               print mobile "\n\n" canvas "\n\n" video "\n"
             }

@@ -14,6 +14,7 @@
 - Track autosave by project identity and revision, so a new project still saves when its revision number matches the previous project. Retry the required save after an overlapping older autosave before switching projects.
 - Upload a shared temporary image once when duplicate layers are saved, retaining every layer's identity and transforms. Missing sources still block the save; existing request-size limits remain in place for projects with many distinct image payloads.
 - Keep failed-save drafts open with **Retry Save**. A conflicting saved revision exposes **Save project as a new copy** and **Reload saved project**, which asks before discarding the local draft.
+- Fix missing cutout pixels after Undo → Save → Redo: retain immutable saved image assets for open editing histories until project deletion. Save as Copy includes only current document assets. Repeated pixel edits can increase project storage.
 
 ### Video Workspace
 
@@ -23,7 +24,8 @@
 
 - Local verification covers project create/open/save/reload, asset recovery, transforms and masks, crop/merge undo, PNG and portable archive export/import, corrupt imports, failed saves, conflicts, project-scoped autosave, delayed edit races, and desktop/tablet layouts. A synthetic project with 25 shared 4096-by-4096 raster layers remains editable and saves without coordinate drift.
 - Frontend types, lint, production build, pipeline audit, focused persistence/editing tests, and an independent audit pass. The image-upload optimization keeps the existing storage format and generation pipeline contracts.
-- **Canvas remains experimental and is not ready for feedback.** Fresh GPU generation and model-based background removal have not been qualified in this pass. Tablet layouts were checked in browser emulation; physical touch and pinch/pen interaction remain unqualified. Complete localization and broader model-specific documentation remain pending.
+- Actual `isnet-anime` background removal passed on illustrated portrait fixtures with CPU inference: original dimensions and transparency, recoverable cutout layers, Undo/Save/Redo, reopen and identical PNG export, repeated requests, and failure handling. Project changes discard stale cutouts but do not stop their ComfyUI inference. Current mask post-processing produces hard edges; inspect fine hair before accepting a cutout.
+- **Canvas remains experimental and is not ready for feedback.** Photographic-subject removal, GPU background-removal acceleration, and fresh GPU generation remain unqualified. Tablet layouts were checked in browser emulation; physical touch and pinch/pen interaction remain unqualified. Complete localization and broader model-specific documentation remain pending.
 - **Video generation remains in beta.** The layout checks use simulated jobs and media; they do not establish fresh GPU rendering qualification for LTX, WAN, MiniMax H3, or advanced model combinations.
 
 ## v0.32.44 - OmniForge, Live Gallery Folders, And Media Workflow Updates

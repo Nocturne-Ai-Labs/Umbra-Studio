@@ -94,6 +94,15 @@ opening a saved Canvas navigation state on a phone returns to TXT2IMG.
    pending jobs and staging previews. **Export image layer PNG** saves the
    selected raster layer's image as a PNG.
 
+For background removal, launch ComfyUI, select an unlocked image layer, and
+choose **Remove image background**. The `Image Rembg (Remove Background)` custom
+node and `isnet-anime` model must be available. A successful removal adds a
+cutout layer and hides the original; Undo restores the original, and Redo
+recovers the cutout. Existing transparent and erased pixels remain transparent.
+Inspect hair and fine edges before using the result: the current post-processing
+produces hard mask edges. Switching projects discards the pending result,
+although its ComfyUI inference may continue to completion.
+
 Close **Prompt**, **Generation**, or **Layers** to give the canvas more room.
 On a short window, **Hide Strip** also frees space. **Fit visible content**
 and **Reset view** help recover an off-screen view. Switching between Canvas
@@ -110,12 +119,20 @@ its result. Duplicate layers sharing a temporary image upload that image once;
 each layer keeps its own identity and transforms. Projects with many distinct
 large images can still reach the existing save-request limit.
 
+Saved image assets remain available for open Undo/Redo histories until the
+project is deleted, so repeated pixel edits can increase project storage.
+**Save project as a new copy** and portable exports include the current
+document's referenced assets rather than unrelated historical image files.
+
 Canvas is not ready for feedback. Current local checks cover editing, saved
 project recovery, exports, failure handling, and simulated desktop/tablet
-layouts, including a synthetic 25-layer 4K project. Fresh GPU generation,
-model-based background removal, and physical touch/pen/pinch interaction remain
-unqualified. Complete localization and broader model-specific documentation
-are pending.
+layouts, including a synthetic 25-layer 4K project. Actual `isnet-anime`
+background removal was checked on illustrated portrait fixtures using CPU
+inference, including alpha preservation, Undo/Save/Redo, reopen, PNG export,
+repeat requests, stale-result protection, and failure handling. This does not
+qualify photographic subjects, GPU background-removal acceleration, fresh
+image generation, or physical touch/pen/pinch interaction. Complete localization
+and broader model-specific documentation are pending.
 
 ## Video
 

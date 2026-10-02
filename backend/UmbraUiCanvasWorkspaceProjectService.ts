@@ -603,30 +603,6 @@ export class UmbraUiCanvasWorkspaceProjectService {
     }
   }
 
-  private async collectRestorePointAssetNames(projectId: string, names: Set<string>): Promise<void> {
-    const entries = await readdir(this.restorePointRoot(projectId), { withFileTypes: true }).catch((error) => {
-      if (error?.code === 'ENOENT') return [];
-      throw error;
-    });
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      const restorePoint = asRecord(JSON.parse(await readFile(join(this.restorePointRoot(projectId), entry.name), 'utf8')));
-      const project = normalizeProject(restorePoint.project);
-      for (const entity of project.entities) {
-        const imageUrl = String(entity.imageUrl || '');
-        if (!imageUrl.startsWith(PROJECT_ASSET_PREFIX)) continue;
-        const filename = safeStoredFilename(imageUrl.slice(PROJECT_ASSET_PREFIX.length));
-        if (filename) names.add(filename);
-      }
-      for (const item of [...project.generation.pending, ...project.generation.staging]) {
-        const acceptanceMaskUrl = String(item.acceptanceMaskUrl || '');
-        if (!acceptanceMaskUrl.startsWith(PROJECT_ASSET_PREFIX)) continue;
-        const filename = safeStoredFilename(acceptanceMaskUrl.slice(PROJECT_ASSET_PREFIX.length));
-        if (filename) names.add(filename);
-      }
-    }
-  }
-
   private dehydrateExistingUrl(projectId: string, value: unknown): string {
     const raw = String(value || '').trim();
     const prefix = `/api/umbra-ui/canvas/projects/${encodeURIComponent(projectId)}/assets/`;
@@ -786,7 +762,7 @@ export class UmbraUiCanvasWorkspaceProjectService {
       if (/^(blob:|data:)/i.test(currentUrl)) throw new Error(`Canvas staging mask ${entry.id} was not uploaded with the project.`);
       return { ...entry, acceptanceMaskUrl: '' };
     });
-    const referenced = await this.assertProjectAssets(projectId, project);
+    await this.assertProjectAssets(projectId, project);
     project.updatedAt = Date.now();
     const serialized = JSON.stringify(project, null, 2);
     const temporaryProjectPath = join(projectRoot, `project.${Date.now()}.tmp`);
@@ -806,18 +782,9 @@ export class UmbraUiCanvasWorkspaceProjectService {
         await rm(temporaryThumbnailPath, { force: true }).catch(() => undefined);
       }
     }
-    try {
-      await this.collectRestorePointAssetNames(projectId, referenced);
-      const assetEntries = await readdir(assetsRoot, { withFileTypes: true });
-      await Promise.all(assetEntries.map((entry) => (
-        entry.isFile() && !referenced.has(entry.name)
-          ? rm(join(assetsRoot, entry.name), { force: true })
-          : Promise.resolve()
-      )));
-    } catch (error) {
-      // The document is durable already; optional housekeeping cannot make it unsaved.
-      console.warn('[CanvasProjects] Project saved, but unused assets could not be cleaned:', error);
-    }
+    // Open clients can still reference earlier immutable assets in undo/redo history.
+    // A save contains only the current document, so it cannot safely identify orphans.
+    // Keep project assets until explicit project deletion; archives select current references.
     return this.hydrate(projectId, project);
   }
 
@@ -843,7 +810,7 @@ export class UmbraUiCanvasWorkspaceProjectService {
     const now = Date.now();
     const targetId = safeId(`canvas-${now}-${Math.random().toString(36).slice(2, 10)}`);
     const project = normalizeProject(stored);
-    await this.assertProjectAssets(sourceId, project);
+    const referenced = await this.assertProjectAssets(sourceId, project);
     project.id = targetId;
     project.name = String(nameInput || `${project.name} Copy`).trim().slice(0, 160) || `${project.name} Copy`;
     project.revision = 0;
@@ -854,10 +821,8 @@ export class UmbraUiCanvasWorkspaceProjectService {
     const targetRoot = this.projectRoot(targetId);
     const targetAssets = join(targetRoot, 'assets');
     await mkdir(targetAssets, { recursive: true });
-    const sourceAssets = await readdir(join(sourceRoot, 'assets'), { withFileTypes: true }).catch(() => []);
-    for (const entry of sourceAssets) {
-      if (!entry.isFile()) continue;
-      await copyFile(join(sourceRoot, 'assets', entry.name), join(targetAssets, entry.name));
+    for (const filename of referenced) {
+      await copyFile(join(sourceRoot, 'assets', filename), join(targetAssets, filename));
     }
     const sourceThumbnail = join(sourceRoot, 'thumbnail.png');
     if (await stat(sourceThumbnail).then((entry) => entry.isFile()).catch(() => false)) {
