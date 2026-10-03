@@ -12,6 +12,7 @@ import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { useToastStore } from '@/store/useToastStore';
 import { reportLastFrameExportIssues } from '@/lib/lastFrameExportIssue';
+import { createUmbraUiVideoOutputHandoffState, observeUmbraUiVideoJobs, observeUmbraUiVideoSavedOutput } from '@/lib/umbraUiVideoOutputHandoff';
 import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { ModelInfoRequestCache } from '@/lib/modelInfoRequestCache';
 import {
@@ -753,6 +754,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
   const videoJobsMutationRevisionRef = React.useRef(0);
   const videoJobsRequestRevisionRef = React.useRef(0);
   const videoJobsAppliedRevisionRef = React.useRef(0);
+  const videoOutputHandoffRef = React.useRef(createUmbraUiVideoOutputHandoffState());
   const [workflows, setWorkflows] = React.useState<ApiWorkflowItem[]>([]);
   const [inheritedGeneration, setInheritedGeneration] = React.useState<Record<string, unknown> | null>(null);
   const [modelCatalog, setModelCatalog] = React.useState<UmbraModelCatalog>(EMPTY_MODEL_CATALOG);
@@ -774,6 +776,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       const jobs = await fetchVideoReviewJobs();
       if (canApply()) {
         videoJobsAppliedRevisionRef.current = requestRevision;
+        const handoff = observeUmbraUiVideoJobs(videoOutputHandoffRef.current, jobs, true);
+        videoOutputHandoffRef.current = handoff.state;
+        for (const detail of handoff.events) {
+          window.dispatchEvent(new CustomEvent('umbra:powerprompter-output-saved', { detail }));
+        }
         setVideoJobs(jobs);
         setVideoJobsError('');
       }
@@ -1264,6 +1271,13 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           reportLastFrameExportIssues(payload);
           void refreshVideoJobs();
           if (!isUmbraUiImageMediaEvent(payload, true, ownedRequestKindsRef.current.get(requestId))) {
+            if (payload.mediaType === 'video' || ownedRequestKindsRef.current.get(requestId) === 'video') {
+              const handoff = observeUmbraUiVideoSavedOutput(videoOutputHandoffRef.current, payload);
+              videoOutputHandoffRef.current = handoff.state;
+              if (handoff.event) {
+                window.dispatchEvent(new CustomEvent('umbra:powerprompter-output-saved', { detail: handoff.event }));
+              }
+            }
             window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));
             return;
           }

@@ -183,9 +183,10 @@ export function configureOfficialLtxDirectorSettings(
   if (retake.enabled && windowStart > retakeStart) fail('the native retake guide miscalculates the preservation mask when Generate from frame is after Retake start. Set Generate from frame at or before Retake start.');
   if (!retake.enabled && audio.overrideMotion && (!motion.enabled || !motion.segments.length)) fail('motion audio override needs an enabled motion clip.');
   if (!retake.enabled && audio.overrideMotion && audio.enabled) fail('audio track must be disabled while motion audio override is active.');
-  const laneFrames = retake.enabled ? 10000 : durationFrames;
-  const motionSegments = checkedSegments(motion.segments, 'motion', laneFrames);
-  const audioSegments = checkedSegments(audio.segments, 'audio', laneFrames);
+  const motionFrames = retake.enabled || !motion.enabled ? 10000 : durationFrames;
+  const audioFrames = retake.enabled || !audio.enabled || audio.overrideMotion ? 10000 : durationFrames;
+  const motionSegments = checkedSegments(motion.segments, 'motion', motionFrames);
+  const audioSegments = checkedSegments(audio.segments, 'audio', audioFrames);
   const previousMotion = list(original.motionSegments);
   const previousAudio = list(original.audioSegments);
   const keep = (previous: NativeState[], id: string) => previous.find(item => item.id === id) || {};

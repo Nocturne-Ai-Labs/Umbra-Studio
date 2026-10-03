@@ -11,10 +11,11 @@ import { getWorkflowJsonExport, type ImageMetadata } from '@/utils/metadata';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { galleryMediaRevision } from '@/lib/galleryMediaIdentity';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
-import { classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
+import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { useFilmstripFolderActivity } from '@/lib/useFilmstripFolderActivity';
 import { useFilmstripGeneration } from '@/components/filmstrip/useFilmstripGeneration';
 import { isProtectedLivePreview } from '@/lib/livePreviewPrivacy';
+import { fetchGalleryFs } from '@/lib/galleryBridgeFs';
 
 interface UmbraFilmstripProps {
   initialHeight?: number;
@@ -30,7 +31,7 @@ type FsListMediaFile = {
   path: string;
   url?: string;
   thumbnailUrl?: string;
-  type?: 'image' | 'video' | 'gif' | 'folder';
+  type?: 'image' | 'video' | 'gif' | 'folder' | 'archive';
   width?: number;
   height?: number;
   size?: number;
@@ -42,6 +43,8 @@ type FsListMediaFile = {
   customOrder?: number;
   tags?: string[];
   privacyClass?: UmbraPrivacyClass;
+  metadataReady?: boolean;
+  metadata?: unknown;
 };
 
 type GallerySortBy = 'created' | 'modified' | 'name' | 'custom';
@@ -49,6 +52,7 @@ type GallerySortOrder = 'asc' | 'desc';
 type FeedMode = 'replace' | 'append' | 'remove';
 
 const DEFAULT_OUTPUT_ROOT = 'Tools/ComfyUI/output';
+const MAX_PROTECTED_COMPLETION_IMAGES = 8192;
 const NO_COMFY_WORKFLOW_MESSAGE = 'No workflow JSON found in selection.';
 const GALLERY_DRAG_PATHS_MIME = 'application/x-umbra-gallery-paths';
 const LIVE_GENERATION_PREVIEW_PATH = 'umbra-live-generation://powerprompter/current.png';
@@ -60,6 +64,35 @@ function normalizePath(value: string | null | undefined): string {
 function pathKey(value: string | null | undefined): string {
   const path = normalizePath(value);
   return /^[a-z]:($|\/)/i.test(path) || path.startsWith('//') ? path.toLowerCase() : path;
+}
+
+function latestPrivacyPathKey(value: string | null | undefined): string {
+  const path = normalizePath(value);
+  if (!path) return '';
+  const root = DEFAULT_OUTPUT_ROOT.toLowerCase();
+  const lower = path.toLowerCase();
+  if (path.split('/').some((part) => part === '.' || part === '..')) return `raw:${pathKey(path)}`;
+  if (lower.startsWith(`${root}/`)) return `managed:${lower}`;
+  if (/^[a-z]:\//i.test(path) || (path.startsWith('/') && !path.startsWith('//'))) {
+    const marker = `/${root}/`;
+    const index = lower.indexOf(marker);
+    if (index >= 0) return `managed:${lower.slice(index + 1)}`;
+  }
+  return `raw:${pathKey(path)}`;
+}
+
+export function shouldIgnoreGalleryFolderForLatest(incoming: string, followLatest: boolean, latestFolder: string): boolean {
+  return followLatest && Boolean(latestFolder) && pathKey(incoming) !== pathKey(latestFolder);
+}
+
+export async function fetchLatestFilmstripFiles(folder: string, signal?: AbortSignal): Promise<FsListMediaFile[]> {
+  const params = new URLSearchParams({ path: folder, sortBy: 'created', sortOrder: 'asc', fast: '1', recursive: 'false' });
+  const response = await fetchGalleryFs('/list-progressive', params, { cache: 'no-store', signal });
+  const payload = await response.json().catch(() => ({} as { error?: string; files?: FsListMediaFile[]; missing?: boolean }));
+  if (!response.ok || payload.missing || !Array.isArray(payload.files)) {
+    throw new Error(String(payload.error || 'Failed to load Latest folder'));
+  }
+  return payload.files;
 }
 
 function pathsLikelySame(left: string | null | undefined, right: string | null | undefined): boolean {
@@ -227,6 +260,45 @@ function toFilmstripImage(item: FsListMediaFile): FilmstripImage {
   };
 }
 
+type KnownLatestPrivacy = Pick<FilmstripImage, 'path' | 'privacyClass'>;
+
+function latestProtectedPaths(knownImages: readonly KnownLatestPrivacy[]): Set<string> {
+  return new Set(knownImages.filter((image) => image.privacyClass === 'nsfw').map((image) => latestPrivacyPathKey(image.path)));
+}
+
+function toLatestFilmstripImage(item: FsListMediaFile, protectedPaths: ReadonlySet<string>): FilmstripImage {
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  const protectedMedia = item.privacyClass === 'nsfw' || protectedPaths.has(latestPrivacyPathKey(item.path))
+    || classifyUmbraMediaMetadata(item.metadata, tags) === 'nsfw'
+    || classifyUmbraMediaMetadata(item, tags) === 'nsfw'
+    || (item.metadataReady !== true && isProtectedLivePreview(undefined));
+  return toFilmstripImage({ ...item, privacyClass: protectedMedia ? 'nsfw' : 'normal' });
+}
+
+export function filmstripImagesFromLatestFiles(files: FsListMediaFile[], knownImages: readonly KnownLatestPrivacy[] = []): FilmstripImage[] {
+  const protectedPaths = latestProtectedPaths(knownImages);
+  return files.filter((file) => file?.type !== 'folder' && file?.type !== 'archive' && file?.path)
+    .map((file) => toLatestFilmstripImage(file, protectedPaths))
+    .sort((left, right) => Number(right.dateCreated) - Number(left.dateCreated));
+}
+
+export function mergeLatestRecentFilmstripImages(
+  current: FilmstripImage[], latest: FilmstripImage[], folder: string,
+): FilmstripImage[] {
+  const latestPaths = new Set(latest.map((image) => latestPrivacyPathKey(image.path)));
+  const byPath = new Map<string, FilmstripImage>();
+  for (const image of [...latest, ...current]) {
+    const key = latestPrivacyPathKey(image.path);
+    if (key && (latestPrivacyPathKey(pathParent(image.path)) !== latestPrivacyPathKey(folder) || latestPaths.has(key)) && !byPath.has(key)) {
+      byPath.set(key, image);
+    }
+  }
+  const next = Array.from(byPath.values())
+    .sort((left, right) => Number(right.dateCreated) - Number(left.dateCreated)).slice(0, 40);
+  return next.length === current.length && next.every((image, index) => image.path === current[index].path
+    && image.privacyClass === current[index].privacyClass) ? current : next;
+}
+
 export function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage[] {
   const payload = detail && typeof detail === 'object' ? detail as Record<string, unknown> : {};
   const outputs = Array.isArray(payload.outputs) ? payload.outputs : [];
@@ -247,7 +319,11 @@ export function filmstripImagesFromSavedOutputs(detail: unknown): FilmstripImage
       createdMs: safeNumber(item.createdMs ?? item.created ?? item.modifiedMs ?? item.modified ?? Date.now()) || Date.now(),
       size: safeNumber(item.size),
       tags,
-      privacyClass: classifyUmbraPrompt(item.positivePrompt ?? item.positive_prompt ?? payload.positivePrompt ?? payload.positive_prompt, tags),
+      privacyClass: item.privacyClass === 'nsfw' || payload.privacyClass === 'nsfw'
+        || classifyUmbraMediaMetadata(item, tags) === 'nsfw'
+        || classifyUmbraMediaMetadata(payload, tags) === 'nsfw'
+        || classifyUmbraPrompt(item.positivePrompt ?? item.positive_prompt ?? payload.positivePrompt ?? payload.positive_prompt, tags) === 'nsfw'
+        ? 'nsfw' : 'normal',
     }));
   }
   return images;
@@ -472,6 +548,10 @@ export function UmbraFilmstrip({
   const initialFeedRootRef = useRef<string>('');
   const lastFeedRequestAtRef = useRef(0);
   const lastForceRefreshBurstAtRef = useRef(0);
+  const latestFeedAbortRef = useRef<AbortController | null>(null);
+  const latestGalleryReplayAtRef = useRef(0);
+  const protectedCompletionImagesRef = useRef(new Map<string, KnownLatestPrivacy>());
+  const latestFolderRef = useRef('');
   const currentFolderRef = useRef<string>('');
   const activityOpenedFolderRef = useRef<string>('');
   const localSizeSortRef = useRef(false);
@@ -538,6 +618,7 @@ export function UmbraFilmstrip({
   }, [rootPath, setAppSetting]);
 
   const folderActivity = useFilmstripFolderActivity([...pinnedFolders, ...recentFolders], rememberRecentFolders);
+  latestFolderRef.current = folderActivity.latestFolder;
 
   const displayedImages = useMemo(() => {
     if (pathKey(feedFolder) !== pathKey(currentFolder || rootPath)) return [];
@@ -723,11 +804,35 @@ export function UmbraFilmstrip({
   }, [addToast, currentFolder, images, rootPath]);
 
   const refreshImages = useCallback((options?: { force?: boolean; reload?: boolean }) => {
-    const folder = normalizePath(currentFolderRef.current || rootPath);
+    const latestFolder = normalizePath(folderActivity.latestFolder);
+    const folder = normalizePath(followLatest && latestFolder ? latestFolder : currentFolderRef.current || rootPath);
     if (!folder) return;
     const now = Date.now();
     if (!options?.force && !options?.reload && now - lastFeedRequestAtRef.current < 850) return;
     lastFeedRequestAtRef.current = now;
+    if (followLatest && latestFolder) {
+      latestFeedAbortRef.current?.abort();
+      const controller = new AbortController();
+      latestFeedAbortRef.current = controller;
+      void fetchLatestFilmstripFiles(folder, controller.signal).then((files) => {
+        if (controller.signal.aborted || !useStore.getState().appSettings['comfyui.filmstripFollowLatest']
+          || pathKey(folder) !== pathKey(currentFolderRef.current)) return;
+        const knownPrivacy = [...protectedCompletionImagesRef.current.values()];
+        const latestImages = filmstripImagesFromLatestFiles(files, knownPrivacy);
+        setRecentGenerationOutputImages((current) => mergeLatestRecentFilmstripImages(current, latestImages, folder));
+        window.dispatchEvent(new CustomEvent('umbra:gallery-filmstrip-feed', {
+          detail: { folderPath: folder, files, mode: 'replace', done: true, source: 'filmstrip-latest-direct' },
+        }));
+      }).catch((error) => {
+        if (!controller.signal.aborted && pathKey(folder) === pathKey(currentFolderRef.current)) {
+          setFolderLoadError(error instanceof Error ? error.message : 'Failed to load Latest folder');
+        }
+      }).finally(() => {
+        if (latestFeedAbortRef.current === controller) latestFeedAbortRef.current = null;
+      });
+      return;
+    }
+    latestFeedAbortRef.current?.abort();
     window.dispatchEvent(new CustomEvent('umbra:gallery-request-filmstrip-feed', {
       detail: {
         path: folder,
@@ -735,7 +840,9 @@ export function UmbraFilmstrip({
         source: options?.reload || options?.force ? 'filmstrip-manual-refresh' : 'filmstrip-refresh',
       },
     }));
-  }, [rootPath]);
+  }, [followLatest, folderActivity.latestFolder, rootPath]);
+
+  useEffect(() => () => latestFeedAbortRef.current?.abort(), []);
 
   useEffect(() => {
     if (!rootPath) return;
@@ -751,6 +858,20 @@ export function UmbraFilmstrip({
       const custom = event as CustomEvent<{ path?: string; folderPath?: string }>;
       const incoming = normalizePath(custom?.detail?.path || custom?.detail?.folderPath || '');
       if (!incoming) return;
+      if (shouldIgnoreGalleryFolderForLatest(incoming,
+        useStore.getState().appSettings['comfyui.filmstripFollowLatest'] === true, folderActivity.latestFolder)) {
+        const now = Date.now();
+        if (now - latestGalleryReplayAtRef.current >= 1500) {
+          latestGalleryReplayAtRef.current = now;
+          queueMicrotask(() => {
+            if (!useStore.getState().appSettings['comfyui.filmstripFollowLatest']) return;
+            window.dispatchEvent(new CustomEvent('umbra:gallery-open-path', {
+              detail: { path: folderActivity.latestFolder, folderPath: folderActivity.latestFolder, source: 'filmstrip-latest' },
+            }));
+          });
+        }
+        return;
+      }
       if (pathKey(incoming) !== pathKey(currentFolderRef.current)) {
         localCustomSortPendingRef.current = null;
       }
@@ -767,7 +888,7 @@ export function UmbraFilmstrip({
     return () => {
       window.removeEventListener('umbra:gallery-folder-changed', onGalleryFolderChanged as EventListener);
     };
-  }, [rememberRecentFolders, folderActivity.markOpened]);
+  }, [rememberRecentFolders, folderActivity.markOpened, folderActivity.latestFolder]);
 
   useEffect(() => {
     const stopFollowing = () => {
@@ -828,11 +949,16 @@ export function UmbraFilmstrip({
       const activeFolder = normalizePath(currentFolderRef.current || '');
       if (activeFolder && (!folderPath || pathKey(folderPath) !== pathKey(activeFolder))) return;
 
+      const latestFeed = custom?.detail?.source === 'filmstrip-latest-direct'
+        || (useStore.getState().appSettings['comfyui.filmstripFollowLatest'] === true
+          && pathKey(folderPath) === pathKey(latestFolderRef.current));
+      const knownPrivacy = [...protectedCompletionImagesRef.current.values()];
+      const protectedPaths = latestProtectedPaths(knownPrivacy);
       const seenPaths = new Set<string>();
       const mapped: FilmstripImage[] = [];
       for (const entry of rawFiles) {
-        if (entry?.type === 'folder') continue;
-        const image = toFilmstripImage(entry);
+        if (entry?.type === 'folder' || (latestFeed && entry?.type === 'archive')) continue;
+        const image = latestFeed ? toLatestFilmstripImage(entry, protectedPaths) : toFilmstripImage(entry);
         const imagePath = normalizePath(image.path);
         if (!imagePath || seenPaths.has(imagePath)) continue;
         seenPaths.add(imagePath);
@@ -846,7 +972,7 @@ export function UmbraFilmstrip({
         localCustomSortPendingRef.current = null;
       }
       const preserveOptimisticOrder = localCustomSortPendingRef.current !== null;
-      if (!localSizeSortRef.current && !preserveOptimisticOrder) {
+      if (custom?.detail?.source !== 'filmstrip-latest-direct' && !localSizeSortRef.current && !preserveOptimisticOrder) {
         setSortField((current) => (current === nextFilmstripField ? current : nextFilmstripField));
         setSortDirection((current) => (current === nextSortOrder ? current : nextSortOrder));
       }
@@ -1092,9 +1218,20 @@ export function UmbraFilmstrip({
       if (detail?.marked) {
         const protect = (image: FilmstripImage): FilmstripImage => paths.has(pathKey(image.path))
           ? { ...image, privacyClass: 'nsfw' } : image;
+        for (const path of paths) {
+          const key = latestPrivacyPathKey(path);
+          protectedCompletionImagesRef.current.delete(key);
+          protectedCompletionImagesRef.current.set(key, { path, privacyClass: 'nsfw' });
+        }
+        while (protectedCompletionImagesRef.current.size > MAX_PROTECTED_COMPLETION_IMAGES) {
+          const oldest = protectedCompletionImagesRef.current.keys().next().value;
+          if (oldest === undefined) break;
+          protectedCompletionImagesRef.current.delete(oldest);
+        }
         setImages((current) => current.map(protect));
         setRecentGenerationOutputImages((current) => current.map(protect));
       } else {
+        for (const path of paths) protectedCompletionImagesRef.current.delete(latestPrivacyPathKey(path));
         setRecentGenerationOutputImages((current) => current.filter((image) => !paths.has(pathKey(image.path))));
       }
     };
@@ -1110,6 +1247,9 @@ export function UmbraFilmstrip({
         : [];
       if (removedPaths.length <= 0) return;
       const isRemoved = createFilmstripPathMatcher(removedPaths);
+      for (const [key, image] of protectedCompletionImagesRef.current) {
+        if (isRemoved(image.path)) protectedCompletionImagesRef.current.delete(key);
+      }
       if (custom?.detail?.source === 'filmstrip') {
         setRecentGenerationOutputImages((current) => current.filter((item) => !isRemoved(item.path)));
         return;
@@ -1186,6 +1326,21 @@ export function UmbraFilmstrip({
       rememberRecentFolders(folders);
       const savedImages = filmstripImagesFromSavedOutputs(detail);
       if (savedImages.length > 0) {
+        for (const image of savedImages) {
+          if (image.privacyClass === 'nsfw') {
+            const key = latestPrivacyPathKey(image.path);
+            protectedCompletionImagesRef.current.delete(key);
+            protectedCompletionImagesRef.current.set(key, image);
+          }
+        }
+        while (protectedCompletionImagesRef.current.size > MAX_PROTECTED_COMPLETION_IMAGES) {
+          const oldest = protectedCompletionImagesRef.current.keys().next().value;
+          if (oldest === undefined) break;
+          protectedCompletionImagesRef.current.delete(oldest);
+        }
+        const protectedPaths = latestProtectedPaths(savedImages);
+        if (protectedPaths.size) setImages((current) => current.map((image) => protectedPaths.has(latestPrivacyPathKey(image.path))
+          ? { ...image, privacyClass: 'nsfw' } : image));
         setRecentGenerationOutputImages((current) => {
           const byPath = new Map<string, FilmstripImage>();
           for (const image of [...savedImages, ...current]) {
@@ -2161,7 +2316,11 @@ export function UmbraFilmstrip({
     if (!followLatest || !folderActivity.latestFolder || !useStore.getState().appSettings['comfyui.filmstripFollowLatest']) return;
     if (pathKey(folderActivity.latestFolder) === pathKey(currentFolderRef.current)) return;
     openFilmstripFolder(folderActivity.latestFolder, 'filmstrip-latest');
-  }, [followLatest, folderActivity.latestFolder, openFilmstripFolder]);
+  }, [currentFolder, followLatest, folderActivity.latestFolder, openFilmstripFolder]);
+
+  useEffect(() => {
+    if (followLatest && folderActivity.latestFolder) refreshImages({ force: true });
+  }, [followLatest, folderActivity.latestFolder, refreshImages]);
 
   const removePinnedFolder = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);

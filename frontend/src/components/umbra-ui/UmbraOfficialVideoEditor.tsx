@@ -142,7 +142,9 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
     return controls;
   }, [draft.mode]);
   const renderField = (field: (typeof fields)[number]) => {
-    const value = draft.values[field.key] ?? field.value;
+    const fixedLtxResize = !h3 && !workflowSizing && field.key === '3678.resize_method';
+    const selectedValue = draft.values[field.key] ?? field.value;
+    const value = fixedLtxResize && selectedValue === 'maintain aspect ratio' ? 'crop' : selectedValue;
     const setValue = (next: string | number | boolean) => change({ values: { ...latest.current.values, [field.key]: next } });
     const fieldDisabled = disabled || (!h3 && workflowSizing && draft.resolution?.followSourceAspect === true
       && ['3600.aspect_preset_when_not_image', '3600.custom_aspect_width', '3600.custom_aspect_height'].includes(field.key));
@@ -151,7 +153,7 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
       {field.type === 'boolean' ? <input type="checkbox" checked={value === true} disabled={fieldDisabled} onChange={event => setValue(event.target.checked)} className="h-4 w-4 shrink-0 accent-[var(--umbra-accent)]" /> : null}
       <span className="min-w-0 break-words">{field.label}</span>
       {field.type === 'select' ? <UmbraSelectControl aria-label={field.label} value={String(value)} disabled={fieldDisabled} onChange={event => setValue(event.target.value)} className={inputClass}>
-        {Array.from(new Set([String(value), ...(field.options || [])])).map(option => <option key={option} value={option}>{option || 'None'}</option>)}
+        {Array.from(new Set([String(value), ...(field.options || [])])).filter(option => !fixedLtxResize || option !== 'maintain aspect ratio').map(option => <option key={option} value={option}>{option || 'None'}</option>)}
       </UmbraSelectControl> : field.type === 'boolean' ? null : <input aria-label={field.label} type={field.type === 'number' ? 'number' : 'text'} value={String(value)} min={field.min} max={field.max} step={field.step} disabled={fieldDisabled}
         onChange={event => setValue(field.type === 'number' ? Number(event.target.value) : event.target.value)} className={inputClass} />}
     </label>;

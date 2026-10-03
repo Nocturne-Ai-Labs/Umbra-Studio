@@ -432,6 +432,14 @@ function configureH3(graph: Ui, draft: OfficialVideoEditorDraft): void {
 
 function configureLtx(graph: Ui, draft: OfficialVideoEditorDraft): void {
   const retaking = draft.ltx?.retake.enabled === true;
+  const rendering = nodeById(graph, 3676, '3592290c-211c-4422-8399-46a8c4affb49');
+  const hasGuides = !retaking && (draft.references.some(ref => (ref.guideStrength ?? 1) > 0)
+    || (draft.ltx?.motion.enabled && draft.ltx.motion.segments.some(clip => clip.strength > 0)));
+  // This pinned first-pass-only branch bypasses DirectorCropGuides and exports
+  // appended conditioning frames as part of the video.
+  if (hasGuides && !readWidget(rendering, 'value_1') && !readWidget(rendering, 'value_2')) {
+    fail('Enable 2nd PASS for image or motion guides. This pinned workflow exports extra guide frames when only the first pass is enabled.');
+  }
   if (draft.references.some(ref => ref.kind === 'audio')) fail('Place LTX audio references in the audio lane.');
   if (!retaking) {
     if (draft.mode === 'T2V' && draft.references.length) fail('T2V does not accept references.');
@@ -496,6 +504,7 @@ function configureLtx(graph: Ui, draft: OfficialVideoEditorDraft): void {
     }
   } else {
     for (const [name, value] of Object.entries({ no_scale: true, scale_from_image: false, aspect_preset_when_not_image: 'CUSTOM', custom_aspect_width: draft.width, custom_aspect_height: draft.height })) writeWidget(calculator, name, value);
+    if (readWidget(director, 'resize_method') === 'maintain aspect ratio') writeWidget(director, 'resize_method', 'crop');
     const loader = nodeById(graph, 3319, '1680c02f-86b1-4db6-8d55-35f78dce9a59');
     writeWidget(loader, 'swap_aspect_when_not_image', false);
     writeWidget(calculator, 'swap_aspect_when_not_image', false);
