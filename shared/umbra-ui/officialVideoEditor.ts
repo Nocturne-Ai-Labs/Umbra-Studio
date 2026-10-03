@@ -9,6 +9,11 @@ export interface OfficialVideoEditorDraft {
   durationSeconds: number;
   frameRate: number;
   seed: string;
+  resolution?: {
+    mode: 'workflow' | 'fixed';
+    followSourceAspect?: boolean;
+    h3?: OfficialH3ResolutionSettings;
+  };
   values: Record<string, string | number | boolean>;
   references: Array<{
     id: string;
@@ -17,13 +22,32 @@ export interface OfficialVideoEditorDraft {
     prompt: string;
     startSeconds: number;
     durationSeconds: number;
+    sourceWidth?: number;
+    sourceHeight?: number;
   }>;
 }
+
+export interface OfficialH3ResolutionSettings {
+  aspect: string;
+  resolution: string;
+  input_scaling: string;
+  custom_mode: 'mp' | 'fixed';
+  custom_aspect_w: number;
+  custom_aspect_h: number;
+  custom_mp: number;
+}
+
+export const OFFICIAL_H3_ASPECTS = ['auto', '1:1', '16:9', '9:16', '2:1', '1:2', '3:2', '2:3', '4:3', '3:4', '4:5', '5:4', 'custom'] as const;
+export const OFFICIAL_H3_INPUT_SCALING = ['Off', 'Auto', 'Target', 'Fit', 'Fill and crop', 'Fit and pad', 'Long side with divisible crop'] as const;
+export const DEFAULT_OFFICIAL_H3_RESOLUTION: OfficialH3ResolutionSettings = {
+  aspect: 'auto', resolution: 'auto', input_scaling: 'Auto', custom_mode: 'mp', custom_aspect_w: 16, custom_aspect_h: 9, custom_mp: 1,
+};
 
 export interface OfficialVideoEditorField {
   key: string;
   label: string;
   group: 'director' | 'generation';
+  category: OfficialVideoSettingsCategory;
   type: 'text' | 'number' | 'boolean' | 'select';
   value: string | number | boolean;
   options?: string[];
@@ -31,6 +55,20 @@ export interface OfficialVideoEditorField {
   max?: number;
   step?: number;
 }
+
+export const OFFICIAL_VIDEO_SETTINGS_CATEGORIES = [
+  { id: 'resolution', label: 'Resolution and aspect ratio' },
+  { id: 'models', label: 'Models and encoders' },
+  { id: 'sampling', label: 'Sampling and guidance' },
+  { id: 'performance', label: 'Performance and memory' },
+  { id: 'upscaling', label: 'Upscaling and interpolation' },
+  { id: 'post-processing', label: 'Post-processing' },
+  { id: 'preview', label: 'Live preview' },
+  { id: 'video-output', label: 'Video output and encoding' },
+  { id: 'audio-output', label: 'Audio output' },
+  { id: 'other', label: 'Other settings' },
+] as const;
+export type OfficialVideoSettingsCategory = (typeof OFFICIAL_VIDEO_SETTINGS_CATEGORIES)[number]['id'];
 
 // LTX has no mode widget: these are constraints on its normal, native timeline,
 // not new graph routes. Retake, motion/IC-LoRA and audio lanes are not adapted.
@@ -43,6 +81,43 @@ type Ui = Record<string, any>;
 type Scalar = string | number | boolean;
 type Binding = { node: Ui; name: string };
 type Setting = Binding & { key: string; label: string; group: 'director' | 'generation'; targets: Binding[]; inputType: string };
+
+// Promoted switch names are ambiguous; categorize exact pinned bindings rather
+// than translated labels or display titles. Unknown future fields remain visible.
+const PINNED_SETTING_CATEGORIES: Record<number, Record<string, OfficialVideoSettingsCategory>> = {
+  1512: {
+    sampler_name: 'sampling', scheduler: 'sampling', steps: 'sampling', shift_video: 'sampling', shift_audio: 'sampling',
+    enabled: 'performance', enabled_1: 'performance', enabled_7: 'performance',
+    enabled_2: 'upscaling', enabled_3: 'upscaling', enabled_4: 'upscaling', enabled_5: 'upscaling', enabled_8: 'upscaling', model_name: 'upscaling', model_name_1: 'upscaling',
+    enabled_6: 'post-processing', watermark_path: 'post-processing',
+    unet_name: 'models', unet_name_1: 'models', clip_name: 'models', vae_name: 'models', vae_name_1: 'models',
+  },
+  3319: {
+    enabled: 'models', enabled_1: 'models', unet_name: 'models', unet_name_1: 'models', vae_name: 'models', vae_name_1: 'models', clip_name1: 'models', clip_name1_1: 'models',
+    model_name: 'upscaling', enabled_2: 'performance', enabled_3: 'sampling', lora_name: 'sampling', strength_model: 'sampling', sampler_name: 'sampling',
+    resolution_preset: 'resolution', swap_aspect_when_not_image: 'resolution',
+  },
+  3420: {
+    enabled: 'post-processing', enabled_4: 'post-processing', enabled_5: 'post-processing', image: 'post-processing', watermark_path: 'post-processing', watermark_path_1: 'post-processing',
+    enabled_1: 'upscaling', enabled_2: 'upscaling', enabled_3: 'upscaling',
+  },
+  3577: { enabled: 'performance', chunks: 'performance', enabled_1: 'sampling' },
+  3676: { enabled: 'performance', value: 'performance', value_1: 'sampling', value_2: 'sampling' },
+};
+
+function settingCategory(setting: Setting): OfficialVideoSettingsCategory {
+  const pinned = PINNED_SETTING_CATEGORIES[setting.node.id]?.[setting.name];
+  if (pinned) return pinned;
+  if (setting.node.type === 'CLIPTextEncode') return 'sampling';
+  if (setting.node.type === 'DaSiWa_ResolutionScaleCalculator') return 'resolution';
+  if (setting.node.type === 'DaSiWa_LTX2LoraLoader') return 'performance';
+  if (setting.node.type === 'ModelPreviewOverrideKJ') return 'preview';
+  if (setting.node.type === 'DaSiWa_EnhancedVideoCombine') {
+    return ['audio_codec', 'audio_bitrate', 'crop_to_audio'].includes(setting.name) ? 'audio-output' : 'video-output';
+  }
+  if (VAE_FIELDS[setting.node.type]) return setting.name === 'vae_name' ? 'models' : 'performance';
+  return 'other';
+}
 export type OfficialVideoEditorWorkflow = Ui & { nodes: Ui[]; links: unknown[] };
 const MAX_SEED = BigInt('18446744073709551615');
 const TOP_FIELDS: Record<string, string[]> = {
@@ -57,6 +132,7 @@ const VAE_FIELDS: Record<string, string[]> = {
   VAELoader: ['vae_name'],
   VAELoaderKJ: ['vae_name', 'device', 'weight_dtype'],
 };
+const RESOLUTION_FIELDS = ['no_scale', 'aspect_preset_when_not_image', 'custom_aspect_width', 'custom_aspect_height', 'mode', 'custom_divisor'];
 const record = (value: unknown): value is Ui => !!value && typeof value === 'object' && !Array.isArray(value);
 const scalar = (value: unknown): value is Scalar => typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
 const fail = (message: string): never => { throw new Error(`Official video editor: ${message}`); };
@@ -124,16 +200,13 @@ function settings(graph: Ui): Setting[] {
   for (const node of allNodes(graph)) {
     const isRoot = rootNodes.has(node);
     const definition = isRoot ? definitions.get(node.type) : undefined;
-    // Only VAE resources have direct nested controls. Linked leaf widgets stay
-    // owned by their promoted boundary, never by a second independent field.
-    const names = VAE_FIELDS[node.type] || (isRoot ? TOP_FIELDS[node.type] || [] : []);
+    // Only VAE resources and the pinned resolution calculator expose direct
+    // nested controls. Linked widgets stay owned by their promoted boundary.
+    const names = VAE_FIELDS[node.type] || (node.id === 3600 && node.type === 'DaSiWa_ResolutionScaleCalculator' ? RESOLUTION_FIELDS : isRoot ? TOP_FIELDS[node.type] || [] : []);
     for (const name of definition ? Object.keys(node.widgets_values_named || {}) : names) {
       const input = node.inputs?.find((port: Ui) => port.widget?.name === name);
       const type = input?.type || (node.type === 'LTXDirector' ? ({ epsilon: 'FLOAT', display_mode: 'COMBO', resize_method: 'COMBO', img_compression: 'INT' } as Ui)[name] : undefined);
       if (!type || (input && input.link != null) || !['STRING', 'INT', 'FLOAT', 'BOOLEAN', 'COMBO'].includes(type)) continue;
-      // Canvas sizing owns these linked calculator controls. Exposing them as
-      // independent settings would imply an effect that configure overrides.
-      if (definition && ['resolution_preset', 'swap_aspect_when_not_image'].includes(name)) continue;
       let targets: Binding[] = [];
       const boundary = definition?.inputs?.find((port: Ui) => port.name === name);
       if (definition) {
@@ -176,7 +249,7 @@ export function getOfficialVideoEditorFields(source: unknown, id: OfficialVideoW
     if (!type || (type !== 'select' && descriptors.some(entry => entry[0] !== first[0]))
       || (type === 'select' && setting.inputType !== 'COMBO')
       || (type !== 'select' && first[0] !== setting.inputType)) return [];
-    const field: OfficialVideoEditorField = { key: setting.key, label: setting.label, group: setting.group, type, value: readWidget(setting.node, setting.name) };
+    const field: OfficialVideoEditorField = { key: setting.key, label: setting.label, group: setting.group, category: settingCategory(setting), type, value: readWidget(setting.node, setting.name) };
     if (type === 'select') {
       const options = choices[0]!.filter((value): value is string => typeof value === 'string' && choices.every(list => list!.includes(value)));
       if (!options.length) return [];
@@ -199,6 +272,7 @@ const LTX_MP: Record<string, number> = {
   '144p': 0.0352, '240p': 0.0977, '360p': 0.22, '480p': 0.391, '540p': 0.494, '576p': 0.396, '720p': 0.879, '900p': 1.373, '1024p': 1, '1080p': 1.978, '1152p': 2.25, '1440p': 3.516, '2160p': 7.91, '2K': 3.906, '4K': 7.91,
   '0.26 MP - Preview': 0.26, '0.36 MP - Small': 0.36, '0.52 MP - SD': 0.52, '0.65 MP - Balanced': 0.65, '0.83 MP - HD': 0.83, '1.00 MP - 1024p': 1, '1.05 MP - HD+': 1.05, '1.20 MP - HD++': 1.2, '1.35 MP - 2K lite': 1.35, '1.55 MP - 2K': 1.55, '1.65 MP - 2K+': 1.65, '1.75 MP - QHD': 1.75, '2.10 MP - FHD': 2.1, '3.30 MP - QHD+': 3.3, '4.75 MP - 2K Pro': 4.75, '6.50 MP - Production': 6.5, '8.30 MP - UHD': 8.3,
 };
+export const OFFICIAL_H3_RESOLUTIONS = ['auto', ...Object.keys(LTX_MP), 'custom'];
 
 function ltxDimensions(graph: Ui): [number, number] {
   const calculator = nodeById(graph, 3600, 'DaSiWa_ResolutionScaleCalculator');
@@ -232,7 +306,8 @@ export function createOfficialVideoEditorDraft(id: OfficialVideoWorkflowId, sour
   const references = isH3 ? (state.items || []).map((item: Ui) => {
     if (item.enabled === false || (item.type === 'video' && item.media_mode && item.media_mode !== 'video')) fail('disabled or embedded-audio references require the native editor.');
     return { id: item.id, kind: item.type, filename: item.value, prompt: item.prompt || '', startSeconds: item.type === 'image' ? 0 : item.trim_start || 0,
-      durationSeconds: item.type === 'image' ? 1 : item.trim_end == null ? item.duration : item.trim_end - (item.trim_start || 0) };
+      durationSeconds: item.type === 'image' ? 1 : item.trim_end == null ? item.duration : item.trim_end - (item.trim_start || 0),
+      ...(Number(item.source_width) > 0 && Number(item.source_height) > 0 ? { sourceWidth: Number(item.source_width), sourceHeight: Number(item.source_height) } : {}) };
   }) : (state.segments || []).map((item: Ui) => ({ id: item.id, kind: item.type, filename: item.imageFile, prompt: item.prompt || '', startSeconds: item.start / fps, durationSeconds: item.length / fps }));
   const [width, height] = isH3 ? [Number(readWidget(director, 'width')), Number(readWidget(director, 'height'))] : ltxDimensions(graph);
   return { prompt: isH3 ? String(readWidget(director, 'prompt')) : state.global_prompt || '',
@@ -240,6 +315,7 @@ export function createOfficialVideoEditorDraft(id: OfficialVideoWorkflowId, sour
       : references.some((item: Ui) => item.kind === 'video') ? 'V2V' : references.length ? references.some((item: Ui) => state.segments.find((seg: Ui) => seg.id === item.id)?.isEndFrame) ? 'FLF2V' : 'I2V' : 'T2V',
     width, height, durationSeconds: Number(readWidget(director, isH3 ? 'duration' : 'duration_seconds')), frameRate: fps,
     seed: seed.mode === 'fixed' ? checkedSeed(seed.last_seed) : '-1',
+    resolution: { mode: 'workflow', ...(isH3 ? { h3: { ...DEFAULT_OFFICIAL_H3_RESOLUTION, ...(state.resolution || {}) } } : {}) },
     values: Object.fromEntries(settings(graph).map(setting => [setting.key, readWidget(setting.node, setting.name)])), references };
 }
 
@@ -270,6 +346,10 @@ function validateReferences(draft: OfficialVideoEditorDraft): void {
     if (typeof ref.prompt !== 'string') fail('reference prompts must be strings.');
     finite(ref.startSeconds, 0, 1000, 'reference startSeconds');
     finite(ref.durationSeconds, Number.EPSILON, 1000, 'reference durationSeconds');
+    if (ref.sourceWidth !== undefined || ref.sourceHeight !== undefined) {
+      finite(ref.sourceWidth, 1, 65536, 'source width');
+      finite(ref.sourceHeight, 1, 65536, 'source height');
+    }
   }
 }
 
@@ -293,6 +373,7 @@ function configureH3(graph: Ui, draft: OfficialVideoEditorDraft): void {
   const items = refs.map((ref, order) => {
     const slot = draft.mode === 'L2VA' ? 1 : counts[ref.kind]++;
     return { id: ref.id, type: ref.kind, value: ref.filename, prompt: ref.prompt, enabled: true, order, slot, start: slot,
+      ...(ref.sourceWidth && ref.sourceHeight ? { source_width: ref.sourceWidth, source_height: ref.sourceHeight } : {}),
       duration: ref.durationSeconds, ...(ref.kind === 'image' ? {} : { trim_start: ref.startSeconds, trim_end: ref.startSeconds + ref.durationSeconds }),
       ...(ref.kind === 'video' ? { media_mode: 'video' } : {}) };
   });
@@ -302,8 +383,23 @@ function configureH3(graph: Ui, draft: OfficialVideoEditorDraft): void {
   const state = jsonWidget(director, 'timeline_data');
   const builder = { ...jsonWidget(director, 'builder_state'), mode: draft.mode, duration: draft.durationSeconds,
     prompt_mode: 'simple', simple_prompt: resolved, imd: resolved, soundscape: '', music: '' };
+  const resolution = draft.resolution?.mode === 'workflow'
+    ? { ...DEFAULT_OFFICIAL_H3_RESOLUTION, ...draft.resolution.h3, custom_width: draft.width, custom_height: draft.height }
+    : { ...DEFAULT_OFFICIAL_H3_RESOLUTION, ...state.resolution, aspect: 'custom', resolution: 'custom', custom_mode: 'fixed', custom_width: draft.width, custom_height: draft.height, input_scaling: 'Off' };
+  if (!OFFICIAL_H3_ASPECTS.includes(resolution.aspect as (typeof OFFICIAL_H3_ASPECTS)[number])
+    || !OFFICIAL_H3_RESOLUTIONS.includes(resolution.resolution)
+    || !OFFICIAL_H3_INPUT_SCALING.includes(resolution.input_scaling as (typeof OFFICIAL_H3_INPUT_SCALING)[number])
+    || !['mp', 'fixed'].includes(resolution.custom_mode)) fail('unsupported H3 resolution settings.');
+  if (resolution.aspect === 'custom') {
+    finite(resolution.custom_aspect_w, 1, 8192, 'custom aspect width');
+    finite(resolution.custom_aspect_h, 1, 8192, 'custom aspect height');
+  }
+  if (resolution.resolution === 'custom' && resolution.custom_mode === 'mp') finite(resolution.custom_mp, 0.01, 64, 'custom megapixels');
+  if (draft.resolution?.mode === 'workflow' && resolution.aspect === 'auto' && refs.some(ref => ref.kind !== 'audio')
+    && !(resolution.resolution === 'custom' && resolution.custom_mode === 'fixed')
+    && !refs.find(ref => ref.kind !== 'audio')?.sourceWidth) fail('Auto aspect needs source dimensions. Re-upload the first visual reference or select an aspect ratio.');
   Object.assign(state, { items, prompt_blocks: notes, builder_state: builder, resolved_prompt: resolved, refmods: [],
-    resolution: { ...state.resolution, aspect: 'custom', resolution: 'custom', custom_mode: 'fixed', custom_width: draft.width, custom_height: draft.height, input_scaling: 'Off' },
+    resolution,
     continuity: { ...state.continuity, operation: 'new', capture: false } });
   for (const [name, value] of Object.entries({ mode: draft.mode, prompt: resolved, width: draft.width, height: draft.height,
     duration: draft.durationSeconds, frame_rate: draft.frameRate, timeline_data: JSON.stringify(state), builder_state: JSON.stringify(builder) })) writeWidget(director, name, value);
@@ -350,10 +446,27 @@ function configureLtx(graph: Ui, draft: OfficialVideoEditorDraft): void {
   Object.assign(director.properties, { global_prompt: draft.prompt, has_serialized_properties: true, retakeMode: false,
     mainTrackEnabled: true, motionTrackEnabled: false, audioTrackEnabled: true, overrideAudio: false, audioTrackWasEnabledBeforeOverride: false });
   const calculator = nodeById(graph, 3600, 'DaSiWa_ResolutionScaleCalculator');
-  for (const [name, value] of Object.entries({ no_scale: true, scale_from_image: false, aspect_preset_when_not_image: 'CUSTOM', custom_aspect_width: draft.width, custom_aspect_height: draft.height })) writeWidget(calculator, name, value);
-  const loader = nodeById(graph, 3319, '1680c02f-86b1-4db6-8d55-35f78dce9a59');
-  writeWidget(loader, 'swap_aspect_when_not_image', false);
-  writeWidget(calculator, 'swap_aspect_when_not_image', false);
+  if (draft.resolution?.mode === 'workflow') {
+    // This pinned calculator has no image wire. Supply the reference aspect via
+    // its existing CUSTOM ratio widgets, keeping native scaling and topology.
+    if (draft.resolution.followSourceAspect) {
+      const ref = draft.references.find(ref => ref.kind !== 'audio');
+      if (!ref) return fail('Image aspect requires a visual reference with source dimensions.');
+      const width = finite(ref.sourceWidth, 1, 8192, 'reference aspect width');
+      const height = finite(ref.sourceHeight, 1, 8192, 'reference aspect height');
+      for (const [name, value] of Object.entries({ aspect_preset_when_not_image: 'CUSTOM', custom_aspect_width: width, custom_aspect_height: height })) writeWidget(calculator, name, value);
+    }
+    const dimensions = ltxDimensions(graph);
+    for (const dimension of dimensions) {
+      finite(dimension, 32, 8192, 'calculated LTX resolution');
+      if (!Number.isInteger(dimension) || dimension % 32) fail('Calculated LTX dimensions must be multiples of 32. Use Div32/Div64 snapping, or valid custom pixel dimensions with No Scale.');
+    }
+  } else {
+    for (const [name, value] of Object.entries({ no_scale: true, scale_from_image: false, aspect_preset_when_not_image: 'CUSTOM', custom_aspect_width: draft.width, custom_aspect_height: draft.height })) writeWidget(calculator, name, value);
+    const loader = nodeById(graph, 3319, '1680c02f-86b1-4db6-8d55-35f78dce9a59');
+    writeWidget(loader, 'swap_aspect_when_not_image', false);
+    writeWidget(calculator, 'swap_aspect_when_not_image', false);
+  }
 }
 
 /** Configure only existing widgets/properties on a structured clone. No API
@@ -362,6 +475,9 @@ function configureLtx(graph: Ui, draft: OfficialVideoEditorDraft): void {
 export function configureOfficialVideoEditor(source: unknown, id: OfficialVideoWorkflowId, draft: OfficialVideoEditorDraft): OfficialVideoEditorWorkflow {
   const original = workflow(source, id);
   if (!record(draft) || typeof draft.prompt !== 'string' || !record(draft.values)) fail('invalid draft.');
+  if (draft.resolution && (!record(draft.resolution) || !['workflow', 'fixed'].includes(draft.resolution.mode)
+    || (draft.resolution.followSourceAspect !== undefined && typeof draft.resolution.followSourceAspect !== 'boolean')
+    || (draft.resolution.h3 !== undefined && !record(draft.resolution.h3)))) fail('invalid resolution configuration.');
   if (!(OFFICIAL_VIDEO_EDITOR_MODES[id] as readonly string[]).includes(draft.mode)) fail(`unsupported mode ${draft.mode}; Image Inpaint remains disabled.`);
   const grid = id === 'h3-26' ? 32 : 64;
   for (const [label, value] of [['width', draft.width], ['height', draft.height]] as const) {

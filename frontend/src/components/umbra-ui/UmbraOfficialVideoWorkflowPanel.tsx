@@ -1,5 +1,7 @@
 'use client';
 
+import { prepareOfficialVideoResolution } from '@/lib/officialVideoResolution';
+
 import React from 'react';
 import { Camera, Clapperboard, ExternalLink, Loader2, PanelRight, Play, RefreshCw, Upload } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -252,7 +254,10 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
 
   const prepareEditorCapture = async (): Promise<CapturedWorkflow> => {
     if (!selected || !editor) throw new Error('The official video editor is still loading.');
-    const configuredWorkflow = configureOfficialVideoEditor(editor.source, selected.id, editor.draft);
+    setBusy('opening');
+    const preparedDraft = await prepareOfficialVideoResolution(editor.draft, selected.id);
+    if (!mountedRef.current) throw new Error('The video workspace was closed.');
+    const configuredWorkflow = configureOfficialVideoEditor(editor.source, selected.id, preparedDraft);
     const payload = { sourceText: editor.sourceText, configuredWorkflow, background: true, officialWorkflowId: selected.id,
       workflowId: selected.id, workflowName: selected.name, sourceSha256: selected.sha256, loadRequestId: crypto.randomUUID() };
     loadRequestRef.current = payload.loadRequestId;
