@@ -9,6 +9,7 @@ export interface OfficialVideoEditorDraft {
   durationSeconds: number;
   frameRate: number;
   seed: string;
+  saveLastFrame?: boolean;
   resolution?: {
     mode: 'workflow' | 'fixed';
     followSourceAspect?: boolean;
@@ -314,7 +315,7 @@ export function createOfficialVideoEditorDraft(id: OfficialVideoWorkflowId, sour
     mode: isH3 ? String(readWidget(director, 'mode'))
       : references.some((item: Ui) => item.kind === 'video') ? 'V2V' : references.length ? references.some((item: Ui) => state.segments.find((seg: Ui) => seg.id === item.id)?.isEndFrame) ? 'FLF2V' : 'I2V' : 'T2V',
     width, height, durationSeconds: Number(readWidget(director, isH3 ? 'duration' : 'duration_seconds')), frameRate: fps,
-    seed: seed.mode === 'fixed' ? checkedSeed(seed.last_seed) : '-1',
+    seed: seed.mode === 'fixed' ? checkedSeed(seed.last_seed) : '-1', saveLastFrame: true,
     resolution: { mode: 'workflow', ...(isH3 ? { h3: { ...DEFAULT_OFFICIAL_H3_RESOLUTION, ...(state.resolution || {}) } } : {}) },
     values: Object.fromEntries(settings(graph).map(setting => [setting.key, readWidget(setting.node, setting.name)])), references };
 }
@@ -475,6 +476,7 @@ function configureLtx(graph: Ui, draft: OfficialVideoEditorDraft): void {
 export function configureOfficialVideoEditor(source: unknown, id: OfficialVideoWorkflowId, draft: OfficialVideoEditorDraft): OfficialVideoEditorWorkflow {
   const original = workflow(source, id);
   if (!record(draft) || typeof draft.prompt !== 'string' || !record(draft.values)) fail('invalid draft.');
+  if (draft.saveLastFrame !== undefined && typeof draft.saveLastFrame !== 'boolean') fail('invalid last-frame export setting.');
   if (draft.resolution && (!record(draft.resolution) || !['workflow', 'fixed'].includes(draft.resolution.mode)
     || (draft.resolution.followSourceAspect !== undefined && typeof draft.resolution.followSourceAspect !== 'boolean')
     || (draft.resolution.h3 !== undefined && !record(draft.resolution.h3)))) fail('invalid resolution configuration.');
@@ -496,6 +498,13 @@ export function configureOfficialVideoEditor(source: unknown, id: OfficialVideoW
       || (setting.inputType === 'INT' && !Number.isSafeInteger(value))) return fail(`unknown or invalid setting ${key}.`);
     writeWidget(setting.node, setting.name, value);
     for (const target of setting.targets) writeWidget(target.node, target.name, value);
+  }
+  // Umbra exports from the encoded video into its own output subfolder. Keep
+  // native history intact and avoid the upstream beside-video PNG duplicate.
+  if (draft.saveLastFrame !== undefined) {
+    for (const node of allNodes(graph)) {
+      if (node.type === 'DaSiWa_EnhancedVideoCombine') writeWidget(node, 'save_last_frame', false);
+    }
   }
   if (id === 'h3-26') configureH3(graph, draft);
   else configureLtx(graph, draft);

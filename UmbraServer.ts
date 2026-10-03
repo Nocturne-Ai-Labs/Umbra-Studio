@@ -1,5 +1,6 @@
 import { assertVideoGenerationPolicy, normalizeVideoRoutePolicy, videoGenerationPolicyIssue, videoGraphPolicyIssue, type UmbraVideoRoutePolicy } from './shared/umbra-ui/videoRoutePolicy';
 import { OfficialVideoWorkflowService, officialCaptureMetadata } from './backend/OfficialVideoWorkflowService';
+import { isLastFrameVideoOutput, saveUmbraVideoLastFrame } from './backend/UmbraVideoLastFrame';
 import { isOfficialVideoWorkflowId, normalizeOfficialVideoWorkflowSelection, type OfficialVideoWorkflowSelection } from './shared/umbra-ui/officialVideoWorkflow';
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from './shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides, type MiniMaxH3Guide } from './shared/umbra-ui/minimaxH3Guides';
@@ -10222,7 +10223,7 @@ async function emitBackendPowerPrompterSavedOutputs(
     }
     return [];
   }
-  const resolvedOutputs = outputs.map((output) => ({
+  const resolvedOutputs: Array<Record<string, unknown> & { fullpath: string }> = outputs.map((output) => ({
     ...output,
     fullpath: resolveComfySavedOutputPath(output),
   }));
@@ -10236,10 +10237,29 @@ async function emitBackendPowerPrompterSavedOutputs(
       if (fullpath !== sourcePath) Object.assign(output, { fullpath, filename: basename(fullpath), subfolder: '' });
     }
   }
+  if (generation?.outputOwner === 'umbra_ui' && generation.mediaType === 'video'
+    && (metadata?.umbra_official_workflow as Record<string, unknown> | undefined)?.saveLastFrame === true) {
+    const comfyRoot = getComfyToolRootFast();
+    for (const output of [...resolvedOutputs]) {
+      if (!isLastFrameVideoOutput(output)) continue;
+      try {
+        const videoPath = resolvePinnedVideoSourcePath(output, ROOT_DIR, comfyRoot);
+        const fullpath = await saveUmbraVideoLastFrame({ videoPath, comfyRoot, allowedRoots: getGalleryTransferAllowedRoots(), signal });
+        resolvedOutputs.push({ filename: basename(fullpath), fullpath, type: 'output', mediaKind: 'images',
+          format: 'image/png', nodeId: output.nodeId, lastFrameFor: videoPath });
+      } catch (error) {
+        signal?.throwIfAborted();
+        const message = `Video saved, but its last frame could not be exported: ${error instanceof Error ? error.message : String(error)}`;
+        output.lastFrameExportError = message;
+        console.warn('[VideoLastFrame]', message);
+        appendPowerPrompterQueueLog('video_last_frame_export_failed', { requestId, promptId, path: output.fullpath, error: message });
+      }
+    }
+  }
   const basePowerPrompterMetadata = metadata?.umbra_power_prompter && typeof metadata.umbra_power_prompter === 'object'
     ? metadata.umbra_power_prompter as Record<string, unknown>
     : {};
-  const stampedOutputs = await Promise.all(resolvedOutputs.map(async (output, outputIndex) => {
+  const stampedOutputs: Array<Record<string, unknown> & { fullpath: string; ppuid: string; umbra_power_prompter: Record<string, unknown> }> = await Promise.all(resolvedOutputs.map(async (output, outputIndex) => {
     const ppuid = createPowerPrompterUid();
     const outputPowerPrompterMetadata: Record<string, unknown> = {
       ...basePowerPrompterMetadata,
@@ -10294,7 +10314,8 @@ async function emitBackendPowerPrompterSavedOutputs(
     };
   }));
   const primaryPowerPrompterMetadata = stampedOutputs[0]?.umbra_power_prompter || basePowerPrompterMetadata;
-  recordGeneratedMediaOutputs(stampedOutputs);
+  // Auxiliary continuity frames must not redirect the filmstrip's Latest folder.
+  recordGeneratedMediaOutputs(stampedOutputs.filter(output => !output.lastFrameFor));
   if (promptIndex === 0 && generation?.outputOwner === 'umbra_ui' && generation.outputMode === 'img2img') {
     try {
       for (const output of stampedOutputs) {

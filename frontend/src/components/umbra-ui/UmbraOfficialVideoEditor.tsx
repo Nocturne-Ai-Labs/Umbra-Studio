@@ -46,8 +46,8 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
   const h3 = workflowId === 'h3-26';
   const fields = getOfficialVideoEditorFields(source, workflowId, catalog);
   const settingsSections = OFFICIAL_VIDEO_SETTINGS_CATEGORIES.map(category => ({ ...category,
-    fields: fields.filter(field => field.group === 'generation' && field.category === category.id),
-  })).filter(category => category.id !== 'resolution' && category.fields.length);
+    fields: fields.filter(field => field.group === 'generation' && field.category === category.id && !field.key.endsWith('.save_last_frame')),
+  })).filter(category => category.id !== 'resolution' && (category.fields.length || category.id === 'video-output'));
   const workflowSizing = draft.resolution?.mode === 'workflow';
   const h3Resolution = { ...DEFAULT_OFFICIAL_H3_RESOLUTION, ...draft.resolution?.h3 };
   const change = (patch: Partial<OfficialVideoEditorDraft>) => onChange({ ...latest.current, ...patch });
@@ -223,7 +223,7 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
           <section aria-label="Seed settings" className="space-y-3 border-b border-white/10 py-4"><h4 className="text-xs font-semibold text-zinc-200">Seed</h4><label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}><input aria-label="Video seed" inputMode="numeric" value={draft.seed} disabled={disabled} onChange={event => change({ seed: event.target.value })} className={inputClass} /></label></section>
           {settingsSections.map(category => <section key={category.id} aria-label={`${category.label} settings`} className="space-y-3 border-b border-white/10 py-4 last:border-b-0">
             <h4 className="text-xs font-semibold text-zinc-200">{category.label}</h4>
-            <div className="grid min-w-0 grid-cols-2 gap-3">{category.fields.map(renderField)}</div>
+            <div className="grid min-w-0 grid-cols-2 gap-3">{category.id === 'video-output' ? <label className={`col-span-2 flex items-center gap-2 py-2 ${labelClass}`}><input aria-label="Save last frame" type="checkbox" checked={draft.saveLastFrame !== false} disabled={disabled} onChange={event => change({ saveLastFrame: event.target.checked })} className="h-4 w-4 accent-[var(--umbra-accent)]" />Save last frame</label> : null}{category.fields.map(renderField)}</div>
           </section>)}
         </div>
       </aside>

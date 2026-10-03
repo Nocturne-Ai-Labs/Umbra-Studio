@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process';
 export interface PreviewProcessOptions {
   maxBytes: number;
   timeoutMs: number;
+  executable?: string;
+  signal?: AbortSignal;
   spawnProcess?: typeof spawn;
 }
 
@@ -16,7 +18,8 @@ export function runFfprobe(args: string[], options: PreviewProcessOptions): Prom
 
 function runMediaProcess(command: 'ffmpeg' | 'ffprobe', args: string[], options: PreviewProcessOptions): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
-    const child = (options.spawnProcess ?? spawn)(command, args, {
+    options.signal?.throwIfAborted();
+    const child = (options.spawnProcess ?? spawn)(options.executable || command, args, {
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     });
     let chunks: Buffer[] = [];
@@ -29,6 +32,7 @@ function runMediaProcess(command: 'ffmpeg' | 'ffprobe', args: string[], options:
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
       chunks = [];
       if (error) reject(error); else resolve(output);
     };
@@ -39,6 +43,9 @@ function runMediaProcess(command: 'ffmpeg' | 'ffprobe', args: string[], options:
       // Retain the caller's decode slot until the owned child actually closes.
       try { child.kill('SIGKILL'); } catch { /* Still wait for close, never admit overlapping work. */ }
     };
+    const abort = () => stop(new Error('Media processing cancelled.'));
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
     timer = setTimeout(() => stop(new Error(command === 'ffprobe' ? 'Timed out while reading video metadata' : 'Timed out while generating video preview')), options.timeoutMs);
     child.stdout!.on('data', (value: Buffer | string) => {
       if (settled || failure) return;

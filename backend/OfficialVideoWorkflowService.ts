@@ -103,6 +103,7 @@ export interface OfficialWorkflowCapture {
   graphSha256: string;
   workflowSha256: string;
   capturedAt: number;
+  saveLastFrame?: boolean;
   nativeExport?: { workflowTextSha256: string; apiTextSha256: string };
 }
 export function parseNativeExportText(text: unknown, label: string): unknown {
@@ -327,6 +328,7 @@ export class OfficialVideoWorkflowService {
       { workflowText: payload.workflowText, apiText: payload.apiText });
   }
   async capture(id: OfficialVideoWorkflowId, payload: any, objectInfo: Record<string, any> | null, nativeExports?: { workflowText: string; apiText: string }) {
+    if (payload?.saveLastFrame !== undefined && typeof payload.saveLastFrame !== 'boolean') throw new Error('Last-frame export must be enabled or disabled.');
     const sourceUi = JSON.parse(await this.source(id));
     if (payload?.sourceSha256 !== OFFICIAL_VIDEO_SOURCES[id].sha256 || payload?.serializer !== 'comfy-native-v1') throw new Error('Capture requires the pinned source and the native ComfyUI serializer.');
     if (officialUiTopology(payload.workflow) !== officialUiTopology(sourceUi)) throw new Error('The upstream workflow wiring changed. Reload its pinned original and configure native controls without editing the graph.');
@@ -337,6 +339,7 @@ export class OfficialVideoWorkflowService {
     if (this.inputRoot) await assertOfficialStagedMedia(graph, this.inputRoot());
     const captureId = `official-dasiwa-${id}-${randomUUID()}`;
     const metadata: OfficialWorkflowCapture = { workflowId: id, sourceCommit: SOURCE_COMMIT, sourceSha256: OFFICIAL_VIDEO_SOURCES[id].sha256, serializer: 'comfy-native-v1', graphSha256: officialGraphSha256(graph), workflowSha256: officialGraphSha256(payload.workflow), capturedAt: Date.now() };
+    if (payload.saveLastFrame !== undefined) metadata.saveLastFrame = payload.saveLastFrame;
     if (nativeExports) metadata.nativeExport = { workflowTextSha256: createHash('sha256').update(nativeExports.workflowText).digest('hex'), apiTextSha256: createHash('sha256').update(nativeExports.apiText).digest('hex') };
     const document = { prompt: graph, workflow: payload.workflow, umbra_official_workflow: metadata };
     await mkdir(this.captureRoot, { recursive: true });

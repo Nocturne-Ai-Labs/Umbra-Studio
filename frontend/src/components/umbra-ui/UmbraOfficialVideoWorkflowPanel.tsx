@@ -187,7 +187,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     } catch (error) { setActionError(errorText(error)); setBusy(''); }
   };
 
-  const captureNative = async (item: OfficialWorkflow): Promise<CapturedWorkflow> => {
+  const captureNative = async (item: OfficialWorkflow, saveLastFrame?: boolean): Promise<CapturedWorkflow> => {
       const native = await new Promise<NativeCapture>((resolve, reject) => {
         const timer = window.setTimeout(() => reject(new Error('Native capture timed out. Reload the video engine and retry.')), 21000);
         window.dispatchEvent(new CustomEvent('umbra:official-workflow-serialize', { detail: { workflowId: item.id,
@@ -198,7 +198,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
       if (!mountedRef.current) throw new Error('The video workspace was closed.');
       if (native.serializer !== 'comfy-native-v1' || native.sourceSha256 !== item.sha256) throw new Error('Native capture does not match this official source. Reload the official workflow in ComfyUI.');
       const response = await fetch(`/api/video/official-workflows/${item.id}/capture`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(native),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...native, ...(saveLastFrame !== undefined ? { saveLastFrame } : {}) }),
       });
       const payload = await response.json();
       if (!response.ok || payload?.success === false) throw new Error(String(payload?.error || 'The configured workflow could not be captured.'));
@@ -255,7 +255,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const prepareEditorCapture = async (): Promise<CapturedWorkflow> => {
     if (!selected || !editor) throw new Error('The official video editor is still loading.');
     setBusy('opening');
-    const preparedDraft = await prepareOfficialVideoResolution(editor.draft, selected.id);
+    const preparedDraft = await prepareOfficialVideoResolution({ ...editor.draft, saveLastFrame: editor.draft.saveLastFrame !== false }, selected.id);
     if (!mountedRef.current) throw new Error('The video workspace was closed.');
     const configuredWorkflow = configureOfficialVideoEditor(editor.source, selected.id, preparedDraft);
     const payload = { sourceText: editor.sourceText, configuredWorkflow, background: true, officialWorkflowId: selected.id,
@@ -281,7 +281,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
       });
       if (!mountedRef.current) throw new Error('The video workspace was closed.');
       setLoadedId(selected.id); setBusy('capturing');
-      return await captureNative(selected);
+      return await captureNative(selected, preparedDraft.saveLastFrame);
     } finally { backgroundLoadRef.current = false; }
   };
   const generateFromEditor = async (queue = true) => {
