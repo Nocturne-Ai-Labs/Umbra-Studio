@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.32.46 - Updater Dashboard And Managed Dependency Repair
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Install with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux. For the first upgrade from an older updater, close and reopen the updater after installing v0.32.46 so its new dashboard and bulk dependency controls load. No dataset, model, project, or settings migration is required.
+- Finish jobs and stop managed ComfyUI before selecting **Update dependencies**. Review the installed build's exact core/frontend minimums and custom-node requirements. The updater uses Umbra Setup's existing managed installers, synchronizes their Python requirements, skips already verified steps, and retains interrupted repair progress. Divergent/local node edits and uncertain process ownership hold installation for review; they are not discarded.
+- For future updates started from this dashboard, **Update app and dependencies** first installs the app, then reloads and presents the new build's dependency plan for separate approval. **Update app only** remains available as a recovery path. Restart managed ComfyUI through Umbra and refresh its native frontend before using **Recheck runtime**. No queue resumes automatically.
+- Model weights remain separate explicit downloads in `UmbraSetup.bat` or `./umbra-setup.sh` > **Models**. Existing image/video models are preserved; this updater release adds no required model download. Optional AI Toolkit/trainer and Python-helper environments retain their separate Setup actions and are not part of the ComfyUI bulk plan.
+- Existing CUDA-tagged Python package builds are held at their exact installed versions. Optional Triton is not installed or changed without a reviewed platform-compatible selection. A dependency requiring an incompatible CUDA package change will hold for explicit review rather than silently replacing it.
+- Linux managed tools may require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit still requires host Git and Node.js 20 or newer.
+
+### Updater Dashboard
+
+- Add release selection, installed-to-selected version comparison, visible patch notes, and package size/date information. Refresh retains the selected release, and prerelease comparisons agree with backend admission rules.
+- Show installed and required ComfyUI, frontend, and custom-node versions or commits together with their status. Distinguish missing or stale Python requirements, verified source files, and owned-runtime registration; successful file installation does not claim GPU generation is qualified.
+- Present reviewed dependency installation, serial progress, retained repair logs, explicit retry, restart guidance, and a separate model-download section. Desktop and compact layouts keep the table, review dialog, and action buttons reachable.
+- Treat release notes as text rather than executable HTML. Preserve app-only recovery when dependency inspection is unavailable, while dependency mutations remain held until fresh requirements can be reviewed.
+
+### Managed Dependency Repair
+
+- Build one deduplicated plan from every declared managed feature, including inactive optional features, using the highest ComfyUI and frontend minimums and all declared custom-node requirements. Existing individual and official H3/LTX repair plans remain available.
+- Inspect live file and Python installation evidence before each step and verify it again afterward. Completed repair records alone cannot skip a subsequently damaged environment. Invalidate only stale generated Setup markers, retaining their old evidence and all user/node source files.
+- Bind approvals to the current build requirements, not to stale installed progress. Changed requirements stop the repair before the next installer; interrupted work resumes only after explicit retry and fresh inspection.
+- Preserve installed package versions as lower bounds and pin local CUDA builds exactly. Existing custom pip policy is not overridden, and unreviewed optional acceleration distributions remain held.
+- Re-read the installed app version after application replacement so the retained updater cannot authorize a second installation using its old startup version. Missing version metadata blocks another update instead of permitting an accidental reinstall or downgrade.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: CUDA local-version constraints used an invalid ordered comparison; exact pins now preserve the installed CUDA build and parse correctly in pip.
+- Fixed: Runtime recheck omitted its current dependency-plan approval, causing bulk readiness refresh to be rejected.
+- Fixed: Missing ComfyUI source files could be displayed as verified when version metadata and Python evidence still existed.
+- Fixed: Failed dependency inspection blocked the app-only recovery path even though the app package could still repair the installation.
+- Fixed: Failed launch/relaunch states left misleading closing guidance; retry controls and actionable errors are restored.
+- Improved: Repeated Git checks for shared custom-node suites are deduplicated within each inspection without retaining stale cross-request results.
+- Improved: App and managed-dependency updates share a clear dashboard while preserving separate approval, model downloads, runtime checks, local edits, and explicit queue resume.
+
 ## v0.32.45 - Native DaSiWa Video Editor, Continuity, And Workspace Updates
 
 ### TL;DR - Setup After Updating
