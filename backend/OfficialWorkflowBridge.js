@@ -142,6 +142,11 @@
       || app.isGraphReady === false || !app.graph || typeof app.graph.serialize !== 'function') {
       return 'ComfyUI native graph loading and serialization are not ready.';
     }
+    // Native startup restores saved tabs after isGraphReady becomes true.
+    // Wait for that restoration before applying Umbra's configured graph.
+    if (window.app !== app || app.extensionManager?.spinner !== false || app.configuringGraph) {
+      return 'ComfyUI is still initializing or restoring its workspace.';
+    }
     const registered = window.LiteGraph?.registered_node_types;
     if (!registered) return 'ComfyUI frontend node registration is unavailable. Update the managed frontend.';
     const missing = nodeTypes.filter(type => !Object.hasOwn(registered, type));
@@ -182,7 +187,8 @@
   }
 
   function assertTopology(workflow, expected) {
-    if (inspectWorkflow(workflow).topology !== expected) {
+    const actual = inspectWorkflow(workflow).topology;
+    if (actual !== expected) {
       fail('The native ComfyUI workflow topology differs from the pinned original. Restore the original workflow before capture; only widgets, layout and modes may change.');
     }
   }
@@ -261,6 +267,19 @@
     const inspection = inspectWorkflow(workflow);
     if (stable([...item.nodeTypes].sort()) !== stable(inspection.nodeTypes)) {
       fail('The pinned manifest node classes do not match the original workflow. Update Umbra.');
+    }
+    // Only the byte-verified original establishes provenance and topology.
+    // Configuration remains UI JSON; the native frontend is the sole serializer.
+    if (Object.hasOwn(message, 'configuredWorkflow')) {
+      if (!record(message.configuredWorkflow)) fail('The configured workflow must be native UI JSON.');
+      let configuredText;
+      try { configuredText = JSON.stringify(message.configuredWorkflow); }
+      catch { fail('The configured workflow is not serializable UI JSON.'); }
+      if (!configuredText || new TextEncoder().encode(configuredText).byteLength > MAX_SOURCE_BYTES) {
+        fail('The configured workflow is too large.');
+      }
+      assertTopology(message.configuredWorkflow, inspection.topology);
+      workflow = structuredClone(message.configuredWorkflow);
     }
     const { app } = await runtime(inspection.nodeTypes, operation);
     loaded = null;

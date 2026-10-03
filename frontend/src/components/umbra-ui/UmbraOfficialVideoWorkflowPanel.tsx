@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 import { useStore } from '@/store/useStore';
 import { normalizeVideoRoutePolicy } from '../../../../shared/umbra-ui/videoRoutePolicy';
 import type { UmbraOfficialVideoQueueOptions } from './useUmbraPowerPrompterBridge';
+import { createOfficialVideoEditorDraft, configureOfficialVideoEditor, type OfficialVideoEditorDraft } from '../../../../shared/umbra-ui/officialVideoEditor';
+import { UmbraOfficialVideoEditor } from './UmbraOfficialVideoEditor';
 
 type OfficialWorkflowId = UmbraOfficialVideoQueueOptions['workflowId'];
 interface OfficialWorkflow {
@@ -44,6 +46,23 @@ const labelClass = 'text-[10px] font-black uppercase tracking-[0.12em] text-zinc
 const MAX_NATIVE_EXPORT_BYTES = 16 * 1024 * 1024;
 const isWorkflowId = (value: unknown): value is OfficialWorkflowId => value === 'h3-26' || value === 'ltx23-50';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error || 'Official workflow action failed.');
+const draftStorageKey = (item: OfficialWorkflow) => `umbra.official-video-draft.${item.id}.${item.sha256}`;
+function restoredDraft(item: OfficialWorkflow, fallback: OfficialVideoEditorDraft): OfficialVideoEditorDraft {
+  try {
+    const saved = window.localStorage.getItem(draftStorageKey(item));
+    if (!saved || saved.length > 1024 * 1024) return fallback;
+    const draft = JSON.parse(saved) as OfficialVideoEditorDraft;
+    if (typeof draft?.prompt !== 'string' || typeof draft.mode !== 'string' || typeof draft.seed !== 'string'
+      || ![draft.width, draft.height, draft.durationSeconds, draft.frameRate].every(value => typeof value === 'number' && Number.isFinite(value))
+      || !draft.values || typeof draft.values !== 'object' || Array.isArray(draft.values)
+      || Object.values(draft.values).some(value => !['string', 'number', 'boolean'].includes(typeof value))
+      || !Array.isArray(draft.references) || draft.references.length > 128
+      || draft.references.some(reference => !reference || typeof reference.id !== 'string' || typeof reference.filename !== 'string'
+        || !['image', 'video', 'audio'].includes(reference.kind) || typeof reference.prompt !== 'string'
+        || ![reference.startSeconds, reference.durationSeconds].every(value => typeof value === 'number' && Number.isFinite(value)))) return fallback;
+    return draft;
+  } catch { return fallback; }
+}
 
 export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected, queueOfficialVideo, preview, review }: UmbraOfficialVideoWorkflowPanelProps) {
   const [items, setItems] = React.useState<OfficialWorkflow[]>([]);
@@ -59,12 +78,56 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const [workflowFile, setWorkflowFile] = React.useState<File | null>(null);
   const [apiFile, setApiFile] = React.useState<File | null>(null);
   const [reviewOpen, setReviewOpen] = React.useState(() => window.innerWidth >= 1100);
+  const [editors, setEditors] = React.useState<Partial<Record<OfficialWorkflowId, { sourceText: string; source: Record<string, unknown>; draft: OfficialVideoEditorDraft }>>>({});
+  const [editorError, setEditorError] = React.useState('');
+  const [settingsError, setSettingsError] = React.useState('');
+  const [nodeCatalog, setNodeCatalog] = React.useState<Record<string, unknown>>({});
+  const [mediaBusy, setMediaBusy] = React.useState(false);
+  const backgroundLoadRef = React.useRef(false);
+  const operationRef = React.useRef(false);
   const loadRequestRef = React.useRef('');
   const mountedRef = React.useRef(true);
   const reviewId = React.useId();
   const selected = items.find(item => item.id === selectedId);
+  const editor = editors[selectedId];
 
   React.useEffect(() => { setWorkflowFile(null); setApiFile(null); }, [selectedId]);
+
+  React.useEffect(() => {
+    if (!selected || editor) return;
+    const abort = new AbortController();
+    setEditorError('');
+    void fetch(`/api/video/official-workflows/${selected.id}/source`, { cache: 'no-store', signal: abort.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Official source could not be loaded (${response.status}).`);
+        const sourceText = await response.text();
+        const source = JSON.parse(sourceText) as Record<string, unknown>;
+        const draft = restoredDraft(selected, createOfficialVideoEditorDraft(selected.id, source));
+        if (!abort.signal.aborted) setEditors(current => ({ ...current, [selected.id]: { sourceText, source, draft } }));
+      }).catch(error => { if (!abort.signal.aborted) setEditorError(errorText(error)); });
+    return () => abort.abort();
+  }, [selected, editor]);
+
+  React.useEffect(() => {
+    if (!comfyConnected) { setNodeCatalog({}); setSettingsError(''); return; }
+    const abort = new AbortController();
+    let retryTimer: number | undefined;
+    let attempts = 0;
+    const loadCatalog = async () => {
+      try {
+        const response = await fetch('/comfy/object_info', { cache: 'no-store', signal: abort.signal });
+        if (!response.ok) throw new Error('Installed video settings could not be checked.');
+        const catalog = await response.json();
+        if (!abort.signal.aborted) { setNodeCatalog(catalog); setSettingsError(''); }
+      } catch (error) {
+        if (abort.signal.aborted) return;
+        if (++attempts < 10) retryTimer = window.setTimeout(() => void loadCatalog(), 3000);
+        else setSettingsError(errorText(error));
+      }
+    };
+    void loadCatalog();
+    return () => { abort.abort(); window.clearTimeout(retryTimer); };
+  }, [comfyConnected, items]);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -92,6 +155,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     const onLoaded = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail?.loadRequestId !== loadRequestRef.current) return;
+      if (backgroundLoadRef.current) return;
       setBusy('');
       if (detail.ok === true && isWorkflowId(detail.workflowId)) {
         setLoadedId(detail.workflowId);
@@ -121,26 +185,30 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     } catch (error) { setActionError(errorText(error)); setBusy(''); }
   };
 
-  const captureWorkflow = async () => {
-    if (!selected?.readiness.ready || loadedId !== selectedId || busy) return;
-    setBusy('capturing'); setActionError(''); setStatus(''); setCaptured(null);
-    try {
+  const captureNative = async (item: OfficialWorkflow): Promise<CapturedWorkflow> => {
       const native = await new Promise<NativeCapture>((resolve, reject) => {
-        const timer = window.setTimeout(() => reject(new Error('Native capture timed out. Open the official workflow in ComfyUI and retry.')), 21000);
-        window.dispatchEvent(new CustomEvent('umbra:official-workflow-serialize', { detail: { workflowId: selected.id,
+        const timer = window.setTimeout(() => reject(new Error('Native capture timed out. Reload the video engine and retry.')), 21000);
+        window.dispatchEvent(new CustomEvent('umbra:official-workflow-serialize', { detail: { workflowId: item.id,
           resolve: (value: NativeCapture) => { window.clearTimeout(timer); resolve(value); },
           reject: (error: unknown) => { window.clearTimeout(timer); reject(new Error(errorText(error))); },
         } }));
       });
-      if (!mountedRef.current) return;
-      if (native.serializer !== 'comfy-native-v1' || native.sourceSha256 !== selected.sha256) throw new Error('Native capture does not match this official source. Reload the official workflow in ComfyUI.');
-      const response = await fetch(`/api/video/official-workflows/${selected.id}/capture`, {
+      if (!mountedRef.current) throw new Error('The video workspace was closed.');
+      if (native.serializer !== 'comfy-native-v1' || native.sourceSha256 !== item.sha256) throw new Error('Native capture does not match this official source. Reload the official workflow in ComfyUI.');
+      const response = await fetch(`/api/video/official-workflows/${item.id}/capture`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(native),
       });
       const payload = await response.json();
       if (!response.ok || payload?.success === false) throw new Error(String(payload?.error || 'The configured workflow could not be captured.'));
-      if (!payload?.captureId || payload.workflowId !== selected.id) throw new Error('The capture response did not identify the selected official workflow.');
-      if (mountedRef.current) { setCaptured({ captureId: String(payload.captureId), workflowId: selected.id, prompt: String(payload.prompt || ''), name: String(payload.name || selected.name) }); setStatus('Configured snapshot captured.'); }
+      if (!payload?.captureId || payload.workflowId !== item.id) throw new Error('The capture response did not identify the selected official workflow.');
+      return { captureId: String(payload.captureId), workflowId: item.id, prompt: String(payload.prompt || ''), name: String(payload.name || item.name) };
+  };
+  const captureWorkflow = async () => {
+    if (!selected?.readiness.ready || loadedId !== selectedId || busy) return;
+    setBusy('capturing'); setActionError(''); setStatus(''); setCaptured(null);
+    try {
+      const next = await captureNative(selected);
+      if (mountedRef.current) { setCaptured(next); setStatus('Configured snapshot captured.'); }
     } catch (error) { if (mountedRef.current) setActionError(errorText(error)); }
     finally { if (mountedRef.current) setBusy(''); }
   };
@@ -182,6 +250,52 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     finally { if (mountedRef.current) setBusy(''); }
   };
 
+  const prepareEditorCapture = async (): Promise<CapturedWorkflow> => {
+    if (!selected || !editor) throw new Error('The official video editor is still loading.');
+    const configuredWorkflow = configureOfficialVideoEditor(editor.source, selected.id, editor.draft);
+    const payload = { sourceText: editor.sourceText, configuredWorkflow, background: true, officialWorkflowId: selected.id,
+      workflowId: selected.id, workflowName: selected.name, sourceSha256: selected.sha256, loadRequestId: crypto.randomUUID() };
+    loadRequestRef.current = payload.loadRequestId;
+    backgroundLoadRef.current = true;
+    setBusy('opening');
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => { window.clearTimeout(timer); window.removeEventListener('umbra:official-workflow-loaded', onLoaded); };
+        const onLoaded = (event: Event) => {
+          const detail = (event as CustomEvent).detail;
+          if (detail?.loadRequestId !== payload.loadRequestId) return;
+          cleanup();
+          if (detail.ok === true) resolve(); else reject(new Error(String(detail.error || 'The native video engine could not prepare this workflow.')));
+        };
+        const timer = window.setTimeout(() => { cleanup(); reject(new Error('The native video engine did not become ready. Restart managed ComfyUI and retry.')); }, 45000);
+        window.addEventListener('umbra:official-workflow-loaded', onLoaded);
+        try {
+          window.sessionStorage.setItem('umbra.pendingComfyWorkflowLoad', JSON.stringify(payload));
+          window.dispatchEvent(new CustomEvent('umbra:comfyui-load-workflow', { detail: payload }));
+        } catch (error) { cleanup(); reject(error); }
+      });
+      if (!mountedRef.current) throw new Error('The video workspace was closed.');
+      setLoadedId(selected.id); setBusy('capturing');
+      return await captureNative(selected);
+    } finally { backgroundLoadRef.current = false; }
+  };
+  const generateFromEditor = async (queue = true) => {
+    if (!selected?.readiness.ready || !editor || !comfyConnected || busy || policySaving || mediaBusy || operationRef.current || (queue && !queueConnected)) return;
+    operationRef.current = true;
+    setCaptured(null); setActionError(''); setStatus('');
+    try {
+      const next = await prepareEditorCapture();
+      if (!mountedRef.current) return;
+      setCaptured(next);
+      if (queue) {
+        setBusy('queueing');
+        await queueOfficialVideo({ captureId: next.captureId, workflowId: next.workflowId, prompt: editor.draft.prompt || next.prompt });
+      }
+      if (mountedRef.current) setStatus(queue ? 'Video queued.' : 'Native configuration verified.');
+    } catch (error) { if (mountedRef.current) setActionError(errorText(error)); }
+    finally { operationRef.current = false; if (mountedRef.current) setBusy(''); }
+  };
+
   return (
     <section data-umbra-official-video="" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--umbra-panel-bg)] text-[var(--umbra-text)]">
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
@@ -203,14 +317,23 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
               <span className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-26' ? 'C-MMH3-26' : 'C-LTX23-50'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
             </button>)}
           </div>
-          {selected ? <section className="space-y-3 rounded border border-white/10 bg-black/15 p-3" aria-label="Selected official workflow">
+          {selected ? <section className="space-y-3 border-b border-white/10 pb-3" aria-label="Selected official workflow">
             <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400"><span>{selected.license}</span><span title={selected.sourceCommit}>Revision {selected.sourceCommit.slice(0, 10)}</span><span title={selected.sha256}>SHA-256 {selected.sha256.slice(0, 12)}</span><a href={selected.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 text-[var(--umbra-accent)] hover:underline">Upstream source<ExternalLink size={12} /></a></div>
             {!selected.readiness.ready ? <div role="status" data-official-readiness-blocked="" className="space-y-1 text-xs text-amber-200"><h4 className={labelClass}>Setup required</h4>{selected.readiness.issues.map((issue, index) => <p key={`${index}:${issue}`} className="break-words">{issue}</p>)}</div> : null}
             {!comfyConnected ? <p className="text-xs text-zinc-400">ComfyUI is not connected. Open its workspace to use the managed controls.</p> : null}
-            <p className="text-xs leading-relaxed text-zinc-400">Configure prompts, seeds, resources, and stages in ComfyUI. Loading replaces the graph currently open there.</p>
-            <div className="flex flex-wrap gap-2"><button type="button" className={buttonClass} disabled={!!busy || !comfyConnected} onClick={() => void openWorkflow()}><ExternalLink size={13} />Load official workflow in ComfyUI</button><button type="button" className={buttonClass} onClick={openComfy}>Open ComfyUI</button><button type="button" className={buttonClass} disabled={!!busy || !selected.readiness.ready || loadedId !== selectedId || !comfyConnected} onClick={() => void captureWorkflow()}><Camera size={13} />Capture from ComfyUI</button></div>
           </section> : null}
-          {selected ? <section key={selected.id} className="space-y-2 rounded border border-white/10 bg-black/15 p-3" aria-label="Import native ComfyUI exports">
+          {editorError ? <p role="alert" className="text-xs text-red-300">{editorError}</p> : null}
+          {settingsError ? <p role="alert" className="text-xs text-red-300">{settingsError}</p> : null}
+          {editor ? <UmbraOfficialVideoEditor key={selectedId} workflowId={selectedId} source={editor.source} draft={editor.draft} catalog={nodeCatalog} disabled={!!busy || mediaBusy} comfyConnected={comfyConnected} preview={preview} onMediaBusyChange={setMediaBusy}
+            onChange={draft => {
+              setEditors(current => ({ ...current, [selectedId]: { ...editor, draft } }));
+              if (selected) { try { window.localStorage.setItem(draftStorageKey(selected), JSON.stringify(draft)); } catch { /* In-memory editing works when storage is unavailable. */ } }
+              setCaptured(null); setStatus(''); setActionError('');
+            }} /> : <div className="min-h-44">{preview}</div>}
+          <details className="border-t border-white/10 py-3">
+          <summary className="cursor-pointer text-[11px] text-zinc-400">Advanced workflow tools</summary>
+          <div className="flex flex-wrap gap-2 py-3"><button type="button" className={buttonClass} disabled={!!busy || !comfyConnected} onClick={() => void openWorkflow()}><ExternalLink size={13} />Load official workflow in ComfyUI</button><button type="button" className={buttonClass} onClick={openComfy}>Open ComfyUI</button><button type="button" className={buttonClass} disabled={!!busy || !selected?.readiness.ready || loadedId !== selectedId || !comfyConnected} onClick={() => void captureWorkflow()}><Camera size={13} />Capture from ComfyUI</button></div>
+          {selected ? <section key={selected.id} className="space-y-2 py-3" aria-label="Import native ComfyUI exports">
             <h3 className={labelClass}>Import native exports</h3>
             <p className="text-[11px] text-zinc-400">Choose Workflow JSON and API JSON exported from the same configured workflow in ComfyUI. Maximum 16 MiB per file.</p>
             <div className="grid min-w-0 gap-3 md:grid-cols-2">
@@ -219,15 +342,19 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
             </div>
             <button type="button" className={buttonClass} disabled={!!busy || policySaving || !workflowFile || !apiFile} onClick={() => void importWorkflow()}><Upload size={13} />Import native exports</button>
           </section> : null}
+          {captured ? <button type="button" className={buttonClass} disabled={!!queueReason || !!busy || policySaving} onClick={() => void queueCapture()}><Play size={14} />Queue captured workflow</button> : null}
+          </details>
           {busy ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={14} className="animate-spin" />{busy === 'opening' ? 'Opening official workflow…' : busy === 'capturing' ? 'Capturing native configuration…' : busy === 'importing' ? 'Importing native exports…' : 'Waiting for queue acknowledgement…'}</p> : null}
           {actionError ? <p role="alert" className="break-words text-xs text-red-300">{actionError}</p> : null}
           {status ? <p role="status" className="text-xs text-zinc-400">{status}</p> : null}
-          {captured ? <section data-official-capture="" className="space-y-2 rounded border border-white/10 bg-black/15 p-3"><h3 className={labelClass}>Captured prompt · {captured.name}</h3><textarea readOnly aria-label="Captured native prompt" value={captured.prompt || 'No text prompt in this native workflow.'} className="min-h-20 w-full resize-y rounded border border-white/10 bg-black/25 p-2 text-xs text-zinc-300" /><p className="text-[11px] text-zinc-500">Queue uses this captured snapshot. Capture or import again after changing the graph in ComfyUI.</p></section> : null}
-          <div className="min-h-44 overflow-hidden rounded border border-white/10">{preview}</div>
         </main>
         <aside id={reviewId} hidden={!reviewOpen} aria-label="Video queue and results" className="min-h-72 min-w-0 shrink-0 border-t border-white/10 xl:w-80 xl:border-l xl:border-t-0">{review}</aside>
       </div>
-      <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 p-3"><button type="button" className={cn(buttonClass, 'border-[var(--umbra-accent)]')} disabled={!!queueReason || !!busy || policySaving} title={queueReason || 'Queue the captured native workflow'} onClick={() => void queueCapture()}><Play size={14} />Queue captured workflow</button>{queueReason ? <p className="min-w-0 flex-1 text-[11px] text-zinc-500">{queueReason}</p> : null}</footer>
+      <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 p-3">
+        <button type="button" className={cn(buttonClass, 'border-[var(--umbra-accent)]')} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !queueConnected || !!busy || mediaBusy || policySaving} onClick={() => void generateFromEditor()}><Play size={14} />Generate video</button>
+        <button type="button" className={buttonClass} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !!busy || mediaBusy || policySaving} onClick={() => void generateFromEditor(false)}><Camera size={14} />Verify video configuration</button>
+        {!comfyConnected ? <p className="text-[11px] text-zinc-500">ComfyUI is not connected.</p> : null}
+      </footer>
     </section>
   );
 }

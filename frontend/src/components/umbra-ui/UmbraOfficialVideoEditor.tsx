@@ -1,0 +1,179 @@
+'use client';
+
+import React from 'react';
+import { ArrowDown, ArrowUp, Film, Image as ImageIcon, Loader2, Music2, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { normalizePowerPrompterGenerationControls } from '@/lib/powerPrompter';
+import { UmbraH3PromptForgeModal } from './UmbraH3PromptForgeModal';
+import { getOfficialVideoEditorFields, OFFICIAL_VIDEO_EDITOR_MODES, type OfficialVideoEditorDraft } from '../../../../shared/umbra-ui/officialVideoEditor';
+import type { OfficialVideoWorkflowId } from '../../../../shared/umbra-ui/officialVideoWorkflow';
+
+interface Props {
+  workflowId: OfficialVideoWorkflowId;
+  source: Record<string, unknown>;
+  catalog: Record<string, unknown>;
+  draft: OfficialVideoEditorDraft;
+  onChange: (draft: OfficialVideoEditorDraft) => void;
+  disabled: boolean;
+  comfyConnected: boolean;
+  preview: React.ReactNode;
+  onMediaBusyChange: (busy: boolean) => void;
+}
+
+const inputClass = 'min-h-9 w-full min-w-0 rounded border border-white/15 bg-black/25 px-2 py-1.5 text-xs text-[var(--umbra-text)] outline-none focus:border-[var(--umbra-accent)] disabled:opacity-40';
+const iconClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-white/15 text-zinc-300 hover:bg-white/5 disabled:opacity-30';
+const labelClass = 'text-[11px] text-zinc-400';
+
+export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, onChange, disabled, comfyConnected, preview, onMediaBusyChange }: Props) {
+  const [forgeOpen, setForgeOpen] = React.useState(false);
+  const [uploading, setUploading] = React.useState('');
+  const [uploadError, setUploadError] = React.useState('');
+  const fileInput = React.useRef<HTMLInputElement>(null);
+  const uploadKind = React.useRef<'image' | 'video' | 'audio'>('image');
+  const latest = React.useRef(draft);
+  latest.current = draft;
+  const h3 = workflowId === 'h3-26';
+  const fields = getOfficialVideoEditorFields(source, workflowId, catalog);
+  const change = (patch: Partial<OfficialVideoEditorDraft>) => onChange({ ...latest.current, ...patch });
+  const references = h3 ? draft.references : [...draft.references].sort((a, b) => a.startSeconds - b.startSeconds);
+  const changeMode = (mode: string) => {
+    const current = latest.current;
+    if (!h3 && mode === 'FLF2V' && current.frameRate > 0 && current.references.length <= 2) {
+      const durationSeconds = Math.max(2, Math.round(current.durationSeconds * current.frameRate)) / current.frameRate;
+      change({ mode, durationSeconds, references: [...current.references].sort((a, b) => a.startSeconds - b.startSeconds)
+        .map((reference, index) => ({ ...reference, startSeconds: index === 0 ? 0 : durationSeconds - 1 / current.frameRate,
+          durationSeconds: 1 / current.frameRate })) });
+    } else change({ mode });
+  };
+  const changeTiming = (patch: Partial<Pick<OfficialVideoEditorDraft, 'durationSeconds' | 'frameRate'>>) => {
+    const current = latest.current;
+    const next = { ...current, ...patch };
+    if (!h3 && next.frameRate > 0 && next.durationSeconds > 0) {
+      next.durationSeconds = Math.max(1, Math.round(next.durationSeconds * next.frameRate)) / next.frameRate;
+    }
+    if (!h3 && next.mode === 'FLF2V' && next.frameRate > 0 && next.durationSeconds > 0) {
+      next.references = [...current.references].sort((a, b) => a.startSeconds - b.startSeconds).map((reference, index) => ({ ...reference,
+        startSeconds: index === 0 ? 0 : next.durationSeconds - 1 / next.frameRate, durationSeconds: 1 / next.frameRate }));
+    } else if (!h3 && patch.frameRate && patch.frameRate > 0) {
+      next.references = current.references.map(reference => {
+        const start = Math.round(reference.startSeconds * next.frameRate);
+        const end = Math.round((reference.startSeconds + reference.durationSeconds) * next.frameRate);
+        return { ...reference, startSeconds: start / next.frameRate, durationSeconds: Math.max(1, end - start) / next.frameRate };
+      });
+    }
+    onChange(next);
+  };
+  const updateReference = (id: string, patch: Partial<OfficialVideoEditorDraft['references'][number]>) => {
+    if (!h3 && latest.current.frameRate > 0) {
+      if (typeof patch.startSeconds === 'number') patch.startSeconds = Math.round(patch.startSeconds * latest.current.frameRate) / latest.current.frameRate;
+      if (typeof patch.durationSeconds === 'number') patch.durationSeconds = Math.max(1, Math.round(patch.durationSeconds * latest.current.frameRate)) / latest.current.frameRate;
+    }
+    change({ references: latest.current.references.map(reference => reference.id === id ? { ...reference, ...patch } : reference) });
+  };
+  const moveReference = (id: string, direction: number) => {
+    const next = h3 ? [...latest.current.references] : [...latest.current.references].sort((a, b) => a.startSeconds - b.startSeconds);
+    const index = next.findIndex(reference => reference.id === id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    if (!h3) {
+      let cursor = 0;
+      for (let i = 0; i < next.length; i++) { next[i] = { ...next[i], startSeconds: cursor }; cursor += next[i].durationSeconds; }
+    }
+    change({ references: next });
+  };
+  const addMedia = async (file: File) => {
+    const kind = uploadKind.current;
+    setUploading(file.name); setUploadError(''); onMediaBusyChange(true);
+    try {
+      const response = await fetch('/api/comfy/upload-media', { method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/octet-stream', 'x-umbra-media-kind': kind,
+          'x-umbra-file-name': encodeURIComponent(file.name) }, body: file });
+      const result = await response.json();
+      if (!response.ok || !result.filename) throw new Error(String(result.error || 'Media upload failed.'));
+      const current = latest.current;
+      const startSeconds = current.references.reduce((end, reference) => Math.max(end, reference.startSeconds + reference.durationSeconds), 0);
+      const endpoint = current.mode === 'FLF2V';
+      const reference = { id: crypto.randomUUID(), kind, filename: String(result.filename), prompt: '',
+        startSeconds: h3 ? 0 : endpoint ? (current.references.length ? current.durationSeconds - 1 / current.frameRate : 0) : startSeconds,
+        durationSeconds: h3 ? kind === 'image' ? 1 : Math.min(2, current.durationSeconds) : endpoint ? 1 / current.frameRate : Math.min(1, current.durationSeconds - startSeconds) };
+      onChange({ ...current, references: [...current.references, reference] });
+    } catch (error) { setUploadError(error instanceof Error ? error.message : 'Media upload failed.'); }
+    finally { setUploading(''); onMediaBusyChange(false); if (fileInput.current) fileInput.current.value = ''; }
+  };
+  const video = React.useMemo(() => {
+    const controls = normalizePowerPrompterGenerationControls(null).video!;
+    controls.mode = draft.mode === 'T2VA' || draft.mode === 'T2V' ? 'text_to_video' : draft.mode === 'REF2VA' ? 'reference_to_video' : 'image_to_video';
+    controls.frameGuideMode = draft.mode === 'FL2VA' ? 'first_last' : 'first';
+    return controls;
+  }, [draft.mode]);
+  const renderField = (field: (typeof fields)[number]) => {
+    const value = draft.values[field.key] ?? field.value;
+    const setValue = (next: string | number | boolean) => change({ values: { ...latest.current.values, [field.key]: next } });
+    return <label key={field.key} className={`flex min-w-0 ${field.type === 'boolean' ? 'items-center gap-2 self-end py-2' : 'flex-col gap-1'} ${labelClass}`}>
+      {field.type === 'boolean' ? <input type="checkbox" checked={value === true} disabled={disabled} onChange={event => setValue(event.target.checked)} className="h-4 w-4 shrink-0 accent-[var(--umbra-accent)]" /> : null}
+      <span className="min-w-0 break-words">{field.label}</span>
+      {field.type === 'select' ? <UmbraSelectControl aria-label={field.label} value={String(value)} disabled={disabled} onChange={event => setValue(event.target.value)} className={inputClass}>
+        {Array.from(new Set([String(value), ...(field.options || [])])).map(option => <option key={option} value={option}>{option || 'None'}</option>)}
+      </UmbraSelectControl> : field.type === 'boolean' ? null : <input aria-label={field.label} type={field.type === 'number' ? 'number' : 'text'} value={String(value)} min={field.min} max={field.max} step={field.step} disabled={disabled}
+        onChange={event => setValue(field.type === 'number' ? Number(event.target.value) : event.target.value)} className={inputClass} />}
+    </label>;
+  };
+  const mediaAllowed = !disabled && !uploading && comfyConnected && draft.mode !== 'T2VA' && draft.mode !== 'T2V';
+  return <div className="min-w-0">
+    <section aria-label="Director timeline and settings" data-official-editor-section="director" className="min-w-0 space-y-3 border-b border-white/10 pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-xs font-semibold">Director</h3><span className="text-[10px] text-zinc-500">{references.length} references</span></div>
+      <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-4">
+        <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Mode<UmbraSelectControl aria-label="Director mode" value={draft.mode} disabled={disabled} onChange={event => changeMode(event.target.value)} className={inputClass}>
+          {OFFICIAL_VIDEO_EDITOR_MODES[workflowId].map(mode => <option key={mode} value={mode}>{mode}</option>)}
+        </UmbraSelectControl></label>
+        <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Duration (s)<input aria-label="Video duration seconds" type="number" min={1} max={h3 ? 15 : 120} step={1 / Math.max(1, draft.frameRate)} value={Number(draft.durationSeconds.toFixed(6))} disabled={disabled} onChange={event => changeTiming({ durationSeconds: Number(event.target.value) })} className={inputClass} /></label>
+        <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Frame rate<input aria-label="Video frame rate" type="number" min={1} max={120} value={draft.frameRate} disabled={disabled} onChange={event => changeTiming({ frameRate: Number(event.target.value) })} className={inputClass} /></label>
+        <div className="flex items-end gap-1">
+          {(h3 && draft.mode === 'REF2VA' ? ['image', 'video', 'audio'] as const : draft.mode === 'V2V' ? ['video'] as const : ['image'] as const).map(kind => <button key={kind} type="button" disabled={!mediaAllowed || (['I2VA', 'L2VA'].includes(draft.mode) && references.length >= 1) || (['FL2VA', 'FLF2V'].includes(draft.mode) && references.length >= 2) || (!h3 && draft.mode !== 'FLF2V' && references.some(reference => reference.startSeconds + reference.durationSeconds >= draft.durationSeconds))} className={iconClass} aria-label={`Add Director ${kind}`} title={`Add ${kind} reference`} onClick={() => { uploadKind.current = kind; if (fileInput.current) { fileInput.current.accept = `${kind}/*`; fileInput.current.click(); } }}>
+            {kind === 'image' ? <ImageIcon size={16} /> : kind === 'video' ? <Film size={16} /> : <Music2 size={16} />}
+          </button>)}
+          <input ref={fileInput} type="file" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) void addMedia(file); }} />
+        </div>
+      </div>
+      <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-3">{fields.filter(field => field.group === 'director').map(renderField)}</div>
+      <div aria-label="Director reference timeline" className="flex min-h-12 min-w-0 items-stretch gap-1 overflow-x-auto border-y border-white/10 bg-black/20 p-1 custom-scrollbar">
+        {references.length ? references.map((reference, index) => <div key={reference.id} className="flex min-w-32 max-w-56 shrink-0 flex-col justify-center border-l-2 border-[var(--umbra-accent)] bg-white/5 px-2 py-1">
+          <span className="truncate text-[11px]">{index + 1}. {reference.filename}</span><span className="text-[10px] text-zinc-400">{h3 ? reference.kind : `${reference.startSeconds.toFixed(2)} - ${(reference.startSeconds + reference.durationSeconds).toFixed(2)}s`}</span>
+        </div>) : <span className="self-center px-2 text-[11px] text-zinc-500">{draft.durationSeconds}s</span>}
+      </div>
+      <div className="grid min-w-0 gap-3 md:grid-cols-2">
+        {references.map((reference, index) => <article key={reference.id} aria-label={`Director reference ${index + 1}`} className="min-w-0 space-y-2 rounded border border-white/10 bg-black/15 p-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {reference.kind === 'image' ? <img src={`/comfy/view?filename=${encodeURIComponent(reference.filename)}&type=input`} alt={`Reference ${index + 1}`} className="h-14 w-14 shrink-0 rounded object-contain" /> : reference.kind === 'video' ? <Film size={22} /> : <Music2 size={22} />}
+            <span className="min-w-0 flex-1 truncate text-xs" title={reference.filename}>{reference.filename}</span>
+            <button type="button" className={iconClass} disabled={disabled || index === 0 || draft.mode === 'FLF2V'} aria-label={`Move reference ${index + 1} earlier`} title="Move earlier" onClick={() => moveReference(reference.id, -1)}><ArrowUp size={14} /></button>
+            <button type="button" className={iconClass} disabled={disabled || index === references.length - 1 || draft.mode === 'FLF2V'} aria-label={`Move reference ${index + 1} later`} title="Move later" onClick={() => moveReference(reference.id, 1)}><ArrowDown size={14} /></button>
+            <button type="button" className={iconClass} disabled={disabled} aria-label={`Remove reference ${index + 1}`} title="Remove reference" onClick={() => change({ references: latest.current.references.filter(item => item.id !== reference.id) })}><Trash2 size={14} /></button>
+          </div>
+          {!h3 || reference.kind !== 'image' ? <div className="grid grid-cols-2 gap-2"><label className={labelClass}>{h3 ? 'Trim start (s)' : 'Start (s)'}<input aria-label={`Reference ${index + 1} start seconds`} type="number" min={0} step={h3 ? 0.1 : 1 / draft.frameRate} value={Number(reference.startSeconds.toFixed(6))} disabled={disabled || draft.mode === 'FLF2V'} onChange={event => updateReference(reference.id, { startSeconds: Number(event.target.value) })} className={inputClass} /></label><label className={labelClass}>Length (s)<input aria-label={`Reference ${index + 1} duration seconds`} type="number" min={h3 ? 2 : 1 / draft.frameRate} max={h3 ? 15 : draft.durationSeconds} step={h3 ? 0.1 : 1 / draft.frameRate} value={Number(reference.durationSeconds.toFixed(6))} disabled={disabled || draft.mode === 'FLF2V'} onChange={event => updateReference(reference.id, { durationSeconds: Number(event.target.value) })} className={inputClass} /></label></div> : null}
+          <label className={`block space-y-1 ${labelClass}`}><span>{h3 ? 'Reference direction' : 'Scene prompt'}</span><textarea aria-label={`Reference ${index + 1} prompt`} value={reference.prompt} disabled={disabled} onChange={event => updateReference(reference.id, { prompt: event.target.value })} className={`${inputClass} min-h-20 resize-y`} /></label>
+        </article>)}
+      </div>
+      {uploading ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={13} className="animate-spin" />{uploading}</p> : null}
+      {uploadError ? <p role="alert" className="text-xs text-red-300">{uploadError}</p> : null}
+    </section>
+    <section aria-label="Video preview" data-official-editor-section="preview" className="min-h-44 min-w-0 overflow-hidden border-b border-white/10 py-3">{preview}</section>
+    <section aria-label="Video generation settings" data-official-editor-section="generation" className="min-w-0 space-y-3 border-b border-white/10 py-4">
+      <h3 className="text-xs font-semibold">Generation settings</h3>
+      <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-3">
+        <label className={`flex flex-col gap-1 ${labelClass}`}>Width<input aria-label="Video width" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.width} disabled={disabled} onChange={event => change({ width: Number(event.target.value) })} className={inputClass} /></label>
+        <label className={`flex flex-col gap-1 ${labelClass}`}>Height<input aria-label="Video height" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.height} disabled={disabled} onChange={event => change({ height: Number(event.target.value) })} className={inputClass} /></label>
+        <label className={`flex flex-col gap-1 ${labelClass}`}>Seed<input aria-label="Video seed" inputMode="numeric" value={draft.seed} disabled={disabled} onChange={event => change({ seed: event.target.value })} className={inputClass} /></label>
+        {fields.filter(field => field.group === 'generation').map(renderField)}
+      </div>
+    </section>
+    <section aria-label="Video prompt" data-official-editor-section="prompt" className="min-w-0 space-y-2 py-4">
+      <label className={`block space-y-2 ${labelClass}`}><span>Overall prompt</span><textarea aria-label="Video overall prompt" value={draft.prompt} disabled={disabled} onChange={event => change({ prompt: event.target.value })} className={`${inputClass} min-h-28 resize-y`} /></label>
+    </section>
+    {h3 ? <section aria-label="Prompt Forge" data-official-editor-section="forge" className="min-w-0 border-t border-white/10 pb-3">
+      <button type="button" className="flex min-h-10 items-center gap-2 text-xs text-zinc-300 hover:text-[var(--umbra-accent)]" aria-expanded={forgeOpen} onClick={() => setForgeOpen(!forgeOpen)}><Sparkles size={15} />Prompt Forge<Plus size={13} /></button>
+      {forgeOpen ? <UmbraH3PromptForgeModal inline disabled={disabled} modeOverride={draft.mode as 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'REF2VA'} video={video} prompt={draft.prompt} durationSeconds={draft.durationSeconds} comfyConnected={comfyConnected} onApplyPrompt={prompt => { if (!disabled) change({ prompt }); }} onClose={() => setForgeOpen(false)} referenceNotes={references.map(reference => ({ kind: reference.kind, role: draft.mode === 'REF2VA' ? 'subject' : 'keyframe', keep: reference.prompt }))} /> : null}
+    </section> : null}
+  </div>;
+}

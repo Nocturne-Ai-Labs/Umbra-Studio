@@ -1425,7 +1425,8 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
     const result = await requestComfyBridge(
       isOfficial ? 'UMBRA_OFFICIAL_WORKFLOW_LOAD' : 'UMBRA_COMFY_LOAD_WORKFLOW',
       isOfficial ? 'UMBRA_OFFICIAL_WORKFLOW_LOAD_RESULT' : 'UMBRA_COMFY_LOAD_WORKFLOW_RESULT',
-      isOfficial ? { sourceText: payload.sourceText, workflowId: officialId, sourceSha256: payload.sourceSha256 } : { workflow, workflowName },
+      isOfficial ? { sourceText: payload.sourceText, workflowId: officialId, sourceSha256: payload.sourceSha256,
+        ...(payload.configuredWorkflow ? { configuredWorkflow: payload.configuredWorkflow } : {}) } : { workflow, workflowName },
       isOfficial ? 19000 : 12000
     );
     if (!result?.ok) {
@@ -1482,7 +1483,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
         await loadWorkflowIntoComfy(officialLoadRequest, { silent: true });
         if (canceled) return;
         loadedOfficialWorkflowRef.current = String(officialLoadRequest.officialWorkflowId);
-        addToast({ type: 'success', message: `Opened ${officialLoadRequest.workflowName || 'official workflow'} in ComfyUI.` });
+        if (!officialLoadRequest.background) addToast({ type: 'success', message: `Opened ${officialLoadRequest.workflowName || 'official workflow'} in ComfyUI.` });
         finish(true);
       } catch (error: any) {
         if (canceled) return;

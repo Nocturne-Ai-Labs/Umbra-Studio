@@ -30,12 +30,16 @@ interface Props {
   comfyConnected: boolean;
   onApplyPrompt: (prompt: string) => void;
   onClose: () => void;
+  inline?: boolean;
+  disabled?: boolean;
+  modeOverride?: 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'REF2VA';
+  referenceNotes?: Array<{ kind: 'image' | 'video' | 'audio'; role: string; keep: string }>;
 }
 
 const fieldClass = 'min-h-9 w-full min-w-0 rounded border border-white/15 bg-black/30 px-2 py-2 text-xs text-zinc-100 outline-none focus:border-fuchsia-300/50';
 const buttonClass = 'inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-200 hover:border-fuchsia-300/40 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
 
-export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose }: Props) {
+export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose, inline = false, disabled = false, referenceNotes, modeOverride }: Props) {
   const [catalog, setCatalog] = React.useState<ForgeCatalog | null>(null);
   const [model, setModel] = React.useState('');
   const [detail, setDetail] = React.useState(5);
@@ -49,16 +53,25 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   const [catalogRefresh, setCatalogRefresh] = React.useState(0);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const requestIdRef = React.useRef('');
-  const mode = miniMaxH3DirectorMode(video.mode, video.frameGuideMode);
+  const mode = modeOverride || miniMaxH3DirectorMode(video.mode, video.frameGuideMode);
+  const contextKey = JSON.stringify([prompt, mode, durationSeconds, referenceNotes]);
+  React.useEffect(() => {
+    setDraft(''); setError(''); setRawResponse('');
+    const requestId = requestIdRef.current;
+    if (!requestId) return;
+    requestIdRef.current = ''; setDrafting(false);
+    void fetch('/comfy/dasiwa/h3/forge/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: requestId }) }).catch(() => undefined);
+  }, [contextKey]);
   const localModel = model.startsWith('local:');
   const supportsComputeDevice = catalog?.local_model === 'llama-3.2-3b-instruct'
     && catalog.compute_devices?.includes('cpu') && catalog.compute_devices.includes('gpu');
 
   React.useEffect(() => {
+    if (inline) return;
     const previousFocus = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
     return () => previousFocus?.focus();
-  }, []);
+  }, [inline]);
 
   React.useEffect(() => {
     if (!comfyConnected) { setError('Start the managed ComfyUI server to use DaSiWa Prompt Forge.'); return; }
@@ -96,7 +109,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   };
 
   const forge = async () => {
-    if (drafting || !comfyConnected || !brief.trim() || !model) return;
+    if (disabled || drafting || !comfyConnected || !brief.trim() || !model) return;
     const requestId = crypto.randomUUID();
     requestIdRef.current = requestId;
     setDrafting(true);
@@ -109,8 +122,8 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
         : [[video.sourceImagePath, video.sourceImageName, video.minimaxH3.referenceNotes[0]],
           [video.middleImagePath, video.middleImageName, video.minimaxH3.referenceNotes[1]],
           [video.lastImagePath, video.lastImageName, video.minimaxH3.referenceNotes[2]]];
-      const references = [];
-      for (const [sourcePath, filename, keep] of imageSources) {
+      const references = referenceNotes ? [...referenceNotes] : [];
+      for (const [sourcePath, filename, keep] of referenceNotes ? [] : imageSources) {
         if (requestIdRef.current !== requestId) return;
         if (!sourcePath && !filename) continue;
         references.push({ kind: 'image', role: mode === 'REF2VA' ? 'subject' : 'keyframe', keep });
@@ -139,16 +152,15 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
     } catch (cause) {
       if (requestIdRef.current === requestId) setError(cause instanceof Error ? cause.message : 'Prompt Forge failed.');
     } finally {
-      if (requestIdRef.current === requestId) requestIdRef.current = '';
-      setDrafting(false);
+      if (requestIdRef.current === requestId) { requestIdRef.current = ''; setDrafting(false); }
     }
   };
 
-  return createPortal(
-    <div data-umbra-modal-root="" className="fixed inset-0 z-[240] flex items-center justify-center bg-black/80 p-3" onMouseDown={(event) => { if (event.target === event.currentTarget && !drafting) onClose(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="MiniMax H3 Prompt Forge" tabIndex={-1}
-        className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-fuchsia-300/35 bg-[#101114] text-zinc-200 shadow-2xl outline-none"
+  const panel = (
+      <div ref={dialogRef} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-label="MiniMax H3 Prompt Forge" tabIndex={inline ? undefined : -1}
+        className={inline ? 'flex w-full min-w-0 flex-col text-[var(--umbra-text)]' : 'flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-fuchsia-300/35 bg-[#101114] text-zinc-200 shadow-2xl outline-none'}
         onKeyDown={(event) => {
+          if (inline) return;
           if (event.key === 'Escape') { event.stopPropagation(); if (!drafting) onClose(); }
           if (event.key !== 'Tab') return;
           const nodes = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea:not(:disabled), input:not(:disabled)') ?? []);
@@ -200,7 +212,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
           {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
           <H3ForgeRawResponse raw={rawResponse} />
           <div className="flex gap-2">
-            <button type="button" className={buttonClass} disabled={!comfyConnected || !model || !brief.trim() || drafting || (localModel && !supportsComputeDevice)} onClick={() => void forge()}>
+            <button type="button" className={buttonClass} disabled={disabled || !comfyConnected || !model || !brief.trim() || drafting || (localModel && !supportsComputeDevice)} onClick={() => void forge()}>
               {drafting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{drafting ? 'Drafting...' : 'Draft prompt'}
             </button>
             {drafting ? <button type="button" className={buttonClass} onClick={cancel}>Cancel draft</button> : null}
@@ -209,10 +221,12 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
             <label className="block text-xs text-zinc-400">Draft
               <textarea aria-label="Prompt Forge draft" className={`${fieldClass} mt-1 min-h-40 resize-y`} value={draft} onChange={(event) => setDraft(event.target.value)} />
             </label>
-            <button type="button" className={buttonClass} disabled={!draft.trim()} onClick={() => { onApplyPrompt(draft.trim()); onClose(); }}>Use prompt</button>
+            <button type="button" className={buttonClass} disabled={disabled || !draft.trim()} onClick={() => { if (!disabled) { onApplyPrompt(draft.trim()); onClose(); } }}>Use prompt</button>
           </div> : null}
         </div>
       </div>
-    </div>, document.body,
+  );
+  return inline ? panel : createPortal(
+    <div data-umbra-modal-root="" className="fixed inset-0 z-[240] flex items-center justify-center bg-black/80 p-3" onMouseDown={(event) => { if (event.target === event.currentTarget && !drafting) onClose(); }}>{panel}</div>, document.body,
   );
 }

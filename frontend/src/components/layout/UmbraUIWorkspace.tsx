@@ -1035,6 +1035,16 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   }, [activeMode]);
 
   React.useEffect(() => {
+    const prepareNativeVideo = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.background !== true || (detail.officialWorkflowId !== 'h3-26' && detail.officialWorkflowId !== 'ltx23-50')) return;
+      setMountedModes(current => current.has('comfyui') ? current : new Set([...current, 'comfyui']));
+    };
+    window.addEventListener('umbra:comfyui-load-workflow', prepareNativeVideo);
+    return () => window.removeEventListener('umbra:comfyui-load-workflow', prepareNativeVideo);
+  }, []);
+
+  React.useEffect(() => {
     const controller = new AbortController();
     void readUserConfigWithRetry<unknown>('umbra-ui-prompt-history', [], controller.signal,
       (error) => console.warn('[Umbra UI] Retrying prompt history load:', error))
@@ -3125,7 +3135,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         )}
       >
         {modeIsMounted('comfyui') ? (
-          <div className={activeMode === 'comfyui' ? 'relative h-full min-h-0 min-w-0' : 'hidden'} aria-hidden={activeMode !== 'comfyui'}>
+          <div className={activeMode === 'comfyui' ? 'relative h-full min-h-0 min-w-0' : activeMode === 'video' ? 'absolute inset-0 invisible pointer-events-none -z-10' : 'hidden'} aria-hidden={activeMode !== 'comfyui'}>
             {renderComfyWorkspace(activeMode === 'comfyui')}
           </div>
         ) : null}
