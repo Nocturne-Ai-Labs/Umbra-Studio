@@ -9,20 +9,36 @@ import { isUmbraShutdownMarkerForProcess, readUmbraShutdownMarker } from '../sha
 import type { inspectManagedDependencies } from './ManagedDependencyStatus';
 
 type DependencyStatus = ReturnType<typeof inspectManagedDependencies>;
-export type ManagedRepairStep = { kind: 'comfyui' | 'node'; target: string; pins: string[]; installedVersion: string; verified: boolean };
-export type ManagedRepairPlan = { id: string; featureId: string; label: string; workflowIds: string[]; steps: ManagedRepairStep[]; holds: string[] };
+export type ManagedRepairStep = {
+  kind: 'comfyui' | 'node'; target: string; pins: string[]; installedVersion: string; verified: boolean;
+  installedCommit: string; requiredVersion: string; requiredCommits: string[];
+  installedFrontendVersion: string; requiredFrontendVersion: string;
+  filesVerified: boolean; pythonDependenciesVerified: boolean;
+  runtimeReadiness: 'ready' | 'held' | 'unverified';
+};
+export type ManagedRepairPlan = {
+  id: string; featureId: string; label: string; workflowIds: string[]; steps: ManagedRepairStep[]; holds: string[];
+  requirementsHash: string; featureIds: string[]; modelProfiles: string[];
+  filesVerified: boolean; runtimeReadiness: 'unverified';
+};
 export type ManagedRepairState = {
   schemaVersion: 1; planId: string; featureId: string;
   phase: 'running' | 'held' | 'failed' | 'restart-required' | 'preflight-held' | 'preflight-passed';
-  completedTargets: string[]; priorVersions: Record<string, string>; lines: string[]; error: string; updatedAt: string;
+  completedTargets: string[]; priorVersions: Record<string, string>; priorCommits?: Record<string, string>; lines: string[]; error: string; updatedAt: string;
 };
 
-export function createManagedWorkflowRepairPlan(status: DependencyStatus, featureId: string): ManagedRepairPlan {
-  const features = featureId === 'official-video-workflows' ? status.features.filter((entry) => ['official-dasiwa-h3-26', 'official-dasiwa-ltx23-50'].includes(entry.id))
+function repairFeatures(status: DependencyStatus, featureId: string) {
+  return featureId === 'all-managed-dependencies' ? status.features
+    : featureId === 'official-video-workflows' ? status.features.filter((entry) => ['official-dasiwa-h3-26', 'official-dasiwa-ltx23-50'].includes(entry.id))
     : status.features.filter((entry) => entry.id === featureId && entry.workflowIds.length);
-  if (!features.length || (featureId === 'official-video-workflows' && features.length !== 2)) throw new Error('Choose a declared workflow dependency plan.');
+}
+
+export function createManagedWorkflowRepairPlan(status: DependencyStatus, featureId: string): ManagedRepairPlan {
+  const features = repairFeatures(status, featureId);
+  if (!features.length || (featureId === 'official-video-workflows' && features.length !== 2)) throw new Error('Choose a declared managed dependency plan.');
   const feature = { ...features[0], id: featureId,
-    label: featureId === 'official-video-workflows' ? 'Official H3 + LTX workflow dependencies' : features[0].label,
+    label: featureId === 'all-managed-dependencies' ? 'All managed dependencies'
+      : featureId === 'official-video-workflows' ? 'Official H3 + LTX workflow dependencies' : features[0].label,
     workflowIds: [...new Set(features.flatMap((entry) => entry.workflowIds))],
     minimumComfyVersion: features.map((entry) => entry.minimumComfyVersion).sort(compareUmbraVersions).at(-1)!,
     minimumFrontendVersion: features.map((entry) => entry.minimumFrontendVersion).filter(Boolean).sort(compareUmbraVersions).at(-1) || '',
@@ -30,19 +46,35 @@ export function createManagedWorkflowRepairPlan(status: DependencyStatus, featur
   };
   const steps: ManagedRepairStep[] = [];
   const core = status.comfyui;
-  if (!core.installed || compareUmbraVersions(core.version || '0.0.0', feature.minimumComfyVersion) < 0
-    || (feature.minimumFrontendVersion && compareUmbraVersions(core.frontendVersion || '0.0.0', feature.minimumFrontendVersion) < 0)) {
-    steps.push({ kind: 'comfyui', target: 'ComfyUI', pins: [feature.minimumComfyVersion, feature.minimumFrontendVersion].filter(Boolean), installedVersion: core.version, verified: false });
-  }
+  const coreVerified = core.installed && core.filesVerified && compareUmbraVersions(core.version || '0.0.0', feature.minimumComfyVersion) >= 0
+    && (!feature.minimumFrontendVersion || compareUmbraVersions(core.frontendVersion || '0.0.0', feature.minimumFrontendVersion) >= 0);
+  // Keep verified targets visible for review and recovery; they are not installer work.
+  steps.push({ kind: 'comfyui', target: 'ComfyUI', pins: [feature.minimumComfyVersion, feature.minimumFrontendVersion].filter(Boolean),
+    installedVersion: core.version, installedCommit: core.installedCommit, requiredVersion: feature.minimumComfyVersion, requiredCommits: [],
+    installedFrontendVersion: core.frontendVersion, requiredFrontendVersion: feature.minimumFrontendVersion,
+    filesVerified: coreVerified, pythonDependenciesVerified: core.pythonDependencies.verified,
+    verified: coreVerified && core.pythonDependencies.verified, runtimeReadiness: 'unverified' });
   for (const name of new Set(feature.customNodes.map((node) => node.name))) {
     const required = status.features.flatMap((entry) => entry.customNodes.filter((node) => node.name === name));
-    steps.push({ kind: 'node', target: name, pins: [...new Set(required.map((node) => node.minimumCommit))], installedVersion: required[0]?.installedCommit || '', verified: required.every((node) => node.status === 'ready') });
+    const pins = [...new Set(required.map((node) => node.minimumCommit))];
+    const filesVerified = required.every((node) => node.filesVerified);
+    const pythonDependenciesVerified = required.every((node) => node.pythonDependencies.verified);
+    steps.push({ kind: 'node', target: name, pins, requiredCommits: pins,
+      installedVersion: required[0]?.installedVersion || '', installedCommit: required[0]?.installedCommit || '',
+      requiredVersion: required.map((node) => node.requiredVersion).filter(Boolean).sort(compareUmbraVersions).at(-1) || '',
+      installedFrontendVersion: '', requiredFrontendVersion: '', filesVerified, pythonDependenciesVerified,
+      verified: filesVerified && pythonDependenciesVerified,
+      runtimeReadiness: required.some((node) => node.runtimeReadiness === 'held') ? 'held'
+        : required.every((node) => node.runtimeReadiness === 'ready') ? 'ready' : 'unverified' });
   }
-  const holds = feature.runtimePackages.map((dependency) => `${dependency.detail} ${dependency.reason}`);
+  const holds = [...new Set(feature.runtimePackages.map((dependency) => `${dependency.detail} ${dependency.reason}`))];
   // Consent remains bound to the build's declared requirements, independent of repair progress.
   const id = createHash('sha256').update(JSON.stringify({ featureId, requirementsHash: status.requirementsHash, core: [feature.minimumComfyVersion, feature.minimumFrontendVersion],
     nodes: feature.customNodes.map((node) => ({ name: node.name, pin: node.minimumCommit, assets: node.frontendAssets, classes: node.requiredClasses, frontendClasses: node.requiredFrontendClasses })) })).digest('hex');
-  return { id, featureId, label: feature.label, workflowIds: feature.workflowIds, steps, holds };
+  return { id, featureId, label: feature.label, workflowIds: feature.workflowIds, steps, holds,
+    requirementsHash: status.requirementsHash, featureIds: features.map((entry) => entry.id),
+    modelProfiles: [...new Set(features.flatMap((entry) => entry.modelProfiles))],
+    filesVerified: steps.every((step) => step.filesVerified), runtimeReadiness: 'unverified' };
 }
 
 export function managedWorkflowRepairPlans(status: DependencyStatus): ManagedRepairPlan[] {
@@ -50,6 +82,7 @@ export function managedWorkflowRepairPlans(status: DependencyStatus): ManagedRep
   if (status.features.some((feature) => feature.id === 'official-dasiwa-h3-26') && status.features.some((feature) => feature.id === 'official-dasiwa-ltx23-50')) {
     plans.unshift(createManagedWorkflowRepairPlan(status, 'official-video-workflows'));
   }
+  if (status.features.length) plans.unshift(createManagedWorkflowRepairPlan(status, 'all-managed-dependencies'));
   return plans;
 }
 
@@ -58,7 +91,9 @@ export function recoverManagedRepairState(value: unknown): ManagedRepairState | 
   if (!state || state.schemaVersion !== 1 || !/^[a-f0-9]{64}$/.test(state.planId) || !/^[a-z0-9-]{1,64}$/.test(state.featureId)
     || !['running', 'held', 'failed', 'restart-required', 'preflight-held', 'preflight-passed'].includes(state.phase)
     || !Array.isArray(state.completedTargets) || state.completedTargets.some((name) => typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(name))
-    || !state.priorVersions || typeof state.priorVersions !== 'object' || !Array.isArray(state.lines)) return null;
+    || !state.priorVersions || typeof state.priorVersions !== 'object' || !Array.isArray(state.lines)
+    || (state.priorCommits !== undefined && (!state.priorCommits || typeof state.priorCommits !== 'object' || Array.isArray(state.priorCommits)
+      || Object.values(state.priorCommits).some((commit) => typeof commit !== 'string' || (commit !== '' && !/^[a-f0-9]{40}$/.test(commit)))))) return null;
   return { ...state, lines: state.lines.filter((line) => typeof line === 'string').slice(-80),
     ...(state.phase === 'running' ? { phase: 'held' as const, error: 'The previous dependency repair was interrupted. Review installed files and explicitly resume; no step was retried automatically.' } : {}) };
 }
@@ -153,17 +188,36 @@ export async function runManagedWorkflowRepair(plan: ManagedRepairPlan, state: M
   assertIdle: () => Promise<void>;
   install: (step: ManagedRepairStep) => Promise<void>;
   persist: (state: ManagedRepairState) => Promise<void>;
+  inspect?: () => DependencyStatus;
 }): Promise<void> {
   if (state.planId !== plan.id || state.featureId !== plan.featureId) throw new Error('Managed requirements changed. Review and approve the new repair plan.');
   state.phase = 'running'; state.error = ''; state.updatedAt = new Date().toISOString(); await hooks.persist(state);
   try {
     for (const step of plan.steps) {
-      if (state.completedTargets.includes(step.target) && step.verified) continue;
+      const currentPlan = hooks.inspect ? createManagedWorkflowRepairPlan(hooks.inspect(), plan.featureId) : plan;
+      if (currentPlan.id !== plan.id) throw new Error('Managed requirements changed. Review and approve the new repair plan.');
+      const current = currentPlan.steps.find((entry) => entry.target === step.target)!;
+      state.priorVersions[step.target] ??= step.kind === 'node' ? step.installedCommit : step.installedVersion;
+      state.priorCommits ??= {};
+      state.priorCommits[step.target] ??= step.installedCommit;
+      if (current.verified) {
+        if (!state.completedTargets.includes(step.target)) state.completedTargets.push(step.target);
+        state.lines.push(`Already verified: ${step.target}; installer skipped.`);
+        state.updatedAt = new Date().toISOString(); state.lines = state.lines.slice(-80); await hooks.persist(state);
+        continue;
+      }
       await hooks.assertIdle();
-      state.priorVersions[step.target] ??= step.installedVersion;
-      state.lines.push(`Installing / verifying ${step.target} (${step.pins.join(', ')})`); state.lines = state.lines.slice(-80);
+      state.lines.push(`${current.filesVerified && !current.pythonDependenciesVerified ? 'Syncing managed Python requirements for' : 'Installing / verifying'} ${step.target} (${step.pins.join(', ')})`); state.lines = state.lines.slice(-80);
       await hooks.persist(state);
-      await hooks.install(step);
+      if (hooks.inspect && createManagedWorkflowRepairPlan(hooks.inspect(), plan.featureId).id !== plan.id) {
+        throw new Error('Managed requirements changed. Review and approve the new repair plan.');
+      }
+      await hooks.install(current);
+      if (hooks.inspect) {
+        const verifiedPlan = createManagedWorkflowRepairPlan(hooks.inspect(), plan.featureId);
+        if (verifiedPlan.id !== plan.id) throw new Error('Managed requirements changed. Review and approve the new repair plan.');
+        if (!verifiedPlan.steps.find((entry) => entry.target === step.target)?.verified) throw new Error(`${step.target}: managed file/Python setup verification is still held. Review the installer log and explicitly retry.`);
+      }
       if (!state.completedTargets.includes(step.target)) state.completedTargets.push(step.target);
       state.updatedAt = new Date().toISOString(); await hooks.persist(state);
     }
@@ -178,6 +232,7 @@ export async function runManagedWorkflowRepair(plan: ManagedRepairPlan, state: M
 }
 
 export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, status: DependencyStatus, origin: string, request: typeof fetch = fetch): Promise<string[]> {
+  if (createManagedWorkflowRepairPlan(status, plan.featureId).id !== plan.id) throw new Error('Managed requirements changed. Review the current repair plan.');
   const issues: string[] = [];
   const get = async (path: string) => {
     const response = await request(`${origin}${path}`, { signal: AbortSignal.timeout(5_000) });
@@ -189,8 +244,7 @@ export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, st
   if (before.stale || before.refreshing || !target?.running || !target.healthy || target.ownership !== 'owned' || !target.ownerPid) {
     return ['Start the managed ComfyUI instance normally, then refresh readiness. Unowned or stale runtime evidence is held.'];
   }
-  const features = plan.featureId === 'official-video-workflows' ? status.features.filter((entry) => ['official-dasiwa-h3-26', 'official-dasiwa-ltx23-50'].includes(entry.id))
-    : status.features.filter((entry) => entry.id === plan.featureId);
+  const features = repairFeatures(status, plan.featureId);
   if (!features.length) return ['The declared workflow repair plan changed. Review the current plan.'];
   for (const feature of features) {
     for (const node of feature.customNodes) if (node.status !== 'ready') issues.push(`${node.name}: ${node.reason || node.status}`);
@@ -201,12 +255,28 @@ export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, st
         && (!dependency.optional || dependency.requiredWhen?.defaultEnabled)) issues.push(`${dependency.detail} ${dependency.reason}`);
     }
   }
-  const catalog = await get('/api/video/official-workflows');
-  if (catalog.success !== true || !Array.isArray(catalog.items)) issues.push('Owned official workflow catalogs are unavailable.');
-  else for (const id of plan.workflowIds) {
-    const item = catalog.items.find((entry: any) => entry.id === id);
-    if (!item) issues.push(`${id}: use its normal pipeline preflight; official runtime qualification is unavailable.`);
-    else if (!item.readiness?.ready) issues.push(...(item.readiness?.issues || [`${id}: runtime node registration is held.`]));
+  if (plan.featureId === 'all-managed-dependencies') {
+    const objectInfo = await get('/object_info');
+    if (!objectInfo || typeof objectInfo !== 'object' || Array.isArray(objectInfo) || !Object.keys(objectInfo).length) issues.push('Owned runtime class catalog is unavailable.');
+    else {
+      const requiredClasses = new Set(features.flatMap((feature) => [...feature.requiredBuiltinClasses, ...feature.customNodes.flatMap((node) => node.requiredClasses)]));
+      for (const name of requiredClasses) if (!Object.prototype.hasOwnProperty.call(objectInfo, name)) issues.push(`ComfyUI has not registered: ${name}. Review its node import log and Python dependencies.`);
+    }
+    for (const step of createManagedWorkflowRepairPlan(status, plan.featureId).steps) {
+      if (!step.verified) issues.push(`${step.target}: managed files or Python Setup installation remain unverified.`);
+    }
+  }
+  const workflowIds = plan.featureId === 'all-managed-dependencies'
+    ? status.features.filter((feature) => ['official-dasiwa-h3-26', 'official-dasiwa-ltx23-50'].includes(feature.id)).flatMap((feature) => feature.workflowIds)
+    : plan.workflowIds;
+  if (workflowIds.length) {
+    const catalog = await get('/api/video/official-workflows');
+    if (catalog.success !== true || !Array.isArray(catalog.items)) issues.push('Owned official workflow catalogs are unavailable.');
+    else for (const id of new Set(workflowIds)) {
+      const item = catalog.items.find((entry: any) => entry.id === id);
+      if (!item) issues.push(`${id}: use its normal pipeline preflight; official runtime qualification is unavailable.`);
+      else if (!item.readiness?.ready) issues.push(...(item.readiness?.issues || [`${id}: runtime node registration is held.`]));
+    }
   }
   const after = await get('/api/umbrabridge/status?refresh=true');
   const next = after.backends?.comfyui;

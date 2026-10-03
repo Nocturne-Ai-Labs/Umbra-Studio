@@ -8,7 +8,9 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { inspectManagedDependencies } from './ManagedDependencyStatus';
+import { invalidateManagedPythonSetupEvidence, prepareManagedDependencyInstallPolicy } from './ManagedDependencyInstallPolicy';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from './ManagedDependencyRepair';
 import { AppUpdateService, compareUmbraVersions, readUmbraAppVersion } from '../backend/AppUpdateService';
 import {
@@ -288,40 +290,50 @@ async function runDependencyAction(session: UpdaterSession, action: DependencyAc
   const bunPath = bundledBun(session);
   const scriptPath = join(session.sourceRoot, 'setup-tools.ts');
   if (!existsSync(bunPath) || !existsSync(scriptPath)) throw new Error('Managed setup tools are missing from this installation.');
-  const child = spawn(bunPath, [scriptPath, ...args], {
-    cwd: session.runtimeRoot,
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, UMBRA_ROOT: session.runtimeRoot, UMBRA_SOURCE_ROOT: session.sourceRoot },
-  });
-  let output = '';
-  const append = (chunk: unknown) => {
-    output = (output + String(chunk)).slice(-100_000);
-    action.lines = output.split(/\r?\n/).filter(Boolean).slice(-80);
-  };
-  child.stdout?.on('data', append);
-  child.stderr?.on('data', append);
-  const code = await new Promise<number>((resolveExit, rejectExit) => {
-    child.once('error', rejectExit);
-    child.once('exit', (value) => resolveExit(value ?? 1));
-  });
-  if (code !== 0 || !output.includes('UMBRA_VERIFY_OK|setup-tools')) {
-    throw new Error(`Managed ${action.target} setup failed (exit ${code}). Review the log and retry.`);
-  }
-  const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
-  if (action.kind === 'node') {
-    const requirements = status.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === action.target));
-    const failed = requirements.filter((node) => node.status !== 'ready');
-    if (!requirements.length || failed.length) {
-      throw new Error(`Managed ${action.target} verification failed. ${failed.map((node) => node.reason || node.status).join(' ')}`);
+  const before = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+  const policy = prepareManagedDependencyInstallPolicy(session.runtimeRoot, before.features.flatMap((feature) => feature.runtimePackages));
+  try {
+    const pythonVerified = action.kind === 'comfyui' ? before.comfyui.pythonDependencies.verified
+      : before.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === action.target)).every((node) => node.pythonDependencies.verified);
+    if (!pythonVerified) invalidateManagedPythonSetupEvidence(session.runtimeRoot, action.target);
+    const child = spawn(bunPath, [scriptPath, ...args], {
+      cwd: session.runtimeRoot,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, UMBRA_ROOT: session.runtimeRoot, UMBRA_SOURCE_ROOT: session.sourceRoot,
+        PIP_CONSTRAINT: pathToFileURL(policy.path).href },
+    });
+    let output = '';
+    const append = (chunk: unknown) => {
+      output = (output + String(chunk)).slice(-100_000);
+      action.lines = output.split(/\r?\n/).filter(Boolean).slice(-80);
+    };
+    child.stdout?.on('data', append);
+    child.stderr?.on('data', append);
+    const code = await new Promise<number>((resolveExit, rejectExit) => {
+      child.once('error', rejectExit);
+      child.once('exit', (value) => resolveExit(value ?? 1));
+    });
+    if (code !== 0 || !output.includes('UMBRA_VERIFY_OK|setup-tools')) {
+      throw new Error(`Managed ${action.target} setup failed (exit ${code}). Review the log and retry.`);
     }
-  } else if (status.comfyui.minimumRequired && compareUmbraVersions(status.comfyui.version, status.comfyui.minimumRequired) < 0) {
-    throw new Error(`ComfyUI ${status.comfyui.minimumRequired}+ is still required by the declared workflows. Review the setup log.`);
-  } else if (action.kind === 'comfyui' && status.comfyui.minimumFrontendRequired
-    && compareUmbraVersions(status.comfyui.frontendVersion || '0.0.0', status.comfyui.minimumFrontendRequired) < 0) {
-    throw new Error(`ComfyUI frontend ${status.comfyui.minimumFrontendRequired}+ is still required. Repair the core/frontend bundle and review the setup log.`);
-  }
-  action.lines.push('Managed files verified. Restart managed ComfyUI and refresh its frontend before opening the workflow. Runtime node registration is checked when the workflow runs.');
+    const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
+    if (action.kind === 'node') {
+      const requirements = status.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === action.target));
+      const failed = requirements.filter((node) => !node.filesVerified || !node.pythonDependencies.verified);
+      if (!requirements.length || failed.length) {
+        throw new Error(`Managed ${action.target} verification failed. ${failed.map((node) => node.reason || node.pythonDependencies.detail).join(' ')}`);
+      }
+    } else if (status.comfyui.minimumRequired && compareUmbraVersions(status.comfyui.version, status.comfyui.minimumRequired) < 0) {
+      throw new Error(`ComfyUI ${status.comfyui.minimumRequired}+ is still required by the declared workflows. Review the setup log.`);
+    } else if (action.kind === 'comfyui' && status.comfyui.minimumFrontendRequired
+      && compareUmbraVersions(status.comfyui.frontendVersion || '0.0.0', status.comfyui.minimumFrontendRequired) < 0) {
+      throw new Error(`ComfyUI frontend ${status.comfyui.minimumFrontendRequired}+ is still required. Repair the core/frontend bundle and review the setup log.`);
+    } else if (!status.comfyui.filesVerified || !status.comfyui.pythonDependencies.verified) {
+      throw new Error('Managed ComfyUI files or Python Setup installation remain unverified. Review the setup log and explicitly retry.');
+    }
+    action.lines.push('Managed files verified. Restart managed ComfyUI and refresh its frontend before opening the workflow. Runtime node registration is checked when the workflow runs.');
+  } finally { policy.cleanup(); }
 }
 
 async function openModelSetup(session: UpdaterSession): Promise<{ url: string; child: ReturnType<typeof spawn> }> {
@@ -379,8 +391,18 @@ async function main() {
     }
   }, 2_500);
   heartbeat.unref();
-  const currentVersion = readUmbraAppVersion(session.runtimeRoot, session.sourceRoot);
-  const service = new AppUpdateService(session.runtimeRoot, currentVersion);
+  let currentVersion = readUmbraAppVersion(session.runtimeRoot, session.sourceRoot);
+  let installedVersionVerified = currentVersion !== '0.0.0';
+  let service = new AppUpdateService(session.runtimeRoot, currentVersion);
+  const refreshInstalledVersion = () => {
+    const installed = readUmbraAppVersion(session.runtimeRoot, session.sourceRoot);
+    installedVersionVerified = installed !== '0.0.0';
+    if (!installedVersionVerified) return;
+    if (installed !== currentVersion) {
+      currentVersion = installed;
+      service = new AppUpdateService(session.runtimeRoot, currentVersion);
+    }
+  };
   let persistedState = service.readState();
   const sessionStartedAt = Date.parse(session.createdAt || '');
   const updateCompletedAt = Date.parse(persistedState.completedAt || '');
@@ -422,8 +444,10 @@ async function main() {
     async fetch(request) {
       const url = new URL(request.url);
       if (!isAuthorized(request, url, session)) return json({ success: false, error: 'Unauthorized updater session.' }, 403);
+      // The updater and its HTML survive application replacement. Never authorize another install against the startup version.
+      if (!activeUpdate && !admittingOperation) refreshInstalledVersion();
       if (url.pathname === '/api/health') {
-        return json({ success: true, port: server.port, currentVersion });
+        return json({ success: true, port: server.port, currentVersion, installedVersionVerified });
       }
       if (url.pathname === '/api/releases' && request.method === 'GET') {
         try {
@@ -431,7 +455,7 @@ async function main() {
             refresh: url.searchParams.get('refresh') === 'true',
             includePrerelease: url.searchParams.get('channel') === 'prerelease',
           });
-          return json({ success: true, ...summary });
+          return json({ success: true, ...summary, installedVersionVerified });
         } catch (error) {
           return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 502);
         }
@@ -443,12 +467,12 @@ async function main() {
           && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)
           ? await writeState(service, session, recoverInterruptedUmbraUpdateState(persisted, currentVersion))
           : persisted;
-        return json({ success: true, state });
+        return json({ success: true, currentVersion, installedVersionVerified, state: { ...state, currentVersion } });
       }
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
         try {
           const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
-          return json({ success: true, ...status, action: dependencyAction, repairState: managedRepairState,
+          return json({ success: true, currentVersion, installedVersionVerified, ...status, action: dependencyAction, repairState: managedRepairState,
             repairPlans: managedWorkflowRepairPlans(status), modelSetupRunning: modelSetupRunning() });
         } catch (error) {
           return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
@@ -466,12 +490,13 @@ async function main() {
           await assertDependencyIdle();
           const prior = managedRepairState;
           const state: ManagedRepairState = prior?.planId === plan.id && prior.featureId === plan.featureId
-            ? { ...prior, completedTargets: [...prior.completedTargets], priorVersions: { ...prior.priorVersions }, lines: [...prior.lines] }
+            ? { ...prior, completedTargets: [...prior.completedTargets], priorVersions: { ...prior.priorVersions }, priorCommits: { ...prior.priorCommits }, lines: [...prior.lines] }
             : { schemaVersion: 1, planId: plan.id, featureId: plan.featureId, phase: 'held', completedTargets: [], priorVersions: {}, lines: [], error: '', updatedAt: new Date().toISOString() };
           const action: DependencyAction = { id: randomUUID(), kind: 'workflow', target: plan.label, phase: 'running', lines: [], error: '' };
           dependencyAction = action;
           activeDependency = runManagedWorkflowRepair(plan, state, {
             assertIdle: assertDependencyIdle, persist: persistManagedRepair,
+            inspect: () => inspectManagedDependencies(session.sourceRoot, session.runtimeRoot),
             install: async (step) => {
               action.kind = step.kind; action.target = step.target;
               try { await runDependencyAction(session, action, step.kind === 'comfyui' ? ['managed-comfyui'] : ['comfy-node', step.target]); }
@@ -491,12 +516,19 @@ async function main() {
           const body = await request.json().catch(() => ({})) as Record<string, unknown>;
           const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
           const plan = createManagedWorkflowRepairPlan(status, String(body.featureId || ''));
+          if ((plan.featureId === 'all-managed-dependencies' || body.planId !== undefined) && body.planId !== plan.id) {
+            return json({ success: false, error: 'Review the current managed dependency plan before refreshing readiness.' }, 409);
+          }
           const issues = await preflightManagedWorkflowRepair(plan, status, localUmbraOrigin(session));
+          if (createManagedWorkflowRepairPlan(inspectManagedDependencies(session.sourceRoot, session.runtimeRoot), plan.featureId).id !== plan.id) {
+            return json({ success: false, error: 'Managed requirements changed during preflight. Review the current plan.' }, 409);
+          }
           if (managedRepairState?.planId === plan.id) {
             await persistManagedRepair({ ...managedRepairState, phase: issues.length ? 'preflight-held' : 'preflight-passed',
               error: issues.join(' '), updatedAt: new Date().toISOString() });
           }
-          return json({ success: true, ready: issues.length === 0, issues, qualification: 'Installed files and owned runtime class readiness only. Native GPU execution and quality remain unqualified; queue Resume is explicit.' });
+          return json({ success: true, planId: plan.id, filesVerified: plan.filesVerified, runtimeReadiness: issues.length ? 'held' : 'ready',
+            ready: issues.length === 0, issues, qualification: 'Installed files and owned runtime class readiness only. Native GPU execution and quality remain unqualified; queue Resume is explicit.' });
         } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
         finally { admittingOperation = false; }
       }
@@ -586,6 +618,8 @@ async function main() {
             entry.tag === tag || entry.version === tag.replace(/^v/i, '')
           ));
           if (!release) return json({ success: false, error: 'The selected release is unavailable for this platform.' }, 404);
+          refreshInstalledVersion();
+          if (!installedVersionVerified) return json({ success: false, error: 'The installed app version is unavailable. Restore or review its build metadata before installing another release; no reinstall or downgrade was authorized.' }, 409);
           if (compareUmbraVersions(release.version, currentVersion) <= 0) {
             return json({ success: false, error: 'Select a release newer than the installed version.' }, 400);
           }

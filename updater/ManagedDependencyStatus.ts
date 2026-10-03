@@ -4,18 +4,23 @@ import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
+import { daSiWaCoreRequirements } from '../setup/DaSiWaRequirements';
 import { inspectManagedNodeFrontend, managedChildPath, readManagedToolRequirements, type ManagedNodeRequirement, type ManagedRuntimePackage } from '../setup/ManagedToolRequirements';
 
 export type ManagedNodeStatus = {
   name: string; minimumCommit: string; installedCommit: string;
+  installedVersion: string; requiredVersion: string;
   status: 'ready' | 'missing' | 'outdated' | 'unknown'; reason?: string;
   requiredClasses: string[]; requiredFrontendClasses: string[];
   frontendAssets: string[]; runtimeVerified: boolean;
+  filesVerified: boolean; runtimeReadiness: 'ready' | 'held' | 'unverified';
+  pythonDependencies: ManagedPythonDependencyStatus;
 };
+export type ManagedPythonDependencyStatus = { verified: boolean; detail: string };
 export type ManagedModuleProbeStatus = 'present' | 'missing' | 'unverified';
 export type ManagedPythonModuleProbeOptions = {
   fileExists?: (path: string) => boolean;
-  runPython?: (python: string, args: string[]) => { status: number | null; stdout?: string; error?: unknown };
+  runPython?: (python: string, args: string[], input?: string) => { status: number | null; stdout?: string; error?: unknown };
 };
 export type ManagedConditionalModuleStatus = ManagedRuntimePackage & {
   status: ManagedModuleProbeStatus; detail: string;
@@ -57,6 +62,78 @@ function readComfyVersion(comfyRoot: string): string {
   return '';
 }
 
+function readCheckoutCommit(root: string): string {
+  const top = spawnSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  if (top.status !== 0 || resolve(top.stdout.trim()).toLowerCase() !== resolve(root).toLowerCase()) return '';
+  const head = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  return head.status === 0 && /^[a-f0-9]{40}$/.test(head.stdout.trim()) ? head.stdout.trim() : '';
+}
+
+function readNodeVersion(root: string): string {
+  try {
+    const metadata = Bun.TOML.parse(readFileSync(join(root, 'pyproject.toml'), 'utf8')) as { project?: { version?: unknown }; tool?: { poetry?: { version?: unknown } } };
+    const version = metadata.project?.version || metadata.tool?.poetry?.version;
+    if (typeof version === 'string' && /^\d+\.\d+\.\d+[A-Za-z0-9.+-]*$/.test(version)) return version;
+  } catch { /* Node suites may use JavaScript or inline Python metadata. */ }
+  try {
+    const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+    if (typeof version === 'string' && /^\d+\.\d+\.\d+(?:[A-Za-z0-9.+-]*)$/.test(version)) return version;
+  } catch { /* Node suites may use Python metadata instead. */ }
+  try { return readFileSync(join(root, '__init__.py'), 'utf8').match(/__version__\s*=\s*["'](\d+\.\d+\.\d+[A-Za-z0-9.+-]*)["']/)?.[1] || ''; }
+  catch { /* Version metadata is informational; the commit remains authoritative. */ }
+  return '';
+}
+
+const PYTHON_REQUIREMENTS_PROBE = String.raw`import importlib.metadata as m,json,re,sys
+try:
+ from packaging.requirements import Requirement
+except ImportError:
+ from pip._vendor.packaging.requirements import Requirement
+issues=[]
+for line in sys.stdin.read().replace('\\\n','').splitlines():
+ line=re.split(r'\s+#',line,1)[0].strip()
+ if not line or line.startswith('#'): continue
+ try:
+  requirement=Requirement(line)
+  if requirement.marker and not requirement.marker.evaluate(): continue
+  distribution=m.distribution(requirement.name)
+  if requirement.url: issues.append(requirement.name+': direct-source revision needs separate verification')
+  elif not requirement.specifier.contains(distribution.version, prereleases=True): issues.append(requirement.name+': installed '+distribution.version+' does not satisfy '+str(requirement.specifier))
+ except m.PackageNotFoundError:
+  issues.append(requirement.name+': missing from the managed environment')
+ except Exception:
+  issues.append('Unverified requirement: '+line[:160])
+print(json.dumps({'verified':not issues,'issues':issues[:16]}))`;
+
+function inspectPythonDependencies(comfyRoot: string, dependencyRoot: string, nodeName?: string, options: ManagedPythonModuleProbeOptions = {}): ManagedPythonDependencyStatus {
+  if (nodeName && !existsSync(join(dependencyRoot, '__init__.py'))) return { verified: false, detail: 'The node source is unavailable; its Python requirements remain unverified.' };
+  const python = join(comfyRoot, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  if (!existsSync(python)) return { verified: false, detail: 'The managed tool-local Python environment needs Setup.' };
+  const requirementsPath = join(dependencyRoot, 'requirements.txt');
+  if (!existsSync(requirementsPath)) return { verified: Boolean(nodeName), detail: nodeName ? 'No node requirements.txt is declared.' : 'ComfyUI requirements.txt is unavailable.' };
+  try {
+    const content = readFileSync(requirementsPath, 'utf8');
+    const installedContent = nodeName === 'ComfyUI-DaSiWa-Nodes' ? daSiWaCoreRequirements(content) : content;
+    const marker = readFileSync(join(dependencyRoot, nodeName ? '.umbra-requirements-installed' : '.requirements_installed'), 'utf8').trim();
+    if (marker === Bun.hash(installedContent).toString()) {
+      const args = ['-I', '-c', PYTHON_REQUIREMENTS_PROBE];
+      const probe = options.runPython ? options.runPython(python, args, installedContent)
+        : spawnSync(python, args, { input: installedContent, encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+      if (probe.status === 0 && !probe.error) {
+        const result = JSON.parse(String(probe.stdout || '')) as { verified?: boolean; issues?: string[] };
+        if (result.verified === true && Array.isArray(result.issues) && !result.issues.length) {
+          return { verified: true, detail: 'Managed Setup recorded these requirements and installed distribution versions satisfy them. Imports, platform/GPU compatibility and runtime readiness remain separate checks.' };
+        }
+        if (Array.isArray(result.issues) && result.issues.every((issue) => typeof issue === 'string')) {
+          return { verified: false, detail: `Python requirements need managed Setup sync: ${result.issues.join('; ')}` };
+        }
+      }
+      return { verified: false, detail: 'Managed Python requirement versions could not be verified. Review Setup and explicitly retry; runtime imports remain unchecked.' };
+    }
+  } catch { /* Missing/stale setup evidence requires the existing managed installer. */ }
+  return { verified: false, detail: 'Python requirement installation is unverified or stale. Repair using the existing managed Setup installer.' };
+}
+
 export function inspectManagedPythonModule(selectedToolRoot: string, module: string, options: ManagedPythonModuleProbeOptions = {}): { status: ManagedModuleProbeStatus; detail: string } {
   if (!isAbsolute(selectedToolRoot) || !/^[A-Za-z_][A-Za-z0-9_]{0,79}$/.test(module)) {
     return { status: 'unverified', detail: 'Module availability could not be verified: an explicit absolute tool root and declared module are required. The active branch is held.' };
@@ -95,12 +172,15 @@ export function inspectActiveManagedWorkflowRuntimePackages(sourceRoot: string, 
   });
 }
 
-export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requirement: ManagedNodeRequirement, registeredClasses?: ReadonlySet<string>): ManagedNodeStatus {
+export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requirement: ManagedNodeRequirement, registeredClasses?: ReadonlySet<string>, options: ManagedPythonModuleProbeOptions = {}): ManagedNodeStatus {
   const nodePath = managedChildPath(join(comfyRoot, 'custom_nodes'), requirement.name);
   const base = {
     name: requirement.name, minimumCommit: requirement.minimumCommit,
+    installedVersion: readNodeVersion(nodePath), requiredVersion: (requirement as ManagedNodeRequirement & { version?: string }).version || '',
     requiredClasses: requirement.requiredClasses || [], requiredFrontendClasses: requirement.requiredFrontendClasses || [],
     frontendAssets: requirement.frontendAssets?.map((asset) => asset.path) || [], runtimeVerified: registeredClasses !== undefined,
+    filesVerified: false, runtimeReadiness: 'unverified' as ManagedNodeStatus['runtimeReadiness'],
+    pythonDependencies: inspectPythonDependencies(comfyRoot, nodePath, requirement.name, options),
   };
   if (!existsSync(join(nodePath, '__init__.py'))) return { ...base, installedCommit: '', status: 'missing', reason: 'Install the declared node suite in Setup.' };
   const topLevel = spawnSync('git', ['-C', nodePath, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
@@ -133,9 +213,9 @@ export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requir
   if (frontendProblems.length) return { ...base, installedCommit, status: 'outdated', reason: `Frontend repair required: ${frontendProblems.join(' ')}` };
   const missingClasses = registeredClasses && base.requiredClasses.filter((name) => !registeredClasses.has(name));
   if (missingClasses?.length) {
-    return { ...base, installedCommit, status: 'unknown', reason: `ComfyUI has not registered: ${missingClasses.join(', ')}. Review its node import log and Python dependencies, then restart the managed ComfyUI instance.` };
+    return { ...base, filesVerified: true, runtimeReadiness: 'held', installedCommit, status: 'unknown', reason: `ComfyUI has not registered: ${missingClasses.join(', ')}. Review its node import log and Python dependencies, then restart the managed ComfyUI instance.` };
   }
-  return { ...base, installedCommit, status: 'ready' };
+  return { ...base, filesVerified: true, runtimeReadiness: registeredClasses ? 'ready' : 'unverified', installedCommit, status: 'ready' };
 }
 
 export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: string, registeredClasses?: ReadonlySet<string>) {
@@ -149,6 +229,12 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       { encoding: 'utf8', windowsHide: true, timeout: 5_000 }) : null;
   const frontendVersion = frontendProbe?.status === 0 ? frontendProbe.stdout.trim() : '';
   const packageProbes = new Map<string, ReturnType<typeof inspectManagedPythonModule>>();
+  const requirementsProbes = new Map<string, ReturnType<NonNullable<ManagedPythonModuleProbeOptions['runPython']>>>();
+  const probeOptions: ManagedPythonModuleProbeOptions = { runPython: (python, args, input) => {
+    const key = JSON.stringify([python, args, input]);
+    if (!requirementsProbes.has(key)) requirementsProbes.set(key, spawnSync(python, args, { input, encoding: 'utf8', windowsHide: true, timeout: 5_000 }));
+    return requirementsProbes.get(key)!;
+  } };
   const modelManifest = requirements.length ? readModelSetupManifest(sourceRoot, 'requirements') : { models: [] };
   const features: ManagedFeatureStatus[] = requirements.map((feature) => {
     const files = new Map<string, { destination: string; bytes: number }>();
@@ -173,7 +259,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       modelProfiles: feature.modelProfiles,
       missingModels,
       totalModels: files.size,
-      customNodes: feature.customNodes.map((node) => inspectManagedNode(sourceRoot, comfyRoot, node, registeredClasses)),
+      customNodes: feature.customNodes.map((node) => inspectManagedNode(sourceRoot, comfyRoot, node, registeredClasses, probeOptions)),
       workflowIds: feature.workflowIds || [],
       requiredBuiltinClasses: feature.requiredBuiltinClasses || [],
       missingRuntimeClasses: registeredClasses ? (feature.requiredBuiltinClasses || []).filter((name) => !registeredClasses.has(name)) : [],
@@ -193,9 +279,14 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       installed: Boolean(installedVersion),
       version: installedVersion,
       frontendVersion,
-      minimumFrontendRequired: features.filter((feature) => feature.active && !feature.optional).map((feature) => feature.minimumFrontendVersion).filter(Boolean)
+      installedCommit: existsSync(comfyRoot) ? readCheckoutCommit(comfyRoot) : '',
+      filesVerified: Boolean(installedVersion) && existsSync(join(comfyRoot, 'main.py')),
+      pythonDependencies: inspectPythonDependencies(comfyRoot, comfyRoot, undefined, probeOptions),
+      runtimeReadiness: 'unverified' as const,
+      // The managed core installer must satisfy every build declaration, even before models activate a feature.
+      minimumFrontendRequired: features.map((feature) => feature.minimumFrontendVersion).filter(Boolean)
         .sort(compareUmbraVersions).at(-1) || '',
-      minimumRequired: features.filter((feature) => feature.active && !feature.optional).map((feature) => feature.minimumComfyVersion)
+      minimumRequired: features.map((feature) => feature.minimumComfyVersion)
         .sort(compareUmbraVersions).at(-1) || '',
     },
     features,
