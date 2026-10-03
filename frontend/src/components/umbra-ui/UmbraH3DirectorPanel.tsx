@@ -4,6 +4,7 @@ import React from 'react';
 import { ArrowDown, ArrowUp, Download, FolderOpen, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, RefreshCw, Sparkles, Trash2, Video, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraH3ContinuitySessionModal } from './UmbraH3ContinuitySessionModal';
+import { h3ContinuitySelectionPatch } from '@/lib/h3ContinuitySessions';
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { openH3PromptForgeModelFolder } from '@/lib/h3PromptForgeModelFolder';
 import { h3PromptForgeModels, H3_FORGE_MODEL_MISSING } from '@/lib/h3PromptForgeModels';
@@ -106,16 +107,15 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
     setCheckpoints([]);
     if (!comfyConnected || !/^[a-zA-Z0-9_-]{1,80}$/.test(continuity.session)) return;
     const abort = new AbortController();
-    fetch(`/comfy/df_h3_continuity/session/${encodeURIComponent(continuity.session)}`, { signal: abort.signal })
+    fetch(`/comfy/df_h3_continuity/session/${encodeURIComponent(continuity.session)}${continuity.sourceId ? `?selected=${encodeURIComponent(continuity.sourceId)}` : ''}`, { signal: abort.signal })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok || !Array.isArray(data.clips)) throw new Error(data.error || 'Could not load H3 checkpoints. Update DaSiWa nodes in ComfyUI.');
-        setCheckpoints(data.clips);
-        setCheckpointError('');
+        if (!abort.signal.aborted) { setCheckpoints(data.clips); setCheckpointError(''); }
       })
       .catch((error) => { if (!abort.signal.aborted) setCheckpointError(error instanceof Error ? error.message : 'Could not load checkpoints.'); });
     return () => abort.abort();
-  }, [comfyConnected, continuity.session, checkpointRefresh]);
+  }, [comfyConnected, continuity.session, continuity.sourceId, checkpointRefresh]);
 
   React.useEffect(() => {
     if (!comfyConnected || !continuitySource) { setSourceCheck(''); setSourceCheckFailed(false); return; }
@@ -455,12 +455,10 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         </> : null}
         {checkpointError ? <p role="alert" className="mt-2 text-[10px] text-amber-300">{checkpointError}</p> : null}
       </div> : null}
-      {sessionPickerOpen ? <UmbraH3ContinuitySessionModal currentSession={continuity.session} comfyConnected={comfyConnected}
-        onClose={() => setSessionPickerOpen(false)} onSelect={(session) => {
-          if (session === continuity.session) return;
-          setCheckpoints([]);
+      {sessionPickerOpen ? <UmbraH3ContinuitySessionModal currentSession={continuity.session} currentSourceId={continuity.sourceKind === 'checkpoint' ? continuity.sourceId : ''} comfyConnected={comfyConnected}
+        onClose={() => setSessionPickerOpen(false)} onSelect={(selection) => {
           setCheckpointError('');
-          onChange({ ...controls, continuity: { ...continuity, session, sourceKind: 'checkpoint', sourceId: '', sourceVideoId: '', capture: true, idea: '', useReferences: false } });
+          onChange({ ...controls, continuity: { ...continuity, ...h3ContinuitySelectionPatch(selection), useReferences: selection.session === continuity.session ? continuity.useReferences : false } });
         }} /> : null}
       <div className="mb-3 border-y border-white/10 py-3">
         <div className="mb-2 flex items-center gap-2"><h3 className="text-xs font-semibold text-zinc-200">Reference pack</h3></div>

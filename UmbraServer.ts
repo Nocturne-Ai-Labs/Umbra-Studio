@@ -49,6 +49,7 @@ import { QueueUploadReceiver } from './shared/power-prompter/queueTransport';
 import { classifyUmbraPrompt } from './shared/nsfwPrivacyClassifier';
 import { resolveSingleByteRange } from './shared/httpByteRange';
 import { mediaFileRevision } from './backend/mediaFileRevision';
+import { getH3ContinuitySession, H3ContinuitySessionError, isH3ContinuityId } from './backend/H3ContinuitySessionService';
 import { probeVideoMetadata } from './backend/VideoMetadataProbe';
 import { galleryMediaCacheControl } from './gallery/GalleryMediaCache';
 import { galleryMediaSecurityHeaders } from './shared/galleryMediaResponse';
@@ -34153,6 +34154,38 @@ const server = Bun.serve<UmbraSocketData>({
             : null;
           if (staticResponse) return staticResponse;
           return await proxyComfyHttp(req, url, targetPath === '/' ? '/' : targetPath);
+        }
+
+        if (method === 'GET' && path.startsWith('/api/umbra-ui/h3-continuity/session/')) {
+          let session: string;
+          try { session = decodeURIComponent(path.slice('/api/umbra-ui/h3-continuity/session/'.length)); }
+          catch { return json({ error: 'Invalid continuity session ID.' }, 400); }
+          const selectedValues = url.searchParams.getAll('selected');
+          if (!isH3ContinuityId(session) || session === '_imports' || selectedValues.length > 1
+            || (selectedValues.length === 1 && !isH3ContinuityId(selectedValues[0]))) {
+            return json({ error: 'Invalid continuity session or selected checkpoint ID.' }, 400);
+          }
+          try {
+            const target = getOfficialComfyExecutionTarget();
+            const data = await getH3ContinuitySession({
+              session,
+              selected: selectedValues[0],
+              comfyBaseUrl: target.baseUrl,
+              outputRoot: join(target.toolRoot, 'output'),
+              appRoot: ROOT_DIR,
+              canReadThumbnailPath: async clientPath => Boolean(await resolveGalleryMediaReadPath(clientPath))
+                && await isRemoteMainMediaReadAllowed(req, url, clientPath, server),
+            });
+            if (!sameOfficialComfyTarget(target, getOfficialComfyExecutionTarget())) {
+              return json({ error: 'The owned ComfyUI runtime changed while loading checkpoints.' }, 409);
+            }
+            const response = json(data);
+            response.headers.set('Cache-Control', 'no-store');
+            return response;
+          } catch (error) {
+            if (error instanceof H3ContinuitySessionError) return json({ error: error.message }, error.status);
+            return json({ error: error instanceof Error ? error.message : 'Managed ComfyUI continuity session is unavailable.' }, 409);
+          }
         }
 
         if (method === 'GET' && (path === '/health' || path === '/api/healthz' || path === '/api/healthz/live')) {
