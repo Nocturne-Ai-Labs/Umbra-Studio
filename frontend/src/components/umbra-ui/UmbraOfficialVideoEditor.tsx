@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { ArrowDown, ArrowUp, Film, Image as ImageIcon, Loader2, Music2, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowDown, ArrowUp, Film, Image as ImageIcon, Loader2, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { normalizePowerPrompterGenerationControls } from '@/lib/powerPrompter';
 import { UmbraH3PromptForgeModal } from './UmbraH3PromptForgeModal';
@@ -26,12 +27,22 @@ const labelClass = 'text-[11px] text-zinc-400';
 
 export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, onChange, disabled, comfyConnected, preview, onMediaBusyChange }: Props) {
   const [forgeOpen, setForgeOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const settingsTrigger = React.useRef<HTMLButtonElement>(null);
+  const settingsDialog = React.useRef<HTMLElement>(null);
+  const settingsId = React.useId();
   const [uploading, setUploading] = React.useState('');
   const [uploadError, setUploadError] = React.useState('');
   const fileInput = React.useRef<HTMLInputElement>(null);
   const uploadKind = React.useRef<'image' | 'video' | 'audio'>('image');
   const latest = React.useRef(draft);
   latest.current = draft;
+  React.useEffect(() => {
+    if (!settingsOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : settingsTrigger.current;
+    settingsDialog.current?.focus();
+    return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, [settingsOpen]);
   const h3 = workflowId === 'h3-26';
   const fields = getOfficialVideoEditorFields(source, workflowId, catalog);
   const change = (patch: Partial<OfficialVideoEditorDraft>) => onChange({ ...latest.current, ...patch });
@@ -159,15 +170,33 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
       {uploadError ? <p role="alert" className="text-xs text-red-300">{uploadError}</p> : null}
     </section>
     <section aria-label="Video preview" data-official-editor-section="preview" className="min-h-44 min-w-0 overflow-hidden border-b border-white/10 py-3">{preview}</section>
-    <section aria-label="Video generation settings" data-official-editor-section="generation" className="min-w-0 space-y-3 border-b border-white/10 py-4">
-      <h3 className="text-xs font-semibold">Generation settings</h3>
-      <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-3">
-        <label className={`flex flex-col gap-1 ${labelClass}`}>Width<input aria-label="Video width" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.width} disabled={disabled} onChange={event => change({ width: Number(event.target.value) })} className={inputClass} /></label>
-        <label className={`flex flex-col gap-1 ${labelClass}`}>Height<input aria-label="Video height" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.height} disabled={disabled} onChange={event => change({ height: Number(event.target.value) })} className={inputClass} /></label>
-        <label className={`flex flex-col gap-1 ${labelClass}`}>Seed<input aria-label="Video seed" inputMode="numeric" value={draft.seed} disabled={disabled} onChange={event => change({ seed: event.target.value })} className={inputClass} /></label>
-        {fields.filter(field => field.group === 'generation').map(renderField)}
-      </div>
-    </section>
+    <div data-official-editor-section="generation" className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 py-2">
+      <span className="text-[11px] text-zinc-400">{draft.width} x {draft.height}</span>
+      <button ref={settingsTrigger} type="button" aria-label="Open video generation settings" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-controls={settingsOpen ? settingsId : undefined} onClick={() => setSettingsOpen(true)} className="inline-flex min-h-9 items-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-300 hover:bg-white/5"><SlidersHorizontal size={15} />Settings</button>
+    </div>
+    {settingsOpen ? createPortal(<div data-umbra-modal-root="" className="fixed inset-0 z-[240] bg-black/60 text-[var(--umbra-text)]" onPointerDown={event => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+      <style>{'@keyframes umbra-video-settings-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }'}</style>
+      <aside ref={settingsDialog} id={settingsId} role="dialog" aria-modal="true" aria-label="Video generation settings" tabIndex={-1} className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-white/15 bg-[#101114] shadow-2xl outline-none motion-safe:animate-[umbra-video-settings-slide-in_200ms_ease-out] sm:max-w-[560px]" onKeyDown={event => {
+        // Selection menus are portalled children and own their keyboard handling.
+        if ((event.target as HTMLElement).closest('[role="menu"]')) return;
+        if (event.key === 'Escape') { event.stopPropagation(); setSettingsOpen(false); }
+        if (event.key !== 'Tab') return;
+        const nodes = Array.from(settingsDialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled)') ?? []);
+        const first = nodes[0]; const last = nodes[nodes.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === settingsDialog.current)) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || document.activeElement === settingsDialog.current)) { event.preventDefault(); first?.focus(); }
+      }}>
+        <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-white/10 px-4 pt-[env(safe-area-inset-top)]"><SlidersHorizontal size={16} className="text-[var(--umbra-accent)]" /><h3 className="min-w-0 flex-1 text-sm font-semibold">Generation settings</h3><button type="button" aria-label="Close video generation settings" title="Close settings" className={iconClass} onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))] custom-scrollbar">
+          <div className="grid min-w-0 grid-cols-2 gap-3">
+            <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Width<input aria-label="Video width" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.width} disabled={disabled} onChange={event => change({ width: Number(event.target.value) })} className={inputClass} /></label>
+            <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Height<input aria-label="Video height" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.height} disabled={disabled} onChange={event => change({ height: Number(event.target.value) })} className={inputClass} /></label>
+            <label className={`col-span-2 flex min-w-0 flex-col gap-1 ${labelClass}`}>Seed<input aria-label="Video seed" inputMode="numeric" value={draft.seed} disabled={disabled} onChange={event => change({ seed: event.target.value })} className={inputClass} /></label>
+            {fields.filter(field => field.group === 'generation').map(renderField)}
+          </div>
+        </div>
+      </aside>
+    </div>, document.body) : null}
     <section aria-label="Video prompt" data-official-editor-section="prompt" className="min-w-0 space-y-2 py-4">
       <label className={`block space-y-2 ${labelClass}`}><span>Overall prompt</span><textarea aria-label="Video overall prompt" value={draft.prompt} disabled={disabled} onChange={event => change({ prompt: event.target.value })} className={`${inputClass} min-h-28 resize-y`} /></label>
     </section>
