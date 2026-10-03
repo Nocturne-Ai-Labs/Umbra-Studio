@@ -1,635 +1,1700 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
-  <title>Umbra Studio Updater</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #06080a;
-      --panel: #0b0f12;
-      --panel-2: #10161a;
-      --line: #273038;
-      --muted: #84909a;
-      --text: #eef4f7;
-      --accent: #38d9a9;
-      --danger: #ff6b77;
-      --warning: #f5c451;
-    }
-    * { box-sizing: border-box; }
-    html, body { min-height: 100%; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      letter-spacing: 0;
-    }
-    button, select { font: inherit; letter-spacing: 0; }
-    button { cursor: pointer; }
-    button:disabled { cursor: not-allowed; opacity: .42; }
-    .shell { min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      min-height: 70px;
-      padding: 14px clamp(16px, 3vw, 36px);
-      border-bottom: 1px solid var(--line);
-      background: #080b0d;
-    }
-    .eyebrow { color: var(--accent); font-size: 11px; font-weight: 900; text-transform: uppercase; }
-    h1 { margin: 4px 0 0; font-size: clamp(18px, 3vw, 26px); }
-    .status-pill {
-      border: 1px solid var(--line);
-      padding: 8px 10px;
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-    }
-    main {
-      width: min(1180px, 100%);
-      margin: 0 auto;
-      padding: clamp(16px, 3vw, 32px);
-      display: grid;
-      grid-template-columns: 290px minmax(0, 1fr);
-      gap: 16px;
-      min-height: 0;
-    }
-    .panel { border: 1px solid var(--line); background: var(--panel); min-width: 0; }
-    .panel-title {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      min-height: 44px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-    }
-    #release-list { padding: 8px; display: grid; gap: 7px; max-height: calc(100vh - 190px); overflow: auto; }
-    .release {
-      width: 100%;
-      border: 1px solid var(--line);
-      background: #090d10;
-      color: var(--muted);
-      padding: 12px;
-      text-align: left;
-    }
-    .release:hover, .release.active { border-color: var(--accent); color: var(--text); background: #0c1715; }
-    .release strong { display: block; font-size: 13px; }
-    .release span { display: block; margin-top: 5px; font-size: 10px; }
-    .content { padding: clamp(16px, 3vw, 28px); overflow: auto; }
-    .version { color: var(--accent); font-size: 12px; font-weight: 900; text-transform: uppercase; }
-    h2 { margin: 8px 0; font-size: clamp(22px, 4vw, 34px); }
-    .meta { color: var(--muted); font-size: 11px; line-height: 1.7; }
-    .notes {
-      margin-top: 20px;
-      min-height: 240px;
-      border: 1px solid var(--line);
-      background: #070a0c;
-      padding: 16px;
-      white-space: pre-wrap;
-      color: #c4cdd3;
-      font-family: system-ui, sans-serif;
-      font-size: 14px;
-      line-height: 1.65;
-    }
-    .progress-panel { display: none; margin-top: 16px; border: 1px solid var(--line); padding: 14px; background: var(--panel-2); }
-    .progress-panel.visible { display: block; }
-    .progress-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 900; }
-    .progress-item { margin-top: 8px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
-    .track { height: 8px; margin-top: 12px; background: #20282e; overflow: hidden; }
-    .fill { width: 0; height: 100%; background: var(--accent); transition: width .18s linear; }
-    .message { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
-    .message.error { color: var(--danger); }
-    .message.warning { color: var(--warning); }
-    .dependencies { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 16px; }
-    .dependencies h3 { margin: 0 0 8px; font-size: 14px; }
-    .dependency-list { display: grid; gap: 0; margin-top: 12px; }
-    .dependency-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); padding: 12px 0; }
-    .dependency-row > div { min-width: 0; overflow-wrap: anywhere; }
-    .dependency-row strong { display: block; font-size: 12px; }
-    .dependency-row span { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 4px; }
-    .dependency-row .button { flex: none; }
-    .dependency-log { margin: 8px 0 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }
-    footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      min-height: 68px;
-      padding: 12px clamp(16px, 3vw, 36px);
-      border-top: 1px solid var(--line);
-      background: #080b0d;
-    }
-    .hint { color: var(--muted); font-size: 11px; }
-    .actions { display: flex; gap: 8px; }
-    .button {
-      min-height: 42px;
-      border: 1px solid var(--line);
-      background: #0d1215;
-      color: var(--text);
-      padding: 0 16px;
-      font-size: 11px;
-      font-weight: 900;
-      text-transform: uppercase;
-    }
-    .button:hover { border-color: #66737c; }
-    .button.primary { border-color: var(--accent); background: #0c201a; color: #d8fff3; }
-    @media (max-width: 760px) {
-      main { grid-template-columns: 1fr; }
-      .dependency-row { flex-direction: column; align-items: stretch; }
-      #release-list { max-height: 210px; }
-      footer { align-items: stretch; flex-direction: column; }
-      .actions, .button { width: 100%; }
-      .actions { flex-direction: column; }
-    }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <header>
-      <div>
-        <div class="eyebrow">Nocturne AI Labs</div>
-        <h1>Umbra Studio Updater</h1>
-      </div>
-      <div id="status-pill" class="status-pill">Standalone service</div>
-    </header>
-    <main>
-      <aside class="panel">
-        <div class="panel-title">
-          <span>Available builds</span>
-          <button id="refresh" class="button" type="button">Refresh</button>
-        </div>
-        <div id="release-list"></div>
-      </aside>
-      <section class="panel content">
-        <div id="selected-version" class="version">Select a build</div>
-        <h2 id="selected-name">Release notes</h2>
-        <div id="selected-meta" class="meta">The updater runs independently from Umbra Studio.</div>
-        <div id="progress-panel" class="progress-panel">
-          <div class="progress-head">
-            <span id="phase">Ready</span>
-            <span id="progress-text"></span>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Umbra Studio Updater</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0a0c;
+        --surface: #111114;
+        --line: #2b2b31;
+        --muted: #a2a2ae;
+        --text: #eeeef2;
+        --accent: #ee607c;
+        --good: #63d5ad;
+        --warning: #f0c36b;
+        --danger: #ff8794;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      body {
+        margin: 0;
+        color: var(--text);
+        background: var(--bg);
+        font-family: system-ui, sans-serif;
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+      button {
+        font: inherit;
+        letter-spacing: 0;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+      button:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 19px;
+      }
+      h2 {
+        font-size: 18px;
+      }
+      h3 {
+        font-size: 14px;
+      }
+      .icon {
+        width: 17px;
+        height: 17px;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .shell {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .app-header {
+        min-height: 76px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+        padding: 18px 28px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand > .icon {
+        color: var(--accent);
+        width: 24px;
+        height: 24px;
+      }
+      .eyebrow {
+        color: var(--muted);
+        font-size: 11px;
+        margin-bottom: 3px;
+      }
+      .badge {
+        display: inline-block;
+        max-width: 100%;
+        font-size: 11px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 4px 7px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .badge.good {
+        color: var(--good);
+        border-color: #31584c;
+      }
+      .badge.warning {
+        color: var(--warning);
+        border-color: #5b4d32;
+      }
+      main {
+        width: min(1400px, 100%);
+        margin: 0 auto;
+        padding: 26px 28px;
+        display: grid;
+        grid-template-columns: 240px minmax(0, 1fr);
+        gap: 28px;
+        flex: 1;
+      }
+      .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .button {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        color: var(--text);
+        background: #19191e;
+        padding: 8px 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
+      .button:hover:not(:disabled) {
+        background: #25252c;
+        border-color: #64646f;
+      }
+      .button.primary {
+        color: #fff;
+        background: #913349;
+        border-color: #cd506b;
+      }
+      .button.primary:hover:not(:disabled) {
+        background: #ad3f59;
+      }
+      .button.icon-only {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+      }
+      .button.subtle {
+        background: transparent;
+      }
+      #release-list {
+        display: grid;
+        gap: 7px;
+        max-height: 570px;
+        overflow: auto;
+        padding: 3px;
+      }
+      .release {
+        border: 1px solid transparent;
+        border-radius: 5px;
+        background: #141417;
+        color: var(--text);
+        padding: 12px;
+        text-align: left;
+        width: 100%;
+      }
+      .release:hover {
+        border-color: #62626c;
+      }
+      .release.active {
+        border-color: var(--accent);
+        background: #27181e;
+      }
+      .release strong {
+        font-size: 14px;
+        display: block;
+      }
+      .release span {
+        display: block;
+        margin-top: 5px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .release[aria-pressed="true"] strong {
+        color: #ffa2b5;
+      }
+      .detail {
+        min-width: 0;
+      }
+      .release-sidebar {
+        min-width: 0;
+      }
+      .meta,
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      .release-heading {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: start;
+      }
+      .release-heading h2 {
+        margin: 5px 0;
+        overflow-wrap: anywhere;
+      }
+      .version {
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .version-pair {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 18px 0;
+        margin-top: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+      .version-pair .label {
+        color: var(--muted);
+        display: block;
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+      .version-pair strong {
+        font-size: 17px;
+      }
+      .version-pair .icon {
+        color: var(--muted);
+      }
+      .version-pair .target strong {
+        color: #ffa2b5;
+      }
+      .notes-section {
+        padding: 22px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .notes {
+        margin: 12px 0 0;
+        max-height: 300px;
+        min-height: 100px;
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: #d1d1d9;
+        font-family: inherit;
+        font-size: 13px;
+        line-height: 1.65;
+        padding-right: 10px;
+      }
+      .dependencies {
+        padding: 22px 0;
+      }
+      .section-title {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .section-title .icon {
+        color: var(--accent);
+      }
+      .summary {
+        margin: 6px 0 14px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        text-align: left;
+        font-size: 12px;
+      }
+      th {
+        padding: 9px 10px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 600;
+        border-bottom: 1px solid var(--line);
+      }
+      td {
+        padding: 12px 10px;
+        border-bottom: 1px solid #222228;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+      }
+      th:first-child {
+        width: 34%;
+      }
+      th:last-child {
+        width: 20%;
+      }
+      td small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.5;
+        margin-top: 4px;
+      }
+      code {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 11px;
+        overflow-wrap: anywhere;
+      }
+      .table-wrap {
+        border-top: 1px solid var(--line);
+      }
+      .good {
+        color: var(--good);
+      }
+      .warning {
+        color: var(--warning);
+      }
+      .message {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.6;
+        margin-top: 10px;
+        overflow-wrap: anywhere;
+        white-space: pre-line;
+      }
+      .message:empty {
+        display: none;
+      }
+      .message.error {
+        color: var(--danger);
+      }
+      .message.warning {
+        color: var(--warning);
+      }
+      .model-section {
+        border-top: 1px solid var(--line);
+        padding: 18px 0;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--text);
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .model-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        border-bottom: 1px solid #222228;
+        padding: 12px 0;
+        font-size: 12px;
+      }
+      .model-row > div {
+        min-width: 0;
+      }
+      .model-row small {
+        display: block;
+        color: var(--muted);
+        line-height: 1.6;
+        margin-top: 4px;
+        overflow-wrap: anywhere;
+      }
+      .model-row .button {
+        flex: none;
+      }
+      .log {
+        max-height: 170px;
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        color: var(--muted);
+        font:
+          11px/1.6 ui-monospace,
+          Consolas,
+          monospace;
+        margin: 8px 0;
+      }
+      .progress-panel {
+        padding: 14px 16px;
+        border-left: 3px solid var(--accent);
+        background: #19151a;
+        margin-top: 18px;
+      }
+      .progress-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .track {
+        height: 5px;
+        margin-top: 12px;
+        background: #34313a;
+        overflow: hidden;
+        border-radius: 2px;
+      }
+      .fill {
+        width: 0;
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.2s linear;
+      }
+      .progress-item {
+        margin-top: 7px;
+        font-size: 11px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      footer {
+        position: sticky;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        border-top: 1px solid var(--line);
+        padding: 14px 28px;
+        background: #111114;
+        z-index: 2;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      dialog {
+        width: min(700px, calc(100% - 28px));
+        max-height: calc(100dvh - 40px);
+        border: 1px solid #50505b;
+        border-radius: 8px;
+        background: #111114;
+        color: var(--text);
+        padding: 0;
+      }
+      dialog::backdrop {
+        background: rgb(0 0 0 / 0.78);
+      }
+      .dialog-head,
+      .dialog-actions {
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .dialog-body {
+        padding: 16px 20px;
+        max-height: calc(100dvh - 210px);
+        overflow: auto;
+      }
+      .dialog-actions {
+        border-top: 1px solid var(--line);
+        border-bottom: 0;
+        justify-content: flex-end;
+      }
+      .dialog-body p {
+        line-height: 1.6;
+        font-size: 13px;
+        margin-bottom: 14px;
+      }
+      .plan-step {
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .plan-step small {
+        display: block;
+        color: var(--muted);
+        margin-top: 5px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      .plan-step code {
+        color: #d7d7e0;
+      }
+      @media (min-width: 1000px) {
+        .release-sidebar {
+          position: sticky;
+          top: 20px;
+          align-self: start;
+        }
+      }
+      @media (max-width: 800px) {
+        main {
+          grid-template-columns: 190px minmax(0, 1fr);
+          padding: 20px 16px;
+          gap: 18px;
+        }
+        footer,
+        .app-header {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+        footer {
+          align-items: start;
+          flex-direction: column;
+        }
+        .actions {
+          width: 100%;
+        }
+      }
+      @media (max-width: 600px) {
+        main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        #release-list {
+          display: flex;
+          max-height: none;
+          overflow-x: auto;
+        }
+        .release {
+          flex: 0 0 155px;
+        }
+        .app-header {
+          align-items: start;
+        }
+        h1 {
+          font-size: 16px;
+        }
+        .brand {
+          gap: 8px;
+        }
+        .section-head {
+          flex-wrap: wrap;
+        }
+        .version-pair {
+          gap: 12px;
+        }
+        th:first-child {
+          width: 31%;
+        }
+        th:last-child {
+          width: 23%;
+        }
+        th,
+        td {
+          padding: 9px 5px;
+        }
+        .badge {
+          white-space: normal;
+        }
+        .model-row {
+          align-items: start;
+        }
+        .model-row .button {
+          max-width: 130px;
+        }
+        .hint {
+          font-size: 11px;
+          width: 100%;
+        }
+        .actions .button {
+          flex: 1 1 140px;
+        }
+        footer {
+          position: static;
+        }
+        .notes {
+          max-height: 260px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Icon paths from lucide-react; MIT licensed. -->
+    <svg hidden aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+        <path d="M21 3v5h-5" />
+        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+        <path d="M8 16H3v5" />
+      </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24">
+        <path d="M12 15V3" />
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <path d="m7 10 5 5 5-5" />
+      </symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24">
+        <path d="M5 12h14" />
+        <path d="m12 5 7 7-7 7" />
+      </symbol>
+      <symbol id="i-package" viewBox="0 0 24 24">
+        <path
+          d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"
+        />
+        <path d="M12 22V12" />
+        <polyline points="3.29 7 12 12 20.71 7" />
+        <path d="m7.5 4.27 9 5.15" />
+      </symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24">
+        <path d="M14 17H5" />
+        <path d="M19 7h-9" />
+        <circle cx="17" cy="17" r="3" />
+        <circle cx="7" cy="7" r="3" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24">
+        <path d="M18 6 6 18" />
+        <path d="m6 6 12 12" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24">
+        <path
+          d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"
+        />
+      </symbol>
+    </svg>
+    <div class="shell">
+      <header class="app-header">
+        <div class="brand">
+          <svg class="icon" aria-hidden="true"><use href="#i-package" /></svg>
+          <div>
+            <div class="eyebrow">Nocturne AI Labs</div>
+            <h1>Umbra Studio Updater</h1>
           </div>
-          <div id="current-item" class="progress-item"></div>
-          <div class="track"><div id="fill" class="fill"></div></div>
-          <div id="state-message" class="message"></div>
         </div>
-        <div id="notes" class="notes">Choose a release from the left. Umbra Studio, ComfyUI, AI-Toolkit, and the gallery service will close only when installation begins. User and Tools remain preserved.</div>
-        <section class="dependencies" aria-label="Managed dependencies">
-          <h3>Managed dependencies</h3>
-          <div id="dependency-summary" class="meta">Checking installed tools and model packs...</div>
-          <div id="dependency-list" class="dependency-list"></div>
-          <div id="dependency-message" class="message" role="status"></div>
-          <pre id="dependency-log" class="dependency-log" hidden></pre>
-        </section>
-      </section>
-    </main>
-    <footer>
-      <div id="hint" class="hint">This page is served by the external updater, not Umbra Studio.</div>
-      <div class="actions">
-        <button id="close-updater" class="button" type="button">Close updater</button>
-        <button id="launch-umbra" class="button primary" type="button" hidden>Launch Umbra Studio</button>
-        <button id="update" class="button primary" type="button" disabled>Install selected update</button>
+        <span id="status-pill" class="badge">Checking installation</span>
+      </header>
+      <main>
+        <aside class="release-sidebar" aria-label="Release selection">
+          <div class="section-head">
+            <h3>Available versions</h3>
+            <button
+              id="refresh"
+              class="button icon-only"
+              type="button"
+              title="Refresh releases"
+              aria-label="Refresh releases"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-refresh" />
+              </svg>
+            </button>
+          </div>
+          <div id="release-list" aria-label="Available versions">
+            <p class="meta">Checking releases...</p>
+          </div>
+        </aside>
+        <div class="detail">
+          <section aria-label="Selected release">
+            <div class="release-heading">
+              <div>
+                <span id="selected-version" class="version">Umbra Studio</span>
+                <h2 id="selected-name">Release notes</h2>
+                <div id="selected-meta" class="meta"></div>
+              </div>
+              <span id="release-channel" class="badge" hidden></span>
+            </div>
+            <div class="version-pair">
+              <div>
+                <span class="label">Installed</span
+                ><strong id="installed-version">Checking...</strong>
+              </div>
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg>
+              <div class="target">
+                <span class="label">Selected version</span
+                ><strong id="target-version">Not selected</strong>
+              </div>
+            </div>
+            <div
+              id="progress-panel"
+              class="progress-panel"
+              role="status"
+              hidden
+            >
+              <div class="progress-head">
+                <span id="phase">Ready</span><span id="progress-text"></span>
+              </div>
+              <div id="current-item" class="progress-item"></div>
+              <div class="track"><div id="fill" class="fill"></div></div>
+              <div id="state-message" class="message"></div>
+            </div>
+            <section class="notes-section" aria-label="Patch notes">
+              <h3>Patch notes</h3>
+              <pre id="notes" class="notes">No release selected.</pre>
+            </section>
+          </section>
+          <section class="dependencies" aria-label="Managed dependencies">
+            <div class="section-head">
+              <div class="section-title">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-settings" />
+                </svg>
+                <h3>Managed dependencies</h3>
+                <span id="dependency-count" class="badge">Checking</span>
+              </div>
+              <button id="repair-all" class="button" type="button" disabled>
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-download" /></svg
+                ><span>Update dependencies</span>
+              </button>
+            </div>
+            <p id="dependency-summary" class="meta summary">
+              Checking the installed build's requirements...
+            </p>
+            <div class="table-wrap">
+              <table aria-label="Installed and required dependency versions">
+                <thead>
+                  <tr>
+                    <th scope="col">Component</th>
+                    <th scope="col">Installed</th>
+                    <th scope="col">Required</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="dependency-list"></tbody>
+              </table>
+            </div>
+            <div id="dependency-message" class="message" role="status"></div>
+            <div id="dependency-holds" class="message warning"></div>
+            <div
+              class="section-head"
+              style="margin-top: 12px"
+              id="runtime-actions"
+              hidden
+            >
+              <span id="runtime-status" class="meta"></span
+              ><button id="recheck" class="button" type="button">
+                <svg class="icon" aria-hidden="true">
+                  <use href="#i-refresh" /></svg
+                >Recheck runtime
+              </button>
+            </div>
+            <details id="dependency-log-section" hidden>
+              <summary>Installation log</summary>
+              <pre id="dependency-log" class="log"></pre>
+            </details>
+          </section>
+          <details class="model-section">
+            <summary>
+              Model downloads
+              <span id="model-count" class="badge">Checking</span>
+            </summary>
+            <div id="model-list"></div>
+            <div id="model-actions" hidden>
+              <p class="message">
+                Model installer is open. Finish or cancel downloads before
+                closing it.
+              </p>
+              <button id="close-models" class="button" type="button">
+                Close model installer
+              </button>
+            </div>
+          </details>
+        </div>
+      </main>
+      <footer>
+        <div id="hint" class="hint" role="status">
+          User files and models are preserved.
+        </div>
+        <div class="actions">
+          <button id="close-updater" class="button subtle" type="button">
+            Close updater</button
+          ><button id="app-only" class="button" type="button" disabled>
+            Update app only</button
+          ><button id="launch-umbra" class="button" type="button" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-play" /></svg
+            >Launch Umbra Studio</button
+          ><button id="update" class="button primary" type="button" disabled>
+            <svg class="icon" aria-hidden="true"><use href="#i-download" /></svg
+            ><span>Update app and dependencies</span>
+          </button>
+        </div>
+      </footer>
+    </div>
+    <dialog id="review-dialog" aria-labelledby="review-title">
+      <div class="dialog-head">
+        <h2 id="review-title"></h2>
+        <button
+          id="review-close"
+          class="button icon-only"
+          type="button"
+          title="Close review"
+          aria-label="Close review"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
       </div>
-    </footer>
-  </div>
-  <script>
-    const token = new URLSearchParams(location.search).get('token') || '';
-    const api = (path, options = {}) => fetch(`${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`, {
-      cache: 'no-store',
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    }).then(async (response) => {
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload.success === false) throw new Error(payload.error || `Request failed (${response.status}).`);
-      return payload;
-    });
-    const list = document.querySelector('#release-list');
-    const updateButton = document.querySelector('#update');
-    const launchUmbraButton = document.querySelector('#launch-umbra');
-    const closeUpdaterButton = document.querySelector('#close-updater');
-    const refreshButton = document.querySelector('#refresh');
-    const progressPanel = document.querySelector('#progress-panel');
-    const stateMessage = document.querySelector('#state-message');
-    const dependencyList = document.querySelector('#dependency-list');
-    const dependencySummary = document.querySelector('#dependency-summary');
-    const dependencyMessage = document.querySelector('#dependency-message');
-    const dependencyLog = document.querySelector('#dependency-log');
-    let summary = null;
-    let selected = null;
-    let latestState = null;
-    let stateTimer = 0;
-    let dependencyTimer = 0;
-    let dependencyRunning = false;
-    let dependencyReady = false;
-    const activePhases = new Set(['downloading', 'staged', 'stopping', 'extracting', 'applying', 'updating_nodes']);
-    const phaseNames = {
-      downloading: 'Downloading release',
-      staged: 'Verifying package',
-      stopping: 'Stopping Umbra Studio',
-      extracting: 'Extracting package',
-      applying: 'Replacing application files',
-      updating_nodes: 'Updating Umbra Nodes',
-      restarting: 'Finishing legacy update',
-      complete: 'Update complete',
-      failed: 'Update failed',
-    };
-    const formatBytes = (value) => {
-      let size = Math.max(0, Number(value) || 0);
-      const units = ['B', 'KB', 'MB', 'GB'];
-      let index = 0;
-      while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
-      return `${size.toFixed(index === 0 ? 0 : size >= 100 ? 0 : 1)} ${units[index]}`;
-    };
-    const versionParts = (value) => {
-      const version = String(value || '').replace(/^v/i, '').split('+', 1)[0];
-      const prereleaseAt = version.indexOf('-');
-      return {
-        core: (prereleaseAt < 0 ? version : version.slice(0, prereleaseAt)).split('.'),
-        prerelease: prereleaseAt < 0 ? null : version.slice(prereleaseAt + 1).split('.'),
+      <div id="review-body" class="dialog-body"></div>
+      <div class="dialog-actions">
+        <button id="review-cancel" class="button" type="button">Cancel</button
+        ><button
+          id="review-confirm"
+          class="button primary"
+          type="button"
+        ></button>
+      </div>
+    </dialog>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const token = new URLSearchParams(location.search).get("token") || "";
+      const api = async (path, options = {}) => {
+        const response = await fetch(
+          `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`,
+          {
+            cache: "no-store",
+            ...options,
+            headers: {
+              "Content-Type": "application/json",
+              ...(options.headers || {}),
+            },
+          },
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.success === false)
+          throw new Error(
+            payload.error || `Request failed (${response.status}).`,
+          );
+        return payload;
       };
-    };
-    const compareNumericParts = (left, right) => {
-      const a = left.replace(/^0+(?=\d)/, '');
-      const b = right.replace(/^0+(?=\d)/, '');
-      if (a.length !== b.length) return a.length > b.length ? 1 : -1;
-      return a === b ? 0 : a > b ? 1 : -1;
-    };
-    const compare = (left, right) => {
-      const a = versionParts(left); const b = versionParts(right);
-      for (let i = 0; i < 3; i += 1) {
-        const difference = compareNumericParts(a.core[i] || '0', b.core[i] || '0');
-        if (difference) return difference;
+      const activePhases = new Set([
+        "downloading",
+        "staged",
+        "stopping",
+        "extracting",
+        "applying",
+        "updating_nodes",
+        "restarting",
+      ]);
+      const phaseNames = {
+        downloading: "Downloading release",
+        staged: "Verifying package",
+        stopping: "Stopping Umbra Studio",
+        extracting: "Extracting package",
+        applying: "Installing app",
+        updating_nodes: "Updating Umbra Nodes",
+        restarting: "Finishing update",
+        complete: "App update complete",
+        failed: "App update failed",
+      };
+      let summary = null,
+        selected = null,
+        latestState = null,
+        dependencyStatus = null;
+      let stateTimer = 0,
+        dependencyTimer = 0,
+        dependencyLoading = false,
+        dependencyReload = false,
+        dependenciesFresh = false,
+        localOperation = false,
+        terminal = false;
+      let appError = "",
+        dependencyError = "",
+        reviewedTarget = "",
+        postUpdateTarget = "";
+      const intentKey = `umbra-updater-combined:${token}`;
+      try {
+        postUpdateTarget = sessionStorage.getItem(intentKey) || "";
+      } catch {
+        /* Storage is optional. */
       }
-      if (!a.prerelease || !b.prerelease) {
-        return a.prerelease ? -1 : b.prerelease ? 1 : 0;
+      function setIntent(version) {
+        postUpdateTarget = version;
+        try {
+          if (version) sessionStorage.setItem(intentKey, version);
+          else sessionStorage.removeItem(intentKey);
+        } catch {
+          /* Storage is optional. */
+        }
       }
-      for (let i = 0; i < Math.max(a.prerelease.length, b.prerelease.length); i += 1) {
-        const leftPart = a.prerelease[i];
-        const rightPart = b.prerelease[i];
-        if (leftPart === undefined || rightPart === undefined) return leftPart === undefined ? -1 : 1;
-        const leftNumeric = /^\d+$/.test(leftPart);
-        const rightNumeric = /^\d+$/.test(rightPart);
-        if (leftNumeric && rightNumeric) {
-          const difference = compareNumericParts(leftPart, rightPart);
+      const formatBytes = (value) => {
+        let size = Math.max(0, Number(value) || 0),
+          index = 0;
+        const units = ["B", "KB", "MB", "GB"];
+        while (size >= 1024 && index < 3) {
+          size /= 1024;
+          index++;
+        }
+        return `${size.toFixed(index === 0 || size >= 100 ? 0 : 1)} ${units[index]}`;
+      };
+      const versionParts = (value) => {
+        const version = String(value || "")
+            .replace(/^v/i, "")
+            .split("+", 1)[0],
+          at = version.indexOf("-");
+        return {
+          core: (at < 0 ? version : version.slice(0, at)).split("."),
+          prerelease: at < 0 ? null : version.slice(at + 1).split("."),
+        };
+      };
+      const compareNumeric = (left, right) => {
+        const a = left.replace(/^0+(?=\d)/, ""),
+          b = right.replace(/^0+(?=\d)/, "");
+        return a.length !== b.length
+          ? a.length > b.length
+            ? 1
+            : -1
+          : a === b
+            ? 0
+            : a > b
+              ? 1
+              : -1;
+      };
+      function compare(left, right) {
+        const a = versionParts(left),
+          b = versionParts(right);
+        for (let i = 0; i < 3; i++) {
+          const difference = compareNumeric(a.core[i] || "0", b.core[i] || "0");
           if (difference) return difference;
-        } else if (leftNumeric !== rightNumeric) {
-          return leftNumeric ? -1 : 1;
-        } else if (leftPart !== rightPart) {
-          return leftPart > rightPart ? 1 : -1;
+        }
+        if (!a.prerelease || !b.prerelease)
+          return a.prerelease ? -1 : b.prerelease ? 1 : 0;
+        for (
+          let i = 0;
+          i < Math.max(a.prerelease.length, b.prerelease.length);
+          i++
+        ) {
+          const l = a.prerelease[i],
+            r = b.prerelease[i];
+          if (l === undefined || r === undefined)
+            return l === undefined ? -1 : 1;
+          const ln = /^\d+$/.test(l),
+            rn = /^\d+$/.test(r);
+          if (ln && rn) {
+            const difference = compareNumeric(l, r);
+            if (difference) return difference;
+          } else if (ln !== rn) return ln ? -1 : 1;
+          else if (l !== r) return l > r ? 1 : -1;
+        }
+        return 0;
+      }
+      const appActive = () =>
+        Boolean(latestState && activePhases.has(latestState.phase));
+      const dependenciesActive = () =>
+        Boolean(
+          dependencyStatus?.action?.phase === "running" ||
+            dependencyStatus?.modelSetupRunning ||
+            dependencyStatus?.repairState?.phase === "running",
+        );
+      const busy = () =>
+        terminal || localOperation || appActive() || dependenciesActive();
+      const planForAll = () =>
+        dependencyStatus?.repairPlans?.find(
+          (plan) => plan.featureId === "all-managed-dependencies",
+        );
+      const canManage = () =>
+        Boolean(
+          latestState &&
+            ["idle", "complete"].includes(latestState.phase) &&
+            !busy() &&
+            !dependencyLoading &&
+            dependenciesFresh &&
+            dependencyStatus,
+        );
+      const isNewer = () =>
+        Boolean(
+          selected &&
+            summary &&
+            compare(selected.version, summary.currentVersion) > 0,
+        );
+      const element = (tag, text, className) => {
+        const node = document.createElement(tag);
+        if (text !== undefined) node.textContent = text;
+        if (className) node.className = className;
+        return node;
+      };
+      function message(id, text, kind = "") {
+        $(id).className = `message${kind ? ` ${kind}` : ""}`;
+        $(id).textContent = text;
+      }
+      function updateActions() {
+        const locked =
+          busy() || !latestState || dependencyLoading || !dependenciesFresh;
+        $("update").disabled = locked || !isNewer();
+        $("app-only").disabled = locked || !isNewer();
+        $("update").hidden = Boolean(
+          latestState?.phase === "complete" && !isNewer(),
+        );
+        $("app-only").hidden = $("update").hidden;
+        $("launch-umbra").hidden = latestState?.phase !== "complete";
+        $("launch-umbra").disabled = locked;
+        $("close-updater").disabled = busy();
+        $("refresh").disabled = busy() || dependencyLoading;
+        $("repair-all").disabled = !canManage() || !planForAll();
+        $("recheck").disabled = !canManage();
+        $("close-models").disabled = terminal || localOperation || appActive();
+        for (const button of $("model-list").querySelectorAll("button"))
+          button.disabled = !canManage();
+        for (const button of $("release-list").querySelectorAll("button"))
+          button.disabled = locked;
+      }
+      function showVersions() {
+        $("status-pill").textContent = summary
+          ? `Installed v${summary.currentVersion}`
+          : "Version unavailable";
+        $("installed-version").textContent = summary
+          ? `v${summary.currentVersion}`
+          : "Unavailable";
+        for (const button of $("release-list").querySelectorAll("button")) {
+          const release = summary?.releases.find(
+            (entry) => entry.tag === button.dataset.tag,
+          );
+          if (!release) continue;
+          button.querySelector("strong").textContent =
+            `v${release.version}${compare(release.version, summary.currentVersion) === 0 ? " / Installed" : ""}`;
         }
       }
-      return 0;
-    };
-    const selectedIsNewer = () => Boolean(
-      selected
-      && summary
-      && compare(selected.version, summary.currentVersion) > 0
-    );
-    function updateReleaseLabels() {
-      if (!summary) return;
-      for (const button of list.querySelectorAll('.release')) {
-        const release = summary.releases.find((entry) => entry.tag === button.dataset.tag);
-        const title = button.querySelector('strong');
-        if (!release || !title) continue;
-        title.textContent = `v${release.version}${compare(release.version, summary.currentVersion) > 0 ? '  UPDATE' : release.version === summary.currentVersion ? '  INSTALLED' : ''}`;
-      }
-    }
-    function updateActions(state = latestState) {
-      const active = Boolean(state && activePhases.has(state.phase));
-      const busy = active || dependencyRunning;
-      const canInstallSelected = !busy && selectedIsNewer();
-      const completedCurrentSelection = Boolean(
-        state
-        && state.phase === 'complete'
-        && selected
-        && compare(selected.version, state.targetVersion || state.currentVersion) === 0
-      );
-      updateButton.disabled = !canInstallSelected;
-      updateButton.hidden = !canInstallSelected && completedCurrentSelection;
-      launchUmbraButton.hidden = !completedCurrentSelection;
-      launchUmbraButton.disabled = busy;
-      closeUpdaterButton.disabled = busy;
-    }
-    function selectRelease(release) {
-      selected = release;
-      document.querySelector('#selected-version').textContent = `Umbra Studio v${release.version}`;
-      document.querySelector('#selected-name').textContent = release.name || release.tag;
-      document.querySelector('#selected-meta').textContent = `${release.packageName} | ${formatBytes(release.packageBytes)} | ${release.channel}`;
-      document.querySelector('#notes').textContent = release.notes || 'No release notes were provided.';
-      for (const button of list.querySelectorAll('.release')) button.classList.toggle('active', button.dataset.tag === release.tag);
-      updateActions();
-    }
-    function renderReleases() {
-      list.replaceChildren();
-      for (const release of summary.releases) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'release';
-        button.dataset.tag = release.tag;
-        const title = document.createElement('strong');
-        title.textContent = `v${release.version}${compare(release.version, summary.currentVersion) > 0 ? '  UPDATE' : release.version === summary.currentVersion ? '  INSTALLED' : ''}`;
-        const date = document.createElement('span');
-        date.textContent = release.publishedAt ? new Date(release.publishedAt).toLocaleDateString() : release.channel;
-        button.append(title, date);
-        button.addEventListener('click', () => selectRelease(release));
-        list.append(button);
-      }
-      const preferred = summary.releases.find((release) => compare(release.version, summary.currentVersion) > 0) || summary.releases[0];
-      if (preferred) selectRelease(preferred);
-    }
-    async function loadReleases(refresh = false) {
-      refreshButton.disabled = true;
-      stateMessage.className = 'message';
-      stateMessage.textContent = '';
-      try {
-        summary = await api(`/api/releases${refresh ? '?refresh=true' : ''}`);
-        renderReleases();
-        document.querySelector('#status-pill').textContent = `Installed v${summary.currentVersion}`;
-      } catch (error) {
-        stateMessage.className = 'message error';
-        stateMessage.textContent = error.message;
-        progressPanel.classList.add('visible');
-      } finally {
-        refreshButton.disabled = false;
-      }
-    }
-    async function pollState() {
-      try {
-        const payload = await api('/api/state');
-        const state = payload.state;
-        latestState = state;
-        const active = activePhases.has(state.phase);
-        const completedCurrentSelection = state.phase === 'complete'
-          && selected
-          && compare(selected.version, state.targetVersion || state.currentVersion) === 0;
-        progressPanel.classList.toggle('visible', active || completedCurrentSelection || state.phase === 'failed');
-        document.querySelector('#phase').textContent = phaseNames[state.phase] || 'Ready';
-        document.querySelector('#current-item').textContent = state.currentItem || '';
-        const ratio = state.totalBytes > 0 ? Math.min(100, state.processedBytes / state.totalBytes * 100) : 0;
-        document.querySelector('#fill').style.width = `${ratio}%`;
-        document.querySelector('#progress-text').textContent = state.phase === 'downloading'
-          ? `${formatBytes(state.processedBytes)} / ${formatBytes(state.totalBytes)}`
-          : '';
-        if (state.phase === 'complete' && summary && state.currentVersion) {
-          summary.currentVersion = state.currentVersion;
-          document.querySelector('#status-pill').textContent = `Installed v${state.currentVersion}`;
-          updateReleaseLabels();
-          if (!dependencyReady) {
-            dependencyReady = true;
-            void loadDependencies();
-          }
+      function selectRelease(release) {
+        selected = release;
+        $("selected-version").textContent = `Umbra Studio v${release.version}`;
+        $("target-version").textContent = `v${release.version}`;
+        $("selected-name").textContent = release.name || release.tag;
+        $("selected-meta").textContent =
+          `${release.packageName} / ${formatBytes(release.packageBytes)}${release.publishedAt ? ` / ${new Date(release.publishedAt).toLocaleDateString()}` : ""}`;
+        $("release-channel").hidden = false;
+        $("release-channel").textContent = release.channel;
+        // Release text is untrusted; never interpret remote HTML or script-bearing Markdown.
+        $("notes").textContent =
+          release.notes || "No patch notes were provided.";
+        for (const button of $("release-list").querySelectorAll("button")) {
+          const active = button.dataset.tag === release.tag;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
         }
-        stateMessage.className = `message${state.error ? ' error' : state.warning ? ' warning' : ''}`;
-        const completionMessage = completedCurrentSelection
-          ? 'Update complete. Launch Umbra Studio when you are ready.'
-          : '';
-        stateMessage.textContent = state.error || [state.warning, completionMessage].filter(Boolean).join(' ');
-        updateActions(state);
-        if (active) {
-          dependencyReady = false;
-          updateButton.textContent = phaseNames[state.phase] || 'Updating';
-          clearTimeout(stateTimer);
-          stateTimer = setTimeout(pollState, 350);
-        } else {
-          updateButton.textContent = 'Install selected update';
-        }
-      } catch (error) {
-        stateMessage.className = 'message error';
-        stateMessage.textContent = error.message;
-      }
-    }
-    function dependencyRow(name, detail, label, onClick, forceEnabled = false) {
-      const row = document.createElement('div');
-      row.className = 'dependency-row';
-      const copy = document.createElement('div');
-      const title = document.createElement('strong');
-      title.textContent = name;
-      const description = document.createElement('span');
-      description.textContent = detail;
-      copy.append(title, description);
-      row.append(copy);
-      if (label) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'button';
-        button.textContent = label;
-        button.disabled = !forceEnabled && (dependencyRunning || Boolean(latestState && activePhases.has(latestState.phase)));
-        button.addEventListener('click', onClick);
-        row.append(button);
-      }
-      dependencyList.append(row);
-    }
-    async function startDependency(kind, target) {
-      dependencyRunning = true;
-      dependencyList.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-      updateActions();
-      dependencyMessage.className = 'message';
-      dependencyMessage.textContent = `Preparing ${target}...`;
-      try {
-        await api('/api/dependencies/action', { method: 'POST', body: JSON.stringify({ kind, target }) });
-        await loadDependencies();
-      } catch (error) {
-        dependencyRunning = false;
-        await loadDependencies();
-        dependencyMessage.className = 'message error';
-        dependencyMessage.textContent = error.message;
         updateActions();
       }
-    }
-    async function reviewWorkflowRepair(plan) {
-      if (dependencyRunning) return;
-      const description = [plan.label, ...plan.steps.map(step => `${step.target}: ${step.pins.join(', ')}`),
-        ...plan.holds, 'Install these managed dependencies using existing Setup? Models are separate. Local node changes are preserved. Restart and runtime preflight are required; queues do not resume automatically.'].join('\n\n');
-      if (!window.confirm(description)) return;
-      dependencyRunning = true; updateActions();
-      try {
-        await api('/api/dependencies/repair', { method: 'POST', body: JSON.stringify({ featureId: plan.featureId, planId: plan.id }) });
-        await loadDependencies();
-      } catch (error) { dependencyRunning = false; await loadDependencies(); dependencyMessage.className = 'message error'; dependencyMessage.textContent = error.message; }
-    }
-    async function recheckWorkflowRepair(featureId) {
-      try {
-        const result = await api('/api/dependencies/preflight', { method: 'POST', body: JSON.stringify({ featureId }) });
-        await loadDependencies();
-        dependencyMessage.className = result.ready ? 'message' : 'message error';
-        dependencyMessage.textContent = result.ready ? result.qualification : result.issues.join(' ');
-      } catch (error) { dependencyMessage.className = 'message error'; dependencyMessage.textContent = error.message; }
-    }
-    async function launchModelSetup(profile) {
-      const tab = window.open('', '_blank');
-      dependencyList.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-      try {
-        const result = await api('/api/dependencies/model-setup', { method: 'POST', body: JSON.stringify({ profile }) });
-        if (tab) tab.location.href = result.url;
-        else window.location.href = result.url;
-        await loadDependencies();
-      } catch (error) {
-        tab?.close();
-        await loadDependencies();
-        dependencyMessage.className = 'message error';
-        dependencyMessage.textContent = error.message;
-      }
-    }
-    async function closeModelSetup() {
-      try {
-        await api('/api/dependencies/model-setup/close', { method: 'POST', body: '{}' });
-        dependencyMessage.textContent = 'Closing model installer...';
-        setTimeout(loadDependencies, 350);
-      } catch (error) {
-        dependencyMessage.className = 'message error';
-        dependencyMessage.textContent = error.message;
-      }
-    }
-    async function loadDependencies() {
-      try {
-        const status = await api('/api/dependencies');
-        const action = status.action;
-        dependencyRunning = action?.phase === 'running' || status.modelSetupRunning;
-        dependencyList.replaceChildren();
-        const requiredVersion = status.comfyui.minimumRequired;
-        const outdatedComfy = Boolean(requiredVersion && compare(status.comfyui.version || '0.0.0', requiredVersion) < 0) || Boolean(status.comfyui.minimumFrontendRequired && compare(status.comfyui.frontendVersion || '0.0.0', status.comfyui.minimumFrontendRequired) < 0);
-        const canManage = latestState?.phase === 'idle' || latestState?.phase === 'complete';
-        dependencySummary.textContent = status.features.length
-          ? canManage ? 'Checked against the installed build. Tool changes require your confirmation.' : 'Current installation shown. Finish the Umbra Studio update to unlock managed dependency actions.'
-          : 'This installed build does not declare managed feature requirements yet.';
-        if (status.modelSetupRunning) {
-          dependencyRow('Model installer', 'Open in a separate tab. Finish or cancel downloads before closing it.', 'Close installer', closeModelSetup, true);
-        }
-        dependencyRow('ComfyUI', `${status.comfyui.installed ? `Installed v${status.comfyui.version}` : 'Not installed'}${requiredVersion ? ` · active features need v${requiredVersion}+` : ''}`,
-          canManage ? !status.comfyui.installed ? 'Install' : outdatedComfy ? 'Update' : '' : '', () => startDependency('comfyui', 'ComfyUI'));
-        const managedSuites = new Map();
-        for (const plan of status.repairPlans || []) {
-          const saved = status.repairState?.featureId === plan.featureId ? status.repairState : null;
-          dependencyRow(plan.label, `${saved ? `${saved.phase} | ${saved.completedTargets.length} steps completed | ${saved.error || ''}` : 'Review required tool suites and pins'}${plan.holds.length ? ` | ${plan.holds.join(' ')}` : ''}`,
-            canManage ? saved && ['held', 'failed'].includes(saved.phase) ? 'Review / Resume' : 'Review repair' : '', () => reviewWorkflowRepair(plan));
-          if (saved && ['restart-required', 'preflight-held', 'preflight-passed'].includes(saved.phase)) {
-            dependencyRow('Runtime readiness', 'Start managed ComfyUI normally, refresh its frontend, then recheck. Native GPU execution remains unqualified.', canManage ? 'Recheck' : '', () => recheckWorkflowRepair(plan.featureId));
+      async function loadReleases(refresh = false) {
+        $("refresh").disabled = true;
+        try {
+          const previousTag = selected?.tag;
+          summary = await api(`/api/releases${refresh ? "?refresh=true" : ""}`);
+          if (
+            latestState?.phase === "complete" &&
+            latestState.currentVersion &&
+            compare(latestState.currentVersion, summary.currentVersion) > 0
+          )
+            summary.currentVersion = latestState.currentVersion;
+          $("release-list").replaceChildren();
+          for (const release of summary.releases) {
+            const button = element("button", undefined, "release");
+            button.type = "button";
+            button.dataset.tag = release.tag;
+            button.append(
+              element("strong", `v${release.version}`),
+              element(
+                "span",
+                `${release.channel}${release.publishedAt ? ` / ${new Date(release.publishedAt).toLocaleDateString()}` : ""}`,
+              ),
+            );
+            button.addEventListener("click", () => selectRelease(release));
+            $("release-list").append(button);
           }
-        }
-        for (const feature of status.features) {
-          const prefix = feature.optional ? 'Optional' : feature.active ? 'In use' : 'Available';
-          const missing = feature.missingModels.length;
-          const missingDetail = missing ? ` · Missing: ${feature.missingModels.join(', ')}` : '';
-          dependencyRow(feature.label, `${prefix} · ${feature.totalModels - missing}/${feature.totalModels} managed models present · ComfyUI v${feature.minimumComfyVersion}+${missingDetail}`,
-            canManage && missing && (feature.active || feature.optional) ? 'Models' : '', () => launchModelSetup(feature.modelProfiles[0]));
-          for (const dependency of feature.runtimePackages || []) {
-            dependencyRow(dependency.distribution, `${dependency.status === 'missing' ? 'Workflow held' : 'Runtime unqualified'} | ${dependency.detail} ${dependency.reason}`, '', () => {});
+          const preferred =
+            summary.releases.find((entry) => entry.tag === previousTag) ||
+            summary.releases.find(
+              (entry) => compare(entry.version, summary.currentVersion) > 0,
+            ) ||
+            summary.releases[0];
+          if (preferred) selectRelease(preferred);
+          else {
+            selected = null;
+            $("release-list").append(
+              element("p", "No compatible packages found.", "meta"),
+            );
+            $("target-version").textContent = "Not available";
+            $("notes").textContent = "No compatible release is available.";
           }
+          appError = "";
+          showVersions();
+        } catch (error) {
+          appError = error.message;
+          $("progress-panel").hidden = false;
+          message("state-message", error.message, "error");
+        } finally {
+          updateActions();
+        }
+      }
+      function refreshProgress() {
+        const state = latestState;
+        if (!state) return;
+        $("progress-panel").hidden =
+          !appActive() &&
+          !appError &&
+          !["complete", "failed"].includes(state.phase);
+        $("phase").textContent = phaseNames[state.phase] || "Ready";
+        $("current-item").textContent = state.currentItem || "";
+        $("fill").style.width =
+          `${state.phase === "complete" ? 100 : state.totalBytes > 0 ? Math.max(0, Math.min(100, (state.processedBytes / state.totalBytes) * 100)) : 0}%`;
+        $("progress-text").textContent =
+          state.phase === "downloading"
+            ? `${formatBytes(state.processedBytes)} / ${formatBytes(state.totalBytes)}`
+            : "";
+        message(
+          "state-message",
+          state.error ||
+            appError ||
+            [
+              state.warning,
+              state.phase === "complete"
+                ? "Application installed. Managed tools and model availability are shown below."
+                : "",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          state.error || appError ? "error" : state.warning ? "warning" : "",
+        );
+      }
+      async function pollState() {
+        clearTimeout(stateTimer);
+        try {
+          const previousPhase = latestState?.phase;
+          latestState = (await api("/api/state")).state;
+          if (
+            latestState.phase === "complete" &&
+            summary &&
+            latestState.currentVersion
+          ) {
+            summary.currentVersion = latestState.currentVersion;
+            showVersions();
+          }
+          if (latestState.phase === "failed") setIntent("");
+          refreshProgress();
+          updateActions();
+          if (
+            latestState.phase === "complete" &&
+            previousPhase !== "complete"
+          ) {
+            dependenciesFresh = false;
+            await loadDependencies();
+          }
+          if (appActive()) stateTimer = setTimeout(pollState, 700);
+        } catch (error) {
+          $("progress-panel").hidden = false;
+          message("state-message", error.message, "error");
+          stateTimer = setTimeout(pollState, 3000);
+          updateActions();
+        }
+      }
+      function componentRow(name, installed, required, status, detail = "") {
+        const row = element("tr"),
+          label = element("td");
+        label.append(element("strong", name));
+        if (detail) label.append(element("small", detail));
+        const installedCell = element("td"),
+          requiredCell = element("td");
+        installedCell.append(element("code", installed || "Not installed"));
+        requiredCell.append(element("code", required || "Not declared"));
+        const statusCell = element("td");
+        statusCell.append(
+          element(
+            "span",
+            status.label,
+            `badge ${status.good ? "good" : "warning"}`,
+          ),
+        );
+        row.append(label, installedCell, requiredCell, statusCell);
+        $("dependency-list").append(row);
+      }
+      function renderDependencies() {
+        const status = dependencyStatus,
+          all = planForAll();
+        $("dependency-list").replaceChildren();
+        $("model-list").replaceChildren();
+        const highest = (key) =>
+          status.features
+            .map((feature) => feature[key])
+            .filter(Boolean)
+            .sort(compare)
+            .at(-1) || "";
+        const coreRequired =
+            all?.minimumComfyVersion ||
+            highest("minimumComfyVersion") ||
+            status.comfyui.minimumRequired,
+          frontendRequired =
+            all?.minimumFrontendVersion ||
+            highest("minimumFrontendVersion") ||
+            status.comfyui.minimumFrontendRequired;
+        let attention = 0;
+        for (const [name, installed, required] of [
+          ["ComfyUI", status.comfyui.version, coreRequired],
+          [
+            "ComfyUI frontend",
+            status.comfyui.frontendVersion,
+            frontendRequired,
+          ],
+        ]) {
+          const versionReady = Boolean(
+            installed && (!required || compare(installed, required) >= 0),
+          );
+          const pythonSync =
+            name === "ComfyUI" &&
+            versionReady &&
+            status.comfyui.pythonDependencies?.verified === false;
+          const ready = versionReady && !pythonSync;
+          if (!ready) attention++;
+          componentRow(
+            name,
+            installed ? `v${installed}` : "",
+            required ? `v${required}+` : "",
+            {
+              label: ready
+                ? "Files verified"
+                : pythonSync
+                  ? "Python sync"
+                  : installed
+                    ? "Update needed"
+                    : "Missing",
+              good: ready,
+            },
+            pythonSync ? status.comfyui.pythonDependencies.detail : "",
+          );
+        }
+        const nodes = new Map();
+        for (const feature of status.features)
           for (const node of feature.customNodes) {
-            const existing = managedSuites.get(node.name);
-            if (!existing || existing.status === 'ready' && node.status !== 'ready') managedSuites.set(node.name, node);
+            const entry = nodes.get(node.name) || {
+              nodes: [],
+              pins: new Set(),
+            };
+            entry.nodes.push(node);
+            entry.pins.add(node.minimumCommit);
+            nodes.set(node.name, entry);
           }
+        for (const [name, entry] of nodes) {
+          const node =
+              entry.nodes.find((item) => item.status !== "ready") ||
+              entry.nodes[0],
+            sourceReady = entry.nodes.every(
+              (item) => item.filesVerified ?? item.status === "ready",
+            ),
+            pythonSync =
+              sourceReady &&
+              entry.nodes.some(
+                (item) => item.pythonDependencies?.verified === false,
+              ),
+            ready = sourceReady && !pythonSync;
+          if (!ready) attention++;
+          componentRow(
+            name,
+            [
+              node.installedVersion ? `v${node.installedVersion}` : "",
+              node.installedCommit?.slice(0, 8),
+            ]
+              .filter(Boolean)
+              .join(" / "),
+            [...entry.pins].map((pin) => pin.slice(0, 8)).join(" / "),
+            {
+              label: ready
+                ? "Files verified"
+                : pythonSync
+                  ? "Python sync"
+                  : node.status === "missing"
+                    ? "Missing"
+                    : node.status === "outdated"
+                      ? "Repair needed"
+                      : "Review needed",
+              good: ready,
+            },
+            pythonSync
+              ? entry.nodes.find(
+                  (item) => item.pythonDependencies?.verified === false,
+                ).pythonDependencies.detail
+              : node.reason || "Managed node suite",
+          );
         }
-        for (const node of managedSuites.values()) {
-          dependencyRow(node.name, `${node.status === 'ready' ? 'Installed files verified; runtime unchecked' : node.status}${node.reason ? ` | ${node.reason}` : ''}${node.frontendAssets?.length ? ` | Frontend: ${node.frontendAssets.join(', ')}` : ''}`, !canManage || node.status === 'ready' ? '' : 'Install / repair',
-            () => startDependency('node', node.name));
+        const packages = new Map();
+        for (const feature of status.features)
+          for (const item of feature.runtimePackages || [])
+            if (!packages.has(item.distribution))
+              packages.set(item.distribution, item);
+        for (const [name, item] of packages) {
+          attention++;
+          componentRow(
+            name,
+            item.moduleStatus === "present"
+              ? "Module present"
+              : item.moduleStatus === "missing"
+                ? "Not installed"
+                : "Not verified",
+            "Platform-compatible build",
+            { label: "Manual review", good: false },
+            item.detail,
+          );
         }
-        dependencyLog.hidden = !action?.lines?.length;
-        dependencyLog.textContent = action?.lines?.join('\n') || '';
-        if (status.modelSetupRunning) {
-          dependencyMessage.className = 'message';
-          dependencyMessage.textContent = 'Model installer is open. Close it when downloads finish to continue in the updater.';
-        } else if (action) {
-          dependencyMessage.className = `message${action.phase === 'failed' ? ' error' : ''}`;
-          dependencyMessage.textContent = action.phase === 'running' ? `Working on ${action.target}...`
-            : action.phase === 'complete' ? `${action.target} files verified. Restart managed ComfyUI and refresh its frontend; runtime registration remains to be checked.`
-            : action.error;
+        $("dependency-count").textContent = `${attention} need attention`;
+        $("dependency-count").className =
+          `badge ${attention ? "warning" : "good"}`;
+        $("dependency-summary").textContent = all
+          ? "Required versions for the installed build. Python requirements are installed with their managed tool suites. Models are separate."
+          : "This updater does not expose a complete dependency plan. Close and reopen the updater after installing the new app version.";
+        const saved = status.repairState;
+        $("repair-all").querySelector("span").textContent =
+          saved && ["held", "failed"].includes(saved.phase)
+            ? "Review and resume"
+            : "Update dependencies";
+        message("dependency-holds", [...new Set(all?.holds || [])].join("\n"));
+        $("dependency-holds").className = "message warning";
+        let actionText = "",
+          actionKind = "";
+        if (status.modelSetupRunning) actionText = "Model installer is open.";
+        else if (status.action?.phase === "running")
+          actionText = `Installing ${status.action.target}...`;
+        else if (saved?.error) {
+          actionText = saved.error;
+          actionKind = "warning";
+        } else if (saved?.phase === "restart-required") {
+          actionText =
+            "Managed files verified. Restart ComfyUI through Umbra, refresh its frontend, then recheck runtime registration.";
+          actionKind = "warning";
+        } else if (status.action?.phase === "failed") {
+          actionText = status.action.error || "Dependency installation failed.";
+          actionKind = "error";
+        } else if (status.action?.phase === "complete")
+          actionText = `${status.action.target} files verified. Runtime verification is still required.`;
+        message(
+          "dependency-message",
+          dependencyError || actionText,
+          dependencyError ? "error" : actionKind,
+        );
+        const lines = status.action?.lines?.length
+          ? status.action.lines
+          : saved?.lines || [];
+        $("dependency-log-section").hidden = !lines.length;
+        $("dependency-log").textContent = lines.join("\n");
+        $("runtime-actions").hidden = !all && !saved;
+        $("runtime-status").textContent =
+          saved?.phase === "preflight-passed"
+            ? "Runtime preflight passed. GPU execution and quality are not certified."
+            : "Runtime check pending";
+        $("model-actions").hidden = !status.modelSetupRunning;
+        let missing = 0;
+        for (const feature of status.features) {
+          missing += feature.missingModels.length;
+          const row = element("div", undefined, "model-row"),
+            copy = element("div");
+          copy.append(
+            element("strong", feature.label),
+            element(
+              "small",
+              `${feature.totalModels - feature.missingModels.length}/${feature.totalModels} managed model files present${feature.optional ? " / Optional" : ""}`,
+            ),
+          );
+          const missingFiles = element("details");
+          missingFiles.hidden = !feature.missingModels.length;
+          missingFiles.append(
+            element("summary", `${feature.missingModels.length} missing files`),
+            element("pre", feature.missingModels.join("\n"), "log"),
+          );
+          copy.append(missingFiles);
+          row.append(copy);
+          if (feature.modelProfiles?.length) {
+            const button = element("button", "Manage models", "button");
+            button.type = "button";
+            button.addEventListener("click", () =>
+              launchModelSetup(feature.modelProfiles[0]),
+            );
+            row.append(button);
+          }
+          $("model-list").append(row);
         }
-        updateActions();
-        const combined = status.repairPlans?.find(plan => plan.featureId === 'official-video-workflows');
-        const updatedVersion = latestState?.phase === 'complete' ? latestState.targetVersion : '';
-        if (combined && updatedVersion && !dependencyRunning && automaticRepairReviewVersion !== updatedVersion) {
-          automaticRepairReviewVersion = updatedVersion;
-          void reviewWorkflowRepair(combined);
-        }
-        clearTimeout(dependencyTimer);
-        if (dependencyRunning) dependencyTimer = setTimeout(loadDependencies, status.modelSetupRunning ? 2000 : 1000);
-      } catch (error) {
-        dependencyRunning = false;
-        dependencyMessage.className = 'message error';
-        dependencyMessage.textContent = error.message;
+        $("model-count").textContent = missing
+          ? "Downloads available"
+          : "Files present";
         updateActions();
       }
-    }
-    refreshButton.addEventListener('click', () => loadReleases(true));
-    updateButton.addEventListener('click', async () => {
-      if (!selected) return;
-      updateButton.disabled = true;
-      try {
-        await api('/api/update', { method: 'POST', body: JSON.stringify({ tag: selected.tag, includePrerelease: selected.channel === 'prerelease' }) });
-        await pollState();
-      } catch (error) {
-        stateMessage.className = 'message error';
-        stateMessage.textContent = error.message;
-        progressPanel.classList.add('visible');
-        updateButton.disabled = false;
-      }
-    });
-    async function pollRelaunch() {
-      try {
-        const status = await api('/api/relaunch-state');
-        if (status.phase === 'failed') {
-          stateMessage.className = 'message error';
-          stateMessage.textContent = status.error || 'Umbra Studio could not be started.';
-          document.querySelector('#phase').textContent = 'Launch failed';
-          document.querySelector('#hint').textContent = 'The updater remains open. Correct the problem or try again.';
-          launchUmbraButton.disabled = false;
-          closeUpdaterButton.disabled = false;
+      async function loadDependencies() {
+        if (terminal) return;
+        if (dependencyLoading) {
+          dependencyReload = true;
           return;
         }
-        setTimeout(pollRelaunch, 250);
-      } catch {
-        document.querySelector('#phase').textContent = 'Starting Umbra Studio';
-        document.querySelector('#hint').textContent = 'Updater closed. Umbra Studio is starting in a new launcher.';
+        dependencyLoading = true;
+        clearTimeout(dependencyTimer);
+        updateActions();
+        try {
+          dependencyStatus = await api("/api/dependencies");
+          dependenciesFresh = true;
+          renderDependencies();
+        } catch (error) {
+          dependenciesFresh = false;
+          dependencyError = error.message;
+          message("dependency-message", error.message, "error");
+          $("dependency-count").textContent = "Unavailable";
+        } finally {
+          dependencyLoading = false;
+          if (dependenciesActive() || !dependenciesFresh)
+            dependencyTimer = setTimeout(loadDependencies, 2000);
+          updateActions();
+        }
+        if (dependencyReload) {
+          dependencyReload = false;
+          void loadDependencies();
+          return;
+        }
+        // A completed app install can change the requirements. Only review a fresh plan, never reuse earlier consent.
+        if (
+          postUpdateTarget &&
+          latestState?.phase === "complete" &&
+          compare(
+            postUpdateTarget,
+            latestState.targetVersion || latestState.currentVersion,
+          ) === 0 &&
+          canManage() &&
+          planForAll() &&
+          reviewedTarget !== postUpdateTarget
+        ) {
+          reviewedTarget = postUpdateTarget;
+          setIntent("");
+          void reviewRepair(planForAll());
+        }
       }
-    }
-    launchUmbraButton.addEventListener('click', async () => {
-      clearTimeout(stateTimer);
-      launchUmbraButton.disabled = true;
-      closeUpdaterButton.disabled = true;
-      document.querySelector('#phase').textContent = 'Starting Umbra Studio';
-      document.querySelector('#hint').textContent = 'The updater will close before Umbra Studio starts.';
-      stateMessage.className = 'message';
-      stateMessage.textContent = 'A separate relaunch worker will start Umbra Studio after this updater has fully closed.';
-      progressPanel.classList.add('visible');
-      try {
-        await api('/api/relaunch', { method: 'POST', body: '{}' });
-        void pollRelaunch();
-      } catch (error) {
-        stateMessage.className = 'message error';
-        stateMessage.textContent = error.message;
-        document.querySelector('#phase').textContent = 'Launch failed';
-        document.querySelector('#hint').textContent = 'The updater remains open. Correct the problem or try again.';
-        launchUmbraButton.disabled = false;
-        closeUpdaterButton.disabled = false;
+      async function reviewDialog(title, body, confirmation) {
+        if ($("review-dialog").open || busy()) return false;
+        $("review-title").textContent = title;
+        $("review-body").replaceChildren(...body);
+        $("review-confirm").textContent = confirmation;
+        $("review-dialog").returnValue = "";
+        $("review-dialog").showModal();
+        return new Promise((resolve) =>
+          $("review-dialog").addEventListener(
+            "close",
+            () => resolve($("review-dialog").returnValue === "confirm"),
+            { once: true },
+          ),
+        );
       }
-    });
-    closeUpdaterButton.addEventListener('click', async () => {
-      closeUpdaterButton.disabled = true;
-      try {
-        await api('/api/close', { method: 'POST', body: '{}' });
-        document.querySelector('#hint').textContent = 'Updater closed.';
-        document.querySelector('#phase').textContent = 'Updater closed';
-      } catch (error) {
-        stateMessage.className = 'message error';
-        stateMessage.textContent = error.message;
-        progressPanel.classList.add('visible');
-        closeUpdaterButton.disabled = false;
+      async function reviewRepair(plan) {
+        if (!plan || !canManage()) return;
+        const body = [
+          element(
+            "p",
+            "Install the build-declared ComfyUI and custom-node requirements. User files, models, and local node edits are preserved. Already verified steps are skipped.",
+          ),
+        ];
+        for (const step of plan.steps) {
+          const row = element("div", undefined, "plan-step");
+          row.append(
+            element(
+              "strong",
+              `${step.target}${step.verified ? " / Verified, skip" : ""}`,
+            ),
+            element(
+              "small",
+              `Installed: ${step.installedVersion || "Not installed"}`,
+            ),
+            element("code", `Required: ${step.pins.join(" / ")}`),
+          );
+          body.push(row);
+        }
+        if (plan.holds.length)
+          body.push(element("p", plan.holds.join("\n"), "message warning"));
+        body.push(
+          element(
+            "p",
+            "Finish jobs and stop managed ComfyUI before installation. No queue resumes automatically. Model downloads are separate. Restart and runtime checks remain required.",
+            "message",
+          ),
+        );
+        if (
+          !(await reviewDialog(
+            "Review dependency installation",
+            body,
+            "Install dependencies",
+          ))
+        )
+          return;
+        localOperation = true;
+        dependencyError = "";
+        updateActions();
+        try {
+          await api("/api/dependencies/repair", {
+            method: "POST",
+            body: JSON.stringify({
+              featureId: plan.featureId,
+              planId: plan.id,
+            }),
+          });
+        } catch (error) {
+          dependencyError = error.message;
+        } finally {
+          localOperation = false;
+          await loadDependencies();
+          updateActions();
+        }
       }
-    });
-    let automaticRepairReviewVersion = '';
-    void loadReleases().then(pollState);
-    void loadDependencies();
-  </script>
-</body>
+      async function installApp(includeDependencies) {
+        if (busy() || !isNewer()) return;
+        const release = selected;
+        const body = [
+          element(
+            "p",
+            `Install Umbra Studio v${release.version} (${formatBytes(release.packageBytes)})?`,
+          ),
+          element(
+            "p",
+            "Umbra Studio, its managed tools, and Gallery close when installation begins. User files, datasets, models, and local tool changes are preserved.",
+          ),
+        ];
+        body.push(
+          element(
+            "p",
+            includeDependencies
+              ? "After the app update, review the new build's exact dependency versions before installing them. Model downloads remain optional and separate."
+              : "App files only. Managed dependencies can still require a separate update.",
+            "message",
+          ),
+        );
+        if (
+          !(await reviewDialog(
+            includeDependencies
+              ? "Update app and dependencies"
+              : "Update app only",
+            body,
+            "Install update",
+          ))
+        )
+          return;
+        localOperation = true;
+        reviewedTarget = "";
+        appError = "";
+        dependencyError = "";
+        setIntent(includeDependencies ? release.version : "");
+        updateActions();
+        try {
+          await api("/api/update", {
+            method: "POST",
+            body: JSON.stringify({
+              tag: release.tag,
+              includePrerelease: release.channel === "prerelease",
+            }),
+          });
+        } catch (error) {
+          setIntent("");
+          appError = error.message;
+        } finally {
+          localOperation = false;
+          await pollState();
+          updateActions();
+        }
+      }
+      async function recheckRuntime() {
+        if (!canManage()) return;
+        const featureId =
+          dependencyStatus.repairState?.featureId || planForAll()?.featureId;
+        if (!featureId) return;
+        localOperation = true;
+        dependencyError = "";
+        updateActions();
+        try {
+          const result = await api("/api/dependencies/preflight", {
+            method: "POST",
+            body: JSON.stringify({ featureId }),
+          });
+          dependencyError = result.ready ? "" : result.issues.join("\n");
+        } catch (error) {
+          dependencyError = error.message;
+        } finally {
+          localOperation = false;
+          await loadDependencies();
+          updateActions();
+        }
+      }
+      async function launchModelSetup(profile) {
+        if (!canManage()) return;
+        const tab = window.open("about:blank", "_blank");
+        if (tab) tab.opener = null;
+        localOperation = true;
+        dependencyError = "";
+        updateActions();
+        try {
+          const result = await api("/api/dependencies/model-setup", {
+            method: "POST",
+            body: JSON.stringify({ profile }),
+          });
+          const url = new URL(result.url);
+          if (
+            url.protocol !== "http:" ||
+            !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+          )
+            throw new Error("Model installer returned an invalid local URL.");
+          if (tab) tab.location.href = url.href;
+          else {
+            dependencyError =
+              "Allow pop-ups to open the model installer, then try again.";
+            await api("/api/dependencies/model-setup/close", {
+              method: "POST",
+              body: "{}",
+            });
+          }
+        } catch (error) {
+          tab?.close();
+          dependencyError = error.message;
+        } finally {
+          localOperation = false;
+          await loadDependencies();
+          updateActions();
+        }
+      }
+      async function closeModels() {
+        if (localOperation || terminal || appActive()) return;
+        localOperation = true;
+        dependencyError = "";
+        updateActions();
+        try {
+          await api("/api/dependencies/model-setup/close", {
+            method: "POST",
+            body: "{}",
+          });
+        } catch (error) {
+          dependencyError = error.message;
+        } finally {
+          localOperation = false;
+          await loadDependencies();
+          updateActions();
+        }
+      }
+      async function pollRelaunch() {
+        try {
+          const state = await api("/api/relaunch-state");
+          if (state.phase === "failed") {
+            terminal = false;
+            message(
+              "state-message",
+              state.error || "Umbra Studio could not start.",
+              "error",
+            );
+            updateActions();
+            return;
+          }
+          setTimeout(pollRelaunch, 500);
+        } catch {
+          $("hint").textContent =
+            "Updater closed. The launch worker was dispatched; check Umbra Studio for startup status.";
+        }
+      }
+      async function finish(action) {
+        if (busy()) return;
+        terminal = true;
+        clearTimeout(stateTimer);
+        clearTimeout(dependencyTimer);
+        updateActions();
+        try {
+          await api(`/api/${action}`, { method: "POST", body: "{}" });
+          $("hint").textContent =
+            action === "close"
+              ? "Updater closed."
+              : "Closing updater and starting Umbra Studio...";
+          if (action === "relaunch") void pollRelaunch();
+        } catch (error) {
+          terminal = false;
+          $("progress-panel").hidden = false;
+          message("state-message", error.message, "error");
+          updateActions();
+        }
+      }
+      $("refresh").addEventListener("click", async () => {
+        dependencyError = "";
+        await loadReleases(true);
+        await pollState();
+        await loadDependencies();
+      });
+      $("update").addEventListener("click", () => installApp(true));
+      $("app-only").addEventListener("click", () => installApp(false));
+      $("repair-all").addEventListener("click", () =>
+        reviewRepair(planForAll()),
+      );
+      $("recheck").addEventListener("click", recheckRuntime);
+      $("close-models").addEventListener("click", closeModels);
+      $("launch-umbra").addEventListener("click", () => finish("relaunch"));
+      $("close-updater").addEventListener("click", () => finish("close"));
+      $("review-close").addEventListener("click", () =>
+        $("review-dialog").close("cancel"),
+      );
+      $("review-cancel").addEventListener("click", () =>
+        $("review-dialog").close("cancel"),
+      );
+      $("review-confirm").addEventListener("click", () =>
+        $("review-dialog").close("confirm"),
+      );
+      void (async () => {
+        await loadReleases();
+        await pollState();
+        await loadDependencies();
+      })();
+    </script>
+  </body>
 </html>
