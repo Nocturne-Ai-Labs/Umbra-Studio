@@ -14,6 +14,7 @@
 - Install with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux. Close and reopen an older updater after installing this version to load its new compatibility checks.
 - If Setup or Updater reports a background-removal package conflict, finish jobs and stop managed ComfyUI through Umbra, then review **Background removal package compatibility** or **Update dependencies**. The repair downloads two small checksum-verified Python wheels; it does not download segmentation weights, generation models, or CUDA packages. Unknown package versions or other legacy Albumentations consumers remain held for review.
 - Restart managed ComfyUI normally after repair and recheck its runtime. No generation queue resumes automatically. Model downloads and optional helper environments retain their separate explicit Setup actions.
+- Linux managed tools may require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit still requires host Git and Node.js 20 or newer.
 
 ### Background Package Compatibility
 
