@@ -2846,6 +2846,9 @@ function normalizeAppSettingsForClient(settings: Record<string, unknown>): Recor
   const normalizedSettings = normalizeGalleryAppSettingsForStorage(settings);
   return {
     ...normalizedSettings,
+    ...(process.env.UMBRA_COMFY_PORT?.trim()
+      ? { 'comfyui.url': getComfyHttpBaseUrl(getComfyProxyTarget()) }
+      : {}),
     'video.routePolicy': normalizeVideoRoutePolicy(settings['video.routePolicy']),
     'library.defaultComfyOutputRoot': toClientPath(resolvePathCandidate(getDefaultOutputRootPath())),
   };
@@ -12059,7 +12062,9 @@ async function runBackendPowerPrompterPipelineQueue(
             prompt: queuedWorkflow.promptGraph,
             extra_data: {
               extra_pnginfo: extraPngInfo,
-              preview_method: 'taesd',
+              // Official workflows own their preview decoder nodes. Core TAESD
+              // cannot initialize every community tiny VAE (including taeh3).
+              preview_method: queuedWorkflow.officialExecutionTarget ? 'auto' : 'taesd',
             },
           }),
         });

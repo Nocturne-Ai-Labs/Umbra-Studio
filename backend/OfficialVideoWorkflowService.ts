@@ -259,6 +259,11 @@ export async function assertOfficialStagedMedia(graph: OfficialApiGraph, inputRo
         const mode = node.inputs.mode;
         const items = (timeline.items || []).map((item: any, index: number) => ({ ...item, slot: item.slot ?? index })).filter((item: any) => item.enabled !== false);
         const base = ['T2VA', 'I2VA', 'L2VA', 'FL2VA', 'Image Inpaint'].includes(String(mode));
+        const continuity = timeline.continuity;
+        const continuing = continuity && (continuity.version >= 3
+          ? !!(continuity.source_kind === 'video' ? continuity.source_video_id : continuity.source_id)
+          : continuity.operation === 'continue');
+        if (continuing && (base || continuity.use_references !== true)) continue;
         const lastSlot = items.some((item: any) => item.type === 'image' && item.slot === 1) ? 1 : 0;
         for (const item of items) {
           const active = !base ? ['image', 'audio', 'video'].includes(item.type)
@@ -358,8 +363,16 @@ export class OfficialVideoWorkflowService {
     const graph = videoGraphNodes(document) as OfficialApiGraph;
     const director = Object.values(graph).find(node => node.class_type === (metadata.workflowId === 'h3-26' ? 'MiniMaxH3Director' : 'LTXDirector'));
     const mode = String(director?.inputs.mode || '');
-    const videoMode: 'reference_to_video' | 'image_to_video' | 'text_to_video' = mode === 'REF2VA' ? 'reference_to_video' : ['I2VA', 'L2VA', 'FL2VA'].includes(mode) ? 'image_to_video' : 'text_to_video';
-    const prompt = typeof director?.inputs.prompt === 'string' ? director.inputs.prompt : typeof director?.inputs.global_prompt === 'string' ? director.inputs.global_prompt : '';
+    const videoMode: 'reference_to_video' | 'image_to_video' | 'text_to_video' = mode === 'REF2VA' ? 'reference_to_video' : ['I2VA', 'L2VA', 'FL2VA', 'I2V', 'FLF2V', 'L2V'].includes(mode) ? 'image_to_video' : 'text_to_video';
+    let prompt = typeof director?.inputs.prompt === 'string' ? director.inputs.prompt : typeof director?.inputs.global_prompt === 'string' ? director.inputs.global_prompt : '';
+    const timeline = typeof director?.inputs.timeline_data === 'string' ? JSON.parse(director.inputs.timeline_data) : {};
+    if (director?.class_type === 'MiniMaxH3Director') {
+      const c = timeline.continuity;
+      const continuing = c && (c.version >= 3 ? !!(c.source_kind === 'video' ? c.source_video_id : c.source_id) : c.operation === 'continue');
+      if (continuing) prompt = typeof c.continuation_prompt === 'string' ? c.continuation_prompt : '';
+    } else if (!prompt) {
+      prompt = String(timeline.retakeMode ? timeline.retake_global_prompt || '' : timeline.global_prompt || '');
+    }
     return { workflowId: metadata.workflowId, name: OFFICIAL_VIDEO_SOURCES[metadata.workflowId].name, videoFamily: OFFICIAL_VIDEO_SOURCES[metadata.workflowId].family, videoMode, prompt: prompt.trim() || OFFICIAL_VIDEO_SOURCES[metadata.workflowId].name };
   }
   async load(selection: OfficialVideoWorkflowSelection): Promise<any> {

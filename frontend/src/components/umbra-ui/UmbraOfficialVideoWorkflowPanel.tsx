@@ -12,6 +12,9 @@ import { normalizeVideoRoutePolicy } from '../../../../shared/umbra-ui/videoRout
 import type { UmbraOfficialVideoQueueOptions } from './useUmbraPowerPrompterBridge';
 import { createOfficialVideoEditorDraft, configureOfficialVideoEditor, type OfficialVideoEditorDraft } from '../../../../shared/umbra-ui/officialVideoEditor';
 import { UmbraOfficialVideoEditor } from './UmbraOfficialVideoEditor';
+import { configureOfficialH3DirectorSettings, hasOfficialH3Continuity } from '../../../../shared/umbra-ui/officialH3Director';
+import { configureOfficialLtxDirectorSettings } from '../../../../shared/umbra-ui/officialLtxDirector';
+import { serializeOfficialVideoLoraStack, validateOfficialVideoLoraChoices } from '../../../../shared/umbra-ui/officialVideoLora';
 
 type OfficialWorkflowId = UmbraOfficialVideoQueueOptions['workflowId'];
 interface OfficialWorkflow {
@@ -62,7 +65,10 @@ function restoredDraft(item: OfficialWorkflow, fallback: OfficialVideoEditorDraf
       || draft.references.some(reference => !reference || typeof reference.id !== 'string' || typeof reference.filename !== 'string'
         || !['image', 'video', 'audio'].includes(reference.kind) || typeof reference.prompt !== 'string'
         || ![reference.startSeconds, reference.durationSeconds].every(value => typeof value === 'number' && Number.isFinite(value)))) return fallback;
-    return draft;
+    if (draft.h3) configureOfficialH3DirectorSettings({}, draft.h3, draft);
+    if (draft.ltx) configureOfficialLtxDirectorSettings({}, draft.ltx, { durationFrames: Math.round(draft.durationSeconds * draft.frameRate), frameRate: draft.frameRate });
+    if (draft.loraStack) serializeOfficialVideoLoraStack(draft.loraStack);
+    return { ...fallback, ...draft };
   } catch { return fallback; }
 }
 
@@ -255,8 +261,23 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const prepareEditorCapture = async (): Promise<CapturedWorkflow> => {
     if (!selected || !editor) throw new Error('The official video editor is still loading.');
     setBusy('opening');
+    if (editor.draft.loraStack) validateOfficialVideoLoraChoices(editor.draft.loraStack, nodeCatalog);
     const preparedDraft = await prepareOfficialVideoResolution({ ...editor.draft, saveLastFrame: editor.draft.saveLastFrame !== false }, selected.id);
     if (!mountedRef.current) throw new Error('The video workspace was closed.');
+    if (selected.id === 'h3-26' && hasOfficialH3Continuity(preparedDraft.h3)) {
+      if (preparedDraft.resolution?.mode === 'workflow') throw new Error('Continuity needs a fixed source canvas. Use Match source settings, or choose Fixed pixels before continuing.');
+      const c = preparedDraft.h3!.continuity;
+      const response = await fetch('/comfy/df_h3_continuity/preflight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: c.session, source_kind: c.sourceKind,
+        source_id: c.sourceKind === 'video' ? c.sourceVideoId : c.sourceId, mode: preparedDraft.mode, width: preparedDraft.width, height: preparedDraft.height,
+        frame_rate: preparedDraft.frameRate, duration: preparedDraft.durationSeconds, overlap_frames: c.overlapFrames }) });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(Array.isArray(result.issues) ? result.issues.join(' ') : result.error || 'Continuity source check failed.');
+    }
+    if (selected.id === 'h3-26' && preparedDraft.mode === 'REF2VA' && (!hasOfficialH3Continuity(preparedDraft.h3) || preparedDraft.h3?.continuity.useReferences) && preparedDraft.h3?.refMods.some(row => row.enabled && row.name && row.strength > 0)) {
+      const response = await fetch('/comfy/dasiwa/refmods'); const library = await response.json();
+      if (!response.ok || !Array.isArray(library)) throw new Error('Could not verify RefMods. Update DaSiWa nodes and refresh.');
+      for (const row of preparedDraft.h3.refMods) if (row.enabled && row.strength > 0 && !library.some(item => item.name === row.name)) throw new Error(`RefMod '${row.name}' is unavailable. Select an installed RefMod or disable its slot.`);
+    }
     const configuredWorkflow = configureOfficialVideoEditor(editor.source, selected.id, preparedDraft);
     const payload = { sourceText: editor.sourceText, configuredWorkflow, background: true, officialWorkflowId: selected.id,
       workflowId: selected.id, workflowName: selected.name, sourceSha256: selected.sha256, loadRequestId: crypto.randomUUID() };
@@ -318,7 +339,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
           {catalogError ? <p role="alert" className="break-words text-xs text-red-300">{catalogError}</p> : null}
           {!loading && !catalogError && items.length === 0 ? <p role="status" className="py-3 text-xs text-zinc-400">No official workflows are available. Check readiness to retry.</p> : null}
           <div className="grid min-w-0 gap-2 md:grid-cols-2" role="group" aria-label="Official video workflow">
-            {items.map(item => <button key={item.id} type="button" aria-pressed={selectedId === item.id} disabled={!!busy} onClick={() => { setSelectedId(item.id); setCaptured(null); setActionError(''); setStatus(''); }} className={cn('min-w-0 rounded border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-50', selectedId === item.id ? 'border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_8%,transparent)]' : 'border-white/10 bg-black/15 hover:bg-white/5')}>
+            {items.map(item => <button key={item.id} type="button" aria-pressed={selectedId === item.id} disabled={!!busy || mediaBusy} onClick={() => { setSelectedId(item.id); setCaptured(null); setActionError(''); setStatus(''); }} className={cn('min-w-0 rounded border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-50', selectedId === item.id ? 'border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_8%,transparent)]' : 'border-white/10 bg-black/15 hover:bg-white/5')}>
               <span className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-26' ? 'C-MMH3-26' : 'C-LTX23-50'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
             </button>)}
           </div>

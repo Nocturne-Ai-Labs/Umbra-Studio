@@ -11,6 +11,7 @@ import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePromp
 import { ensureUmbraUiQueuedMedia } from '@/lib/umbraUiQueuedMedia';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { useToastStore } from '@/store/useToastStore';
+import { reportLastFrameExportIssues } from '@/lib/lastFrameExportIssue';
 import { classifyUmbraMediaMetadata, classifyUmbraPrompt, type UmbraPrivacyClass } from '@/lib/nsfwPrivacy';
 import { ModelInfoRequestCache } from '@/lib/modelInfoRequestCache';
 import {
@@ -1260,6 +1261,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         if (type === 'queue_saved_outputs') {
           const requestId = String(payload?.requestId || '').trim();
           if (!ownedRequestIdsRef.current.has(requestId)) return;
+          reportLastFrameExportIssues(payload);
           void refreshVideoJobs();
           if (!isUmbraUiImageMediaEvent(payload, true, ownedRequestKindsRef.current.get(requestId))) {
             window.dispatchEvent(new CustomEvent('umbra:umbra-ui-output-refresh'));

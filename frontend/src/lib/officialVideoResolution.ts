@@ -7,7 +7,7 @@ export async function prepareOfficialVideoResolution(draft: OfficialVideoEditorD
   const needsSource = workflowId === 'h3-26'
     ? h3.aspect === 'auto' && !(h3.resolution === 'custom' && h3.custom_mode === 'fixed')
     : draft.resolution.followSourceAspect;
-  const reference = draft.references.find(item => item.kind !== 'audio');
+  const reference = draft.references.find(item => item.enabled !== false && item.kind !== 'audio' && item.mediaMode !== 'audio');
   if (!needsSource || !reference) return draft;
   const dimensions = await new Promise<{ sourceWidth: number; sourceHeight: number }>((resolve, reject) => {
     const media = reference.kind === 'image' ? new Image() : document.createElement('video');

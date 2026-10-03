@@ -1,5 +1,8 @@
 import { isOfficialVideoWorkflowId, type OfficialVideoWorkflowId } from './officialVideoWorkflow';
 import { readComfyInputChoices } from './comfyInputChoices';
+import { configureOfficialH3DirectorSettings, hasOfficialH3Continuity, readOfficialH3DirectorSettings, type OfficialH3DirectorSettings } from './officialH3Director';
+import { configureOfficialLtxDirectorSettings, readOfficialLtxDirectorSettings, type OfficialLtxDirectorSettings } from './officialLtxDirector';
+import { readOfficialVideoLoraStack, serializeOfficialVideoLoraStack, type OfficialVideoLoraRow } from './officialVideoLora';
 
 export interface OfficialVideoEditorDraft {
   prompt: string;
@@ -10,6 +13,9 @@ export interface OfficialVideoEditorDraft {
   frameRate: number;
   seed: string;
   saveLastFrame?: boolean;
+  h3?: OfficialH3DirectorSettings;
+  ltx?: OfficialLtxDirectorSettings;
+  loraStack?: OfficialVideoLoraRow[];
   resolution?: {
     mode: 'workflow' | 'fixed';
     followSourceAspect?: boolean;
@@ -23,6 +29,10 @@ export interface OfficialVideoEditorDraft {
     prompt: string;
     startSeconds: number;
     durationSeconds: number;
+    enabled?: boolean;
+    mediaMode?: 'video' | 'audio' | 'video_audio';
+    guideStrength?: number;
+    trimStartSeconds?: number;
     sourceWidth?: number;
     sourceHeight?: number;
   }>;
@@ -72,7 +82,7 @@ export const OFFICIAL_VIDEO_SETTINGS_CATEGORIES = [
 export type OfficialVideoSettingsCategory = (typeof OFFICIAL_VIDEO_SETTINGS_CATEGORIES)[number]['id'];
 
 // LTX has no mode widget: these are constraints on its normal, native timeline,
-// not new graph routes. Retake, motion/IC-LoRA and audio lanes are not adapted.
+// not new graph routes. Advanced lanes stay in their native timeline fields.
 export const OFFICIAL_VIDEO_EDITOR_MODES = {
   'h3-26': ['T2VA', 'I2VA', 'FL2VA', 'L2VA', 'REF2VA'],
   'ltx23-50': ['T2V', 'I2V', 'FLF2V', 'V2V'],
@@ -113,6 +123,7 @@ function settingCategory(setting: Setting): OfficialVideoSettingsCategory {
   if (setting.node.type === 'DaSiWa_ResolutionScaleCalculator') return 'resolution';
   if (setting.node.type === 'DaSiWa_LTX2LoraLoader') return 'performance';
   if (setting.node.type === 'ModelPreviewOverrideKJ') return 'preview';
+  if (setting.node.type === 'LTXDirectorGuide') return 'sampling';
   if (setting.node.type === 'DaSiWa_EnhancedVideoCombine') {
     return ['audio_codec', 'audio_bitrate', 'crop_to_audio'].includes(setting.name) ? 'audio-output' : 'video-output';
   }
@@ -134,6 +145,7 @@ const VAE_FIELDS: Record<string, string[]> = {
   VAELoaderKJ: ['vae_name', 'device', 'weight_dtype'],
 };
 const RESOLUTION_FIELDS = ['no_scale', 'aspect_preset_when_not_image', 'custom_aspect_width', 'custom_aspect_height', 'mode', 'custom_divisor'];
+const LTX_GUIDE_FIELDS = ['ic_lora_name', 'ic_lora_strength'];
 const record = (value: unknown): value is Ui => !!value && typeof value === 'object' && !Array.isArray(value);
 const scalar = (value: unknown): value is Scalar => typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
 const fail = (message: string): never => { throw new Error(`Official video editor: ${message}`); };
@@ -181,7 +193,7 @@ function readWidget(node: Ui, name: string): Scalar {
 function writeWidget(node: Ui, name: string, value: Scalar): void {
   node.widgets_values[widgetIndex(node, name)] = value;
   node.widgets_values_named[name] = value;
-  if (Object.hasOwn(node.properties || {}, name) || ['LTXDirector', 'DaSiWa_SeedControl'].includes(node.type)) {
+  if (Object.hasOwn(node.properties || {}, name) || ['LTXDirector', 'DaSiWa_SeedControl', 'DaSiWa_LTX2LoraLoader'].includes(node.type)) {
     node.properties = { ...node.properties, [name]: value };
   }
 }
@@ -203,7 +215,8 @@ function settings(graph: Ui): Setting[] {
     const definition = isRoot ? definitions.get(node.type) : undefined;
     // Only VAE resources and the pinned resolution calculator expose direct
     // nested controls. Linked widgets stay owned by their promoted boundary.
-    const names = VAE_FIELDS[node.type] || (node.id === 3600 && node.type === 'DaSiWa_ResolutionScaleCalculator' ? RESOLUTION_FIELDS : isRoot ? TOP_FIELDS[node.type] || [] : []);
+    const names = VAE_FIELDS[node.type] || (node.id === 3600 && node.type === 'DaSiWa_ResolutionScaleCalculator' ? RESOLUTION_FIELDS
+      : [3652, 3651, 3663].includes(node.id) && node.type === 'LTXDirectorGuide' ? LTX_GUIDE_FIELDS : isRoot ? TOP_FIELDS[node.type] || [] : []);
     for (const name of definition ? Object.keys(node.widgets_values_named || {}) : names) {
       const input = node.inputs?.find((port: Ui) => port.widget?.name === name);
       const type = input?.type || (node.type === 'LTXDirector' ? ({ epsilon: 'FLOAT', display_mode: 'COMBO', resize_method: 'COMBO', img_compression: 'INT' } as Ui)[name] : undefined);
@@ -224,7 +237,7 @@ function settings(graph: Ui): Setting[] {
       const value = readWidget(node, name);
       if (!scalar(value)) continue;
       result.push({ node, name, targets, inputType: type, key: `${node.id}.${name}`,
-        label: `${node.title || definition?.name || node.type}: ${input?.label || boundary?.label || name}`,
+        label: `${node.type === 'LTXDirectorGuide' ? `${node.type} ${node.id}` : node.title || definition?.name || node.type}: ${input?.label || boundary?.label || name}`,
         group: ['MiniMaxH3Director', 'LTXDirector'].includes(node.type) ? 'director' : 'generation' });
     }
   }
@@ -301,15 +314,13 @@ export function createOfficialVideoEditorDraft(id: OfficialVideoWorkflowId, sour
   const seed = jsonWidget(nodeById(graph, id === 'h3-26' ? 2739 : 3720, 'DaSiWa_SeedControl'), 'seed_control_state');
   const isH3 = id === 'h3-26';
   if (isH3 && !(OFFICIAL_VIDEO_EDITOR_MODES['h3-26'] as readonly string[]).includes(String(readWidget(director, 'mode')))) fail('Image Inpaint remains disabled; unsupported H3 mode.');
-  if (state.continuity?.operation === 'continue' || state.refmods?.some((row: Ui) => row.enabled !== false && row.name)) fail('continuity and saved RefMods require the native editor.');
-  if (state.retakeMode || state.motionSegments?.length || state.audioSegments?.length) fail('retake, motion and LTX audio lanes require the native editor.');
   const fps = Number(readWidget(director, 'frame_rate'));
   const references = isH3 ? (state.items || []).map((item: Ui) => {
-    if (item.enabled === false || (item.type === 'video' && item.media_mode && item.media_mode !== 'video')) fail('disabled or embedded-audio references require the native editor.');
-    return { id: item.id, kind: item.type, filename: item.value, prompt: item.prompt || '', startSeconds: item.type === 'image' ? 0 : item.trim_start || 0,
+    return { id: item.id, kind: item.type, filename: item.value, prompt: item.prompt || '', enabled: item.enabled !== false,
+      ...(item.type === 'video' ? { mediaMode: item.media_mode || 'video' } : {}), startSeconds: item.type === 'image' ? 0 : item.trim_start || 0,
       durationSeconds: item.type === 'image' ? 1 : item.trim_end == null ? item.duration : item.trim_end - (item.trim_start || 0),
       ...(Number(item.source_width) > 0 && Number(item.source_height) > 0 ? { sourceWidth: Number(item.source_width), sourceHeight: Number(item.source_height) } : {}) };
-  }) : (state.segments || []).map((item: Ui) => ({ id: item.id, kind: item.type, filename: item.imageFile, prompt: item.prompt || '', startSeconds: item.start / fps, durationSeconds: item.length / fps }));
+  }) : (state.segments || []).map((item: Ui) => ({ id: item.id, kind: item.type, filename: item.imageFile, prompt: item.prompt || '', startSeconds: item.start / fps, durationSeconds: item.length / fps, guideStrength: item.guideStrength ?? 1, ...(item.type === 'video' ? { trimStartSeconds: (item.trimStart || 0) / fps } : {}) }));
   const [width, height] = isH3 ? [Number(readWidget(director, 'width')), Number(readWidget(director, 'height'))] : ltxDimensions(graph);
   return { prompt: isH3 ? String(readWidget(director, 'prompt')) : state.global_prompt || '',
     mode: isH3 ? String(readWidget(director, 'mode'))
@@ -317,7 +328,9 @@ export function createOfficialVideoEditorDraft(id: OfficialVideoWorkflowId, sour
     width, height, durationSeconds: Number(readWidget(director, isH3 ? 'duration' : 'duration_seconds')), frameRate: fps,
     seed: seed.mode === 'fixed' ? checkedSeed(seed.last_seed) : '-1', saveLastFrame: true,
     resolution: { mode: 'workflow', ...(isH3 ? { h3: { ...DEFAULT_OFFICIAL_H3_RESOLUTION, ...(state.resolution || {}) } } : {}) },
-    values: Object.fromEntries(settings(graph).map(setting => [setting.key, readWidget(setting.node, setting.name)])), references };
+    values: Object.fromEntries(settings(graph).map(setting => [setting.key, readWidget(setting.node, setting.name)])), references,
+    loraStack: readOfficialVideoLoraStack(nodeById(graph, isH3 ? 2678 : 3589, 'DaSiWa_LTX2LoraLoader')),
+    ...(isH3 ? { h3: readOfficialH3DirectorSettings(state) } : { ltx: readOfficialLtxDirectorSettings({ ...state, start_frame: Number(readWidget(director, 'start_frame')), duration_frames: Number(readWidget(director, 'duration_frames')) }) }) };
 }
 
 function checkedSeed(value: unknown): string {
@@ -345,8 +358,12 @@ function validateReferences(draft: OfficialVideoEditorDraft): void {
     if (!['image', 'video', 'audio'].includes(ref.kind)) fail('unsupported reference kind.');
     if (typeof ref.filename !== 'string' || !ref.filename || /[\x00-\x1f:]|^[\\/]|(^|[\\/])\.\.?([\\/]|$)/.test(ref.filename)) fail('references require staged relative ComfyUI input filenames, not paths or URLs.');
     if (typeof ref.prompt !== 'string') fail('reference prompts must be strings.');
+    if (ref.enabled !== undefined && typeof ref.enabled !== 'boolean') fail('reference enabled must be true or false.');
+    if (ref.mediaMode !== undefined && !['video', 'audio', 'video_audio'].includes(ref.mediaMode)) fail('unsupported video stream mode.');
     finite(ref.startSeconds, 0, 1000, 'reference startSeconds');
     finite(ref.durationSeconds, Number.EPSILON, 1000, 'reference durationSeconds');
+    if (ref.guideStrength !== undefined) finite(ref.guideStrength, 0, 1, 'guide strength');
+    if (ref.trimStartSeconds !== undefined) finite(ref.trimStartSeconds, 0, 1000, 'video trim start');
     if (ref.sourceWidth !== undefined || ref.sourceHeight !== undefined) {
       finite(ref.sourceWidth, 1, 65536, 'source width');
       finite(ref.sourceHeight, 1, 65536, 'source height');
@@ -355,30 +372,36 @@ function validateReferences(draft: OfficialVideoEditorDraft): void {
 }
 
 function configureH3(graph: Ui, draft: OfficialVideoEditorDraft): void {
-  const refs = draft.references;
+  const continuing = hasOfficialH3Continuity(draft.h3);
+  const useReferences = !continuing || (draft.mode === 'REF2VA' && draft.h3?.continuity.useReferences);
+  const refs = useReferences ? draft.references.filter(ref => ref.enabled !== false) : [];
+  const refMods = useReferences && draft.mode === 'REF2VA' ? draft.h3?.refMods.filter(row => row.enabled && row.name && row.strength > 0) || [] : [];
   const images = refs.filter(ref => ref.kind === 'image');
   if (draft.mode !== 'REF2VA' && refs.some(ref => ref.kind !== 'image')) fail(`${draft.mode} supports image references only.`);
   if (draft.mode === 'T2VA' && refs.length) fail('T2VA does not accept references.');
-  if (['I2VA', 'L2VA'].includes(draft.mode) && images.length !== 1) fail(`${draft.mode} requires exactly one image.`);
-  if (draft.mode === 'FL2VA' && images.length !== 2) fail('this FL2VA adapter requires first and last images; use T2VA for text-only generation.');
+  if (!continuing && ['I2VA', 'L2VA'].includes(draft.mode) && images.length !== 1) fail(`${draft.mode} requires exactly one image.`);
+  if (!continuing && draft.mode === 'FL2VA' && images.length !== 2) fail('this FL2VA adapter requires first and last images; use T2VA for text-only generation.');
   if (images.some(ref => ref.startSeconds !== 0 || ref.durationSeconds !== 1)) fail('H3 images are ordered REF/endpoint tiles, not timed segments: use startSeconds=0 and durationSeconds=1.');
-  if (draft.mode === 'REF2VA') {
-    const videos = refs.filter(ref => ref.kind === 'video'), audios = refs.filter(ref => ref.kind === 'audio');
-    if (images.length > 9 || videos.length > 3 || audios.length > 3 || refs.length > 12 || !refs.length) fail('REF2VA requires 1-12 files, at most 9 images, 3 videos and 3 audio clips.');
-    if (audios.length && !images.length && !videos.length) fail('REF2VA audio requires a visual reference.');
+  if (draft.mode === 'REF2VA' && useReferences) {
+    const videos = refs.filter(ref => ref.kind === 'video' && ref.mediaMode !== 'audio'), audios = refs.filter(ref => ref.kind === 'audio' || (ref.kind === 'video' && ref.mediaMode && ref.mediaMode !== 'video'));
+    if (images.length > 9 || videos.length > 3 || audios.length > 3 || images.length + videos.length + audios.length > 12 || (!refs.length && !refMods.length)) fail('REF2VA requires references or RefMods, at most 9 images, 3 videos and 3 audio clips.');
+    if (audios.length && !images.length && !videos.length && !refMods.length) fail('REF2VA audio requires a visual reference.');
     for (const lane of [videos, audios]) {
       if (lane.some(ref => ref.durationSeconds < 2 || ref.durationSeconds > 15) || lane.reduce((sum, ref) => sum + ref.durationSeconds, 0) > 15) fail('each H3 video/audio crop must be 2-15 seconds; each lane totals at most 15 seconds.');
     }
   }
   const counts = { image: 0, video: 0, audio: 0 };
-  const items = refs.map((ref, order) => {
-    const slot = draft.mode === 'L2VA' ? 1 : counts[ref.kind]++;
-    return { id: ref.id, type: ref.kind, value: ref.filename, prompt: ref.prompt, enabled: true, order, slot, start: slot,
+  const items = draft.references.map((ref, order) => {
+    const lane = ref.kind === 'video' && ref.mediaMode === 'audio' ? 'audio' : ref.kind;
+    const slot = draft.mode === 'L2VA' ? 1 : ref.enabled === false ? counts[lane] : counts[lane]++;
+    const audioSlot = ref.kind === 'video' && ref.mediaMode === 'video_audio' && ref.enabled !== false ? counts.audio++ : undefined;
+    return { id: ref.id, type: ref.kind, value: ref.filename, prompt: ref.prompt, enabled: ref.enabled !== false, order, slot, start: slot,
+      ...(audioSlot === undefined ? {} : { audioSlot }),
       ...(ref.sourceWidth && ref.sourceHeight ? { source_width: ref.sourceWidth, source_height: ref.sourceHeight } : {}),
       duration: ref.durationSeconds, ...(ref.kind === 'image' ? {} : { trim_start: ref.startSeconds, trim_end: ref.startSeconds + ref.durationSeconds }),
-      ...(ref.kind === 'video' ? { media_mode: 'video' } : {}) };
+      ...(ref.kind === 'video' ? { media_mode: ref.mediaMode || 'video' } : {}) };
   });
-  const notes = items.filter(item => item.prompt.trim()).map(item => ({ id: `attached-${item.id}`, text: `<${item.type === 'image' ? 'Picture' : item.type === 'video' ? 'Video' : 'Audio'} ${draft.mode === 'L2VA' ? 1 : item.slot + 1}>: ${item.prompt}`, enabled: true, start: item.start, duration: item.duration, order: item.order }));
+  const notes = items.filter(item => item.enabled && item.prompt.trim()).map(item => ({ id: `attached-${item.id}`, text: `<${item.type === 'image' ? 'Picture' : item.type === 'video' && item.media_mode !== 'audio' ? 'Video' : 'Audio'} ${draft.mode === 'L2VA' ? 1 : item.slot + 1}>: ${item.prompt}`, enabled: true, start: item.start, duration: item.duration, order: item.order }));
   const resolved = [draft.prompt, ...notes.map(note => note.text)].filter(Boolean).join('\n\n');
   const director = nodeById(graph, 2730, 'MiniMaxH3Director');
   const state = jsonWidget(director, 'timeline_data');
@@ -396,30 +419,34 @@ function configureH3(graph: Ui, draft: OfficialVideoEditorDraft): void {
     finite(resolution.custom_aspect_h, 1, 8192, 'custom aspect height');
   }
   if (resolution.resolution === 'custom' && resolution.custom_mode === 'mp') finite(resolution.custom_mp, 0.01, 64, 'custom megapixels');
-  if (draft.resolution?.mode === 'workflow' && resolution.aspect === 'auto' && refs.some(ref => ref.kind !== 'audio')
+  const aspectReference = refs.find(ref => ref.kind !== 'audio' && ref.mediaMode !== 'audio');
+  if (draft.resolution?.mode === 'workflow' && resolution.aspect === 'auto' && aspectReference
     && !(resolution.resolution === 'custom' && resolution.custom_mode === 'fixed')
-    && !refs.find(ref => ref.kind !== 'audio')?.sourceWidth) fail('Auto aspect needs source dimensions. Re-upload the first visual reference or select an aspect ratio.');
-  Object.assign(state, { items, prompt_blocks: notes, builder_state: builder, resolved_prompt: resolved, refmods: [],
-    resolution,
-    continuity: { ...state.continuity, operation: 'new', capture: false } });
+    && !aspectReference.sourceWidth) fail('Auto aspect needs source dimensions. Re-upload the first visual reference or select an aspect ratio.');
+  Object.assign(state, { items, prompt_blocks: notes, builder_state: builder, resolved_prompt: resolved, resolution });
+  if (draft.h3) Object.assign(state, configureOfficialH3DirectorSettings(state, draft.h3, draft));
+  else Object.assign(state, { refmods: [], continuity: { ...state.continuity, operation: 'new', capture: false, source_id: '', source_video_id: '' } });
   for (const [name, value] of Object.entries({ mode: draft.mode, prompt: resolved, width: draft.width, height: draft.height,
     duration: draft.durationSeconds, frame_rate: draft.frameRate, timeline_data: JSON.stringify(state), builder_state: JSON.stringify(builder) })) writeWidget(director, name, value);
 }
 
 function configureLtx(graph: Ui, draft: OfficialVideoEditorDraft): void {
-  if (draft.references.some(ref => ref.kind === 'audio')) fail('LTX audio references are not supported by this bounded adapter; use the native audio lane.');
-  if (draft.mode === 'T2V' && draft.references.length) fail('T2V does not accept references.');
-  if (draft.mode !== 'T2V' && !draft.references.length) fail(`${draft.mode} requires references.`);
-  if (['I2V', 'FLF2V'].includes(draft.mode) && draft.references.some(ref => ref.kind !== 'image')) fail(`${draft.mode} requires image references.`);
-  if (draft.mode === 'V2V' && draft.references.some(ref => ref.kind !== 'video')) fail('V2V requires video references (normal visual guide lane, not IC-LoRA/retake).');
+  const retaking = draft.ltx?.retake.enabled === true;
+  if (draft.references.some(ref => ref.kind === 'audio')) fail('Place LTX audio references in the audio lane.');
+  if (!retaking) {
+    if (draft.mode === 'T2V' && draft.references.length) fail('T2V does not accept references.');
+    if (draft.mode !== 'T2V' && !draft.references.length) fail(`${draft.mode} requires references.`);
+    if (['I2V', 'FLF2V'].includes(draft.mode) && draft.references.some(ref => ref.kind !== 'image')) fail(`${draft.mode} requires image references.`);
+    if (draft.mode === 'V2V' && draft.references.some(ref => ref.kind !== 'video')) fail('V2V requires video references.');
+  }
   const duration = frames(draft.durationSeconds, draft.frameRate, 'durationSeconds');
   const segments = draft.references.map(ref => ({ id: ref.id, type: ref.kind, imageFile: ref.filename, fileName: ref.filename.split(/[\\/]/).pop(),
     prompt: ref.prompt, start: frames(ref.startSeconds, draft.frameRate, 'reference startSeconds'), length: frames(ref.durationSeconds, draft.frameRate, 'reference durationSeconds'),
-    trimStart: 0, isEndFrame: false, guideStrength: 1 })).sort((a, b) => a.start - b.start);
-  if (segments.some(seg => seg.length < 1 || seg.start + seg.length > duration)) fail('LTX segments must fit entirely inside the generation timeline.');
-  if (segments.some((seg, i) => i > 0 && seg.start < segments[i - 1].start + segments[i - 1].length)) fail('overlapping LTX local-prompt segments are not supported.');
+    trimStart: frames(ref.trimStartSeconds ?? 0, draft.frameRate, 'video trim start'), isEndFrame: false, guideStrength: ref.guideStrength ?? 1 })).sort((a, b) => a.start - b.start);
+  if (!retaking && segments.some(seg => seg.length < 1 || seg.start + seg.length > duration)) fail('LTX segments must fit entirely inside the generation timeline.');
+  if (!retaking && segments.some((seg, i) => i > 0 && seg.start < segments[i - 1].start + segments[i - 1].length)) fail('overlapping LTX local-prompt segments are not supported.');
   if (segments.some(seg => seg.prompt.includes('|'))) fail('LTX local prompts cannot contain | (the native relay delimiter).');
-  if (draft.mode === 'FLF2V') {
+  if (!retaking && draft.mode === 'FLF2V') {
     if (segments.length !== 2 || segments[0].start !== 0 || segments[0].length !== 1 || segments[1].start !== duration - 1 || segments[1].length !== 1) fail('FLF2V requires one-frame images at the first and last target frames.');
     segments[1].isEndFrame = true;
   }
@@ -436,16 +463,21 @@ function configureLtx(graph: Ui, draft: OfficialVideoEditorDraft): void {
   if (lengths.length) lengths[lengths.length - 1] += duration - cursor;
   const director = nodeById(graph, 3678, 'LTXDirector');
   const state = jsonWidget(director, 'timeline_data');
-  Object.assign(state, { global_prompt: draft.prompt, retakeMode: false, retakeVideo: null, normalStartFrame: 0, normalDurationFrames: duration,
-    segments, motionSegments: [], audioSegments: [], mainTrackEnabled: true, motionTrackEnabled: false, audioTrackEnabled: true, overrideAudio: false });
+  Object.assign(state, { global_prompt: draft.prompt, normalStartFrame: 0, normalDurationFrames: duration, segments, mainTrackEnabled: true,
+    ...(!draft.ltx ? { retakeMode: false, retakeVideo: null, motionSegments: [], audioSegments: [], motionTrackEnabled: false, audioTrackEnabled: true, overrideAudio: false } : {}) });
   const values = { start_second: 0, end_second: draft.durationSeconds, duration_seconds: draft.durationSeconds,
     start_frame: 0, end_frame: duration, duration_frames: duration, frame_rate: draft.frameRate,
     custom_width: draft.width, custom_height: draft.height, timeline_data: JSON.stringify(state),
-    local_prompts: segments.map(seg => seg.prompt).join(' | '), segment_lengths: lengths.join(','), guide_strength: segments.map(() => '1.00').join(','),
+    local_prompts: segments.map(seg => seg.prompt).join(' | '), segment_lengths: lengths.join(','), guide_strength: segments.map(seg => seg.guideStrength.toFixed(2)).join(','),
     use_custom_audio: false, use_custom_motion: false, override_audio: false };
   for (const [name, value] of Object.entries(values)) writeWidget(director, name, value);
   Object.assign(director.properties, { global_prompt: draft.prompt, has_serialized_properties: true, retakeMode: false,
     mainTrackEnabled: true, motionTrackEnabled: false, audioTrackEnabled: true, overrideAudio: false, audioTrackWasEnabledBeforeOverride: false });
+  if (draft.ltx) {
+    const advanced = configureOfficialLtxDirectorSettings(state, draft.ltx, { durationFrames: duration, frameRate: draft.frameRate });
+    for (const [name, value] of Object.entries(advanced.widgets)) writeWidget(director, name, value);
+    Object.assign(director.properties, advanced.properties);
+  }
   const calculator = nodeById(graph, 3600, 'DaSiWa_ResolutionScaleCalculator');
   if (draft.resolution?.mode === 'workflow') {
     // This pinned calculator has no image wire. Supply the reference aspect via
@@ -508,6 +540,12 @@ export function configureOfficialVideoEditor(source: unknown, id: OfficialVideoW
   }
   if (id === 'h3-26') configureH3(graph, draft);
   else configureLtx(graph, draft);
+  if (id === 'h3-26' && (hasOfficialH3Continuity(draft.h3) || draft.h3?.continuity.capture)) {
+    if (allNodes(graph).some(node => node.type === 'DaSiWa_EnhancedVideoCombine' && (readWidget(node, 'pingpong') || readWidget(node, 'crop_to_audio')))) {
+      fail('continuity checkpoints require unchanged timing. Turn off Ping-pong and Crop to audio before generating.');
+    }
+  }
+  if (draft.loraStack !== undefined) writeWidget(nodeById(graph, id === 'h3-26' ? 2678 : 3589, 'DaSiWa_LTX2LoraLoader'), 'stack_data', serializeOfficialVideoLoraStack(draft.loraStack));
   const seedNode = nodeById(graph, id === 'h3-26' ? 2739 : 3720, 'DaSiWa_SeedControl');
   const state = jsonWidget(seedNode, 'seed_control_state');
   // The native INT widget can coerce uint64 strings to lossy numbers. For the

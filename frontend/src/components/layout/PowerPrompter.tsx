@@ -30,6 +30,7 @@ import { PowerPrompterQueueHistoryModal } from '@/components/power-prompter/queu
 import { PowerPrompterQueueConfirmModal, PowerPrompterSaveQueueModal } from '@/components/power-prompter/queue/PowerPrompterQueueDialogs';
 import { PowerPrompterSettingsModal } from '@/components/modals/PowerPrompterSettingsModal';
 import { useStore } from '@/store/useStore';
+import { reportLastFrameExportIssues } from '@/lib/lastFrameExportIssue';
 import type {
   PowerPrompterCardDocument,
   PowerPrompterQueueTraversalMode,
@@ -7205,6 +7206,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         }
 
         if (messageType === 'queue_saved_outputs') {
+          reportLastFrameExportIssues(payload);
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('umbra:powerprompter-output-saved', { detail: payload }));
           }
