@@ -689,6 +689,15 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 
 ## Additional Attribution
 
+### transparent-background / InSPyReNet
+- Project: https://github.com/plemeri/transparent-background
+- Authors: Taehun Kim and the InSPyReNet contributors
+- Usage: optional ComfyUI background removal. The managed compatibility recipe retains the upstream license and package contents, changes the augmentation dependency, and adapts two resize API calls. Umbra does not include segmentation weights in its app packages.
+
+### AlbumentationsX
+- Project: https://github.com/albumentations-team/AlbumentationsX
+- Usage: augmentation support required by current ControlNet preprocessors and the reviewed background-removal compatibility package. Installed separately under its upstream licensing terms; it is not relicensed as Umbra code.
+
 Some Umbra Studio features also interoperate with optional third-party ComfyUI
 custom-node repositories and other upstream tools installed by the user.
 

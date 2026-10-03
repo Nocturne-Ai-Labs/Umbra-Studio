@@ -5,7 +5,7 @@ import path from 'path';
 const packagePath = path.join(process.cwd(), 'package.json');
 const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
 
-const match = String(pkg.version || '').match(/^(\d+)\.(\d+)\.(\d+)/);
+const match = String(pkg.version || '').match(/^(\d+)\.(\d+)\.(\d+)(-[a-z0-9.-]+)?(?:\+[a-z0-9.-]+)?$/i);
 if (!match) {
   console.error(`Unsupported version format: ${pkg.version}`);
   process.exit(1);
@@ -17,7 +17,7 @@ let patch = Number(match[3]);
 
 patch += 1;
 
-const nextVersion = `${major}.${minor}.${patch}`;
+const nextVersion = `${major}.${minor}.${patch}${match[4] || ''}`;
 const prevVersion = pkg.version;
 pkg.version = nextVersion;
 

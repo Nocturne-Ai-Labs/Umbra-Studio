@@ -7,10 +7,11 @@ import { resolveComfyEndpoint } from '../backend/comfyEndpoint';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { isUmbraShutdownMarkerForProcess, readUmbraShutdownMarker } from '../shared/umbraShutdownMarker';
 import type { inspectManagedDependencies } from './ManagedDependencyStatus';
+import { BACKGROUND_COMPATIBILITY_RECIPE, BACKGROUND_COMPATIBILITY_VERSION } from '../setup/BackgroundRemovalCompatibility';
 
 type DependencyStatus = ReturnType<typeof inspectManagedDependencies>;
 export type ManagedRepairStep = {
-  kind: 'comfyui' | 'node'; target: string; pins: string[]; installedVersion: string; verified: boolean;
+  kind: 'comfyui' | 'node' | 'package'; target: string; pins: string[]; installedVersion: string; verified: boolean;
   installedCommit: string; requiredVersion: string; requiredCommits: string[];
   installedFrontendVersion: string; requiredFrontendVersion: string;
   filesVerified: boolean; pythonDependenciesVerified: boolean;
@@ -27,8 +28,13 @@ export type ManagedRepairState = {
   completedTargets: string[]; priorVersions: Record<string, string>; priorCommits?: Record<string, string>; lines: string[]; error: string; updatedAt: string;
 };
 
+export function managedRepairStepArgs(step: Pick<ManagedRepairStep, 'kind' | 'target'>): string[] {
+  return step.kind === 'package' ? ['background-compatibility']
+    : step.kind === 'comfyui' ? ['managed-comfyui'] : ['comfy-node', step.target];
+}
+
 function repairFeatures(status: DependencyStatus, featureId: string) {
-  return featureId === 'all-managed-dependencies' ? status.features
+  return ['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId) ? status.features
     : featureId === 'official-video-workflows' ? status.features.filter((entry) => ['official-dasiwa-h3-26', 'official-dasiwa-ltx23-50'].includes(entry.id))
     : status.features.filter((entry) => entry.id === featureId && entry.workflowIds.length);
 }
@@ -37,7 +43,8 @@ export function createManagedWorkflowRepairPlan(status: DependencyStatus, featur
   const features = repairFeatures(status, featureId);
   if (!features.length || (featureId === 'official-video-workflows' && features.length !== 2)) throw new Error('Choose a declared managed dependency plan.');
   const feature = { ...features[0], id: featureId,
-    label: featureId === 'all-managed-dependencies' ? 'All managed dependencies'
+    label: featureId === 'background-removal-compatibility' ? 'Background removal package compatibility'
+      : featureId === 'all-managed-dependencies' ? 'All managed dependencies'
       : featureId === 'official-video-workflows' ? 'Official H3 + LTX workflow dependencies' : features[0].label,
     workflowIds: [...new Set(features.flatMap((entry) => entry.workflowIds))],
     minimumComfyVersion: features.map((entry) => entry.minimumComfyVersion).sort(compareUmbraVersions).at(-1)!,
@@ -67,13 +74,24 @@ export function createManagedWorkflowRepairPlan(status: DependencyStatus, featur
       runtimeReadiness: required.some((node) => node.runtimeReadiness === 'held') ? 'held'
         : required.every((node) => node.runtimeReadiness === 'ready') ? 'ready' : 'unverified' });
   }
-  const holds = [...new Set(feature.runtimePackages.map((dependency) => `${dependency.detail} ${dependency.reason}`))];
+  if (featureId === 'background-removal-compatibility') steps.length = 0;
+  const compatibility = status.backgroundCompatibility;
+  if (compatibility && ['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId)) {
+    steps.push({ kind: 'package', target: 'BackgroundRemoval', pins: [BACKGROUND_COMPATIBILITY_VERSION, 'albumentationsx==2.4.11'],
+      installedVersion: compatibility.versions['transparent-background'] || '', installedCommit: '', requiredVersion: BACKGROUND_COMPATIBILITY_VERSION,
+      requiredCommits: [], installedFrontendVersion: '', requiredFrontendVersion: '', filesVerified: true,
+      pythonDependenciesVerified: compatibility.verified, verified: compatibility.verified, runtimeReadiness: 'unverified' });
+  }
+  const holds = featureId === 'background-removal-compatibility' ? []
+    : [...new Set(feature.runtimePackages.map((dependency) => `${dependency.detail} ${dependency.reason}`))];
+  if (compatibility && !compatibility.verified && ['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId)) holds.push(compatibility.detail);
   // Consent remains bound to the build's declared requirements, independent of repair progress.
   const id = createHash('sha256').update(JSON.stringify({ featureId, requirementsHash: status.requirementsHash, core: [feature.minimumComfyVersion, feature.minimumFrontendVersion],
-    nodes: feature.customNodes.map((node) => ({ name: node.name, pin: node.minimumCommit, assets: node.frontendAssets, classes: node.requiredClasses, frontendClasses: node.requiredFrontendClasses })) })).digest('hex');
+    nodes: feature.customNodes.map((node) => ({ name: node.name, pin: node.minimumCommit, assets: node.frontendAssets, classes: node.requiredClasses, frontendClasses: node.requiredFrontendClasses })),
+    ...(['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId) ? { backgroundRecipe: BACKGROUND_COMPATIBILITY_RECIPE } : {}) })).digest('hex');
   return { id, featureId, label: feature.label, workflowIds: feature.workflowIds, steps, holds,
     requirementsHash: status.requirementsHash, featureIds: features.map((entry) => entry.id),
-    modelProfiles: [...new Set(features.flatMap((entry) => entry.modelProfiles))],
+    modelProfiles: featureId === 'background-removal-compatibility' ? [] : [...new Set(features.flatMap((entry) => entry.modelProfiles))],
     filesVerified: steps.every((step) => step.filesVerified), runtimeReadiness: 'unverified' };
 }
 
@@ -83,6 +101,9 @@ export function managedWorkflowRepairPlans(status: DependencyStatus): ManagedRep
     plans.unshift(createManagedWorkflowRepairPlan(status, 'official-video-workflows'));
   }
   if (status.features.length) plans.unshift(createManagedWorkflowRepairPlan(status, 'all-managed-dependencies'));
+  if (status.features.length && status.backgroundCompatibility && !status.backgroundCompatibility.verified) {
+    plans.unshift(createManagedWorkflowRepairPlan(status, 'background-removal-compatibility'));
+  }
   return plans;
 }
 
@@ -119,6 +140,18 @@ async function loopbackPortIsClosed(port: number): Promise<boolean> {
   return probes.every(Boolean);
 }
 
+export function managedComfyProcessBelongsToRoot(runtimeRoot: string, commandLine: string, executablePath = ''): boolean {
+  const canonical = (path: string) => (existsSync(path) ? realpathSync(path) : path).replace(/\\/g, '/').toLowerCase();
+  const command = commandLine.replace(/\\/g, '/').toLowerCase();
+  const main = canonical(join(runtimeRoot, 'Tools', 'ComfyUI', 'main.py'));
+  const venv = canonical(join(runtimeRoot, 'Tools', 'ComfyUI', 'venv'));
+  const runtime = canonical(join(runtimeRoot, 'Runtime'));
+  const executable = executablePath.replace(/\\/g, '/').toLowerCase();
+  const mainArgument = /(?:^|[\s"'])(?:[^\s"']*\/)?main\.py(?:[\s"']|$)/.test(command);
+  return command.includes(main) || (mainArgument && (command.includes(`${venv}/`) || command.includes(`${runtime}/`)))
+    || (mainArgument && (executable.startsWith(`${venv}/`) || executable.startsWith(`${runtime}/`)));
+}
+
 export async function proveManagedRuntimeStopped(runtimeRoot: string): Promise<boolean> {
   let settings: Record<string, any> = {};
   try { settings = JSON.parse(readFileSync(join(runtimeRoot, 'User', 'Config', 'settings.json'), 'utf8')); }
@@ -128,18 +161,18 @@ export async function proveManagedRuntimeStopped(runtimeRoot: string): Promise<b
     : resolveComfyEndpoint(settings.app?.['comfyui.url'] || '', settings.servers?.comfyui?.host || '127.0.0.1', Number(settings.servers?.comfyui?.port || 8188));
   if (!Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535) return false;
   if (!['127.0.0.1', 'localhost', '::1', '[::1]'].includes(endpoint.host) || endpoint.protocol !== 'http:') return false;
-  const canonical = (path: string) => (existsSync(path) ? realpathSync(path) : path).replace(/\\/g, '/').toLowerCase();
-  const main = canonical(join(runtimeRoot, 'Tools', 'ComfyUI', 'main.py'));
-  const venv = canonical(join(runtimeRoot, 'Tools', 'ComfyUI', 'venv'));
-  const script = `$ErrorActionPreference='Stop'; $main='${main.replace(/'/g, "''")}'; $venv='${venv.replace(/'/g, "''")}'; $busy=$false; Get-CimInstance Win32_Process | ForEach-Object { if ($_.ProcessId -eq $PID) { return }; $cmd=([string]$_.CommandLine).ToLowerInvariant().Replace('\\','/'); if ($cmd.Contains($main) -or ($cmd.Contains($venv) -and $cmd.Contains('main.py')) -or $cmd -match '(?:^|[\\s"''])main\\.py(?:[\\s"'']|$)') { $busy=$true } }; if ($busy) { exit 2 }; exit 0`;
+  const script = "$ErrorActionPreference='Stop'; $rows=@(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID } | ForEach-Object { @{ command=[string]$_.CommandLine; executable=[string]$_.ExecutablePath } }); ConvertTo-Json -InputObject $rows -Compress";
   const processes = process.platform === 'win32'
     ? spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, encoding: 'utf8', timeout: 5_000 })
     : spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8', timeout: 5_000 });
   if (processes.status !== 0) return false;
-  if (process.platform !== 'win32' && String(processes.stdout).split(/\r?\n/).some((line) => {
-    const command = line.toLowerCase().replace(/\\/g, '/');
-    return command.includes(main) || (command.includes(venv) && command.includes('main.py')) || /(?:^|\s)main\.py(?:\s|$)/.test(command);
-  })) return false;
+  if (process.platform === 'win32') {
+    try {
+      const rows = JSON.parse(String(processes.stdout));
+      if (!Array.isArray(rows) || rows.some((row) => !row || typeof row.command !== 'string' || typeof row.executable !== 'string'
+        || managedComfyProcessBelongsToRoot(runtimeRoot, row.command, row.executable))) return false;
+    } catch { return false; }
+  } else if (String(processes.stdout).split(/\r?\n/).some((line) => managedComfyProcessBelongsToRoot(runtimeRoot, line))) return false;
   // An unknown listener is a hold even if no process with this root's main.py was found.
   return loopbackPortIsClosed(endpoint.port);
 }
@@ -166,6 +199,10 @@ export async function assertManagedDependencyRepairIdle(options: {
       throw new Error('Dependency repair is held: backend queue state is unavailable. An unavailable queue is not an idle queue.');
     }
     if (queue.activeTasks.length || queue.queuedWork.length || queue.controller?.activeRequestId) throw new Error('Dependency repair is held while generation work is active or queued. Finish or cancel it explicitly before retrying.');
+    // An idle response from a reused/wrong Umbra port is not proof for the selected installation.
+    if (!await (options.stoppedProof || (() => proveManagedRuntimeStopped(options.runtimeRoot)))()) {
+      throw new Error('Dependency repair is held: the selected installation\'s ComfyUI process/listener is not verified stopped.');
+    }
     return;
   }
   const appStopped = await (options.umbraStoppedProof || (() => {
@@ -246,6 +283,20 @@ export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, st
   }
   const features = repairFeatures(status, plan.featureId);
   if (!features.length) return ['The declared workflow repair plan changed. Review the current plan.'];
+  if (['all-managed-dependencies', 'background-removal-compatibility'].includes(plan.featureId) && status.backgroundCompatibility && !status.backgroundCompatibility.verified) issues.push(status.backgroundCompatibility.detail);
+  if (plan.featureId === 'background-removal-compatibility') {
+    const objectInfo = await get('/object_info');
+    // The optional Essentials suite is not installed by this repair.
+    if (status.backgroundCompatibility?.status === 'ready') {
+      for (const name of ['TransparentBGSession+', 'ImageRemoveBackground+']) {
+        if (!Object.prototype.hasOwnProperty.call(objectInfo, name)) issues.push(`Background removal node ${name} is not registered. Review the custom-node import log.`);
+      }
+    }
+    const after = await get('/api/umbrabridge/status?refresh=true');
+    const next = after.backends?.comfyui;
+    if (after.stale || after.refreshing || !next?.healthy || next.ownership !== 'owned' || next.ownerPid !== target.ownerPid || next.port !== target.port) issues.push('The owned ComfyUI process changed during background preflight. Refresh readiness.');
+    return [...new Set(issues)];
+  }
   for (const feature of features) {
     for (const node of feature.customNodes) if (node.status !== 'ready') issues.push(`${node.name}: ${node.reason || node.status}`);
     if (compareUmbraVersions(status.comfyui.version || '0.0.0', feature.minimumComfyVersion) < 0

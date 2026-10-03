@@ -6,6 +6,7 @@ import { compareUmbraVersions } from '../shared/appUpdate';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
 import { daSiWaCoreRequirements } from '../setup/DaSiWaRequirements';
 import { inspectManagedNodeFrontend, managedChildPath, readManagedToolRequirements, type ManagedNodeRequirement, type ManagedRuntimePackage } from '../setup/ManagedToolRequirements';
+import { inspectBackgroundRemovalCompatibility } from '../setup/BackgroundRemovalCompatibility';
 
 export type ManagedNodeStatus = {
   name: string; minimumCommit: string; installedCommit: string;
@@ -299,5 +300,6 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
         .sort(compareUmbraVersions).at(-1) || '',
     },
     features,
+    backgroundCompatibility: inspectBackgroundRemovalCompatibility(runtimeRoot),
   };
 }

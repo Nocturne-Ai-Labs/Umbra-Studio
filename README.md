@@ -12,6 +12,11 @@ Umbra Studio is a desktop-first AI art and workflow application built to unify
 generation backends, prompt tooling, media browsing, metadata handling, model
 management, and portable tool orchestration inside one app-managed environment.
 
+Umbra Studio has entered **Beta**, beginning with **0.90.0-beta**. Development
+will continue through Beta before 1.0; this milestone does not remove the
+experimental status of Mobile, Canvas, or video generation. See the current
+release notes for feature-specific limitations and setup requirements.
+
 ## Built With
 
 - [Bun](https://bun.sh/) powers Umbra's TypeScript backend, local HTTP and

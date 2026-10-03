@@ -11,7 +11,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { inspectManagedDependencies } from './ManagedDependencyStatus';
 import { invalidateManagedPythonSetupEvidence, prepareManagedDependencyInstallPolicy } from './ManagedDependencyInstallPolicy';
-import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from './ManagedDependencyRepair';
+import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from './ManagedDependencyRepair';
 import { AppUpdateService, compareUmbraVersions, readUmbraAppVersion } from '../backend/AppUpdateService';
 import {
   createIdleUmbraUpdateState,
@@ -65,7 +65,7 @@ function json(value: unknown, status = 200): Response {
 
 type DependencyAction = {
   id: string;
-  kind: 'comfyui' | 'node' | 'workflow';
+  kind: 'comfyui' | 'node' | 'package' | 'workflow';
   target: string;
   phase: 'running' | 'complete' | 'failed';
   lines: string[];
@@ -295,7 +295,7 @@ async function runDependencyAction(session: UpdaterSession, action: DependencyAc
   try {
     const pythonVerified = action.kind === 'comfyui' ? before.comfyui.pythonDependencies.verified
       : before.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === action.target)).every((node) => node.pythonDependencies.verified);
-    if (!pythonVerified) invalidateManagedPythonSetupEvidence(session.runtimeRoot, action.target);
+    if (action.kind !== 'package' && !pythonVerified) invalidateManagedPythonSetupEvidence(session.runtimeRoot, action.target);
     const child = spawn(bunPath, [scriptPath, ...args], {
       cwd: session.runtimeRoot,
       windowsHide: true,
@@ -318,7 +318,9 @@ async function runDependencyAction(session: UpdaterSession, action: DependencyAc
       throw new Error(`Managed ${action.target} setup failed (exit ${code}). Review the log and retry.`);
     }
     const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
-    if (action.kind === 'node') {
+    if (action.kind === 'package') {
+      if (!status.backgroundCompatibility.verified) throw new Error(status.backgroundCompatibility.detail);
+    } else if (action.kind === 'node') {
       const requirements = status.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === action.target));
       const failed = requirements.filter((node) => !node.filesVerified || !node.pythonDependencies.verified);
       if (!requirements.length || failed.length) {
@@ -499,7 +501,7 @@ async function main() {
             inspect: () => inspectManagedDependencies(session.sourceRoot, session.runtimeRoot),
             install: async (step) => {
               action.kind = step.kind; action.target = step.target;
-              try { await runDependencyAction(session, action, step.kind === 'comfyui' ? ['managed-comfyui'] : ['comfy-node', step.target]); }
+              try { await runDependencyAction(session, action, managedRepairStepArgs(step)); }
               finally { state.lines.push(...action.lines.slice(-20)); }
             },
           }).then(() => { action.phase = 'complete'; action.lines = state.lines; })

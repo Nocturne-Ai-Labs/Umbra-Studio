@@ -414,6 +414,7 @@ function verifyPublish() {
     'resources/app/setup/UmbraSetupApp.js',
     'resources/app/setup/index.html',
     'resources/app/setup/models.js',
+    'resources/app/setup/python/background_compat.py',
     'resources/app/backend/FirstRunService.ts',
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',

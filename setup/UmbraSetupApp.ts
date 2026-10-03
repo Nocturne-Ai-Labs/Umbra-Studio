@@ -12,7 +12,7 @@ import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { MODEL_MANIFESTS, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from '../shared/appUpdate';
-import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
+import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
 
 const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
@@ -332,13 +332,15 @@ async function main() {
           activeJob = job;
           void runManagedWorkflowRepair(plan, state, {
             assertIdle: assertDependencyIdle, persist: persistManagedRepair,
+            inspect: () => inspectManagedDependencies(sourceRoot, runtimeRoot),
             install: async (step) => {
               job.step = `Installing ${step.target}`;
               job.lines = [];
               try {
-                await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), step.kind === 'comfyui' ? ['managed-comfyui'] : ['comfy-node', step.target], job, '', sourceRoot);
+                await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), managedRepairStepArgs(step), job, '', sourceRoot);
                 if (!job.lines.some((line) => line === 'UMBRA_VERIFY_OK|setup-tools')) throw new Error(`${step.target} did not finish managed verification.`);
                 const verified = inspectManagedDependencies(sourceRoot, runtimeRoot);
+                if (step.kind === 'package' && !verified.backgroundCompatibility.verified) throw new Error(verified.backgroundCompatibility.detail);
                 const failed = step.kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === step.target && node.status !== 'ready')) : [];
                 if (failed.length) throw new Error(failed.map((node) => node.reason || node.status).join(' '));
                 if (step.kind === 'comfyui' && (!verified.comfyui.installed || compareUmbraVersions(verified.comfyui.version || '0.0.0', verified.comfyui.minimumRequired || '0.0.0') < 0

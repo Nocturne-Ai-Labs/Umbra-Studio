@@ -1319,6 +1319,17 @@ SOFTWARE.
               : node.reason || "Managed node suite",
           );
         }
+        const background = status.backgroundCompatibility;
+        if (background && (background.status !== "not-needed" || background.versions["transparent-background"])) {
+          if (!background.verified) attention++;
+          componentRow(
+            "Background removal",
+            background.versions["transparent-background"] || "Not verified",
+            "X 2.4.11",
+            { label: background.verified ? background.status === "ready" ? "Packages verified" : "Not affected" : background.status === "repair-required" ? "Repair needed" : "Review needed", good: background.verified },
+            background.detail,
+          );
+        }
         const packages = new Map();
         for (const feature of status.features)
           for (const item of feature.runtimePackages || [])
@@ -1488,7 +1499,7 @@ SOFTWARE.
         const body = [
           element(
             "p",
-            "Install the build-declared ComfyUI and custom-node requirements. User files, models, and local node edits are preserved. Already verified steps are skipped.",
+            "Install the build-declared ComfyUI, custom-node requirements, and reviewed package compatibility repairs. User files, models, and local node edits are preserved. Already verified steps are skipped.",
           ),
         ];
         for (const step of plan.steps) {
@@ -1496,7 +1507,7 @@ SOFTWARE.
           row.append(
             element(
               "strong",
-              `${step.target}${step.verified ? " / Verified, skip" : ""}`,
+              `${step.kind === "package" ? "Background removal" : step.target}${step.verified ? " / Verified, skip" : ""}`,
             ),
             element(
               "small",

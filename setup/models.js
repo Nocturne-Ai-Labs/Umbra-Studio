@@ -256,6 +256,10 @@ async function loadManagedTools() {
   toolsRow('ComfyUI', `${core.version || 'Missing'}${core.minimumRequired ? ` | Required ${core.minimumRequired}+` : ''} | Frontend ${core.frontendVersion || 'unverified'}${core.minimumFrontendRequired ? ` | Required ${core.minimumFrontendRequired}+` : ''}`,
     !core.installed || outdated ? 'comfyui' : '', 'ComfyUI');
   const suites = new Map();
+  const background = dependencies.backgroundCompatibility;
+  if (background && (background.status !== 'not-needed' || background.versions['transparent-background'])) {
+    toolsRow('Background removal compatibility', `${background.versions['transparent-background'] || 'Unverified'} | ${background.detail}`);
+  }
   for (const plan of dependencies.repairPlans || []) {
     const saved = dependencies.repairState?.featureId === plan.featureId ? dependencies.repairState : null;
     toolsRow(plan.label, saved ? `${saved.phase} | ${saved.completedTargets.length} steps completed | ${saved.error || ''}` : `${plan.steps.length} managed repair steps | Review suites and pins`, '', '',

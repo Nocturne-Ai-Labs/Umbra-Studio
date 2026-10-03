@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.90.0-beta - Beta Milestone And Background Package Compatibility
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Umbra Studio moves from Alpha into Beta as `0.90.0-beta`. Beta development continues before 1.0; the feature warnings above still apply. This version change requires no dataset, model, project, or settings migration.
+- Install with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux. Close and reopen an older updater after installing this version to load its new compatibility checks.
+- If Setup or Updater reports a background-removal package conflict, finish jobs and stop managed ComfyUI through Umbra, then review **Background removal package compatibility** or **Update dependencies**. The repair downloads two small checksum-verified Python wheels; it does not download segmentation weights, generation models, or CUDA packages. Unknown package versions or other legacy Albumentations consumers remain held for review.
+- Restart managed ComfyUI normally after repair and recheck its runtime. No generation queue resumes automatically. Model downloads and optional helper environments retain their separate explicit Setup actions.
+
+### Background Package Compatibility
+
+- Detect the shared Albumentations / AlbumentationsX namespace conflict in managed ComfyUI environments, including background-removal packages outside declared workflow requirements. Show the issue in Setup and Updater instead of treating installed node requirements as complete environment verification.
+- Add an explicitly reviewed background-removal compatibility repair to the dependency plan. Verify upstream wheel checksums, preserve Torch/CUDA and model files, remove the overlapping legacy distribution only when no other package requires it, restore the same AlbumentationsX files, and verify package consistency and synthetic preprocessing. Unknown versions or legacy consumers hold for review; no queue resumes automatically.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Overlapping background-removal augmentation packages could break imports and preprocessing despite installed node requirements appearing complete.
+- Fixed: Interrupted compatibility repairs could leave missing augmentation files falsely classified as not needing repair; incomplete work now remains unverified and explicitly retryable.
+- Improved: Compatibility package installation is isolated from pip target/index and Python environment overrides, preserves reviewed package constraints, and requires the selected installation's ComfyUI process and listener to be verified stopped.
+- Improved: Setup and Updater show actionable compatibility status and a reviewed repair plan. Both portable targets require the bundled repair recipe; future version bumps retain the Beta suffix.
+
 ## v0.32.46 - Updater Dashboard And Managed Dependency Repair
 
 ### TL;DR - Setup After Updating
