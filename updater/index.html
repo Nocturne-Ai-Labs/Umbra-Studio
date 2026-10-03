@@ -587,7 +587,47 @@
     </style>
   </head>
   <body>
-    <!-- Icon paths from lucide-react; MIT licensed. -->
+    <!-- Icon paths from lucide-react; ISC licensed, with MIT-licensed Feather-derived portions.
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2023 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2025.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+The MIT License (MIT) (for portions derived from Feather)
+
+Copyright (c) 2013-2023 Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+    -->
     <svg hidden aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
       <symbol id="i-refresh" viewBox="0 0 24 24">
         <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
@@ -982,8 +1022,8 @@
         $(id).textContent = text;
       }
       function updateActions() {
-        const locked =
-          busy() || !latestState || dependencyLoading || !dependenciesFresh;
+        // App replacement can repair broken dependency metadata; only dependency operations require that status.
+        const locked = busy() || !latestState;
         $("update").disabled = locked || !isNewer();
         $("app-only").disabled = locked || !isNewer();
         $("update").hidden = Boolean(
@@ -1200,11 +1240,14 @@
           const versionReady = Boolean(
             installed && (!required || compare(installed, required) >= 0),
           );
+          const sourceReady =
+            versionReady &&
+            (name !== "ComfyUI" || status.comfyui.filesVerified !== false);
           const pythonSync =
             name === "ComfyUI" &&
-            versionReady &&
+            sourceReady &&
             status.comfyui.pythonDependencies?.verified === false;
-          const ready = versionReady && !pythonSync;
+          const ready = sourceReady && !pythonSync;
           if (!ready) attention++;
           componentRow(
             name,
@@ -1394,6 +1437,9 @@
           dependencyError = error.message;
           message("dependency-message", error.message, "error");
           $("dependency-count").textContent = "Unavailable";
+          $("dependency-summary").textContent = "The installed build's dependency requirements could not be verified.";
+          $("model-count").textContent = "Unavailable";
+          $("runtime-status").textContent = "Unavailable";
         } finally {
           dependencyLoading = false;
           if (dependenciesActive() || !dependenciesFresh)
@@ -1454,7 +1500,7 @@
             ),
             element(
               "small",
-              `Installed: ${step.installedVersion || "Not installed"}`,
+              `Installed: ${[step.installedVersion, step.installedCommit].filter(Boolean).join(" / ") || "Not installed"}`,
             ),
             element("code", `Required: ${step.pins.join(" / ")}`),
           );
@@ -1556,13 +1602,21 @@
         const featureId =
           dependencyStatus.repairState?.featureId || planForAll()?.featureId;
         if (!featureId) return;
+        const plan = dependencyStatus.repairPlans?.find(
+          (entry) => entry.featureId === featureId,
+        );
+        if (!plan?.id) {
+          dependencyError = "The current dependency plan is unavailable. Refresh and review the installed build's plan before rechecking runtime readiness.";
+          message("dependency-message", dependencyError, "error");
+          return;
+        }
         localOperation = true;
         dependencyError = "";
         updateActions();
         try {
           const result = await api("/api/dependencies/preflight", {
             method: "POST",
-            body: JSON.stringify({ featureId }),
+            body: JSON.stringify({ featureId: plan.featureId, planId: plan.id }),
           });
           dependencyError = result.ready ? "" : result.issues.join("\n");
         } catch (error) {
@@ -1632,6 +1686,7 @@
           const state = await api("/api/relaunch-state");
           if (state.phase === "failed") {
             terminal = false;
+            $("hint").textContent = "Umbra Studio could not start. Review the error and retry launching.";
             message(
               "state-message",
               state.error || "Umbra Studio could not start.",
@@ -1661,6 +1716,8 @@
           if (action === "relaunch") void pollRelaunch();
         } catch (error) {
           terminal = false;
+          if (action === "relaunch")
+            $("hint").textContent = "Umbra Studio could not start. Review the error and retry launching.";
           $("progress-panel").hidden = false;
           message("state-message", error.message, "error");
           updateActions();

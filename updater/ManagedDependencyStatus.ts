@@ -62,10 +62,21 @@ function readComfyVersion(comfyRoot: string): string {
   return '';
 }
 
-function readCheckoutCommit(root: string): string {
-  const top = spawnSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+type ManagedGitProbe = { status: number | null; stdout: string };
+
+function probeManagedGit(root: string, args: string[], probes?: Map<string, ManagedGitProbe>): ManagedGitProbe {
+  const key = JSON.stringify([root, args]);
+  const prior = probes?.get(key);
+  if (prior) return prior;
+  const probe = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  probes?.set(key, probe);
+  return probe;
+}
+
+function readCheckoutCommit(root: string, probes?: Map<string, ManagedGitProbe>): string {
+  const top = probeManagedGit(root, ['rev-parse', '--show-toplevel'], probes);
   if (top.status !== 0 || resolve(top.stdout.trim()).toLowerCase() !== resolve(root).toLowerCase()) return '';
-  const head = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  const head = probeManagedGit(root, ['rev-parse', 'HEAD'], probes);
   return head.status === 0 && /^[a-f0-9]{40}$/.test(head.stdout.trim()) ? head.stdout.trim() : '';
 }
 
@@ -172,7 +183,7 @@ export function inspectActiveManagedWorkflowRuntimePackages(sourceRoot: string, 
   });
 }
 
-export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requirement: ManagedNodeRequirement, registeredClasses?: ReadonlySet<string>, options: ManagedPythonModuleProbeOptions = {}): ManagedNodeStatus {
+export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requirement: ManagedNodeRequirement, registeredClasses?: ReadonlySet<string>, options: ManagedPythonModuleProbeOptions = {}, gitProbes?: Map<string, ManagedGitProbe>): ManagedNodeStatus {
   const nodePath = managedChildPath(join(comfyRoot, 'custom_nodes'), requirement.name);
   const base = {
     name: requirement.name, minimumCommit: requirement.minimumCommit,
@@ -183,17 +194,15 @@ export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requir
     pythonDependencies: inspectPythonDependencies(comfyRoot, nodePath, requirement.name, options),
   };
   if (!existsSync(join(nodePath, '__init__.py'))) return { ...base, installedCommit: '', status: 'missing', reason: 'Install the declared node suite in Setup.' };
-  const topLevel = spawnSync('git', ['-C', nodePath, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  const topLevel = probeManagedGit(nodePath, ['rev-parse', '--show-toplevel'], gitProbes);
   if (topLevel.status !== 0 || resolve(topLevel.stdout.trim()).toLowerCase() !== resolve(nodePath).toLowerCase()) {
     return { ...base, installedCommit: '', status: 'unknown', reason: 'The suite is not an independent Git checkout; local files were preserved.' };
   }
-  const head = spawnSync('git', ['-C', nodePath, 'rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  const head = probeManagedGit(nodePath, ['rev-parse', 'HEAD'], gitProbes);
   const installedCommit = head.status === 0 ? head.stdout.trim() : '';
   if (!/^[a-f0-9]{40}$/.test(installedCommit)) return { ...base, installedCommit: '', status: 'unknown' };
   if (installedCommit !== requirement.minimumCommit) {
-    const ancestor = spawnSync('git', ['-C', nodePath, 'merge-base', '--is-ancestor', requirement.minimumCommit, 'HEAD'], {
-      encoding: 'utf8', windowsHide: true, timeout: 5_000,
-    });
+    const ancestor = probeManagedGit(nodePath, ['merge-base', '--is-ancestor', requirement.minimumCommit, 'HEAD'], gitProbes);
     if (ancestor.status !== 0) return { ...base, installedCommit, status: 'outdated', reason: 'Install the reviewed node suite version in Setup.' };
   }
   if (requirement.requiredPatch) {
@@ -202,9 +211,7 @@ export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requir
       return { ...base, installedCommit, status: 'unknown', reason: 'Bundled compatibility patch is missing; repair the Umbra Studio installation.' };
     }
     // The upstream commit alone cannot establish readiness for Umbra's local integration.
-    const applied = spawnSync('git', ['-C', nodePath, 'apply', '--reverse', '--check', patch], {
-      encoding: 'utf8', windowsHide: true, timeout: 5_000,
-    });
+    const applied = probeManagedGit(nodePath, ['apply', '--reverse', '--check', patch], gitProbes);
     if (applied.status !== 0) {
       return { ...base, installedCommit, status: 'outdated', reason: 'Umbra compatibility patch needs to be installed or refreshed.' };
     }
@@ -229,6 +236,8 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       { encoding: 'utf8', windowsHide: true, timeout: 5_000 }) : null;
   const frontendVersion = frontendProbe?.status === 0 ? frontendProbe.stdout.trim() : '';
   const packageProbes = new Map<string, ReturnType<typeof inspectManagedPythonModule>>();
+  // Suites appear in several features; share identical Git probes only for this inspection, never across requests or repairs.
+  const gitProbes = new Map<string, ManagedGitProbe>();
   const requirementsProbes = new Map<string, ReturnType<NonNullable<ManagedPythonModuleProbeOptions['runPython']>>>();
   const probeOptions: ManagedPythonModuleProbeOptions = { runPython: (python, args, input) => {
     const key = JSON.stringify([python, args, input]);
@@ -259,7 +268,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       modelProfiles: feature.modelProfiles,
       missingModels,
       totalModels: files.size,
-      customNodes: feature.customNodes.map((node) => inspectManagedNode(sourceRoot, comfyRoot, node, registeredClasses, probeOptions)),
+      customNodes: feature.customNodes.map((node) => inspectManagedNode(sourceRoot, comfyRoot, node, registeredClasses, probeOptions, gitProbes)),
       workflowIds: feature.workflowIds || [],
       requiredBuiltinClasses: feature.requiredBuiltinClasses || [],
       missingRuntimeClasses: registeredClasses ? (feature.requiredBuiltinClasses || []).filter((name) => !registeredClasses.has(name)) : [],
@@ -279,7 +288,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       installed: Boolean(installedVersion),
       version: installedVersion,
       frontendVersion,
-      installedCommit: existsSync(comfyRoot) ? readCheckoutCommit(comfyRoot) : '',
+      installedCommit: existsSync(comfyRoot) ? readCheckoutCommit(comfyRoot, gitProbes) : '',
       filesVerified: Boolean(installedVersion) && existsSync(join(comfyRoot, 'main.py')),
       pythonDependencies: inspectPythonDependencies(comfyRoot, comfyRoot, undefined, probeOptions),
       runtimeReadiness: 'unverified' as const,

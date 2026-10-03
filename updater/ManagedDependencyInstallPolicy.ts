@@ -35,8 +35,9 @@ export function managedDependencyConstraints(installed: InstalledDistribution[],
   }
   const held = new Set(optional.map(normalize));
   for (const name of held) if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error('Invalid optional dependency hold.');
-  // Existing versions are lower bounds, not upgrade requests. Unreviewed optional packages cannot change.
-  const lines = [...packages].sort(([a], [b]) => a.localeCompare(b)).map(([name, version]) => `${name}${held.has(name) ? '==' : '>='}${version}`);
+  // Ordered specifiers cannot contain local versions. Pin those builds exactly to preserve e.g. Torch's CUDA variant.
+  // Other installed versions remain lower bounds; unreviewed optional packages cannot change.
+  const lines = [...packages].sort(([a], [b]) => a.localeCompare(b)).map(([name, version]) => `${name}${held.has(name) || version.includes('+') ? '==' : '>='}${version}`);
   for (const name of held) if (!packages.has(name)) lines.push(`${name}<0`);
   return `${lines.join('\n')}\n`;
 }
