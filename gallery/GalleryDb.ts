@@ -136,6 +136,24 @@ function escapeSqlLike(value: string): string {
   return String(value || '').replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
+function searchRootScope(roots: string[]): { clauses: string[]; params: string[] } {
+  const clauses: string[] = [];
+  const params: string[] = [];
+  for (const root of roots) {
+    if (process.platform === 'win32') {
+      const lowerRoot = root.toLowerCase();
+      clauses.push("(lower(f.path) = ? OR lower(f.path) LIKE ? ESCAPE '\\')");
+      params.push(lowerRoot, `${escapeSqlLike(lowerRoot)}/%`);
+    } else {
+      // LIKE ignores ASCII case even on case-sensitive filesystems. Binary
+      // bounds retain exact folder identity and do not interpret SQL wildcards.
+      clauses.push('(f.path = ? OR (f.path >= ? AND f.path < ?))');
+      params.push(root, `${root}/`, `${root}0`);
+    }
+  }
+  return { clauses, params };
+}
+
 function metadataSearchSnippet(metadataJson: string | null | undefined, terms: string[]): string {
   const raw = String(metadataJson || '');
   if (!raw) return '';
@@ -654,13 +672,7 @@ export class GalleryDb {
     const offset = Math.max(0, Math.trunc(Number(offsetInput || 0)));
     if (!query || roots.length === 0) return [];
 
-    const rootClauses: string[] = [];
-    const rootParams: string[] = [];
-    for (const root of roots) {
-      const lowerRoot = root.toLowerCase();
-      rootClauses.push("(lower(f.path) = ? OR lower(f.path) LIKE ? ESCAPE '\\')");
-      rootParams.push(lowerRoot, `${escapeSqlLike(lowerRoot)}/%`);
-    }
+    const { clauses: rootClauses, params: rootParams } = searchRootScope(roots);
 
     const needle = `%${escapeSqlLike(query)}%`;
     const rows = this.db.query(`
@@ -688,7 +700,7 @@ export class GalleryDb {
           OR lower(f.path) LIKE ? ESCAPE '\\'
           OR lower(ft.tag) LIKE ? ESCAPE '\\'
         )
-      ORDER BY f.modified_ms DESC, f.file_name COLLATE NOCASE ASC, f.path COLLATE NOCASE ASC
+      ORDER BY f.modified_ms DESC, f.file_name COLLATE NOCASE ASC, f.path COLLATE NOCASE ASC, f.path ASC
       LIMIT ? OFFSET ?
     `).all(...rootParams, needle, needle, needle, limit, offset) as FileRow[];
 
@@ -742,12 +754,12 @@ export class GalleryDb {
         metadata_json AS metadataJson,
         metadata_format AS metadataFormat
       FROM files
-      WHERE lower(folder_path) = ?
+      WHERE ${process.platform === 'win32' ? 'lower(folder_path)' : 'folder_path'} = ?
         AND metadata_json IS NOT NULL
         AND ${whereTerms}
-      ORDER BY file_name COLLATE NOCASE ASC, path COLLATE NOCASE ASC
+      ORDER BY file_name COLLATE NOCASE ASC, path COLLATE NOCASE ASC, path ASC
       LIMIT ? OFFSET ?
-    `).all(folderPath.toLowerCase(), ...params, limit, offset) as Array<{
+    `).all(process.platform === 'win32' ? folderPath.toLowerCase() : folderPath, ...params, limit, offset) as Array<{
       uid: string;
       path: string;
       folderPath: string;
@@ -772,13 +784,7 @@ export class GalleryDb {
     const limit = Math.max(1, Math.min(40, Math.trunc(Number(limitInput || 18))));
     if (!query || roots.length === 0) return [];
 
-    const rootClauses: string[] = [];
-    const rootParams: string[] = [];
-    for (const root of roots) {
-      const lowerRoot = root.toLowerCase();
-      rootClauses.push("(lower(f.path) = ? OR lower(f.path) LIKE ? ESCAPE '\\')");
-      rootParams.push(lowerRoot, `${escapeSqlLike(lowerRoot)}/%`);
-    }
+    const { clauses: rootClauses, params: rootParams } = searchRootScope(roots);
 
     const escaped = escapeSqlLike(query);
     const containsNeedle = `%${escaped}%`;
@@ -854,8 +860,8 @@ export class GalleryDb {
     const limit = Math.max(1, Math.min(600, Math.trunc(Number(limitInput || 300))));
     if (folders.length === 0) return [];
 
-    const clauses = folders.map(() => 'lower(f.folder_path) = ?').join(' OR ');
-    const params = folders.map((folder) => folder.toLowerCase());
+    const clauses = folders.map(() => `${process.platform === 'win32' ? 'lower(f.folder_path)' : 'f.folder_path'} = ?`).join(' OR ');
+    const params = folders.map((folder) => process.platform === 'win32' ? folder.toLowerCase() : folder);
     const rows = this.db.query(`
       SELECT
         ft.tag AS tag,
@@ -1173,9 +1179,10 @@ export class GalleryDb {
       SET
         folder_path = ?, file_name = ?, file_type = ?, file_size = ?,
         created_ms = ?, modified_ms = ?, file_sig = ?,
-        metadata_json = COALESCE(metadata_json, ?),
-        metadata_format = COALESCE(metadata_format, ?),
-        metadata_updated_ms = COALESCE(metadata_updated_ms, ?),
+        metadata_json = ?,
+        metadata_format = ?,
+        metadata_updated_ms = ?,
+        metadata_source_revision = NULL,
         last_seen_ms = ?
       WHERE uid = ?
     `);

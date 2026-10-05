@@ -232,6 +232,7 @@ import { isAllowedLocalServerHostname } from './shared/localServerHost';
 import * as EditorDb from './backend/EditorDb';
 import { fetchModelMedia, isSafeModelMediaType, validateModelMediaUrl } from './backend/ModelManagerMediaHttp';
 import { GalleryDb, type GalleryFileInput, type GalleryMediaType, type GalleryMetadataSearchMatch } from './gallery/GalleryDb';
+import { gallerySearchPathKey } from './gallery/GallerySearchPathKey';
 import { ModelIndexWorkerService, type ModelRootDescriptor } from './backend/ModelIndexWorkerService';
 import { ModelDownloadWorkerService } from './backend/ModelDownloadWorkerService';
 import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
@@ -28786,7 +28787,7 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
       if (!resolved) continue;
       const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
       if (!fullPath) continue;
-      const key = normalizeOutputPathInput(fullPath).toLowerCase();
+      const key = gallerySearchPathKey(fullPath);
       if (!key || seenRoots.has(key)) continue;
       const rootStat = await fs.stat(fullPath).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
@@ -28810,7 +28811,7 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
         .sort((left, right) => compareFsSearchFiles(left, right, query, sortBy, sortOrder))
         .slice(0, fileLimit);
       filesByPath.clear();
-      for (const file of best) filesByPath.set(normalizeOutputPathInput(file.path).toLowerCase(), file);
+      for (const file of best) filesByPath.set(gallerySearchPathKey(file.path), file);
     };
     const indexedPageSize = Math.max(64, Math.min(256, fileLimit * 3));
     // Leave time to discover files that have not reached the index yet.
@@ -28847,7 +28848,7 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
         signal?.throwIfAborted();
         for (const file of live) {
           if (!file || !fsFileMatchesSearch(file, query)) continue;
-          filesByPath.set(normalizeOutputPathInput(file.path).toLowerCase(), file);
+          filesByPath.set(gallerySearchPathKey(file.path), file);
         }
         keepBestFiles();
       }
@@ -28863,12 +28864,12 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
       rootPath: root.clientRootPath,
       absoluteRootPath: root.fullPath,
     }));
-    const seenDirs = new Set(queue.map((entry) => normalizeOutputPathInput(entry.absolutePath).toLowerCase()));
+    const seenDirs = new Set(queue.map((entry) => gallerySearchPathKey(entry.absolutePath)));
 
     for (const root of queue) {
       const label = basename(root.clientPath) || root.clientPath;
       if (fsTextMatchesSearch(label, query) || fsTextMatchesSearch(root.clientPath, query)) {
-        foldersByPath.set(root.clientPath.toLowerCase(), { name: label, path: root.clientPath, rootPath: root.rootPath });
+        foldersByPath.set(gallerySearchPathKey(root.clientPath), { name: label, path: root.clientPath, rootPath: root.rootPath });
       }
     }
 
@@ -28890,12 +28891,12 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const absolutePath = join(current.absolutePath, entry.name);
-        const absoluteKey = normalizeOutputPathInput(absolutePath).toLowerCase();
+        const absoluteKey = gallerySearchPathKey(absolutePath);
         if (!absoluteKey || seenDirs.has(absoluteKey)) continue;
         seenDirs.add(absoluteKey);
         const clientPath = mapAbsolutePathToGalleryPath(current.rootPath, current.absoluteRootPath, absolutePath);
         if (foldersByPath.size < folderLimit && (fsTextMatchesSearch(entry.name, query) || fsTextMatchesSearch(clientPath, query))) {
-          foldersByPath.set(clientPath.toLowerCase(), { name: entry.name, path: clientPath, rootPath: current.rootPath });
+          foldersByPath.set(gallerySearchPathKey(clientPath), { name: entry.name, path: clientPath, rootPath: current.rootPath });
         }
         queue.push({
           absolutePath,
@@ -28924,7 +28925,7 @@ async function handleFsSearch(url: URL, signal?: AbortSignal): Promise<Response>
         if (inputs.length === 0) continue;
         for (const file of galleryDb.upsertFolderFiles(current.clientPath, inputs)) {
           if (!fsFileMatchesSearch(file, query)) continue;
-          filesByPath.set(normalizeOutputPathInput(file.path).toLowerCase(), file);
+          filesByPath.set(gallerySearchPathKey(file.path), file);
         }
         keepBestFiles();
       }
@@ -28978,7 +28979,7 @@ async function handleFsSearchSuggestions(url: URL): Promise<Response> {
       if (!resolved) continue;
       const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
       if (!fullPath) continue;
-      const key = normalizeOutputPathInput(fullPath).toLowerCase();
+      const key = gallerySearchPathKey(fullPath);
       if (!key || seenRoots.has(key)) continue;
       if (!existsSync(fullPath) || !statSync(fullPath).isDirectory()) continue;
       seenRoots.add(key);
