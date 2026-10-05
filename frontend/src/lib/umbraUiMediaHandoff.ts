@@ -237,18 +237,25 @@ function extractGraphClipSkip(metadata: ImageMetadata): number | undefined {
 }
 
 function mergeLoras(...groups: UmbraUiMediaHandoffLora[][]): UmbraUiMediaHandoffLora[] {
-  const merged = new Map<string, UmbraUiMediaHandoffLora>();
+  let merged: UmbraUiMediaHandoffLora[] = [];
   for (const group of groups) {
-    for (const lora of group) {
-      const key = normalizeModelKey(lora.name);
-      if (!key) continue;
-      merged.set(key, { ...lora });
-    }
+    const entries = group.filter((lora) => !!normalizeModelKey(lora.name));
+    const names = new Set(entries.map((lora) => normalizeModelKey(lora.name)));
+    // Later sources own both their model representations and requested IDs.
+    // Rename a colliding fallback entry before final normalization can rename
+    // a current control entry instead. Keep independent entries in source order.
+    const usedIds = new Set(entries.map((lora) => lora.id.trim()));
+    const retained = merged.filter((lora) => !names.has(normalizeModelKey(lora.name))).map((lora) => {
+      const requestedId = lora.id.trim();
+      let id = requestedId;
+      let suffix = 1;
+      while (usedIds.has(id)) id = `${requestedId}-${suffix++}`;
+      usedIds.add(id);
+      return { ...lora, id };
+    });
+    merged = [...retained, ...entries.map((lora) => ({ ...lora }))];
   }
-  return Array.from(merged.values(), (lora, index) => ({
-    ...lora,
-    id: `metadata-lora-${index + 1}`,
-  }));
+  return merged;
 }
 
 function normalizeMetadataLoras(value: unknown, idPrefix: string): UmbraUiMediaHandoffLora[] {
@@ -430,14 +437,12 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   });
   const powerPrompterSegments = Array.isArray(powerPrompter.segments) ? powerPrompter.segments : [];
   const positivePromptWithSyntax = String(prompts.positive || powerPrompter.prompt || '').trim();
-  const syntaxLoras = extractPromptSyntaxLoras([
-    positivePromptWithSyntax,
-    String(powerPrompter.prompt || '').trim(),
-    ...powerPrompterSegments.map((candidate) => {
+  const syntaxLoras = extractPromptSyntaxLoras(
+    positivePromptWithSyntax || powerPrompterSegments.map((candidate) => {
       const segment = isRecord(candidate) ? candidate : {};
       return String(segment.text || '').trim();
-    }),
-  ].filter(Boolean).join(', '));
+    }).filter(Boolean).join(', '),
+  );
   const positivePrompt = cleanPromptText(positivePromptWithSyntax.replace(/<lora:[^>]+>/gi, ''));
   const positivePromptSegments = powerPrompterSegments.length > 0
     ? powerPrompterSegments
@@ -542,7 +547,16 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
       : {}),
     workflowResources,
     ...(isRecord(tiledVae) ? { tiledVae: normalizedPowerPrompterGeneration.tiledVae } : {}),
-    loras: mergeLoras(directLoras, extractGraphLoras(metadata), generationLoras, inpaintLoras, syntaxLoras),
+    // An explicit current stack (including []) owns the controls. Inline
+    // prompt tags can add LoRAs, but legacy graph/direct/lineage lists cannot.
+    loras: Array.isArray(generation.loras)
+      ? mergeLoras(syntaxLoras, generationLoras)
+      : mergeLoras(
+        directLoras,
+        syntaxLoras,
+        extractGraphLoras(metadata),
+        Object.keys(generation).length === 0 ? inpaintLoras : [],
+      ),
     inpaint: isRecord(metadata.umbra_inpaint) ? normalizeUmbraUiMediaInpaintSnapshot(inpaint) : undefined,
   });
 }
