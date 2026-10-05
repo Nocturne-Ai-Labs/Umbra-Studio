@@ -53,7 +53,7 @@ function showSetupTab(tab) {
     modelElement(`tab-${id}`).tabIndex = tab === id ? 0 : -1;
   });
 }
-const setupTabs = ['general', 'models', 'tools'];
+const setupTabs = ['general', 'tools', 'models'];
 setupTabs.forEach(tab => {
   modelElement(`tab-${tab}`).addEventListener('click', () => showSetupTab(tab));
   modelElement(`tab-${tab}`).addEventListener('keydown', event => {
@@ -242,8 +242,32 @@ function toolsRow(label, detail, kind = '', target = '', action = null, actionLa
   }
   modelElement('tools-list').append(row);
 }
+async function reviewAndInstallManagedPlan(plan, review = true) {
+  const helpers = plan.featureId === 'all-managed-dependencies' ? ['Python Helpers (including pandas), WD/PixAI taggers, natural-language tagging/captioning (Qwen2-VL), detailers, SAM, upscaling/interpolation, and CLIP/SigLIP vision support', `Shared model downloads: ${((plan.sharedSupport?.bytes || 0) / 1024 ** 3).toFixed(2)} GiB plus Python packages; valid existing files are kept. Generation checkpoints and model-family downloads are separate.`] : [];
+  if (review && !window.confirm([plan.label, ...helpers, ...plan.steps.map(step => `${step.target}: ${step.pins.join(', ')}`), ...plan.holds,
+    'Install / verify this bundle? Generation model-family downloads are separate. Local changes are preserved. Restart and runtime preflight follow tool repairs.'].join('\n\n'))) return false;
+  setBusy(true);
+  try {
+    const result = await api('/api/dependencies/repair', { method: 'POST', body: JSON.stringify({ featureId: plan.featureId, planId: plan.id }) });
+    renderJob(result.job); void poll(); return true;
+  } catch (error) { modelError(error); setBusy(false); return false; }
+}
+
+modelElement('install-all-dependencies').addEventListener('click', async () => {
+  setBusy(true);
+  try {
+    const result = await api('/api/dependencies');
+    const plan = result.repairPlans?.find(plan => plan.featureId === 'all-managed-dependencies');
+    if (plan) plan.sharedSupport = result.sharedSupport;
+    if (!plan) throw new Error('This build has no declared dependency plan. Refresh Tools and review the setup log.');
+    if (!await reviewAndInstallManagedPlan(plan, false)) setBusy(false);
+  } catch (error) { modelError(error); setBusy(false); }
+});
+document.querySelectorAll('[data-setup-tab]').forEach(button => button.addEventListener('click', () => showSetupTab(button.dataset.setupTab)));
+
 async function loadManagedTools() {
   const dependencies = await api('/api/dependencies');
+  modelElement('shared-support-size').textContent = `Shared support models: ${(dependencies.sharedSupport.bytes / 1024 ** 3).toFixed(2)} GiB, plus Python packages. Existing valid files are verified and kept.`;
   modelElement('tools-list').replaceChildren();
   modelElement('tools-summary').textContent = tr(dependencies.features.length ? 'toolsHint' : 'noManagedTools');
   const core = dependencies.comfyui;
@@ -261,17 +285,10 @@ async function loadManagedTools() {
     toolsRow('Background removal compatibility', `${background.versions['transparent-background'] || 'Unverified'} | ${background.detail}`);
   }
   for (const plan of dependencies.repairPlans || []) {
+    if (plan.featureId === 'all-managed-dependencies') plan.sharedSupport = dependencies.sharedSupport;
     const saved = dependencies.repairState?.featureId === plan.featureId ? dependencies.repairState : null;
     toolsRow(plan.label, saved ? `${saved.phase} | ${saved.completedTargets.length} steps completed | ${saved.error || ''}` : `${plan.steps.length} managed repair steps | Review suites and pins`, '', '',
-      async () => {
-        if (!window.confirm([plan.label, ...plan.steps.map(step => `${step.target}: ${step.pins.join(', ')}`), ...plan.holds,
-          'Install / verify these managed tools using existing Setup? Model downloads are separate. Local changes are preserved. Restart and native runtime preflight are required.'].join('\n\n'))) return;
-        setBusy(true);
-        try {
-          const result = await api('/api/dependencies/repair', { method: 'POST', body: JSON.stringify({ featureId: plan.featureId, planId: plan.id }) });
-          renderJob(result.job); void poll();
-        } catch (error) { modelError(error); setBusy(false); }
-      }, saved && ['held', 'failed'].includes(saved.phase) ? 'Review / Resume' : 'Review repair');
+      () => reviewAndInstallManagedPlan(plan), saved && ['held', 'failed'].includes(saved.phase) ? 'Review / Resume' : 'Review repair');
     if (saved && ['restart-required', 'preflight-held', 'preflight-passed'].includes(saved.phase)) {
       toolsRow('Runtime readiness', 'Start managed ComfyUI normally and refresh its frontend; native hooks and GPU remain unqualified.', '', '', async () => {
         try {

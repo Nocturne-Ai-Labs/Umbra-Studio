@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { invalidateManagedPythonSetupEvidence, prepareManagedDependencyInstallPolicy } from '../updater/ManagedDependencyInstallPolicy';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
-import { MODEL_MANIFESTS, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
+import { MODEL_MANIFESTS, SHARED_VISION_PROFILES, sharedSupportCatalog, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
@@ -20,7 +20,7 @@ const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
 const MAX_LOG_LINES = 500;
 
-type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools';
+type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools' | 'python-helpers';
 type SetupJobState = {
   id: string;
   kind: SetupJobKind;
@@ -197,6 +197,14 @@ async function runModelInstall(
   check = false,
   hfToken = '',
 ) {
+  if (kind === 'python-helpers') {
+    job.step = 'Installing Python Helpers';
+    await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), ['python-helpers'], job, '', sourceRoot);
+    if (!job.lines.some((line) => line === 'UMBRA_VERIFY_OK|setup-tools')) {
+      throw new Error('Python Helpers verification did not complete. Review the setup log.');
+    }
+    return;
+  }
   if (kind === 'data-forge') {
     job.step = 'Installing WD tagger models';
     await runScript(runtimeRoot, join(sourceRoot, 'scripts', 'download-waifu-models.mjs'), [], job);
@@ -287,7 +295,7 @@ async function main() {
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
         try {
           const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
-          return json({ success: true, ...status, repairState: managedRepairState,
+          return json({ success: true, ...status, sharedSupport: sharedSupportCatalog(sourceRoot), repairState: managedRepairState,
             repairPlans: managedWorkflowRepairPlans(status) });
         }
         catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
@@ -349,7 +357,15 @@ async function main() {
           const job: SetupJobState = { id: randomUUID(), kind: 'managed-tools', phase: 'running', step: `Preparing ${plan.label}`,
             lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false };
           activeJob = job;
-          void runManagedWorkflowRepair(plan, state, {
+          void (async () => {
+            if (plan.featureId === 'all-managed-dependencies') {
+              await runModelInstall(runtimeRoot, sourceRoot, 'python-helpers', job);
+              await runModelInstall(runtimeRoot, sourceRoot, 'data-forge-pixai', job);
+              await runModelInstall(runtimeRoot, sourceRoot, 'data-forge', job);
+              await runModelInstall(runtimeRoot, sourceRoot, 'support', job, ['core']);
+              await runModelInstall(runtimeRoot, sourceRoot, 'requirements', job, SHARED_VISION_PROFILES);
+            }
+            await runManagedWorkflowRepair(plan, state, {
             assertIdle: assertDependencyIdle, persist: persistManagedRepair,
             inspect: () => inspectManagedDependencies(sourceRoot, runtimeRoot),
             install: async (step) => {
@@ -369,7 +385,8 @@ async function main() {
                   || compareUmbraVersions(verified.comfyui.frontendVersion || '0.0.0', verified.comfyui.minimumFrontendRequired || '0.0.0') < 0)) throw new Error('The core/frontend bundle still needs repair.');
               } finally { state.lines.push(...job.lines.slice(-20)); }
             },
-          }).then(() => { job.phase = 'complete'; job.step = 'Restart required; runtime preflight pending'; job.completedAt = new Date().toISOString(); })
+            });
+          })().then(() => { job.phase = 'complete'; job.step = 'Restart required; runtime preflight pending'; job.completedAt = new Date().toISOString(); })
             .catch((error) => { job.phase = 'failed'; job.step = 'Managed repair held'; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); });
           return json({ success: true, accepted: true, job, repairState: state }, 202);
         } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
@@ -431,7 +448,7 @@ async function main() {
           return json({ success: false, error: 'Model installation requires a settings object.' }, 400);
         }
         const kind = String(body.kind || '') as SetupJobKind;
-        if (!['data-forge', 'data-forge-pixai', 'umbra-ui', 'requirements', 'support'].includes(kind)) {
+        if (!['data-forge', 'data-forge-pixai', 'umbra-ui', 'requirements', 'support', 'python-helpers'].includes(kind)) {
           return json({ success: false, error: 'Choose a supported model pack.' }, 400);
         }
         let profiles: string[] = ['core'];
@@ -453,7 +470,7 @@ async function main() {
           startedAt: new Date().toISOString(),
           completedAt: null,
           error: '',
-          cancellable: kind !== 'data-forge' && kind !== 'data-forge-pixai',
+          cancellable: kind !== 'data-forge' && kind !== 'data-forge-pixai' && kind !== 'python-helpers',
         };
         activeJob = job;
         void runModelInstall(runtimeRoot, sourceRoot, kind, job, profiles, body.check === true, String(body.hfToken || '').trim())

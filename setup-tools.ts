@@ -901,6 +901,15 @@ function ensureVenvPip(venvPython: string, workingDirectory: string, label: stri
     );
 }
 
+function verifyUmbraPythonHelpers(venvPython: string): boolean {
+    try {
+        const result = spawnSync(venvPython, ['-c', 'import onnxruntime, pandas, huggingface_hub, PIL, numpy, torch, transformers'], {
+            encoding: 'utf-8', shell: false, timeout: 60000
+        });
+        return result.status === 0;
+    } catch { return false; }
+}
+
 function setupUmbraPythonHelpersVenv(): boolean {
     ensureDir(PYTHON_HELPERS_DIR);
     if (!getVenvPython(PYTHON_HELPERS_DIR)) {
@@ -933,7 +942,7 @@ function setupUmbraPythonHelpersVenv(): boolean {
     const requirementsKey = PYTHON_HELPER_PACKAGES.join('\n');
     if (existsSync(markerPath)) {
         try {
-            if (readFileSync(markerPath, 'utf-8') === requirementsKey) {
+            if (readFileSync(markerPath, 'utf-8') === requirementsKey && verifyUmbraPythonHelpers(py)) {
                 log('OK', 'Umbra Python helper venv already prepared. Skipping.');
                 return true;
             }
@@ -953,6 +962,14 @@ function setupUmbraPythonHelpersVenv(): boolean {
         );
     }
 
+    if (!verifyUmbraPythonHelpers(py)) {
+        return failWithVerify(
+            'python-helper-import-check-failed',
+            'Python helper dependencies could not be imported after installation.',
+            [`Helper Python: ${py}`],
+            ['Review the installation log and retry Python Helpers repair.']
+        );
+    }
     writeFileSync(markerPath, requirementsKey, 'utf-8');
     log(`${c.green}OK${c.reset}`, `Umbra Python helper venv ready: ${PYTHON_HELPERS_DIR}`);
     return true;

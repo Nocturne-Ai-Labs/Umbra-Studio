@@ -7,7 +7,22 @@ export const MODEL_MANIFESTS: Record<ModelSetupPack, string> = {
   requirements: 'model-requirements-manifest.json',
   support: 'model-manifest.json',
 };
-type ModelFile = { destination: string; bytes: number; sha256: string };
+export const SHARED_VISION_PROFILES = ['canvas-reference-sdxl', 'canvas-reference-flux'];
+
+export function sharedSupportCatalog(sourceRoot: string) {
+  const support = readModelSetupManifest(sourceRoot, 'support');
+  const requirements = readModelSetupManifest(sourceRoot, 'requirements');
+  const dataForge = JSON.parse(readFileSync(join(sourceRoot, 'defaults', 'DataForge', 'model-manifest.json'), 'utf8')) as Manifest;
+  const models = [
+    ...support.models.filter(model => model.installPolicy === 'automatic'),
+    ...requirements.models.filter(model => model.installPolicy === 'automatic' && model.profiles.some(profile => SHARED_VISION_PROFILES.includes(profile))),
+    ...dataForge.models,
+  ];
+  const files = new Map<string, number>();
+  for (const model of models) for (const file of model.files) files.set(`${model.id}/${file.destination || file.path}`, file.bytes);
+  return { bytes: [...files.values()].reduce((total, bytes) => total + bytes, 0), modelIds: models.map(model => model.id) };
+}
+type ModelFile = { destination: string; path?: string; bytes: number; sha256: string };
 type Manifest = {
   schemaVersion: number;
   profiles: Record<string, { label: string; description: string; noDownload?: boolean; requiresProfiles?: string[] }>;

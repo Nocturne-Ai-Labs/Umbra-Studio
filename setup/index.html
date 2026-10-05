@@ -158,10 +158,31 @@
       <div id="status" class="status" data-i18n="standaloneService">Standalone service</div>
     </header>
     <main>
+      <section class="panel" aria-labelledby="setup-guide-title">
+        <h2 id="setup-guide-title" data-i18n="setupGuide">Set up Umbra Studio</h2>
+        <button id="install-all-dependencies" class="button primary" type="button" data-i18n="installAllDependencies">Install All Dependencies & Support Models</button>
+        <p data-i18n="allDependenciesHint">One click installs shared Python packages (including pandas), WD and PixAI taggers, natural-language tagging/captioning (Qwen2-VL), detailers, SAM, upscaling/interpolation, CLIP/SigLIP vision support, and managed workflow tools. Generation checkpoints and model-family downloads stay separate in Step 3. Stop managed ComfyUI before installing.</p>
+        <p id="shared-support-size" aria-live="polite">Shared support models: approximately 12.75 GiB, plus Python packages. Existing valid files are verified and kept.</p>
+        <p class="model-license-disclaimer" data-i18n="modelLicenseDisclaimer">Model licenses are separate from Umbra Studio’s license. Review the terms shown in Models before installation.</p>
+        <ol>
+          <li data-i18n="setupStep1">Step 1 — Choose and save your language below.</li>
+          <li><span data-i18n="setupStep2">Step 2 — Install shared dependencies and support models above, or use Tools and Models to repair individual features.</span> <button class="button" type="button" data-setup-tab="tools" data-i18n="openTools">Open Tools</button></li>
+          <li><span data-i18n="setupStep3">Step 3 — Separately choose the generation model family you want in Models, then add its compatible checkpoint in Model Manager where required.</span> <button class="button" type="button" data-setup-tab="models" data-i18n="openModels">Open Models</button></li>
+          <li data-i18n="setupStep4">Step 4 — Launch Umbra Studio, start ComfyUI from Umbra, and test the features you selected. After tool repairs, restart ComfyUI and use Tools runtime preflight to check registration.</li>
+        </ol>
+        <h3 data-i18n="featureSetupTitle">What to install for each feature</h3>
+        <ul>
+          <li data-i18n="featureGeneration">Image / video generation, Power Prompter and Canvas: managed ComfyUI and the workflow tools for your selected family; then its Model families pack and a compatible checkpoint in Model Manager where required.</li>
+          <li data-i18n="featureSupport">Detailers, masking and upscaling: the relevant workflow tools in Tools and the matching Pipeline support models in Models.</li>
+          <li data-i18n="featureTagging">Waifu tagging, natural-language tagging/captioning, Image Inspector and Data Forge: Python Helpers in Tools plus Data Forge Models in Models. PixAI additionally needs Install PixAI Tagger.</li>
+          <li data-i18n="featureGallery">Gallery browsing and prompt editing: no additional AI models are needed.</li>
+          <li data-i18n="featureRemote">Umbra Remote: launch Umbra, open Umbra Remote, and follow its three-step connection guide.</li>
+        </ul>
+      </section>
       <nav class="setup-tabs" role="tablist" aria-label="Setup">
-        <button id="tab-general" class="button" role="tab" aria-selected="true" aria-controls="general-panel" data-i18n="languageLabel">Language</button>
-        <button id="tab-models" class="button" role="tab" aria-selected="false" aria-controls="models-panel" data-i18n="modelsTab">Models</button>
-        <button id="tab-tools" class="button" role="tab" aria-selected="false" aria-controls="tools-panel" data-i18n="toolsTab">Tools</button>
+        <button id="tab-general" class="button" role="tab" aria-selected="true" aria-controls="general-panel" data-i18n="languageStepTab">1. Language</button>
+        <button id="tab-tools" class="button" role="tab" aria-selected="false" aria-controls="tools-panel" data-i18n="toolsStepTab">2. Tools</button>
+        <button id="tab-models" class="button" role="tab" aria-selected="false" aria-controls="models-panel" data-i18n="modelsStepTab">3. Models</button>
       </nav>
       <section id="general-panel" class="panel" role="tabpanel" aria-labelledby="tab-general">
         <div class="section-label" data-i18n="languageLabel">Language</div>
@@ -227,9 +248,13 @@
           <h2 data-i18n="managedTools">Managed tools</h2>
           <button id="tools-refresh" class="button" type="button" data-i18n="refreshTools">Refresh</button>
         </div>
+        <h3 data-i18n="pythonHelpers">Python Helpers</h3>
+        <p data-i18n="pythonHelpersDescription">Install or repair shared Python dependencies for Waifu tagging and captioning.</p>
+        <button class="button" data-install="python-helpers" type="button" data-i18n="installPythonHelpers">Install / Repair Python Helpers</button>
         <p id="tools-summary" aria-live="polite"></p>
         <div id="tools-list" class="model-files"></div>
         <p id="tools-message" aria-live="polite"></p>
+
       </section>
       <section id="progress" class="progress">
         <div class="progress-head">
@@ -255,6 +280,28 @@
     const SETUP_TRANSLATIONS = {
       en: {
         standaloneService: 'Standalone service',
+        setupGuide: "Set up Umbra Studio",
+        installAllDependencies: "Install All Dependencies & Support Models",
+        allDependenciesHint: "One click installs shared Python packages (including pandas), WD and PixAI taggers, natural-language tagging/captioning (Qwen2-VL), detailers, SAM, upscaling/interpolation, CLIP/SigLIP vision support, and managed workflow tools. Generation checkpoints and model-family downloads stay separate in Step 3. Stop managed ComfyUI before installing.",
+        setupStep1: "Step 1 — Choose and save your language below.",
+        setupStep2: "Step 2 — Install shared dependencies and support models above, or use Tools and Models to repair individual features.",
+        setupStep3: "Step 3 — Separately choose the generation model family you want in Models, then add its compatible checkpoint in Model Manager where required.",
+        setupStep4: "Step 4 — Launch Umbra Studio, start ComfyUI from Umbra, and test the features you selected. After tool repairs, restart ComfyUI and use Tools runtime preflight to check registration.",
+        openTools: "Open Tools",
+        openModels: "Open Models",
+        featureSetupTitle: "What to install for each feature",
+        featureGeneration: "Image / video generation, Power Prompter and Canvas: managed ComfyUI and the workflow tools for your selected family; then its Model families pack and a compatible checkpoint in Model Manager where required.",
+        featureSupport: "Detailers, masking and upscaling: the relevant workflow tools in Tools and the matching Pipeline support models in Models.",
+        featureTagging: "Waifu tagging, natural-language tagging/captioning, Image Inspector and Data Forge: Python Helpers in Tools plus Data Forge Models in Models. PixAI additionally needs Install PixAI Tagger.",
+        featureGallery: "Gallery browsing and prompt editing: no additional AI models are needed.",
+        featureRemote: "Umbra Remote: launch Umbra, open Umbra Remote, and follow its three-step connection guide.",
+        languageStepTab: "1. Language",
+        toolsStepTab: "2. Tools",
+        modelsStepTab: "3. Models",
+        pythonHelpers: 'Python Helpers',
+        pythonHelpersDescription: 'Install or repair shared Python dependencies for Waifu tagging and captioning.',
+        installPythonHelpers: 'Install / Repair Python Helpers',
+        installingPythonHelpers: 'Installing Python Helpers',
         languageLabel: 'Language',
         languageTitle: 'Choose your preferred language',
         languageDescription: 'This preference is stored in your portable User folder and can be changed later in Umbra Studio settings.',
@@ -292,6 +339,14 @@
       },
       de: {
         standaloneService: 'Eigenständiger Dienst',
+        setupGuide: 'Umbra Studio einrichten',
+        installAllDependencies: 'Alle Abhängigkeiten installieren',
+        openTools: 'Tools öffnen', openModels: 'Modelle öffnen',
+        languageStepTab: '1. Sprache', toolsStepTab: '2. Tools', modelsStepTab: '3. Modelle',
+        pythonHelpers: 'Python-Hilfsprogramme',
+        pythonHelpersDescription: 'Gemeinsame Python-Abhängigkeiten für Waifu-Tagging und Bildbeschreibungen installieren oder reparieren.',
+        installPythonHelpers: 'Python-Hilfsprogramme installieren / reparieren',
+        installingPythonHelpers: 'Python-Hilfsprogramme werden installiert',
         languageLabel: 'Sprache',
         languageTitle: 'Wählen Sie Ihre bevorzugte Sprache',
         languageDescription: 'Diese Einstellung wird in Ihrem portablen User-Ordner gespeichert und kann später in den Umbra-Studio-Einstellungen geändert werden.',
@@ -372,6 +427,7 @@
     function localizeJobStep(step) {
       const jobSteps = {
         'Preparing installer': 'preparingInstaller',
+        'Installing Python Helpers': 'installingPythonHelpers',
         'Installing WD tagger models': 'installingWdTaggers',
         'Installing PixAI Python dependencies': 'installingPixaiDependencies',
         'Installing optional PixAI tagger': 'installingPixaiTagger',
@@ -385,6 +441,7 @@
 
     function setBusy(busy) {
       installButtons.forEach((button) => { button.disabled = busy; });
+      document.getElementById('install-all-dependencies').disabled = busy;
       document.getElementById('launch').disabled = busy;
       document.getElementById('close').disabled = busy;
       setModelBusy(busy);
@@ -403,7 +460,7 @@
       setBusy(job.phase === 'running');
       renderModelProgress(job);
       renderToolsProgress(job);
-      status.textContent = job.phase === 'running' ? job.kind === 'managed-tools' ? job.step : tr('installingModels') : localizeJobStep(job.step);
+      status.textContent = job.phase === 'running' ? job.kind === 'managed-tools' || job.kind === 'python-helpers' ? localizeJobStep(job.step) : tr('installingModels') : localizeJobStep(job.step);
       status.classList.toggle('error', job.phase === 'failed');
     }
 
