@@ -38,7 +38,7 @@
 ### Validation And Packaging
 
 - Independent source reviews and focused regression checks passed. Frontend build/lint, root/frontend/setup type checks and isolated Linux source/API/UI checks passed. Readiness fixtures were inert and no personal installation was used.
-- Native Windows runtime, fresh GPU generation and full managed-tool installation remain unqualified. Windows packages are built on Windows CI; packaged candidate results are recorded separately. Both portable ZIPs omit installed tools, user-selected generation weights and the large Data Forge model pack; use **Umbra Setup → Models** for optional pinned model downloads.
+- Native Windows launcher/runtime, full ComfyUI and AI Toolkit install/update/start, installed core-support verification, fresh GPU generation and Power Prompter hires/detailer graph receipt, and a refreshed curated UI tour remain unqualified. Windows packages are built on Windows CI; packaged candidate results are recorded separately. Both portable ZIPs omit installed tools, user-selected generation weights and the large Data Forge model pack; use **Umbra Setup → Models** for optional pinned model downloads.
 
 ### Fixes And Quality-of-Life Recap
 
