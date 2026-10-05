@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.90.4-beta - Guided Setup And Faster Queue Handoffs
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio.
+- Open **UmbraSetup.bat** on Windows or **./umbra-setup.sh** on Linux for the numbered setup guide. Stop managed ComfyUI before dependency installation. The top **Install All Dependencies & Support Models** button installs Python helpers (including pandas), WD/Waifu and PixAI taggers, natural-language tagging/captioning, automatic detailer/masking/upscale support, reference vision models, and declared managed dependencies in one run.
+- This shared bundle downloads approximately **12.75 GiB of model files**, plus Python packages. Review the displayed model licenses and allow sufficient disk space. It does not include large generation-model families/checkpoints: choose those separately in **Models**, for the features you want to use.
+- If only Python helper imports are missing, use **Tools → Install / Repair Python Helpers**. After dependency repair, launch/restart managed ComfyUI and run runtime preflight; downloaded files alone do not establish runtime readiness.
+- **If ComfyUI cannot launch, Launch remains disabled, or automatic startup fails after updating an older/incomplete installation:** use **Neural Hub → ComfyUI → Install** to reinstall/repair, with managed ComfyUI stopped, and wait for all stages to finish. Existing models and user data remain in place. Then Launch, or restart Umbra to retry enabled automatic startup.
+- Linux managed-node prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Guided Setup
+
+- Add a four-step guide: language, shared dependencies/support, separate generation models, and launch/runtime verification. Map features to their required installations, including natural-language captions.
+- Probe required Python imports before trusting the helper completion marker, and again after pip installation. A stale marker can no longer hide missing pandas or other helper dependencies.
+- Keep authenticated installation, one active installer, managed-process idle checks, current repair-plan validation, and model verification in place.
+
+### Responsiveness And Gallery
+
+- Submit ComfyUI jobs without waiting for preview WebSocket readiness. Preview monitoring connects in parallel; workflow validation, metadata preparation, and configured Power Prompter dispatch delay remain.
+- Wake completion checks on ComfyUI events and use a 250 ms polling fallback instead of 1.5 seconds. The authoritative queue response still decides completion, preserving uncertain-submission and outage protections.
+- Preserve the Gallery grid and current scroll position during same-folder refreshes, including filmstrip refresh. Reject stale scroll restoration after navigation; intentional folder/sort resets remain.
+- Hide fast successful read-request traces in the terminal by default. Writes, errors, slow responses, and important status responses remain visible; diagnostic logging restores full traces. UI polling frequency is unchanged.
+
+### Validation
+
+- 33 focused regressions cover logging, Gallery refresh races, queue activity/fallback behavior, and setup import verification/worker ordering. Actual-source isolated API and desktop/tablet/phone UI checks passed. Combined frontend build/lint, backend/frontend type checks, source export audit, and pipeline audit are required before publication.
+- Installer boundary tests used mocked pip/model downloads. The full 12.75 GiB installation, live GPU job timing, physical touch, and Windows runtime execution remain unqualified. Windows packages are built on Windows CI; packaged Linux smoke checks are recorded separately.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Gallery refresh could shrink the image grid and snap scrolling toward the top.
+- Fixed: a stale helper completion marker could leave required Python imports missing.
+- Improved: job submission no longer waits for preview socket readiness, and completion checks wake sooner between jobs.
+- Improved: fast successful polling requests no longer flood the terminal by default.
+- Improved: numbered setup, feature-to-install guidance, and one-click shared support installation, including natural-language tagging/captioning.
+
 ## v0.90.3-beta - Umbra Remote Setup And Connection Checks
 
 ### TL;DR - Setup After Updating
