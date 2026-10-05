@@ -168,18 +168,18 @@ export function shouldRemoteSettingsRequireRestart({
   activeBindHost,
   activePort,
   runtimeOverrides,
-  suppressRestart = false,
+  activeTailscaleServe = false,
 }: {
   savedBindHost: string;
   savedPort: number;
   activeBindHost: string;
   activePort: number;
   runtimeOverrides: RemoteRuntimeOverrides;
-  suppressRestart?: boolean;
+  activeTailscaleServe?: boolean;
 }): boolean {
-  if (suppressRestart) return false;
   return (
-    (!runtimeOverrides.bindHost && savedBindHost !== activeBindHost)
+    // Serve already reaches this listener; widening the bind is unnecessary.
+    (!runtimeOverrides.bindHost && !activeTailscaleServe && savedBindHost !== activeBindHost)
     || (!runtimeOverrides.port && savedPort !== activePort)
   );
 }

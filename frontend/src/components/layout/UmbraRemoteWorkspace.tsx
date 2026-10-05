@@ -23,6 +23,7 @@ import {
 import * as QRCode from 'qrcode';
 import { useStore } from '@/store/useStore';
 import { cn } from '@/lib/utils';
+import { probeRemoteUrl, type RemoteUrlProbeResult } from '@/lib/remoteUrlProbe';
 
 type RemoteStatus = {
   ok?: boolean;
@@ -118,14 +119,7 @@ type RemoteDevice = {
   lastAuthenticatedAt: number;
 };
 
-type RemoteUrlTestResult = {
-  ok?: boolean;
-  secure?: boolean;
-  status?: number;
-  latencyMs?: number;
-  error?: string;
-  testing?: boolean;
-};
+type RemoteUrlTestResult = Partial<RemoteUrlProbeResult> & { testing?: boolean };
 
 type RemoteTelemetrySnapshot = {
   ok?: boolean;
@@ -239,7 +233,7 @@ function UrlRow({
   return (
     <div
       className={cn(
-        'group flex items-center gap-3 rounded-lg border bg-black/25 px-3 py-2',
+        'group flex flex-wrap items-center gap-3 rounded-lg border bg-black/25 px-3 py-2',
         primary ? 'border-cyan-300/35 shadow-[0_0_18px_rgba(0,255,255,0.12)]' : 'border-white/10',
       )}
     >
@@ -254,7 +248,7 @@ function UrlRow({
         {descriptor.tone === 'tailscale' ? <LockKeyhole size={15} /> : <Globe2 size={15} />}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">{descriptor.label}</span>
           {primary ? (
             <span className={cn(
@@ -268,45 +262,50 @@ function UrlRow({
             <span className={cn(
               'rounded border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest',
               testResult.testing && 'border-cyan-300/30 bg-cyan-500/10 text-cyan-100',
-              !testResult.testing && testResult.ok && 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100',
+              !testResult.testing && testResult.ok && !testResult.setupRequired && 'border-emerald-300/30 bg-emerald-500/10 text-emerald-100',
+              !testResult.testing && testResult.setupRequired && 'border-yellow-300/30 bg-yellow-500/10 text-yellow-100',
               !testResult.testing && testResult.ok === false && 'border-red-300/30 bg-red-500/10 text-red-100',
             )}>
-              {testResult.testing ? 'Testing' : testResult.ok ? `${testResult.status || 200} ${testResult.latencyMs || 0}ms` : 'Failed'}
+              {testResult.testing ? 'Testing' : testResult.ok ? `Reachable ${testResult.latencyMs || 0}ms` : 'Failed'}
             </span>
           ) : null}
         </div>
         <div className="truncate font-mono text-xs text-zinc-100">{url}</div>
-        {testResult?.error ? <div className="truncate text-[10px] text-red-200">{testResult.error}</div> : null}
+        {!testResult?.testing && testResult?.message ? <div className="mt-1 text-xs leading-relaxed text-zinc-300">{testResult.message}</div> : null}
+        {!testResult?.testing && testResult?.error ? <div className="mt-1 text-xs leading-relaxed text-red-200">{testResult.error}</div> : null}
       </div>
-      {onTest ? (
+      <div className="ml-auto flex w-full justify-end gap-2 sm:w-auto">
+        {onTest ? (
+          <button
+            type="button"
+            onClick={() => onTest(url)}
+            disabled={testResult?.testing}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-white/10 sm:h-8 sm:w-8 text-zinc-400 hover:border-emerald-300/40 hover:bg-emerald-500/10 hover:text-emerald-100"
+            title="Test URL"
+            aria-label="Test URL"
+          >
+            <Play size={13} />
+          </button>
+        ) : null}
         <button
           type="button"
-          onClick={() => onTest(url)}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:border-emerald-300/40 hover:bg-emerald-500/10 hover:text-emerald-100"
-          title="Test URL"
-          aria-label="Test URL"
+          onClick={copyUrl}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-white/10 sm:h-8 sm:w-8 text-zinc-400 hover:border-cyan-300/40 hover:bg-cyan-500/10 hover:text-cyan-100"
+          title="Copy URL"
+          aria-label="Copy URL"
         >
-          <Play size={13} />
+          <Copy size={14} />
         </button>
-      ) : null}
-      <button
-        type="button"
-        onClick={copyUrl}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:border-cyan-300/40 hover:bg-cyan-500/10 hover:text-cyan-100"
-        title="Copy URL"
-        aria-label="Copy URL"
-      >
-        <Copy size={14} />
-      </button>
-      <button
-        type="button"
-        onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:border-white/25 hover:bg-white/5 hover:text-white"
-        title="Open URL"
-        aria-label="Open URL"
-      >
-        <ExternalLink size={14} />
-      </button>
+        <button
+          type="button"
+          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-white/10 sm:h-8 sm:w-8 text-zinc-400 hover:border-white/25 hover:bg-white/5 hover:text-white"
+          title="Open URL"
+          aria-label="Open URL"
+        >
+          <ExternalLink size={14} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -488,7 +487,13 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
           : tailscaleBackendState === 'Stopped'
             ? 'Stopped'
             : tailscaleBackendState;
-  const remoteSummary = openRemoteReady
+  const remoteSummary = openRemoteReady && status?.settings?.requireRemoteAuth !== false && !authConfigured
+    ? {
+      title: 'Remote Account Required',
+      message: 'Your Tailscale route is ready. Open Security and create the Remote Access Account before signing in from another device.',
+      tone: 'offline' as const,
+    }
+    : openRemoteReady
     ? {
       title: 'Remote Ready',
       message: 'Umbra Remote is available through your live Tailscale connection.',
@@ -609,29 +614,17 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
   };
 
   const testRemoteUrl = async (targetUrl: string) => {
-    setUrlTests((current) => ({ ...current, [targetUrl]: { ...(current[targetUrl] || {}), testing: true } }));
+    setUrlTests((current) => ({ ...current, [targetUrl]: { testing: true } }));
     const startedAt = performance.now();
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 5000);
     try {
-      const checkUrl = new URL('/api/healthz/live', targetUrl).toString();
-      const response = await fetch(checkUrl, {
-        cache: 'no-store',
-        credentials: 'include',
-        signal: controller.signal,
-      });
-      const payload: RemoteUrlTestResult = {
-        ok: response.ok,
-        secure: new URL(targetUrl).protocol === 'https:',
-        status: response.status,
-        latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
-        error: response.ok ? undefined : `HTTP ${response.status}`,
-      };
+      const payload = await probeRemoteUrl(targetUrl, controller.signal);
       setUrlTests((current) => ({
         ...current,
         [targetUrl]: { ...payload, testing: false },
       }));
-      showToast(payload.ok ? 'Remote URL is reachable' : 'Remote URL test failed', payload.ok ? 'success' : 'error');
+      showToast(payload.ok ? (payload.setupRequired ? 'URL reachable; Remote account setup required' : 'Remote URL is reachable') : 'Remote URL test failed', payload.ok ? 'success' : 'error');
     } catch (testError) {
       setUrlTests((current) => ({
         ...current,
@@ -639,7 +632,11 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
           ok: false,
           testing: false,
           latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
-          error: testError instanceof Error ? testError.message : 'Test failed',
+          error: controller.signal.aborted
+            ? 'Connection timed out. Check Tailscale on this device and the Serve route, then retry.'
+            : testError instanceof TypeError
+              ? 'Could not reach this URL from this browser. Check Tailscale, the Serve route, and HTTPS.'
+              : testError instanceof Error ? testError.message : 'Test failed',
         },
       }));
       showToast('Remote URL test failed', 'error');
@@ -809,7 +806,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--umbra-bg)] text-[var(--umbra-text)]">
-      <header className="flex items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-5 py-4 backdrop-blur-xl">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-black/20 px-5 py-4 backdrop-blur-xl">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-cyan-300/35 bg-cyan-500/10 text-cyan-100 shadow-[0_0_24px_rgba(0,255,255,0.12)]">
             <Wifi size={18} />
@@ -881,7 +878,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
 
           <div className="grid gap-3 lg:grid-cols-4">
             {[
-              { label: 'Auth', value: authConfigured ? 'Configured' : 'Missing', good: authConfigured },
+              { label: 'Auth', value: status?.settings?.requireRemoteAuth === false ? 'Not required' : authConfigured ? 'Configured' : 'Setup required', good: status?.settings?.requireRemoteAuth === false || authConfigured },
               {
                 label: 'HTTPS',
                 value: tailscaleServeTargetMismatch
@@ -1144,7 +1141,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
               <div className="flex shrink-0 items-center gap-2">
                 {status?.settings?.pendingRestart ? (
                   <span className="rounded border border-yellow-300/30 bg-yellow-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-yellow-100">
-                    Restart Required
+                    Listener Restart Pending
                   </span>
                 ) : null}
                 <button
@@ -1195,7 +1192,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
                   <option value="::">All IPv6 interfaces - ::</option>
                 </UmbraSelectControl>
                 <span className="mt-1 block text-xs text-zinc-600">
-                  Listener changes apply after restart. Current: {status?.settings?.active?.bindHost || status?.bindHost || '--'}
+                  Tailscale Serve works with a local listener. Port changes apply after restarting Umbra. Current: {status?.settings?.active?.bindHost || status?.bindHost || '--'}
                   {status?.settings?.active?.runtimeOverrides?.bindHost ? ' (launch override)' : ''}.
                 </span>
               </label>
@@ -1620,20 +1617,20 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
           </div>
 
           <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-            <h3 className="text-xs font-black uppercase tracking-[0.18em] text-white">Remote Mode Checklist</h3>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <h3 className="text-xs font-black uppercase tracking-[0.18em] text-white">Connect Another Device</h3>
+            <ol className="mt-3 space-y-2">
               {[
-                'Tailscale is required for Umbra Remote access.',
-                'Remote clients must sign in with the Umbra Remote username and password.',
-                'Tailscale Serve gives you an HTTPS MagicDNS URL inside your tailnet.',
-                'Non-tailnet clients are not part of this Remote setup.',
-              ].map((item) => (
-                <div key={item} className="flex items-start gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-xs text-zinc-300">
-                  <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-300" />
+                'Sign in to Tailscale on this host and your remote device using the same tailnet.',
+                'In Connection, enable Umbra Remote and save. A local listener works with Tailscale Serve.',
+                'In Security, create the Remote Access Account if Umbra login is required.',
+                'In Connection, enable Tailscale Serve. Open the HTTPS URL on your remote device and sign in. Test URL checks reachability; it does not sign you in.',
+              ].map((item, index) => (
+                <li key={item} className="flex items-start gap-2 text-sm leading-relaxed text-zinc-300">
+                  <span className="shrink-0 font-mono text-zinc-500">{index + 1}.</span>
                   <span>{item}</span>
-                </div>
+                </li>
               ))}
-            </div>
+            </ol>
           </div>
           </>
           ) : null}

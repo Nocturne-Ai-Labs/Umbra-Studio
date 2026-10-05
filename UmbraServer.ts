@@ -151,6 +151,7 @@ import {
 import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
 import { applyLtx25PromptEnhancerInputs } from './backend/Ltx25PromptEnhancer';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
+import { REMOTE_CONNECTIVITY_PATH, createRemoteConnectivityStatus, isHostConnectivityProbeOrigin } from './backend/remoteConnectivity';
 import {
   createUnavailableTailscaleStatus,
   normalizeTailscalePeerIp,
@@ -2927,6 +2928,7 @@ function resolveCorsOrigin(rawOrigin: unknown, req?: Request): string {
     if (requestOrigin && requestOrigin === normalizedOrigin) return normalizedOrigin;
     const requestUrl = new URL(req.url);
     if (getRequestVisibleOrigin(req, requestUrl) === normalizedOrigin) return normalizedOrigin;
+    if (isHostConnectivityProbeOrigin(normalizedOrigin, requestUrl.pathname, req.method, PORT)) return normalizedOrigin;
   }
   // Published host-only routes trust the app's own origin, not arbitrary
   // browser pages served by other loopback ports.
@@ -33752,6 +33754,13 @@ const server = Bun.serve<UmbraSocketData>({
           }
         }
 
+        if (method === 'GET' && path === REMOTE_CONNECTIVITY_PATH) {
+          return json(createRemoteConnectivityStatus(
+            remoteConnectionSettings.requireRemoteAuth !== false,
+            Boolean(effectiveRemoteAuthConfig),
+          ), { headers: { 'Cache-Control': 'no-store' } });
+        }
+
         if (method === 'GET' && path === '/api/remote/auth/status') {
           return json(createRemoteAuthStatus(req, url, effectiveRemoteAuthConfig, server));
         }
@@ -34411,7 +34420,9 @@ const server = Bun.serve<UmbraSocketData>({
             activeBindHost: HOST,
             activePort: PORT,
             runtimeOverrides,
-            suppressRestart: publishedTailscaleOnly && Boolean(currentTailscaleOrigin),
+            activeTailscaleServe: publishedTailscaleOnly
+              && remoteSettings.enabled
+              && (tailscaleAccess.serveEnabled || Boolean(currentTailscaleOrigin)),
           });
           return json({
             ok: true,
