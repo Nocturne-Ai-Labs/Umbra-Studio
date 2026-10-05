@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.90.1-beta - ComfyUI Installation And Action Console Reliability
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update Umbra Studio with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra.
+- If ComfyUI was installed with an older build or an installation failed, stop managed ComfyUI through Umbra and select **Install / Reinstall ComfyUI** in the ComfyUI controls to establish complete installation verification. Launch remains unavailable until all required setup stages finish. Existing model and user-data locations remain in place; this update adds no required model-weight download. Dependency repairs download the packages required by the selected installation.
+- On Windows, managed ordinary custom nodes require an available StringZilla wheel instead of silently compiling it. Conflicting binary-policy directives, unsafe source references, or unavailable compatible wheels stop with actionable guidance. Microsoft Visual C++ Build Tools and a Windows SDK may still be required by other source-built dependencies; the VC++ Redistributable alone is not a compiler.
+- On Linux, managed tools may require `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer. Model-family weights and optional tools remain separate Setup actions.
+
+### ComfyUI Installation And Lifecycle
+
+- Keep Launch, retry, and Restart Connected unavailable during unresolved or incomplete setup. A lost response or missing action history remains uncertain rather than unlocking launch or retrying an installer automatically.
+- Record full installation completion separately from the reusable core requirements cache. A later failed setup cannot be cleared by an older install or partial repair. Completion records survive version switching, and a successful full Update can repair an earlier failed Install.
+- Reject incomplete managed installations before Python launch diagnostics. Preserve normal Stop and explicitly configured external-runtime behavior.
+- Use the same ordinary-node Windows wheel guard in managed install and repair paths, expire outdated Windows verification, and retain raw pip errors with repair guidance.
+
+### Action Logs
+
+- Preserve replayed installer output across reconnects, retain a bounded console transcript with sequence and truncation metadata, and drain partial output before recording completion.
+- Group backend API actions in terminal diagnostics while omitting sensitive payloads and retaining main-action ownership across delegated work.
+
+### Validation
+
+- Installer/controller/lifecycle regressions: 191 passing cases and 60 source-boundary assertions, including separate-process Linux completion-record checks. Frontend build, lint, and frontend/backend type checks pass.
+- Live Omarchy development checks reject missing/incomplete managed installations before Python diagnostics and show locked launch controls. These checks used an isolated runtime and a controlled incomplete-install fixture. Complete managed ComfyUI install, Update, version switching, connected restart, and Windows runtime behavior have not been qualified end to end.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Launch could become available before all required ComfyUI setup stages succeeded.
+- Fixed: Older or partial installer attempts could override a newer failed attempt's completion evidence.
+- Fixed: Version switching lost completion evidence, and failed Install history could keep a successful full Update locked.
+- Fixed: Managed launch diagnostics and Restart Connected could run before incomplete-install rejection.
+- Fixed: Reconnecting action consoles could lose output or accept unrelated completion after an uncertain request.
+- Improved: Windows custom-node installation stops safely when its StringZilla wheel policy cannot be verified, with clearer dependency repair guidance.
+- Improved: Installer transcripts and grouped backend action logs provide more useful progress and failure diagnostics.
+
 ## v0.90.0-beta - Beta Milestone And Background Package Compatibility
 
 ### TL;DR - Setup After Updating

@@ -1,9 +1,10 @@
+import { comfyToolActions } from '@/lib/toolActionController';
 /**
  * Main App Component
  * Migrated from Next.js app router to standard React + React Router
  */
 
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { StudioShell } from '@/components/layout/StudioShell';
 import { DebugErrorBoundary } from '@/components/debug/DebugErrorBoundary';
@@ -79,6 +80,7 @@ const AppLoadingFallback = ({ fullscreen = false }: { fullscreen?: boolean }) =>
 );
 
 export function App() {
+  useEffect(() => comfyToolActions.attach(), []);
   const popoutMode = typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('umbraPopout')
     : null;

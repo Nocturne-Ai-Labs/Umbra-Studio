@@ -12,6 +12,7 @@
 import { join } from 'path';
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { execSync, spawnSync } from 'child_process';
+import { installOrdinaryNodeRequirements } from './setup/OrdinaryNodeRequirements';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
 import * as readline from 'readline';
@@ -98,7 +99,7 @@ function getGPUInfo(): { name: string; vramMB: number } | null {
     return null;
 }
 
-function installComfyNodeRequirements(comfyPath: string, nodePath: string, nodeName: string): boolean {
+function installComfyNodeRequirements(comfyPath: string, nodePath: string, nodeName: string, forceRequirements = false): boolean {
     const requirementsPath = join(nodePath, 'requirements.txt');
     if (!existsSync(requirementsPath)) return true;
 
@@ -110,29 +111,12 @@ function installComfyNodeRequirements(comfyPath: string, nodePath: string, nodeN
         return false;
     }
 
-    const requirementsHash = Bun.hash(readFileSync(requirementsPath, 'utf-8')).toString();
     const markerPath = join(nodePath, '.umbra-requirements-installed');
     if (nodeName === 'ComfyUI-DaSiWa-Nodes') {
         return installDaSiWaRequirements(venvPython, requirementsPath, markerPath);
     }
-    try {
-        if (readFileSync(markerPath, 'utf-8').trim() === requirementsHash) return true;
-    } catch {
-        // Missing or stale marker: install the current requirements.
-    }
-
-    log('->', `Installing requirements for ${nodeName}...`);
-    const result = spawnSync(venvPython, ['-m', 'pip', 'install', '-r', requirementsPath], {
-        cwd: comfyPath,
-        stdio: 'inherit'
-    });
-    if (result.status !== 0) {
-        log(`${c.red}X${c.reset}`, `Failed to install requirements for ${nodeName}`);
-        return false;
-    }
-
-    writeFileSync(markerPath, `${requirementsHash}\n`, 'utf-8');
-    return true;
+    return installOrdinaryNodeRequirements(venvPython, comfyPath, requirementsPath, markerPath, nodeName,
+        (message) => log('->', message), process.platform, forceRequirements);
 }
 
 function isLowVRAM(): boolean {
@@ -666,6 +650,7 @@ async function manageCustomNodes() {
         }
 
         console.log(`\n${c.cyan}Installing selected custom nodes...${c.reset}\n`);
+        let requiredFailure = false;
 
         for (const node of COMFY_NODES) {
             if ('nvidiaOnly' in node && node.nvidiaOnly && !getGPUInfo()) {
@@ -722,14 +707,20 @@ async function manageCustomNodes() {
                 }
             }
 
-            if (existsSync(nodePath) && !installComfyNodeRequirements(comfyPath, nodePath, node.name)) {
+            if (existsSync(nodePath) && !installComfyNodeRequirements(comfyPath, nodePath, node.name, IS_WINDOWS)) {
                 const required = 'required' in node && node.required;
+                if (required) requiredFailure = true;
                 const level = required ? `${c.red}X${c.reset}` : `${c.yellow}WARN${c.reset}`;
                 log(level, `${node.name} is present but its Python dependencies are incomplete`);
             }
+            if ('required' in node && node.required && !existsSync(nodePath)) requiredFailure = true;
         }
 
-        log(`${c.green}✓${c.reset}`, 'Custom node installation complete');
+        if (requiredFailure) {
+            log(`${c.red}X${c.reset}`, 'Required custom node installation failed. Review the original error above and retry.');
+        } else {
+            log(`${c.green}✓${c.reset}`, 'Custom node installation complete');
+        }
         await prompt('\nPress Enter to continue...');
         return manageCustomNodes();
     }

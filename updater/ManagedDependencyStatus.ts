@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
 import { daSiWaCoreRequirements } from '../setup/DaSiWaRequirements';
+import { ordinaryNodeRequirementsMarker } from '../setup/OrdinaryNodeRequirements';
 import { inspectManagedNodeFrontend, managedChildPath, readManagedToolRequirements, type ManagedNodeRequirement, type ManagedRuntimePackage } from '../setup/ManagedToolRequirements';
 import { inspectBackgroundRemovalCompatibility } from '../setup/BackgroundRemovalCompatibility';
 
@@ -127,7 +128,9 @@ function inspectPythonDependencies(comfyRoot: string, dependencyRoot: string, no
     const content = readFileSync(requirementsPath, 'utf8');
     const installedContent = nodeName === 'ComfyUI-DaSiWa-Nodes' ? daSiWaCoreRequirements(content) : content;
     const marker = readFileSync(join(dependencyRoot, nodeName ? '.umbra-requirements-installed' : '.requirements_installed'), 'utf8').trim();
-    if (marker === Bun.hash(installedContent).toString()) {
+    const expectedMarker = nodeName && nodeName !== 'ComfyUI-DaSiWa-Nodes'
+      ? ordinaryNodeRequirementsMarker(installedContent) : Bun.hash(installedContent).toString();
+    if (marker === expectedMarker) {
       const args = ['-I', '-c', PYTHON_REQUIREMENTS_PROBE];
       const probe = options.runPython ? options.runPython(python, args, installedContent)
         : spawnSync(python, args, { input: installedContent, encoding: 'utf8', windowsHide: true, timeout: 5_000 });

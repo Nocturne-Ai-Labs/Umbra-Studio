@@ -1,3 +1,9 @@
+import { beginComfyCompletion, hasComfyCompletion } from './setup/ComfyInstallCompletion';
+import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
+import { createToolLineFramer, MAX_TOOL_LOGS, MAX_TOOL_JOBS } from './backend/ToolActionConsole';
+import { createActionRelay } from './shared/backendActionRelay';
+import { addMainActionDelegation, isReturnedMainAction } from './shared/backendActionOwnership';
+import { createActionLogger } from './shared/backendActionLogger';
 import { assertVideoGenerationPolicy, normalizeVideoRoutePolicy, videoGenerationPolicyIssue, videoGraphPolicyIssue, type UmbraVideoRoutePolicy } from './shared/umbra-ui/videoRoutePolicy';
 import { OfficialVideoWorkflowService, officialCaptureMetadata } from './backend/OfficialVideoWorkflowService';
 import { isLastFrameVideoOutput, saveUmbraVideoLastFrame } from './backend/UmbraVideoLastFrame';
@@ -14800,6 +14806,9 @@ interface ToolActionJob {
   status: ToolActionStatus;
   exitCode?: number | null;
   logs: string[];
+  logStart: number;
+  logEnd: number;
+  droppedLogs: number;
   error?: string;
   verifyFailure?: {
     code: string;
@@ -14810,6 +14819,11 @@ interface ToolActionJob {
 }
 
 const toolActionJobs = new Map<string, ToolActionJob>();
+const toolOperations = createToolOperationAdmission();
+function toolBusy(tool: string) {
+  return { success: false, error: `${tool} is busy with another tool operation.`, busy: true, activeAction: toolOperations.get(tool) };
+}
+
 const VERIFY_FAIL_MARKER = 'UMBRA_VERIFY_FAIL|';
 
 function isChildProcessAlive(proc: ChildProcess | null): boolean {
@@ -15765,8 +15779,9 @@ function parseVerifyFailure(line: string): ToolActionJob['verifyFailure'] | null
   }
 }
 
-function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'aitoolkit') {
+function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'aitoolkit', claim?: ToolOperationClaim) {
   const id = crypto.randomUUID();
+  if (claim) claim.actionId = id;
   const bunBin = process.execPath || 'bun';
   const job: ToolActionJob = {
     id,
@@ -15774,18 +15789,30 @@ function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'ai
     tool,
     startedAt: Date.now(),
     status: 'running',
-    logs: []
+    logs: [], logStart: 0, logEnd: 0, droppedLogs: 0
   };
+  for (const [oldId, oldJob] of toolActionJobs) {
+    if (toolActionJobs.size < MAX_TOOL_JOBS) break;
+    if (oldJob.status !== 'running') toolActionJobs.delete(oldId);
+  }
   toolActionJobs.set(id, job);
 
-  const proc = spawn(bunBin, ['setup-tools.ts', ...args], {
-    cwd: SOURCE_DIR,
-    env: {
-      ...process.env,
-      UMBRA_ROOT: ROOT_DIR
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
+  let proc: ChildProcess;
+  let spawnError: Error | undefined;
+  try {
+    if (tool === 'comfyui' && (action === 'install' || action === 'update' || action === 'set_comfyui_version')) {
+      const toolPath = findToolDir(['comfyui', 'comfy']);
+      if (toolPath) beginComfyCompletion(toolPath);
+    }
+    proc = spawn(bunBin, ['setup-tools.ts', ...args], {
+      cwd: SOURCE_DIR,
+      env: {
+        ...process.env,
+        UMBRA_ROOT: ROOT_DIR
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+  } catch (error) { spawnError = error instanceof Error ? error : new Error(String(error)); }
 
   const appendLog = (line: string, stream: 'stdout' | 'stderr') => {
     const parsedVerifyFailure = parseVerifyFailure(line);
@@ -15798,48 +15825,34 @@ function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'ai
       return;
     }
 
+    const sequence = job.logEnd++;
     job.logs.push(line);
-    if (job.logs.length > 200) job.logs = job.logs.slice(-200);
+    if (job.logs.length > MAX_TOOL_LOGS) job.logs.shift();
+    job.logStart = job.logEnd - job.logs.length;
+    job.droppedLogs = job.logStart;
     broadcastToClients('log_tool_action', {
       actionId: id,
       action,
       tool: tool || null,
       stream,
-      message: line
+      message: line, sequence, logStart: job.logStart, logEnd: job.logEnd, droppedLogs: job.droppedLogs
     });
   };
 
-  const appendChunk = (chunk: any, stream: 'stdout' | 'stderr') => {
-    const text = String(chunk ?? '');
-    if (!text.trim()) return;
-    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
-    for (const line of lines) appendLog(line, stream);
-  };
+  const stdout = createToolLineFramer(line => appendLog(line, 'stdout'));
+  const stderr = createToolLineFramer(line => appendLog(line, 'stderr'));
+  proc?.stdout?.on('data', chunk => stdout.write(chunk));
+  proc?.stderr?.on('data', chunk => stderr.write(chunk));
 
-  proc.stdout?.on('data', (chunk) => {
-    appendChunk(chunk, 'stdout');
-    const text = String(chunk).trim();
-    if (text && isBackendDiagnosticLoggingEnabled()) console.log(`[ToolAction:${id}] ${text}`);
-  });
-
-  proc.stderr?.on('data', (chunk) => {
-    appendChunk(chunk, 'stderr');
-    const text = String(chunk).trim();
-    if (text && isBackendDiagnosticLoggingEnabled()) console.warn(`[ToolAction:${id}] ${text}`);
-  });
-
-  let completionWatchdog: NodeJS.Timeout | null = null;
   let finalized = false;
   const finalizeJob = (code: number | null, processError?: Error) => {
     if (finalized) return;
     finalized = true;
-    if (completionWatchdog) {
-      clearInterval(completionWatchdog);
-      completionWatchdog = null;
-    }
+    stdout.end();
+    stderr.end();
     job.exitCode = code;
     job.endedAt = Date.now();
-    job.status = !processError && code === 0 ? 'completed' : 'failed';
+    job.status = !processError && !job.verifyFailure && code === 0 ? 'completed' : 'failed';
     if (processError) {
       job.error = processError.message || 'spawn failed';
     } else if (code !== 0) {
@@ -15866,6 +15879,7 @@ function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'ai
         aitoolkitStartTime = null;
       }
     }
+    claim?.release();
     broadcastToClients('log_tool_action_status', {
       actionId: id,
       action,
@@ -15873,17 +15887,16 @@ function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'ai
       status: job.status,
       exitCode: code,
       error: job.error,
-      verifyFailure: job.verifyFailure
+      verifyFailure: job.verifyFailure, logs: [...job.logs],
+      logStart: job.logStart, logEnd: job.logEnd, droppedLogs: job.droppedLogs
     });
   };
 
-  proc.once('exit', (code) => finalizeJob(code));
-  proc.once('close', (code) => finalizeJob(code));
-  proc.once('error', (err) => finalizeJob(null, err));
-  completionWatchdog = setInterval(() => {
-    if (proc.exitCode !== null) finalizeJob(proc.exitCode);
-  }, 1000);
-  (completionWatchdog as any).unref?.();
+  if (spawnError) finalizeJob(null, spawnError);
+  else {
+    proc.once('error', err => { spawnError = err; });
+    proc.once('close', code => finalizeJob(code, spawnError));
+  }
 
   return job;
 }
@@ -16536,6 +16549,25 @@ function detectComfyUI(): DetectedTool {
   if (!pythonPath) return { name: 'comfyui', path: toolPath, detected: false };
 
   return { name: 'comfyui', path: toolPath, detected: true, pythonPath, mainScript };
+}
+
+function getComfyLaunchReady(comfy = detectComfyUI()): boolean {
+  const active = toolOperations.get('comfyui');
+  if (active && active.action !== 'launch') return false;
+  if (officialComfySession || !isManagedComfyTarget(getComfyProxyTarget())) return true;
+  if (!comfy.detected || !comfy.pythonPath || !comfy.mainScript ||
+    !existsSync(comfy.pythonPath) || !existsSync(comfy.mainScript)) return false;
+  // Full Update/version setup can repair an earlier failed Install. Partial actions cannot.
+  const install = [...toolActionJobs.values()].reverse().filter(job => job.tool === 'comfyui' && ['install', 'update', 'set_comfyui_version'].includes(job.action))
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
+  if (install && install.status !== 'completed') return false;
+  try {
+    // Core pip cache alone precedes node/model/compatibility setup and is not final proof.
+    const requirements = readFileSync(join(comfy.path, 'requirements.txt'), 'utf8');
+    const hash = Bun.hash(requirements).toString();
+    return readFileSync(join(comfy.path, '.requirements_installed'), 'utf8').trim() === hash &&
+      hasComfyCompletion(comfy.path, hash);
+  } catch { return false; }
 }
 
 function detectAIToolkit(): DetectedTool {
@@ -17809,7 +17841,8 @@ function getBackendConfig() {
   const comfyLaunchHost = isLoopbackIpAddress(comfyHost)
     ? comfyHost.replace(/^\[|\]$/g, '')
     : '127.0.0.1';
-  const comfyLaunchCapability = resolveComfyLaunchCapability(comfy);
+  const comfyLaunchReady = getComfyLaunchReady(comfy);
+  const comfyLaunchCapability = comfyLaunchReady ? resolveComfyLaunchCapability(comfy) : null;
 
   const comfyArgs = comfy.detected ? [
     comfy.mainScript!,
@@ -17826,7 +17859,7 @@ function getBackendConfig() {
   if (comfy.detected && (comfyLaunchCapability?.supportsPreviewMethod ?? true)) {
     comfyArgs.push('--preview-method', 'auto');
   }
-  if (comfy.detected) {
+  if (comfy.detected && comfyLaunchReady) {
     comfyArgs.push(...getComfyVramLaunchArguments(getAppSettings()['comfyui.vramMode']));
     const requestedAttentionBackend = normalizeComfyAttentionBackend(getAppSettings()['comfyui.attentionBackend']);
     const attentionBackend = requestedAttentionBackend === 'default' && isComfySageAttentionAvailable(comfy)
@@ -17894,6 +17927,8 @@ const comfyStartup = createComfyStartup(startComfyUIProcess);
 const startComfyUI = () => comfyStartup.start();
 
 async function startComfyUIProcess() {
+  const claim = toolOperations.claim('comfyui', 'launch');
+  if (!claim) return toolBusy('comfyui');
   try {
     if (officialComfySession) {
       const target = getOfficialComfyExecutionTarget();
@@ -17917,8 +17952,11 @@ async function startComfyUIProcess() {
         : { success: false, error: 'The configured external ComfyUI server is unavailable. Managed ComfyUI launch requires a loopback HTTP URL.', running: false, healthy, port: endpoint.port };
     }
 
+    if (!getComfyLaunchReady()) {
+      return { success: false, error: 'ComfyUI install is missing or incomplete. Run Reinstall ComfyUI to repair runtime and launch configuration.' };
+    }
     const config = getBackendConfig().comfyui;
-    if (!config.detected || config.args.length === 0) {
+    if (!config.detected || config.args.length === 0 || !getComfyLaunchReady()) {
       return { success: false, error: 'ComfyUI install is missing or incomplete. Run Reinstall ComfyUI to repair runtime and launch configuration.' };
     }
 
@@ -18073,6 +18111,10 @@ async function startComfyUIProcess() {
       comfyOwnershipSnapshotCache = null;
     });
 
+    await new Promise<void>((resolve, reject) => {
+      comfyProcess.once('spawn', resolve);
+      comfyProcess.once('error', reject);
+    });
     return { success: true, message: 'Started' };
   } catch (error: any) {
     const message = String(error?.message || 'Failed to launch ComfyUI');
@@ -18082,7 +18124,7 @@ async function startComfyUIProcess() {
       stack: error?.stack,
     });
     return { success: false, error: message };
-  }
+  } finally { claim.release(); }
 }
 
 async function stopComfyUI() {
@@ -18594,16 +18636,16 @@ async function startGalleryBridgeInternal(stopEpoch = galleryBridgeStopEpoch) {
       scheduleGalleryBridgeSelfHeal('spawn_error', proc.pid ?? null);
     });
 
-    proc.stdout?.on('data', (data) => {
-      const lines = String(data || '').split('\n');
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line) continue;
+    const galleryActionRelay = createActionRelay({
+      diagnostic: (line) => {
         if (isBackendDiagnosticLoggingEnabled()) console.log(`\x1b[33m[GALLERY]\x1b[0m ${line}`);
         appendBackendStreamLog('gallery', 'stdout', line);
         broadcastToClients('backend_log', { backend: 'gallery', stream: 'stdout', message: line });
-      }
+      },
     });
+    proc.stdout?.on('data', (data) => galleryActionRelay.write(data));
+    proc.stdout?.on('end', () => galleryActionRelay.end());
+    proc.stdout?.on('close', () => galleryActionRelay.end());
 
     proc.stderr?.on('data', (data) => {
       const lines = String(data || '').split('\n');
@@ -19014,6 +19056,7 @@ async function proxyGalleryBridgeFsGet(
   headers.delete('origin');
   headers.delete('referer');
   headers.set('X-Umbra-Gallery-Bridge-Token', GALLERY_BRIDGE_TOKEN);
+  addMainActionDelegation(headers, GALLERY_BRIDGE_TOKEN);
 
   let upstreamSignal: AbortSignal | null = null;
   try {
@@ -19178,6 +19221,7 @@ async function proxyGalleryBridgeFsPost(
   headers.delete('origin');
   headers.delete('referer');
   headers.set('X-Umbra-Gallery-Bridge-Token', GALLERY_BRIDGE_TOKEN);
+  addMainActionDelegation(headers, GALLERY_BRIDGE_TOKEN);
 
   try {
     const upstream = await fetch(targetUrl.toString(), {
@@ -33621,12 +33665,14 @@ type UmbraSocketData = {
   upstream?: WebSocket;
 };
 
+const mainActionLogger = createActionLogger({ process: 'Umbra main', suppressed: req => isReturnedMainAction(req, GALLERY_BRIDGE_TOKEN) });
+
 const server = Bun.serve<UmbraSocketData>({
   port: PORT,
   hostname: HOST,
   idleTimeout: 120,
 
-  async fetch(req: Request, server: Bun.Server<UmbraSocketData>) {
+  fetch: mainActionLogger.wrap(async (req: Request, server: Bun.Server<UmbraSocketData>) => {
     const requestStartedAt = Date.now();
     let responseStatus = 0;
     const url = new URL(req.url);
@@ -35261,12 +35307,15 @@ const server = Bun.serve<UmbraSocketData>({
         return json({
           runtimeRoot: ROOT_DIR,
           comfyui: {
+            activeAction: toolOperations.get('comfyui'),
             detected: detected.comfyui.detected,
+            launchReady: getComfyLaunchReady(detected.comfyui),
             path: detected.comfyui.path,
             port: config.comfyui.port,
             status: detected.comfyui.detected ? 'ready' : 'not_installed'
           },
           aitoolkit: {
+            activeAction: toolOperations.get('aitoolkit'),
             detected: detected.aitoolkit.detected,
             path: detected.aitoolkit.path,
             port: config.aitoolkit.port,
@@ -35383,38 +35432,44 @@ const server = Bun.serve<UmbraSocketData>({
           return json({ error: 'Invalid version reference format' }, 400);
         }
 
-        const catalog = await getToolVersionCatalog(tool, 1);
-        if (!catalog.available) {
-          return json({ error: catalog.unavailableReason || `${config.displayName} versions are unavailable.` }, 404);
-        }
+        const claim = toolOperations.claim(tool, 'set_comfyui_version');
+        if (!claim) return json(toolBusy(tool), 409);
+        let transferred = false;
+        try {
+          const catalog = await getToolVersionCatalog(tool, 1);
+          if (!catalog.available) {
+            return json({ error: catalog.unavailableReason || `${config.displayName} versions are unavailable.` }, 404);
+          }
 
-        const portableRoot = getPortablePathForToolVersionTarget(tool);
-        if (!isPathWithin(portableRoot, catalog.path)) {
+          const portableRoot = getPortablePathForToolVersionTarget(tool);
+          if (!isPathWithin(portableRoot, catalog.path)) {
+            return json({
+              error: `${config.displayName} version switching is only available for portable installs under ${portableRoot.replace(/\\/g, '/')}.`,
+              path: catalog.path
+            }, 400);
+          }
+
+          const backendStatus = await getBackendStatusAsync(tool);
+          if (backendStatus.running) {
+            return json({ error: `Stop ${config.displayName} before switching versions.` }, 400);
+          }
+
+          const actionMap: Record<ToolVersionTarget, { action: string; command: string }> = {
+            comfyui: { action: 'set_comfyui_version', command: 'set-comfyui-version' },
+          };
+          const selected = actionMap[tool];
+          updateCache = null;
+          const job = createToolAction(selected.action, [selected.command, ref], tool, claim);
+          transferred = true;
           return json({
-            error: `${config.displayName} version switching is only available for portable installs under ${portableRoot.replace(/\\/g, '/')}.`,
-            path: catalog.path
-          }, 400);
-        }
-
-        const backendStatus = await getBackendStatusAsync(tool);
-        if (backendStatus.running) {
-          return json({ error: `Stop ${config.displayName} before switching versions.` }, 400);
-        }
-
-        const actionMap: Record<ToolVersionTarget, { action: string; command: string }> = {
-          comfyui: { action: 'set_comfyui_version', command: 'set-comfyui-version' },
-        };
-        const selected = actionMap[tool];
-        updateCache = null;
-        const job = createToolAction(selected.action, [selected.command, ref], tool);
-        return json({
-          success: true,
-          actionId: job.id,
-          status: job.status,
-          action: selected.action,
-          tool,
-          ref
-        });
+            success: true,
+            actionId: job.id,
+            status: job.status,
+            action: selected.action,
+            tool,
+            ref
+          });
+        } finally { if (!transferred) claim.release(); }
       }
 
       if (path === '/api/tools/actions' && method === 'POST') {
@@ -35447,60 +35502,74 @@ const server = Bun.serve<UmbraSocketData>({
         }
 
         const tool = body.tool;
-        let job: ToolActionJob | null = null;
+        if (tool !== 'comfyui' && tool !== 'aitoolkit') {
+          return json({ success: false, error: 'Invalid tool' }, 400);
+        }
+        const claim = toolOperations.claim(tool, normalizedAction);
+        if (!claim) return json(toolBusy(tool), 409);
+        let transferred = false;
+        try {
+          let job: ToolActionJob | null = null;
 
-        if (normalizedAction === 'install') {
-          const backendStatus = await getBackendStatusAsync(tool);
-          if (backendStatus.running) {
-            return json({ error: `Stop ${tool === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit'} before installing or repairing it.` }, 400);
-          }
-          updateCache = null;
-          job = createToolAction('install', [tool], tool);
-        } else if (normalizedAction === 'update') {
-          const backendStatus = await getBackendStatusAsync(tool);
-          if (backendStatus.running) {
-            return json({ error: `Stop ${tool === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit'} before running update.` }, 400);
-          }
-          updateCache = null;
-          job = createToolAction('update', [`update-${tool}`], tool);
-        } else if (normalizedAction === 'update_pytorch') {
-          const backendStatus = await getBackendStatusAsync(tool);
-          if (backendStatus.running) {
-            return json({ error: `Stop ${tool === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit'} before updating CUDA/PyTorch.` }, 400);
-          }
-          updateCache = null;
-          job = createToolAction('update_pytorch', [`update-pytorch-${tool}`], tool);
-        } else if (normalizedAction === 'install_sageattention') {
-          if (tool !== 'comfyui') {
-            return json({ error: 'SageAttention install is only available for ComfyUI.' }, 400);
-          }
-          const backendStatus = await getBackendStatusAsync('comfyui');
-          if (backendStatus.running) {
-            return json({ error: 'Stop ComfyUI before installing SageAttention.' }, 400);
-          }
-          updateCache = null;
-          job = createToolAction('install_sageattention', ['install-sageattention-comfyui'], tool);
-        } else if (normalizedAction === 'custom_nodes' || normalizedAction === 'h3_nodes') {
-          if (tool === 'comfyui') {
+          if (normalizedAction === 'install') {
+            const backendStatus = await getBackendStatusAsync(tool);
+            if (backendStatus.running) {
+              return json({ error: `Stop ${tool === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit'} before installing or repairing it.` }, 400);
+            }
+            updateCache = null;
+            job = createToolAction('install', [tool], tool, claim);
+          } else if (normalizedAction === 'update') {
+            const backendStatus = await getBackendStatusAsync(tool);
+            if (backendStatus.running) {
+              return json({ error: `Stop ${tool === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit'} before running update.` }, 400);
+            }
+            updateCache = null;
+            job = createToolAction('update', [`update-${tool}`], tool, claim);
+          } else if (normalizedAction === 'update_pytorch') {
+            const backendStatus = await getBackendStatusAsync(tool);
+            if (backendStatus.running) {
+              return json({ error: `Stop ${tool === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit'} before updating CUDA/PyTorch.` }, 400);
+            }
+            updateCache = null;
+            job = createToolAction('update_pytorch', [`update-pytorch-${tool}`], tool, claim);
+          } else if (normalizedAction === 'install_sageattention') {
+            if (tool !== 'comfyui') {
+              return json({ error: 'SageAttention install is only available for ComfyUI.' }, 400);
+            }
             const backendStatus = await getBackendStatusAsync('comfyui');
             if (backendStatus.running) {
-              return json({ error: 'Stop ComfyUI before installing or updating custom nodes, then restart it afterward.' }, 400);
+              return json({ error: 'Stop ComfyUI before installing SageAttention.' }, 400);
             }
-            job = createToolAction(normalizedAction, [normalizedAction === 'h3_nodes' ? 'comfy-h3-nodes' : 'comfy-nodes'], tool);
+            updateCache = null;
+            job = createToolAction('install_sageattention', ['install-sageattention-comfyui'], tool, claim);
+          } else if (normalizedAction === 'custom_nodes' || normalizedAction === 'h3_nodes') {
+            if (tool === 'comfyui') {
+              const backendStatus = await getBackendStatusAsync('comfyui');
+              if (backendStatus.running) {
+                return json({ error: 'Stop ComfyUI before installing or updating custom nodes, then restart it afterward.' }, 400);
+              }
+              job = createToolAction(normalizedAction, [normalizedAction === 'h3_nodes' ? 'comfy-h3-nodes' : 'comfy-nodes'], tool, claim);
+            } else {
+              return json({ error: 'Custom nodes are only available for ComfyUI workflows' }, 400);
+            }
           } else {
-            return json({ error: 'Custom nodes are only available for ComfyUI workflows' }, 400);
+            return json({ error: 'Invalid action' }, 400);
           }
-        } else {
-          return json({ error: 'Invalid action' }, 400);
-        }
 
-        return json({
-          success: true,
-          actionId: job.id,
-          status: job.status,
-          action: normalizedAction,
-          tool
-        });
+          transferred = true;
+          return json({
+            success: true,
+            actionId: job.id,
+            status: job.status,
+            action: normalizedAction,
+            tool
+          });
+        } finally { if (!transferred) claim.release(); }
+      }
+
+      if ((path === '/api/tools/actions' || path === '/api/tools/status') && method === 'GET') {
+        return json({ activeActions: ['comfyui', 'aitoolkit'].map(tool => toolOperations.get(tool)).filter(Boolean),
+          latestByTool: Object.fromEntries(['comfyui', 'aitoolkit'].map(tool => [tool, [...toolActionJobs.values()].reverse().find(job => job.tool === tool) || null])) });
       }
 
       if (path.match(/^\/api\/tools\/actions\/[^/]+$/) && method === 'GET') {
@@ -35521,13 +35590,17 @@ const server = Bun.serve<UmbraSocketData>({
           exitCode: job.exitCode,
           error: job.error,
           verifyFailure: job.verifyFailure,
-          logs: job.logs
+          logs: job.logs, actionId: job.id,
+          logStart: job.logStart, logEnd: job.logEnd, droppedLogs: job.droppedLogs
         });
       }
 
       if (path === '/api/umbrabridge/backend/start' && method === 'POST') {
         const { backend } = await req.json() as { backend: string };
-        if (backend === 'comfyui') return json(await startComfyUI());
+        if (backend === 'comfyui') {
+          const result = await startComfyUI();
+          return json(result, 'busy' in result && result.busy ? 409 : 200);
+        }
         if (backend === 'aitoolkit') return json(await startAIToolkit());
         if (backend === 'gallery') {
           galleryBridgeAutoStartSuppressed = false;
@@ -40127,7 +40200,7 @@ const server = Bun.serve<UmbraSocketData>({
     } finally {
       appendBackendRouteTimingLog(method, path, responseStatus, Date.now() - requestStartedAt);
     }
-  },
+  }),
 
   websocket: {
     perMessageDeflate: {

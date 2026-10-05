@@ -1,3 +1,5 @@
+import { createGalleryActionOwnership } from '../shared/backendActionOwnership';
+import { createActionLogger } from '../shared/backendActionLogger';
 import { existsSync, readFileSync, type Dirent } from 'fs';
 import * as fs from 'fs/promises';
 import { basename, extname, join, relative, resolve, isAbsolute, sep } from 'path';
@@ -1309,6 +1311,7 @@ async function proxyToMain(req: Request, reqUrl: URL): Promise<Response> {
   headers.delete('origin');
   headers.delete('referer');
   headers.delete('x-umbra-gallery-bridge-token');
+  galleryActionOwnership.returnToMain(req, headers);
 
   const init: RequestInit & { duplex?: 'half' } = {
     method: req.method,
@@ -1329,10 +1332,10 @@ async function proxyToMain(req: Request, reqUrl: URL): Promise<Response> {
   try {
     const upstream = await fetch(targetUrl.toString(), init);
     const responseHeaders = new Headers(upstream.headers);
-    return withTrustedCors(req, new Response(upstream.body, {
+    return galleryActionOwnership.forwarded(withTrustedCors(req, new Response(upstream.body, {
       status: upstream.status,
       headers: responseHeaders,
-    }));
+    })));
   } catch (error: any) {
     return json({
       error: error?.message || 'Bridge request failed',
@@ -2626,12 +2629,15 @@ function resolveLocalGalleryFsGetPath(reqUrl: URL, method: string): string {
   return `/api/fs/${route}`;
 }
 
+const galleryActionOwnership = createGalleryActionOwnership();
+const galleryActionLogger = createActionLogger({ process: 'Gallery', frame: true, suppressed: galleryActionOwnership.suppressed });
+
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
   // Match the main server's idle window for local Gallery scans and media.
   idleTimeout: 120,
-  fetch: async (req, server) => {
+  fetch: galleryActionLogger.wrap(async (req, server: Bun.Server<undefined>) => {
     const reqUrl = new URL(req.url);
     reqUrl.pathname = resolveLocalGalleryFsGetPath(reqUrl, req.method);
 
@@ -2639,6 +2645,7 @@ const server = Bun.serve({
     if (req.method === 'OPTIONS') return corsPreflight(req, reqUrl);
     const directPathDenial = await authorizeDirectGalleryFsRequest(req, reqUrl);
     if (directPathDenial) return directPathDenial;
+    galleryActionOwnership.accept(req, BRIDGE_TOKEN);
 
     if (reqUrl.pathname === '/health') {
       if (BRIDGE_TOKEN && req.headers.get('x-umbra-gallery-bridge-token') !== BRIDGE_TOKEN) {
@@ -2793,7 +2800,7 @@ const server = Bun.serve({
         'Cache-Control': cacheControl,
       },
     });
-  },
+  }),
 });
 
 seedPrewarmRoots();

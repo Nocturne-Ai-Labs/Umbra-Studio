@@ -1,5 +1,7 @@
 'use client';
 
+import { comfyToolActions } from '@/lib/toolActionController';
+
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import {
@@ -185,6 +187,9 @@ export const UmbraAppBar = () => {
   const gpuUsage = useStore((state) => state.systemStats.gpuUsage);
   const systemStatsStale = useStore((state) => state.systemStats.stale);
   const comfyConnection = useStore((state) => state.connections.comfyui);
+  const comfyActionBusy = useStore((state) => state.comfyToolAction.busy);
+  const launchReady = useStore((state) => state.comfyToolAction.launchReady);
+  const comfyAction = useStore((state) => state.comfyToolAction.action);
   const comfyBooting = useStore((state) => state.booting.comfyui);
   const comfyUrl = useStore((state) => state.urls.comfyui);
   const isAppBarCollapsed = useStore((state) => state.ui.isAppBarCollapsed);
@@ -240,12 +245,15 @@ export const UmbraAppBar = () => {
     comfyui: 'starting' | 'stopping' | null;
     aitoolkit: 'starting' | 'stopping' | null;
   }>({ comfyui: null, aitoolkit: null });
+  const lifecycleControllerRef = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => lifecycleControllerRef.current?.abort(), []);
   const [restartingAll, setRestartingAll] = React.useState(false);
   const [stoppingAll, setStoppingAll] = React.useState(false);
-  const [toolActionLoading, setToolActionLoading] = React.useState<{
+  const [localToolActionLoading, setToolActionLoading] = React.useState<{
     comfyui: NeuralHubToolAction | null;
     aitoolkit: NeuralHubToolAction | null;
   }>({ comfyui: null, aitoolkit: null });
+  const toolActionLoading = { ...localToolActionLoading, comfyui: comfyActionBusy ? comfyAction : null };
   const [toolUpdates, setToolUpdates] = React.useState<Record<NeuralHubTool, {
     tool: boolean;
     pytorch: boolean;
@@ -268,9 +276,7 @@ export const UmbraAppBar = () => {
   const [toolVersionLoading, setToolVersionLoading] = React.useState<Record<VersionManagedTool, boolean>>({
     comfyui: false,
   });
-  const [toolVersionSwitching, setToolVersionSwitching] = React.useState<Record<VersionManagedTool, boolean>>({
-    comfyui: false,
-  });
+  const toolVersionSwitching = React.useMemo(() => ({ comfyui: comfyActionBusy && comfyAction === 'set_comfyui_version' }), [comfyActionBusy, comfyAction]);
 
   const liveRemoteMode = typeof document === 'undefined'
     ? remoteMode
@@ -699,44 +705,8 @@ export const UmbraAppBar = () => {
     if (targetRef === String(toolCurrentRef[tool] || '').trim()) return;
     if (toolVersionSwitching[tool]) return;
 
-    setToolVersionSwitching((prev) => ({ ...prev, [tool]: true }));
-    try {
-      const startRes = await fetch(`/api/tools/${tool}/version`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ref: targetRef }),
-      });
-      const startData = await startRes.json();
-      if (!startRes.ok || !startData?.actionId) {
-        throw new Error(startData?.error || `Failed to start ${getManagedToolLabel(tool)} version switch`);
-      }
-
-      const actionId = String(startData.actionId);
-      let done = false;
-      while (!done) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const statusRes = await fetch(`/api/tools/actions/${actionId}`);
-        const status = await statusRes.json();
-        if (status.status === 'completed') {
-          done = true;
-        } else if (status.status === 'failed') {
-          const verifyMessage = status?.verifyFailure?.nextSteps?.[0] || status?.verifyFailure?.title;
-          throw new Error(verifyMessage || status.error || `${getManagedToolLabel(tool)} version switch failed`);
-        }
-      }
-
-      useStore.getState().showToast(`${getManagedToolLabel(tool)} switched to ${targetRef}`, 'success');
-      await loadToolVersions(tool);
-      await fetchSystemStatus();
-      await refreshToolUpdates();
-    } catch (error) {
-      useStore.getState().showToast(
-        error instanceof Error ? error.message : `Failed to switch ${getManagedToolLabel(tool)} version`,
-        'error'
-      );
-    } finally {
-      setToolVersionSwitching((prev) => ({ ...prev, [tool]: false }));
-    }
+    if (useStore.getState().booting.comfyui) return;
+    void comfyToolActions.start('set_comfyui_version', targetRef);
   }, [fetchSystemStatus, getManagedToolLabel, isRemoteClient, loadToolVersions, refreshToolUpdates, toolCurrentRef, toolSelectedRef, toolVersionSwitching]);
 
   React.useEffect(() => {
@@ -793,7 +763,14 @@ export const UmbraAppBar = () => {
   };
 
   const handleBackendToggle = async (backend: 'comfyui') => {
-    const isRunning = connections[backend] === 'connected';
+    const isRunning = useStore.getState().connections[backend] === 'connected';
+    if (!isRunning && !comfyToolActions.getState().launchReady) return;
+    if (useStore.getState().booting.comfyui || backendLoading.comfyui || restartingAll || stoppingAll) return;
+    const release = comfyToolActions.acquireLifecycle();
+    if (!release) return;
+    const request = new AbortController();
+    lifecycleControllerRef.current = request;
+
     const action = isRunning ? 'stop' : 'start';
     const backendName = 'ComfyUI';
 
@@ -807,6 +784,7 @@ export const UmbraAppBar = () => {
       const res = await fetch(`/api/umbrabridge/backend/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: request.signal,
         body: JSON.stringify({ backend })
       });
 
@@ -828,6 +806,7 @@ export const UmbraAppBar = () => {
         const waitResponse = await fetch('/api/umbrabridge/backend/wait-ready', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: request.signal,
           body: JSON.stringify({ backend, timeout: null }),
         });
         const waitResult = await waitResponse.json();
@@ -845,6 +824,7 @@ export const UmbraAppBar = () => {
         setBackendLoading(prev => ({ ...prev, [backend]: null }));
       }
     } catch (err) {
+      if (request.signal.aborted) return;
       if (action === 'start') {
         setComfyLaunchPhase('offline');
         void fetchSystemStatus({ force: true });
@@ -855,6 +835,9 @@ export const UmbraAppBar = () => {
         'error'
       );
       setBackendLoading(prev => ({ ...prev, [backend]: null }));
+    } finally {
+      release();
+      lifecycleControllerRef.current = null;
     }
   };
 
@@ -1065,6 +1048,11 @@ export const UmbraAppBar = () => {
       useStore.getState().showToast('Install and update actions are only available from the host PC.', 'error');
       return;
     }
+    if (backend === 'comfyui') {
+      if (useStore.getState().booting.comfyui) return;
+      void comfyToolActions.start(action);
+      return;
+    }
     setToolActionLoading(prev => ({ ...prev, [backend]: action }));
 
     try {
@@ -1092,7 +1080,7 @@ export const UmbraAppBar = () => {
       }
 
       const actionLabel = String(action ?? '').replaceAll('_', ' ');
-      const toolLabel = backend === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit';
+      const toolLabel = 'AI-Toolkit';
       useStore.getState().showToast(`Completed ${actionLabel} for ${toolLabel}`, 'success');
       setToolActionLoading(prev => ({ ...prev, [backend]: null }));
       void fetchSystemStatus({ force: true });
@@ -1109,6 +1097,7 @@ export const UmbraAppBar = () => {
   };
 
   const handleRestartAll = async () => {
+    if (comfyToolActions.getState().busy || useStore.getState().booting.comfyui || restartingAll || stoppingAll) return;
     const connectedBackends: NeuralHubTool[] = [];
     if (connections.comfyui === 'connected') connectedBackends.push('comfyui');
     if (
@@ -1118,11 +1107,17 @@ export const UmbraAppBar = () => {
       connectedBackends.push('aitoolkit');
     }
 
+    if (connectedBackends.includes('comfyui') && !comfyToolActions.getState().launchReady) return;
+
     if (connectedBackends.length === 0) {
       useStore.getState().showToast('No backends are running', 'error');
       return;
     }
 
+    const release = comfyToolActions.acquireLifecycle();
+    if (!release) return;
+    const request = new AbortController();
+    lifecycleControllerRef.current = request;
     setRestartingAll(true);
     useStore.getState().showToast(`Restarting ${connectedBackends.length} backend(s)...`, 'success');
 
@@ -1130,6 +1125,7 @@ export const UmbraAppBar = () => {
       for (const backend of connectedBackends) {
         const response = await fetch('/api/umbrabridge/backend/stop', {
           method: 'POST',
+          signal: request.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ backend }),
         });
@@ -1140,7 +1136,13 @@ export const UmbraAppBar = () => {
       }
 
       // Wait for backends to fully stop
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 2000);
+        request.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new DOMException('Restart aborted', 'AbortError'));
+        }, { once: true });
+      });
       setComfyLaunchPhase('offline');
 
       // Start them back up sequentially
@@ -1148,6 +1150,7 @@ export const UmbraAppBar = () => {
         if (backend === 'comfyui') setComfyLaunchPhase('starting');
         const startResponse = await fetch('/api/umbrabridge/backend/start', {
           method: 'POST',
+          signal: request.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ backend })
         });
@@ -1158,6 +1161,7 @@ export const UmbraAppBar = () => {
 
         const readyResponse = await fetch('/api/umbrabridge/backend/wait-ready', {
           method: 'POST',
+          signal: request.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             backend,
@@ -1177,6 +1181,7 @@ export const UmbraAppBar = () => {
       ]);
       useStore.getState().showToast('All managed backends are ready', 'success');
     } catch (err) {
+      if (request.signal.aborted) return;
       useStore.getState().showToast(
         err instanceof Error ? err.message : 'Failed to restart backends',
         'error'
@@ -1186,7 +1191,9 @@ export const UmbraAppBar = () => {
         refreshAIToolkitStatus(),
       ]);
     } finally {
-      setRestartingAll(false);
+      release();
+      lifecycleControllerRef.current = null;
+      if (!request.signal.aborted) setRestartingAll(false);
     }
   };
 
@@ -1215,7 +1222,7 @@ export const UmbraAppBar = () => {
     const selectedRef = toolSelectedRef[tool];
     const loading = toolVersionLoading[tool];
     const switching = toolVersionSwitching[tool];
-    const disabled = isRemoteClient || loading || switching || !!backendLoading[tool] || !!toolActionLoading[tool];
+    const disabled = comfyActionBusy || isRemoteClient || loading || switching || !!backendLoading[tool] || !!toolActionLoading[tool];
 
     return (
       <div className="space-y-1.5">
@@ -1602,7 +1609,7 @@ export const UmbraAppBar = () => {
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => handleBackendToggle('comfyui')}
-                        disabled={!!backendLoading.comfyui || restartingAll || stoppingAll}
+                        disabled={comfyActionBusy || !!backendLoading.comfyui || restartingAll || stoppingAll || (connections.comfyui !== 'connected' && !launchReady)}
                         className={cn(
                           "flex-1 text-[9px] uppercase tracking-wider font-bold py-1.5 px-2 rounded transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed",
                           connections.comfyui === 'connected' ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
@@ -1633,35 +1640,35 @@ export const UmbraAppBar = () => {
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => handleToolAction('comfyui', 'install')}
-                        disabled={isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
+                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
                         className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50"
                       >
                         {toolActionLoading.comfyui === 'install' ? 'Installing...' : 'Install'}
                       </button>
                       <button
                         onClick={() => handleToolAction('comfyui', 'update')}
-                        disabled={isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
+                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
                         className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all disabled:opacity-50"
                       >
                         {toolActionLoading.comfyui === 'update' ? 'Updating...' : toolUpdates.comfyui.tool ? 'Update Ready' : 'Update'}
                       </button>
                       <button
                         onClick={() => handleToolAction('comfyui', 'custom_nodes')}
-                        disabled={isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
+                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
                         className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
                       >
                         {toolActionLoading.comfyui === 'custom_nodes' ? 'Nodes...' : 'Nodes'}
                       </button>
                       <button
                         onClick={() => handleToolAction('comfyui', 'update_pytorch')}
-                        disabled={isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
+                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
                         className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 transition-all disabled:opacity-50"
                       >
                         {toolActionLoading.comfyui === 'update_pytorch' ? 'Torch...' : toolUpdates.comfyui.pytorch ? 'Torch Ready' : 'Torch'}
                       </button>
                       <button
                         onClick={() => handleToolAction('comfyui', 'install_sageattention')}
-                        disabled={isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
+                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
                         className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-fuchsia-500/10 text-fuchsia-300 hover:bg-fuchsia-500/20 transition-all disabled:opacity-50"
                       >
                         {toolActionLoading.comfyui === 'install_sageattention' ? 'Sage...' : 'Sage'}
@@ -1792,7 +1799,7 @@ export const UmbraAppBar = () => {
                   <div className="pt-2 border-t border-white/5 space-y-1.5">
                     <button
                       onClick={handleRestartAll}
-                      disabled={restartingAll || stoppingAll || !hasManagedBackendRunning}
+                      disabled={comfyActionBusy || restartingAll || stoppingAll || !hasManagedBackendRunning || (connections.comfyui === 'connected' && !launchReady)}
                       className="w-full text-[9px] uppercase tracking-wider font-bold py-2 px-3 rounded bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {restartingAll ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
@@ -1800,7 +1807,7 @@ export const UmbraAppBar = () => {
                     </button>
                     <button
                       onClick={handleStopAll}
-                      disabled={restartingAll || stoppingAll || !hasManagedBackendRunning}
+                      disabled={comfyActionBusy || restartingAll || stoppingAll || !hasManagedBackendRunning}
                       className="w-full text-[9px] uppercase tracking-wider font-bold py-2 px-3 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {stoppingAll ? <Loader2 size={12} className="animate-spin" /> : <Square size={12} />}

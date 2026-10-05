@@ -1,5 +1,6 @@
 'use client';
 
+import { comfyToolActions } from '@/lib/toolActionController';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '@/store/useStore';
@@ -299,18 +300,28 @@ export const BackendSplash = ({
   const [isChecking, setIsChecking] = useState(false);
   const [startupProgress, setStartupProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
-  const [consoleLines, setConsoleLines] = useState<string[]>([]);
+  const [launchConsoleLines, setConsoleLines] = useState<string[]>([]);
+  const sharedAction = useStore((state) => state.comfyToolAction);
+  const sharedActionBusy = sharedAction.busy;
+  const launchReady = sharedAction.launchReady;
+  const consoleLines = useMemo(() => [
+    ...launchConsoleLines,
+    ...(sharedAction.replay.dropped ? [`[Umbra] ${sharedAction.replay.dropped} earlier action lines dropped; showing latest 200.`] : []),
+    ...sharedAction.replay.rows.map(row => row.message),
+    ...(sharedAction.error ? [`[Umbra] ERROR: ${sharedAction.error}`] : []),
+    ...(sharedAction.transportError ? ['[Umbra] Action connection interrupted. Reconnecting...'] : []),
+  ], [launchConsoleLines, sharedAction]);
   const [error, setError] = useState<string | null>(null);
   const [toolInstalled, setToolInstalled] = useState<boolean | null>(null);
   const [hasToolUpdate, setHasToolUpdate] = useState(false);
   const [hasPyTorchUpdate, setHasPyTorchUpdate] = useState(false);
-  const [toolActionLoading, setToolActionLoading] = useState<'install' | 'update' | 'custom_nodes' | 'h3_nodes' | 'update_pytorch' | 'install_sageattention' | null>(null);
+  const toolActionLoading = sharedActionBusy && sharedAction.action !== 'set_comfyui_version' ? sharedAction.action : null;
   const [comfyVersions, setComfyVersions] = useState<ComfyVersionOption[]>([]);
   const [currentComfyRef, setCurrentComfyRef] = useState('');
   const [currentComfyCommit, setCurrentComfyCommit] = useState('');
   const [selectedComfyRef, setSelectedComfyRef] = useState('');
   const [isLoadingComfyVersions, setIsLoadingComfyVersions] = useState(false);
-  const [isSwitchingComfyVersion, setIsSwitchingComfyVersion] = useState(false);
+  const isSwitchingComfyVersion = sharedActionBusy && sharedAction.action === 'set_comfyui_version';
   const [comfyVersionError, setComfyVersionError] = useState<string | null>(null);
   const fetchSystemStatus = useStore((state) => state.fetchSystemStatus);
   const isLaunching = useStore((state) => state.booting[backend]);
@@ -333,15 +344,17 @@ export const BackendSplash = ({
   const setIsLaunching = (value: boolean) => setBooting(backend, value);
   const consoleScrollRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
-  const activeToolActionIdRef = React.useRef<string | null>(null);
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const isMountedRef = React.useRef(true);
+  const componentControllerRef = React.useRef<AbortController | null>(null);
 
   // Track mounted state to prevent state updates after unmount
   React.useEffect(() => {
     isMountedRef.current = true;
+    componentControllerRef.current = new AbortController();
     return () => {
       isMountedRef.current = false;
+      componentControllerRef.current?.abort();
       // Abort any in-flight requests on unmount
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -367,14 +380,16 @@ export const BackendSplash = ({
   const loadToolMeta = React.useCallback(async () => {
     try {
       const [detectRes, updatesRes] = await Promise.all([
-        fetch('/api/tools/detect'),
-        fetch('/api/tools/updates/summary')
+        fetch('/api/tools/detect', { signal: componentControllerRef.current?.signal }),
+        fetch('/api/tools/updates/summary', { signal: componentControllerRef.current?.signal })
       ]);
       if (detectRes.ok) {
         const detect = await detectRes.json();
+        if (!isMountedRef.current) return;
+        comfyToolActions.activeSample(detect?.[backend]?.activeAction);
         setToolInstalled(Boolean(detect?.[backend]?.detected));
       }
-      if (updatesRes.ok) {
+      if (updatesRes.ok && isMountedRef.current) {
         const updates = await updatesRes.json();
         const toolName = backend === 'comfyui'
           ? 'ComfyUI'
@@ -406,8 +421,9 @@ export const BackendSplash = ({
     setComfyVersionError(null);
 
     try {
-      const response = await fetch(`/api/tools/${versionBackend}/versions?limit=500`);
+      const response = await fetch(`/api/tools/${versionBackend}/versions?limit=500`, { signal: componentControllerRef.current?.signal });
       const data = await response.json() as VersionCatalogResponse;
+      if (!isMountedRef.current) return;
       if (!response.ok) {
         throw new Error(data?.error || `Failed to load ${versionBackendLabel} versions`);
       }
@@ -434,13 +450,14 @@ export const BackendSplash = ({
         return currentRef || normalizedPrev || (versions[0]?.ref || '');
       });
     } catch (err: any) {
+      if (!isMountedRef.current) return;
       const message = err?.message || `Failed to load ${versionBackendLabel} versions`;
       setComfyVersions([]);
       setCurrentComfyRef('');
       setCurrentComfyCommit('');
       setComfyVersionError(message);
     } finally {
-      setIsLoadingComfyVersions(false);
+      if (isMountedRef.current) setIsLoadingComfyVersions(false);
       useStore.getState().setBooting('comfyuiVersions', false);
     }
   }, [versionBackend, versionBackendLabel]);
@@ -468,7 +485,7 @@ export const BackendSplash = ({
 
   // WebSocket for real-time logs - connect to /ws/logs
   React.useEffect(() => {
-    if (!isLaunching && !toolActionLoading && !isSwitchingComfyVersion) {
+    if (!isLaunching) {
       return;
     }
 
@@ -506,14 +523,6 @@ export const BackendSplash = ({
             setStartupProgress(prev => Math.max(prev, 80));
             setStatusText('Starting server...');
           }
-        } else if (data.type === 'log_tool_action' && data.data?.tool === backend) {
-          const message = String(data.data.message || '');
-          if (!message) return;
-          const actionId = data.data.actionId as string | undefined;
-          if (actionId && activeToolActionIdRef.current && actionId !== activeToolActionIdRef.current) {
-            return;
-          }
-          setConsoleLines(prev => [...prev.slice(-100), message]);
         }
       } catch (err) {
         // Ignore parse errors for non-JSON messages
@@ -534,9 +543,13 @@ export const BackendSplash = ({
         wsRef.current = null;
       }
     };
-  }, [isLaunching, toolActionLoading, isSwitchingComfyVersion, backend]);
+  }, [isLaunching, backend]);
 
   const handleLaunch = async () => {
+    if (!comfyToolActions.getState().launchReady) return;
+    if (useStore.getState().booting.comfyui || isStopping) return;
+    const release = comfyToolActions.acquireLifecycle();
+    if (!release) return;
     // Cancel any previous in-flight request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -627,6 +640,8 @@ export const BackendSplash = ({
       setConsoleLines(prev => [...prev, `[Umbra] ERROR: ${err.message}`]);
       setComfyLaunchPhase('offline');
       void fetchSystemStatus({ force: true });
+    } finally {
+      release();
     }
   };
 
@@ -637,6 +652,7 @@ export const BackendSplash = ({
   };
 
   const handleRetry = () => {
+    if (comfyToolActions.getState().busy || !comfyToolActions.getState().launchReady) return;
     setError(null);
     setIsLaunching(false);
     setStartupProgress(0);
@@ -645,7 +661,7 @@ export const BackendSplash = ({
   };
 
   const handleStop = async () => {
-    if (isStopping) return;
+    if (isStopping || comfyToolActions.getState().busy) return;
     setIsStopping(true);
     setError(null);
     setStatusText(`Stopping ${name}...`);
@@ -680,65 +696,17 @@ export const BackendSplash = ({
       setStatusText('Host-only action blocked');
       return;
     }
-    setToolActionLoading(action);
-    setError(null);
-    const actionLabel = String(action ?? '').replace('_', ' ');
-    setStatusText(`Running ${actionLabel}...`);
-    setConsoleLines(prev => [...prev, `[Umbra] Running ${actionLabel} for ${name}...`]);
-
-    try {
-      const res = await fetch('/api/tools/actions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, tool: backend })
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.actionId) {
-        throw new Error(data?.error || 'Failed to start action');
-      }
-
-      const actionId = data.actionId as string;
-      activeToolActionIdRef.current = actionId;
-      let lastLogCount = 0;
-      let complete = false;
-      while (!complete) {
-        await new Promise(r => setTimeout(r, 1000));
-        const statusRes = await fetch(`/api/tools/actions/${actionId}`);
-        if (!statusRes.ok) throw new Error('Failed to read action status');
-        const status = await statusRes.json();
-
-        if (Array.isArray(status.logs)) {
-          const hasWsConnection = wsRef.current?.readyState === WebSocket.OPEN;
-          if (!hasWsConnection && status.logs.length > lastLogCount) {
-            const newLines = status.logs.slice(lastLogCount);
-            setConsoleLines(prev => [...prev.slice(-80), ...newLines]);
-          }
-          lastLogCount = status.logs.length;
-        }
-
-        if (status.status === 'completed') {
-          complete = true;
-          setStatusText('Action complete');
-          setConsoleLines(prev => [...prev, `[Umbra] ✓ ${actionLabel} complete`]);
-        } else if (status.status === 'failed') {
-          throw new Error(status.error || 'Tool action failed');
-        }
-      }
-
-      if (versionBackend) {
-        await Promise.all([fetchSystemStatus(), loadToolMeta(), loadComfyVersions()]);
-      } else {
-        await Promise.all([fetchSystemStatus(), loadToolMeta()]);
-      }
-    } catch (err: any) {
-      setError(err?.message || 'Tool action failed');
-      setStatusText('Action failed');
-      setConsoleLines(prev => [...prev, `[Umbra] ✗ ${err?.message || 'Tool action failed'}`]);
-    } finally {
-      setToolActionLoading(null);
-      activeToolActionIdRef.current = null;
-    }
+    if (useStore.getState().booting.comfyui || isStopping) return;
+    void comfyToolActions.start(action);
   };
+
+  React.useEffect(() => {
+    if (!sharedAction.action) return;
+    setStatusText(sharedAction.status === 'unknown' ? 'Action outcome unknown' : sharedAction.busy ? `Running ${sharedAction.action.replaceAll('_', ' ')}...` : sharedAction.status === 'failed' ? 'Action failed' : 'Action complete');
+    if (!sharedAction.busy && sharedAction.status) {
+      void Promise.all([fetchSystemStatus(), loadToolMeta(), loadComfyVersions()]);
+    }
+  }, [sharedAction.action, sharedAction.busy, sharedAction.status, fetchSystemStatus, loadToolMeta, loadComfyVersions]);
 
   const formatComfyVersionDate = (value: string | null) => {
     if (!value) return '';
@@ -759,69 +727,12 @@ export const BackendSplash = ({
     const targetRef = String(selectedComfyRef || '').trim();
     if (!targetRef || isSwitchingComfyVersion) return;
 
-    setIsSwitchingComfyVersion(true);
-    setComfyVersionError(null);
-    setError(null);
-    setStatusText(`Switching to ${targetRef}...`);
-    setConsoleLines(prev => [...prev, `[Umbra] Switching ${versionBackendLabel} to ${targetRef}...`]);
-
-    try {
-      const startRes = await fetch(`/api/tools/${versionBackend}/version`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ref: targetRef })
-      });
-      const startData = await startRes.json();
-      if (!startRes.ok || !startData?.actionId) {
-        throw new Error(startData?.error || `Failed to start ${versionBackendLabel} version switch`);
-      }
-
-      const actionId = String(startData.actionId);
-      activeToolActionIdRef.current = actionId;
-      let lastLogCount = 0;
-      let complete = false;
-      while (!complete) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const statusRes = await fetch(`/api/tools/actions/${actionId}`);
-        if (!statusRes.ok) throw new Error('Failed to read version switch status');
-        const status = await statusRes.json();
-
-        if (Array.isArray(status.logs)) {
-          const hasWsConnection = wsRef.current?.readyState === WebSocket.OPEN;
-          if (!hasWsConnection && status.logs.length > lastLogCount) {
-            const newLines = status.logs.slice(lastLogCount);
-            setConsoleLines(prev => [...prev.slice(-80), ...newLines]);
-          }
-          lastLogCount = status.logs.length;
-        }
-
-        if (status.status === 'completed') {
-          complete = true;
-          setStatusText('Version switch complete');
-          setConsoleLines(prev => [...prev, `[Umbra] OK: ${versionBackendLabel} switched to ${targetRef}`]);
-        } else if (status.status === 'failed') {
-          const verifyFailureMessage = status?.verifyFailure?.nextSteps?.[0] || status?.verifyFailure?.title;
-          throw new Error(verifyFailureMessage || status.error || `${versionBackendLabel} version switch failed`);
-        }
-      }
-
-      useStore.getState().showToast(`${versionBackendLabel} switched to ${targetRef}`, 'success');
-      await Promise.all([fetchSystemStatus(), loadToolMeta(), loadComfyVersions()]);
-    } catch (err: any) {
-      const message = err?.message || `Failed to switch ${versionBackendLabel} version`;
-      setComfyVersionError(message);
-      setError(message);
-      setStatusText('Version switch failed');
-      setConsoleLines(prev => [...prev, `[Umbra] ERROR: ${message}`]);
-      useStore.getState().showToast(message, 'error');
-    } finally {
-      setIsSwitchingComfyVersion(false);
-      activeToolActionIdRef.current = null;
-    }
+    if (useStore.getState().booting.comfyui || isStopping) return;
+    void comfyToolActions.start('set_comfyui_version', targetRef);
   };
 
   const showConsolePanel = isLaunching || !!toolActionLoading || isSwitchingComfyVersion || !!error || consoleLines.length > 0;
-  const mobileManagerBusy = isLaunching || isStopping || isChecking || !!toolActionLoading || isSwitchingComfyVersion;
+  const mobileManagerBusy = sharedActionBusy || isLaunching || isStopping || isChecking || !!toolActionLoading || isSwitchingComfyVersion;
 
   if (mobileManager) {
     return (
@@ -906,7 +817,7 @@ export const BackendSplash = ({
             <button
               type="button"
               onClick={isBackendRunning ? handleStop : (error ? handleRetry : handleLaunch)}
-              disabled={mobileManagerBusy}
+              disabled={mobileManagerBusy || (!isBackendRunning && !launchReady)}
               className={cn(
                 'mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold disabled:opacity-40',
                 isBackendRunning
@@ -1091,7 +1002,8 @@ export const BackendSplash = ({
           {error ? (
             <button
               onClick={handleRetry}
-              className="glass-panel px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border-red-500 transition-all duration-200 flex items-center gap-2 group"
+              disabled={sharedActionBusy || isLaunching || isStopping || isSwitchingComfyVersion || !launchReady}
+              className="glass-panel px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border-red-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 group"
             >
               <RefreshCw className="w-4 h-4" />
               <span className="font-bold text-sm uppercase tracking-wider">Try Again</span>
@@ -1099,7 +1011,7 @@ export const BackendSplash = ({
           ) : (
             <button
               onClick={isBackendRunning ? handleStop : handleLaunch}
-              disabled={isLaunching || isStopping || isSwitchingComfyVersion}
+              disabled={sharedActionBusy || isLaunching || isStopping || isSwitchingComfyVersion || (!isBackendRunning && !launchReady)}
               className="glass-panel px-6 py-3 bg-[var(--umbra-accent)]/20 hover:bg-[var(--umbra-accent)]/30 border-[var(--umbra-accent)] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center gap-2 group"
             >
               {isLaunching ? (
@@ -1138,14 +1050,14 @@ export const BackendSplash = ({
         <div className="flex flex-wrap gap-2 border-t border-white/10 pt-5 mb-6">
           <button
             onClick={() => handleToolAction('install')}
-            disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+            disabled={sharedActionBusy || managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
             className="glass-panel px-4 py-2 bg-white/5 hover:bg-white/10 border-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
           >
             {toolActionLoading === 'install' ? 'Installing...' : (toolInstalled ? `Reinstall ${name}` : `Install ${name}`)}
           </button>
           <button
             onClick={() => handleToolAction('update')}
-            disabled={managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+            disabled={sharedActionBusy || managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
             title={isBackendRunning ? 'Stop ComfyUI before updating it' : 'Update managed ComfyUI'}
             className="glass-panel px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
           >
@@ -1154,7 +1066,7 @@ export const BackendSplash = ({
           {(backend === 'comfyui') && (
             <button
               onClick={() => handleToolAction('custom_nodes')}
-              disabled={managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={sharedActionBusy || managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
               title={isBackendRunning ? 'Stop ComfyUI before installing or updating custom nodes' : 'Install or update managed custom nodes'}
               className="glass-panel px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
@@ -1164,7 +1076,7 @@ export const BackendSplash = ({
           {backend === 'comfyui' && (
             <button
               onClick={() => handleToolAction('h3_nodes')}
-              disabled={managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={sharedActionBusy || managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
               title={isBackendRunning ? 'Stop ComfyUI before updating DaSiWa nodes' : 'Install or update DaSiWa H3 Director and Prompt Forge nodes'}
               className="glass-panel px-4 py-2 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
@@ -1174,7 +1086,7 @@ export const BackendSplash = ({
           {backend === 'comfyui' && (
             <button
               onClick={() => handleToolAction('update_pytorch')}
-              disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={sharedActionBusy || managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
               className="glass-panel px-4 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
               {toolActionLoading === 'update_pytorch' ? 'Updating Torch...' : 'Update CUDA/PyTorch'}
@@ -1183,7 +1095,7 @@ export const BackendSplash = ({
           {backend === 'comfyui' && (
             <button
               onClick={() => handleToolAction('install_sageattention')}
-              disabled={managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
+              disabled={sharedActionBusy || managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
               className="glass-panel px-4 py-2 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
             >
               {toolActionLoading === 'install_sageattention' ? 'Installing Sage...' : 'Install SageAttention'}
@@ -1206,7 +1118,7 @@ export const BackendSplash = ({
               <button
                 type="button"
                 onClick={() => loadComfyVersions()}
-                disabled={managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading}
+                disabled={sharedActionBusy || managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading}
                 className="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
               >
                 <RefreshCw className={`w-3 h-3 ${isLoadingComfyVersions ? 'animate-spin' : ''}`} />
@@ -1223,7 +1135,7 @@ export const BackendSplash = ({
               <UmbraSelectControl
                 value={selectedComfyRef}
                 onChange={(event) => setSelectedComfyRef(event.target.value)}
-                disabled={managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading || comfyVersions.length === 0}
+                disabled={sharedActionBusy || managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading || comfyVersions.length === 0}
                 className="flex-1 min-w-[240px] px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-white text-xs focus:border-[var(--umbra-accent)] outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">{ui(`Select ${versionBackendLabel} version...`)}</option>

@@ -1,3 +1,4 @@
+import { comfyToolActions, type ToolActionState } from '@/lib/toolActionController';
 import { create } from 'zustand';
 import { debugMiddleware } from './debugMiddleware';
 import { AppSettings, loadAppSettings, pushAppSettingsToBackend, saveAppSettings } from '@/lib/appSettings';
@@ -84,6 +85,7 @@ interface AppState {
   setConnectionStatus: (backend: 'comfyui', status: 'connected' | 'disconnected' | 'connecting') => void;
   setComfyLaunchPhase: (phase: ComfyLaunchPhase) => void;
   comfyStartupError: string | null;
+  comfyToolAction: ToolActionState;
 
   // Backend readiness/health (port/service responding)
   backendReady: boolean;
@@ -314,6 +316,7 @@ export const useStore = create<AppState>()(
         },
 
         comfyStartupError: null,
+        comfyToolAction: comfyToolActions.getState(),
         connections: {
           comfyui: 'disconnected',
         },
@@ -534,6 +537,8 @@ export const useStore = create<AppState>()(
                 set({ backendReady: true });
               }
 
+              comfyToolActions.activeSample(data.backends?.comfyui?.activeAction);
+              void comfyToolActions.refresh();
               const comfyStartupError = typeof data.backends?.comfyui?.startup?.error === 'string' ? data.backends.comfyui.startup.error : null;
               if (comfyStartupError !== current.comfyStartupError) set({ comfyStartupError });
               const comfyRuntime = reconcileComfyLaunchRuntimeState({
@@ -658,3 +663,6 @@ const libraryPreferences = createUserPreferenceSession<LibraryPreferences>({
 });
 
 if (typeof window !== 'undefined') void libraryPreferences.hydrate();
+
+// Action diagnostics survive workspace transitions without becoming launch boot state.
+comfyToolActions.subscribe(() => useStore.setState({ comfyToolAction: comfyToolActions.getState() }));

@@ -1,3 +1,4 @@
+import { comfyToolActions } from '@/lib/toolActionController';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { ExternalLink, Loader2, Power, RefreshCw, Settings2 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
@@ -12,6 +13,12 @@ export function ComfyLaunchScreen({ onOpen, onManage }: {
   const { t } = useI18n();
   const autoStartId = useId();
   const healthy = useStore((state) => state.backendHealth.comfyui);
+  const sharedAction = useStore((state) => state.comfyToolAction);
+  const comfyActionBusy = sharedAction.busy;
+  const launchReady = sharedAction.launchReady;
+  const actionStatus = sharedAction.busy && (sharedAction.pending || sharedAction.status === 'running') && sharedAction.action && sharedAction.action !== 'launch'
+    ? `Running ${sharedAction.action.replaceAll('_', ' ')}...`
+    : null;
   const booting = useStore((state) => state.booting.comfyui);
   const startupError = useStore((state) => state.comfyStartupError);
   const autoStart = useStore((state) => state.appSettings['comfyui.autoStart']);
@@ -22,7 +29,7 @@ export function ComfyLaunchScreen({ onOpen, onManage }: {
   const [launching, setLaunching] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const remote = isUmbraRemoteClient();
-  const busy = launching || (booting && !startupError);
+  const busy = comfyActionBusy || launching || (booting && !startupError);
   const failure = error || (!healthy && !launching ? startupError : null);
   const visibleError = failure || settingsError;
 
@@ -42,7 +49,10 @@ export function ComfyLaunchScreen({ onOpen, onManage }: {
   useEffect(() => () => controller.current?.abort(), []);
 
   const launch = async () => {
-    if (controller.current) return;
+    if (!comfyToolActions.getState().launchReady) return;
+    if (controller.current || useStore.getState().booting.comfyui) return;
+    const release = comfyToolActions.acquireLifecycle();
+    if (!release) return;
     const request = new AbortController();
     controller.current = request;
     setLaunching(true);
@@ -68,6 +78,7 @@ export function ComfyLaunchScreen({ onOpen, onManage }: {
       setError(cause instanceof Error ? cause.message : t('comfy.startFailed'));
       store.setComfyLaunchPhase('offline');
     } finally {
+      release();
       controller.current = null;
       if (!request.signal.aborted) {
         setLaunching(false);
@@ -99,7 +110,7 @@ export function ComfyLaunchScreen({ onOpen, onManage }: {
         </div>
         <p className="mt-4 flex items-center gap-2 text-sm text-zinc-200" role="status">
           {busy && !healthy ? <Loader2 className="h-4 w-4 animate-spin" /> : <span className={`h-2 w-2 rounded-full ${healthy ? 'bg-emerald-400' : failure ? 'bg-red-400' : 'bg-zinc-500'}`} />}
-          {healthy ? t('comfy.ready') : failure ? t('comfy.startFailed') : busy ? t('comfy.starting') : t('comfy.stopped')}
+          {actionStatus || (healthy ? t('comfy.ready') : failure ? t('comfy.startFailed') : busy ? t('comfy.starting') : t('comfy.stopped'))}
         </p>
         <p className="mt-2 text-sm leading-relaxed text-zinc-400">{t('comfy.headlessHint')}</p>
         {visibleError && <p role="alert" className="mt-4 break-words rounded-md border border-red-400/25 p-3 text-sm text-red-300">{visibleError}</p>}
@@ -107,7 +118,7 @@ export function ComfyLaunchScreen({ onOpen, onManage }: {
           {healthy ? (
             <button type="button" className={buttonClass} onClick={onOpen}><ExternalLink className="h-4 w-4" />{t('comfy.open')}</button>
           ) : (
-            <button type="button" className={buttonClass} onClick={() => void launch()} disabled={busy}><Power className="h-4 w-4" />{failure ? t('common.retry') : t('comfy.start')}</button>
+            <button type="button" className={buttonClass} onClick={() => void launch()} disabled={busy || !launchReady}><Power className="h-4 w-4" />{failure ? t('common.retry') : t('comfy.start')}</button>
           )}
           <button type="button" className={buttonClass} onClick={onManage}><Settings2 className="h-4 w-4" />{t('comfy.manage')}</button>
           <button type="button" className={buttonClass} onClick={() => void useStore.getState().fetchSystemStatus({ force: true })} aria-label={t('comfy.refresh')} title={t('comfy.refresh')}><RefreshCw className="h-4 w-4" /></button>

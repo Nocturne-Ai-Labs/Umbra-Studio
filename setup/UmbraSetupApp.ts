@@ -8,6 +8,8 @@ import {
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { invalidateManagedPythonSetupEvidence, prepareManagedDependencyInstallPolicy } from '../updater/ManagedDependencyInstallPolicy';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { MODEL_MANIFESTS, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
@@ -128,12 +130,13 @@ function appendOutput(job: SetupJobState, value: string) {
   }
 }
 
-async function runScript(runtimeRoot: string, scriptPath: string, args: string[], job: SetupJobState, hfToken = '', sourceRoot = '') {
+async function runScript(runtimeRoot: string, scriptPath: string, args: string[], job: SetupJobState, hfToken = '', sourceRoot = '', installEnv: Record<string, string> = {}) {
   if (!existsSync(scriptPath)) throw new Error(`Required installer script is missing: ${scriptPath}`);
   const child = spawn(process.execPath, [scriptPath, ...args], {
     cwd: runtimeRoot,
     env: {
       ...process.env,
+      ...installEnv,
       UMBRA_ROOT: runtimeRoot,
       ...(sourceRoot ? { UMBRA_SOURCE_ROOT: sourceRoot } : {}),
       ...(hfToken ? { HF_TOKEN: hfToken } : {}),
@@ -170,6 +173,19 @@ async function runScript(runtimeRoot: string, scriptPath: string, args: string[]
   }).finally(() => jobChildren.delete(job.id));
   if (job.cancelRequested) throw new Error('Installation cancelled.');
   if (code !== 0) throw new Error(`Installer exited with code ${code}.`);
+}
+
+async function runManagedToolScript(runtimeRoot: string, sourceRoot: string, args: string[], job: SetupJobState) {
+  const before = inspectManagedDependencies(sourceRoot, runtimeRoot);
+  const policy = prepareManagedDependencyInstallPolicy(runtimeRoot, before.features.flatMap((feature) => feature.runtimePackages));
+  try {
+    const target = args[0] === 'managed-comfyui' ? 'ComfyUI' : args[0] === 'comfy-node' ? args[1] : null;
+    const pythonVerified = target === 'ComfyUI' ? before.comfyui.pythonDependencies.verified
+      : target ? before.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === target)).every((node) => node.pythonDependencies.verified) : true;
+    if (target && !pythonVerified) invalidateManagedPythonSetupEvidence(runtimeRoot, target);
+    await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), args, job, '', sourceRoot,
+      { PIP_CONSTRAINT: pathToFileURL(policy.path).href });
+  } finally { policy.cleanup(); }
 }
 
 async function runModelInstall(
@@ -294,12 +310,15 @@ async function main() {
             lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false,
           };
           activeJob = job;
-          void runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), args, job, '', sourceRoot)
+          void runManagedToolScript(runtimeRoot, sourceRoot, args, job)
             .then(() => {
               if (!job.lines.some((line) => line === 'UMBRA_VERIFY_OK|setup-tools')) throw new Error('Managed tool installation did not complete verification. Review the log.');
               const verified = inspectManagedDependencies(sourceRoot, runtimeRoot);
-              const failed = kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === target && node.status !== 'ready')) : [];
-              if (failed.length) throw new Error(failed.map((node) => node.reason || node.status).join(' '));
+              const requirements = kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === target)) : [];
+              const failed = requirements.filter((node) => !node.filesVerified || !node.pythonDependencies.verified);
+              if (kind === 'node' && (!requirements.length || failed.length)) {
+                throw new Error(`Managed ${target} verification failed. ${failed.map((node) => node.pythonDependencies.detail || node.reason || node.status).join(' ')}`);
+              }
               if (kind === 'comfyui' && (!verified.comfyui.installed || (verified.comfyui.minimumRequired
                 && compareUmbraVersions(verified.comfyui.version, verified.comfyui.minimumRequired) < 0)
                 || (verified.comfyui.minimumFrontendRequired && compareUmbraVersions(verified.comfyui.frontendVersion || '0.0.0', verified.comfyui.minimumFrontendRequired) < 0))) {
@@ -337,12 +356,15 @@ async function main() {
               job.step = `Installing ${step.target}`;
               job.lines = [];
               try {
-                await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), managedRepairStepArgs(step), job, '', sourceRoot);
+                await runManagedToolScript(runtimeRoot, sourceRoot, managedRepairStepArgs(step), job);
                 if (!job.lines.some((line) => line === 'UMBRA_VERIFY_OK|setup-tools')) throw new Error(`${step.target} did not finish managed verification.`);
                 const verified = inspectManagedDependencies(sourceRoot, runtimeRoot);
                 if (step.kind === 'package' && !verified.backgroundCompatibility.verified) throw new Error(verified.backgroundCompatibility.detail);
-                const failed = step.kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === step.target && node.status !== 'ready')) : [];
-                if (failed.length) throw new Error(failed.map((node) => node.reason || node.status).join(' '));
+                const requirements = step.kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === step.target)) : [];
+                const failed = requirements.filter((node) => !node.filesVerified || !node.pythonDependencies.verified);
+                if (step.kind === 'node' && (!requirements.length || failed.length)) {
+                  throw new Error(`Managed ${step.target} verification failed. ${failed.map((node) => node.pythonDependencies.detail || node.reason || node.status).join(' ')}`);
+                }
                 if (step.kind === 'comfyui' && (!verified.comfyui.installed || compareUmbraVersions(verified.comfyui.version || '0.0.0', verified.comfyui.minimumRequired || '0.0.0') < 0
                   || compareUmbraVersions(verified.comfyui.frontendVersion || '0.0.0', verified.comfyui.minimumFrontendRequired || '0.0.0') < 0)) throw new Error('The core/frontend bundle still needs repair.');
               } finally { state.lines.push(...job.lines.slice(-20)); }
