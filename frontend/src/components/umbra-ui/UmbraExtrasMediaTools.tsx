@@ -155,10 +155,10 @@ function useStagedMedia(mode: UmbraExtrasMediaToolMode) {
   const [items, setItems] = React.useState<StagedMediaItem[]>([]);
   const addPaths = React.useCallback((paths: string[], previewUrls: Record<string, string> = {}) => {
     setItems((current) => {
-      const seen = new Set(current.map((item) => String(item.path || item.file?.name || '').toLowerCase()));
+      const seen = new Set(current.map((item) => String(item.path || item.file?.name || '')));
       const additions = paths.flatMap((path) => {
         const kind = mediaKind(path);
-        const key = path.toLowerCase();
+        const key = path;
         if (!kind || kind !== targetKind || seen.has(key)) return [];
         seen.add(key);
         return [{ id: createId(), name: path.replace(/\\/g, '/').split('/').pop() || path, path, previewUrl: previewUrls[path], kind, status: 'staged' as const }];
@@ -168,7 +168,7 @@ function useStagedMedia(mode: UmbraExtrasMediaToolMode) {
   }, [targetKind]);
   const addFiles = React.useCallback((files: File[]) => {
     setItems((current) => {
-      const fileKey = (file: File) => `${file.webkitRelativePath || file.name}:${file.size}:${file.lastModified}`.toLowerCase();
+      const fileKey = (file: File) => `${file.webkitRelativePath || file.name}:${file.size}:${file.lastModified}`;
       const seen = new Set(current.flatMap((item) => item.file ? [fileKey(item.file)] : []));
       const additions = files.flatMap((file) => {
         const kind = file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : mediaKind(file.name);

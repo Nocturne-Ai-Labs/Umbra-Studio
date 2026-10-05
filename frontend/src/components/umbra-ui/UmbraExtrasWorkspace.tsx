@@ -397,9 +397,9 @@ export function UmbraExtrasWorkspace({
   }, [browsingOutputFolder, outputFolder, remoteClient, showToast]);
 
   const addHandoffs = React.useCallback((handoffs: UmbraUiUpscaleHandoff[]) => {
-    const seenPaths = new Set(sources.map((source) => source.path.toLowerCase()).filter(Boolean));
+    const seenPaths = new Set(sources.map((source) => source.path).filter(Boolean));
     const unique = handoffs.filter((handoff) => {
-      const key = handoff.path.toLowerCase();
+      const key = handoff.path;
       if (!key || seenPaths.has(key)) return false;
       seenPaths.add(key);
       return true;
@@ -410,9 +410,9 @@ export function UmbraExtrasWorkspace({
     }
     const accepted = unique.slice(0, availableSlots);
     setSources((current) => {
-      const currentPaths = new Set(current.map((source) => source.path.toLowerCase()).filter(Boolean));
+      const currentPaths = new Set(current.map((source) => source.path).filter(Boolean));
       const additions = accepted.filter((handoff) => {
-        const key = handoff.path.toLowerCase();
+        const key = handoff.path;
         if (currentPaths.has(key)) return false;
         currentPaths.add(key);
         return true;
@@ -425,7 +425,7 @@ export function UmbraExtrasWorkspace({
       return additions.length ? [...current, ...additions] : current;
     });
     const autoStart = handoffs.find((handoff) => handoff.autoStart
-      && (sources.some((source) => source.path.toLowerCase() === handoff.path.toLowerCase())
+      && (sources.some((source) => source.path === handoff.path)
         || accepted.includes(handoff)));
     if (autoStart) setPendingAutoStartPath(autoStart.path);
   }, [showToast, sources]);
@@ -658,7 +658,7 @@ export function UmbraExtrasWorkspace({
 
   React.useEffect(() => {
     if (!pendingAutoStartPath || submitting || activeJobId) return;
-    const source = sources.find((candidate) => candidate.path.toLowerCase() === pendingAutoStartPath.toLowerCase());
+    const source = sources.find((candidate) => candidate.path === pendingAutoStartPath);
     if (!source) {
       setPendingAutoStartPath('');
       return;

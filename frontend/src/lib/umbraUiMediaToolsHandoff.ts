@@ -40,7 +40,7 @@ export function normalizeUmbraUiMediaToolsHandoff(value: unknown): UmbraUiMediaT
     .map(normalizePath)
     .filter((path) => (IMAGE_EXTENSION_PATTERN.test(path) || VIDEO_EXTENSION_PATTERN.test(path)) && acceptedPattern.test(path))
     .filter((path) => {
-      const key = path.toLowerCase();
+      const key = path;
       if (!path || seen.has(key)) return false;
       seen.add(key);
       return true;
