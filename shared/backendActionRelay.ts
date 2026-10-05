@@ -1,7 +1,7 @@
-import { ACTION_FRAME, renderAction, validateActionRecord } from './backendActionLogger';
+import { ACTION_FRAME, renderAction, shouldReportAction, validateActionRecord } from './backendActionLogger';
 export type ActionRelayOptions = {
   sink?: (line: string) => void; diagnostic: (line: string) => void;
-  env?: Record<string,string | undefined>; tty?: boolean;
+  env?: Record<string,string | undefined>; tty?: boolean; diagnostics?: () => boolean;
 };
 // Bound pending lines and discard oversized records until their next newline.
 export function createActionRelay(options: ActionRelayOptions) {
@@ -12,7 +12,7 @@ export function createActionRelay(options: ActionRelayOptions) {
     try {
       if (line.startsWith(ACTION_FRAME)) {
         const value: unknown = JSON.parse(line.slice(ACTION_FRAME.length));
-        if (validateActionRecord(value)) sink(renderAction(value, options.env, options.tty));
+        if (validateActionRecord(value) && shouldReportAction(value, options)) sink(renderAction(value, options.env, options.tty));
         return;
       }
       const text = line.trim();

@@ -53,6 +53,24 @@ export function renderAction(record: ActionRecord, env: Record<string, string | 
   const outcomeColor = ['failed','uncaught'].includes(record.outcome) ? 31 : ['rejected','aborted'].includes(record.outcome) ? 33 : 32;
   return `${record.time} ${record.id} ${paint(`${emoji} ${record.group}`, groupColor)} ${record.method} ${record.route} ${record.status ?? '-'} ${paint(record.outcome, outcomeColor)} ${record.elapsed.toFixed(1)}ms`;
 }
+export type ActionOutputOptions = {
+  env?: Record<string, string | undefined>;
+  diagnostics?: () => boolean;
+};
+
+// Keep routine polling out of the terminal without discarding action frames.
+export function shouldReportAction(record: ActionRecord, options: ActionOutputOptions = {}): boolean {
+  const routineRead = ['GET', 'HEAD', 'OPTIONS'].includes(record.method)
+    && record.status !== null && record.status >= 200 && record.status < 300
+    && ['success', 'response', 'accepted'].includes(record.outcome)
+    && record.elapsed < 1000;
+  if (!routineRead) return true;
+  const env = options.env ?? process.env;
+  if (env.UMBRA_DIAGNOSTICS === '1' || env.UMBRA_DIAGNOSTICS === 'true') return true;
+  try { return options.diagnostics?.() === true; }
+  catch { return false; }
+}
+
 function outcome(response: Response | undefined, aborted: boolean, threw: boolean): ActionOutcome {
   if (aborted) return 'aborted';
   if (threw) return 'uncaught';
@@ -67,7 +85,7 @@ function outcome(response: Response | undefined, aborted: boolean, threw: boolea
 export type LoggerOptions = {
   process: ActionProcess; sink?: (line: string) => void; frame?: boolean;
   clock?: () => number; classifier?: typeof classifyAction;
-  env?: Record<string,string | undefined>; tty?: boolean;
+  env?: Record<string,string | undefined>; tty?: boolean; diagnostics?: () => boolean;
   suppressed?: (req: Request, response: Response | undefined) => boolean;
 };
 export function createActionLogger(options: LoggerOptions) {
@@ -95,7 +113,7 @@ export function createActionLogger(options: LoggerOptions) {
                 ...identity, method: safeMethod(req.method), status: response?.status ?? null,
                 outcome: outcome(response, req.signal.aborted, threw), elapsed: Math.max(0, safeClock() - started),
               };
-              if (validateActionRecord(record)) sink(options.frame ? ACTION_FRAME + JSON.stringify(record) : renderAction(record, options.env, options.tty));
+              if (validateActionRecord(record) && (options.frame || shouldReportAction(record, options))) sink(options.frame ? ACTION_FRAME + JSON.stringify(record) : renderAction(record, options.env, options.tty));
             }
           } catch { /* Terminal reporting must not affect dispatch or error propagation. */ }
         }

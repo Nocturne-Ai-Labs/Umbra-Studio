@@ -18640,6 +18640,7 @@ async function startGalleryBridgeInternal(stopEpoch = galleryBridgeStopEpoch) {
     });
 
     const galleryActionRelay = createActionRelay({
+      diagnostics: isBackendDiagnosticLoggingEnabled,
       diagnostic: (line) => {
         if (isBackendDiagnosticLoggingEnabled()) console.log(`\x1b[33m[GALLERY]\x1b[0m ${line}`);
         appendBackendStreamLog('gallery', 'stdout', line);
@@ -33670,7 +33671,7 @@ type UmbraSocketData = {
   upstream?: WebSocket;
 };
 
-const mainActionLogger = createActionLogger({ process: 'Umbra main', suppressed: req => isReturnedMainAction(req, GALLERY_BRIDGE_TOKEN) });
+const mainActionLogger = createActionLogger({ process: 'Umbra main', diagnostics: isBackendDiagnosticLoggingEnabled, suppressed: req => isReturnedMainAction(req, GALLERY_BRIDGE_TOKEN) });
 
 const server = Bun.serve<UmbraSocketData>({
   port: PORT,
