@@ -353,6 +353,29 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
   const [devicesLoading, setDevicesLoading] = React.useState(false);
   const [tailscaleServeRunning, setTailscaleServeRunning] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<RemoteTab>('connection');
+  const connectionSettingsRef = React.useRef<HTMLFormElement>(null);
+  const accountSettingsRef = React.useRef<HTMLDivElement>(null);
+  const httpsSettingsRef = React.useRef<HTMLDivElement>(null);
+  const [setupSection, setSetupSection] = React.useState<'connection' | 'account' | 'https' | null>(null);
+
+  React.useEffect(() => {
+    if (!setupSection) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = setupSection === 'account' ? accountSettingsRef.current
+        : setupSection === 'https' ? httpsSettingsRef.current : connectionSettingsRef.current;
+      if (!target) return;
+      target.scrollIntoView({ block: 'start' });
+      target.focus({ preventScroll: true });
+      setSetupSection(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [setupSection, activeTab]);
+
+  const openSetupSection = (section: 'connection' | 'account' | 'https') => {
+    setActiveTab(section === 'account' ? 'security' : 'connection');
+    setSetupSection(section);
+  };
+
   const [tailscaleServeNotice, setTailscaleServeNotice] = React.useState<{
     code?: string;
     message?: string;
@@ -476,6 +499,9 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
   const tailscaleReady = tailscaleConnected;
   const authConfigured = Boolean(status?.auth?.configured);
   const authEditable = !status?.auth?.remote;
+  const remoteAccessConfigured = Boolean(status?.remoteEnabled
+    && (status.settings?.requireRemoteAuth === false || authConfigured));
+  const httpsLinkReady = Boolean(openRemoteReady && status?.selectedUrl?.startsWith('https:'));
   const tailscaleStateLabel = !status
     ? (loading ? 'Checking' : 'Unavailable')
     : !tailscaleInstalled
@@ -876,6 +902,64 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
             </div>
           </div>
 
+          {activeTab === 'connection' || activeTab === 'guide' ? (
+            <section aria-labelledby="remote-setup-heading" className="glass-panel p-4">
+              <h3 id="remote-setup-heading" className="text-xs font-black uppercase tracking-[0.18em]">Set Up Umbra Remote</h3>
+              <ol className="mt-3 divide-y divide-white/10">
+                {[
+                  {
+                    title: 'Connect Tailscale',
+                    state: !status ? 'Checking host' : tailscaleConnected ? 'Host connected' : 'Host needs Tailscale',
+                    instruction: 'Install Tailscale on this computer and your remote device. Connect both to the same Tailscale network (tailnet), then turn Tailscale on.',
+                    action: 'Check Tailscale',
+                    onClick: () => void refresh({ syncForm: false }),
+                    disabled: loading,
+                  },
+                  {
+                    title: 'Enable Remote and set up login',
+                    state: !status ? 'Checking settings' : !status.remoteEnabled ? 'Remote is off'
+                      : status.settings?.requireRemoteAuth !== false && !authConfigured ? 'Account needed' : 'Access configured',
+                    instruction: 'Enable Umbra Remote in Connection Settings and save. Then open Security and create a Remote Access Account if login is required.',
+                    action: status?.remoteEnabled ? 'Open Security' : 'Connection Settings',
+                    onClick: () => openSetupSection(status?.remoteEnabled ? 'account' : 'connection'),
+                    disabled: !status || !authEditable,
+                  },
+                  {
+                    title: 'Create your HTTPS link and connect',
+                    state: !status ? 'Checking route' : !tailscaleConnected ? 'Complete Step 1 first'
+                      : !remoteAccessConfigured ? 'Complete Step 2 first' : httpsLinkReady ? 'HTTPS link ready' : 'HTTPS setup needed',
+                    instruction: 'Enable Tailscale Serve in HTTPS Front Door and approve Serve in Tailscale if prompted. Copy the HTTPS URL or scan its QR code on your remote device, then sign in. Test URL checks the connection; it does not sign you in.',
+                    action: httpsLinkReady ? 'Copy Remote URL' : 'Set Up HTTPS',
+                    onClick: () => httpsLinkReady
+                      ? void copyBestRemoteUrl() : openSetupSection('https'),
+                    disabled: !status || !tailscaleConnected || !remoteAccessConfigured,
+                  },
+                ].map((step, index) => (
+                  <li key={step.title} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+                    <span className="shrink-0 pt-0.5 font-mono text-sm text-[var(--umbra-accent)]">{index + 1}.</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <h4 className="text-sm font-bold">Step {index + 1}: {step.title}</h4>
+                        <span className="text-xs text-zinc-400">{step.state}</span>
+                      </div>
+                      <p className="mt-1 text-sm leading-relaxed text-zinc-300">{step.instruction}</p>
+                      {index === 0 ? (
+                        <a href="https://tailscale.com/download" target="_blank" rel="noopener noreferrer"
+                          className="mt-2 mr-2 inline-flex min-h-11 items-center rounded-md border border-white/15 px-3 text-xs font-bold hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)]">
+                          Get Tailscale
+                        </a>
+                      ) : null}
+                      <button type="button" onClick={step.onClick} disabled={step.disabled}
+                        className="mt-2 min-h-11 rounded-md border border-white/15 px-3 text-xs font-bold hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-50">
+                        {step.action}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
+
           <div className="grid gap-3 lg:grid-cols-4">
             {[
               { label: 'Auth', value: status?.settings?.requireRemoteAuth === false ? 'Not required' : authConfigured ? 'Configured' : 'Setup required', good: status?.settings?.requireRemoteAuth === false || authConfigured },
@@ -1130,7 +1214,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
           ) : null}
 
           {activeTab === 'connection' ? (
-          <form onSubmit={saveRemoteSettings} className="rounded-xl border border-cyan-300/20 bg-black/20 p-4">
+          <form ref={connectionSettingsRef} tabIndex={-1} onSubmit={saveRemoteSettings} className="rounded-xl border border-cyan-300/20 bg-black/20 p-4">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-xs font-black uppercase tracking-[0.18em] text-white">Connection Settings</h3>
@@ -1210,7 +1294,7 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
               </label>
             </div>
 
-            <div className="mb-4 rounded-lg border border-emerald-300/20 bg-emerald-500/5 p-3">
+            <div ref={httpsSettingsRef} tabIndex={-1} className="mb-4 rounded-lg border border-emerald-300/20 bg-emerald-500/5 p-3">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <h4 className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-100">HTTPS Front Door</h4>
@@ -1265,8 +1349,10 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
                 <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Tailscale Serve</div>
                 <div className="mt-1 truncate font-mono text-xs text-emerald-100">{status?.tailscaleServeCommand || 'Unavailable until Tailscale is installed'}</div>
                 <div className="mt-1 text-xs text-zinc-600">
-                  {status?.tailscaleServeEnabled
-                    ? 'Active. Umbra is available at the HTTPS MagicDNS URL.'
+                  {status?.remoteEnabled === false
+                    ? 'Enable Umbra Remote and save before connecting through this route.'
+                    : status?.tailscaleServeEnabled
+                      ? 'Active. Umbra is available at the HTTPS MagicDNS URL.'
                     : tailscaleServeTargetMismatch
                       ? `Needs repair. Current target: ${status?.tailscaleServeTargets?.[0] || 'unknown'}. Expected: ${status?.tailscaleServeExpectedTarget || status?.localUrl || 'this Umbra listener'}.`
                     : status?.tailscaleServeConfigured && !tailscaleConnected
@@ -1386,6 +1472,8 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
 
           {activeTab === 'security' ? (
           <div
+            ref={accountSettingsRef}
+            tabIndex={-1}
             className={cn(
               'rounded-xl border bg-black/20 p-4',
               authConfigured ? 'border-emerald-300/20' : 'border-yellow-300/25',
@@ -1563,8 +1651,10 @@ export function UmbraRemoteWorkspace({ isActive = true }: UmbraRemoteWorkspacePr
                 ))}
                 {!remoteUrls.length && !loading ? (
                   <div className="rounded-lg border border-yellow-400/30 bg-yellow-500/10 px-3 py-4 text-sm text-yellow-100">
-                    {!tailscaleInstalled
-                      ? 'Tailscale is not installed or could not be queried on this host.'
+                    {status?.remoteEnabled === false
+                      ? 'Complete Step 2: enable Umbra Remote and save to allow remote connections.'
+                      : !tailscaleInstalled
+                        ? 'Tailscale is not installed or could not be queried on this host.'
                       : !tailscaleConnected
                         ? tailscaleHealthMessage || 'Tailscale is off. Turn it on, wait for it to connect, then refresh.'
                         : 'Tailscale is connected, but no Umbra route is active. Enable Tailscale Serve, then refresh.'}
