@@ -23,14 +23,19 @@ function normalizedText(value: unknown): string {
   return String(value || '').trim();
 }
 
-function includesLora(text: string, rawName: string): boolean {
-  const normalizedName = rawName
+function normalizeLoraName(rawName: string): string {
+  return rawName
     .trim()
     .replace(/\\/g, '/')
-    .replace(/\.[^/.]+$/, '')
+    .replace(/\.(safetensors|ckpt|pt|pth|bin)$/i, '')
     .toLowerCase();
+}
+
+function includesLora(text: string, rawName: string): boolean {
+  const normalizedName = normalizeLoraName(rawName);
   if (!normalizedName) return false;
-  return text.toLowerCase().includes(`<lora:${normalizedName}`);
+  return Array.from(text.matchAll(/<lora:([^:>]+)(?::[^>]*)?>/gi))
+    .some((match) => normalizeLoraName(match[1]) === normalizedName);
 }
 
 export function buildGalleryGenerationPromptDetails(
@@ -83,6 +88,17 @@ export function buildGalleryGenerationPromptDetails(
     }))
     .filter(Boolean);
   if (loraSyntax.length > 0) {
+    // Flat metadata has no card segments, but its positive text must remain
+    // visible when the LoRA block makes the modular view available.
+    if (blocks.length === 0 && snapshot?.positivePrompt) {
+      blocks.push({
+        slotId: 'gallery-positive',
+        variantId: 'gallery-positive-combined',
+        cardLabel: 'Positive',
+        variantLabel: '',
+        promptText: snapshot.positivePrompt,
+      });
+    }
     blocks.push({
       slotId: 'gallery-loras',
       variantId: 'gallery-loras-enabled',
