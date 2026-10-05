@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.90.5-beta - ComfyUI Launch Recovery And UI Audit Repairs
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update using `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio. **A working ComfyUI installation no longer needs Reinstall simply to create a completion marker after an Umbra update.**
+- Launch readiness checks the installed ComfyUI main script and managed Python environment. Launch/Restart remain blocked during an active Umbra-managed setup operation. If startup reports a genuine missing dependency or broken environment, stop managed ComfyUI and use **Neural Hub → ComfyUI → Install** to repair it; wait for setup to finish. Existing models and user data stay in place.
+- No additional model downloads or data migration are required for these fixes. Linux custom-node prerequisites remain `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### ComfyUI Launch
+
+- Remove persistent installation-completion journal, requirements-fingerprint and historical failed-job lockouts. These could reject an existing runtime after an update and cause unnecessary reinstalls.
+- Retain active operation exclusion, lost-response protection, installer transcript/reconnect handling, managed process ownership and Windows StringZilla compatible-wheel handling. Actual runtime startup errors remain visible; file detection does not guarantee every custom-node dependency is healthy.
+
+### Umbra UI Repairs
+
+- Canvas saves now persist deliberately emptied prompts and retain the current view while saving.
+- Media handoffs preserve authoritative LoRA selections and strengths, including explicit empty selections.
+- Extras preserves distinct case-sensitive media identities.
+- Video LoRA lookup prefers an exact catalog match, and final-frame extraction uses supported FFmpeg synchronization arguments.
+
+### Gallery Repairs
+
+- Fresh complete refreshes clear vanished selected media, including a retry after a failed partial page. Cached, incomplete and failed replies preserve selection.
+- Local-filter Select all, shift ranges and viewer navigation follow visible media.
+- POSIX case-distinct paths remain separate across selection, navigation, caches, search, suggestions and optimistic rollback. Windows drive/UNC identities retain case-insensitive handling.
+- Modular prompt viewing retains flat positive prompts; LoRA matching distinguishes prefix and dotted model names.
+- Export cancellation remains authoritative when a completion receipt arrives late.
+- Copying onto a previously indexed destination replaces stale metadata and dimensions.
+
+### Validation And Packaging
+
+- Independent source reviews and focused regression checks passed. Frontend build/lint, root/frontend/setup type checks and isolated Linux source/API/UI checks passed. Readiness fixtures were inert and no personal installation was used.
+- Native Windows runtime, fresh GPU generation and full managed-tool installation remain unqualified. Windows packages are built on Windows CI; packaged candidate results are recorded separately. Both portable ZIPs omit installed tools, user-selected generation weights and the large Data Forge model pack; use **Umbra Setup → Models** for optional pinned model downloads.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: completion markers and old failed setup jobs could force unnecessary ComfyUI reinstalls after updates.
+- Fixed: Canvas empty saves/view jumps, LoRA handoff identity and strengths, Extras case collisions, Video LoRA selection and FFmpeg final-frame extraction.
+- Fixed: Gallery stale selections, hidden-media selection/navigation, case-distinct paths, missing modular prompts, LoRA collisions, late export cancellation and stale copied metadata.
+- Improved: existing working installations stay launchable while active setup and missing-file protections remain.
+
 ## v0.90.4-beta - Guided Setup And Faster Queue Handoffs
 
 ### TL;DR - Setup After Updating
