@@ -66,6 +66,7 @@ import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSna
 import { PowerPrompterHistoryStore } from './backend/PowerPrompterHistoryStore';
 import { createPowerPrompterAdmissionGate, takeAdmittedQueueHead } from './backend/PowerPrompterAdmissionGate';
 import type { PowerPrompterAdmissionGate } from './backend/PowerPrompterAdmissionGate';
+import { ComfyPromptActivity } from './backend/ComfyPromptActivity';
 import { PowerPrompterDispatchDelayControl, resolvePowerPrompterAdmissionDispatchDelay, waitForPowerPrompterDispatchDelay } from './backend/PowerPrompterDispatchDelay';
 import { appendSavedQueueIdSuffix, buildRemainingPowerPrompterQueueSnapshot, getSavedQueueSummaryIndexPath, readSavedQueueSummaryIndex, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
 import { canInterruptPowerPrompterPrompt, getInterruptedPromptHistoryStatus, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
@@ -5409,7 +5410,7 @@ interface BackendPowerPrompterQueueTask {
   promptIds: string[];
   activePromptIndex: number;
   previewWs: WebSocket | null;
-  previewReady: Promise<void> | null;
+  comfyActivity: ComfyPromptActivity;
   previewReconnectTimer: ReturnType<typeof setTimeout> | null;
   previewReconnectAttempts: number;
   previewMonitorClosed: boolean;
@@ -9879,125 +9880,116 @@ function startBackendPowerPrompterPreviewMonitor(
     target.search = `?clientId=${encodeURIComponent(clientId)}`;
     wsUrl = target.toString();
   } catch (error) {
-    task.previewReady = Promise.resolve();
     appendPowerPrompterQueueLog('backend_preview_runtime_held', { requestId, error: String(error) });
     return;
   }
-  let readySettled = false;
-  task.previewReady = new Promise<void>((resolve) => {
-    const finish = () => {
-      if (readySettled) return;
-      readySettled = true;
-      resolve();
+  try {
+    const ws = new WebSocket(wsUrl);
+    task.previewWs = ws;
+    const ownsMonitor = () => task.previewWs === ws && !task.previewMonitorClosed
+      && !task.canceled && !task.abortController.signal.aborted;
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      if (!ownsMonitor()) return;
+      task.previewReconnectAttempts = 0;
+      appendPowerPrompterQueueLog('backend_preview_ws_open', { requestId });
     };
-    setTimeout(finish, 1500);
-    try {
-      const ws = new WebSocket(wsUrl);
-      task.previewWs = ws;
-      const ownsMonitor = () => task.previewWs === ws && !task.previewMonitorClosed
-        && !task.canceled && !task.abortController.signal.aborted;
-      ws.binaryType = 'arraybuffer';
-      ws.onopen = () => {
-        if (!ownsMonitor()) { finish(); return; }
-        task.previewReconnectAttempts = 0;
-        appendPowerPrompterQueueLog('backend_preview_ws_open', { requestId });
-        finish();
-      };
-      ws.onmessage = (event) => {
-        void (async () => {
-          if (!ownsMonitor()) return;
-          if (typeof event.data === 'string') {
-            const message = normalizeComfyWsMessage(JSON.parse(event.data));
-            if (!message) return;
-            const promptId = extractComfyPromptIdFromMessage(message.data);
-            if (promptId) {
-              const mappedIndex = task.promptIds.findIndex((entry) => String(entry || '').trim() === promptId);
-              if (mappedIndex >= 0) task.activePromptIndex = mappedIndex;
-            }
-            if (message.type === 'progress') {
-              const progress = extractComfyProgressFromMessage(message.data);
-              if (progress.hasProgress) {
-                emitBackendPowerPrompterJobProgress(
-                  requestId,
-                  task,
-                  getBackendPreviewPromptIndex(task, promptId),
-                  progress,
-                  sourceWs,
-                );
-              }
-            }
-            if (message.type === 'executing' && promptId) {
-              const index = getBackendPreviewPromptIndex(task, promptId);
-              if (index >= 0) task.activePromptIndex = index;
-            }
-            return;
+    ws.onmessage = (event) => {
+      void (async () => {
+        if (!ownsMonitor()) return;
+        if (typeof event.data === 'string') {
+          const message = normalizeComfyWsMessage(JSON.parse(event.data));
+          if (!message) return;
+          if (message.type === 'status' || message.type === 'execution_success'
+            || message.type === 'execution_error' || message.type === 'execution_interrupted'
+            || (message.type === 'executing' && message.data?.node === null)) {
+            task.comfyActivity.notify();
           }
+          const promptId = extractComfyPromptIdFromMessage(message.data);
+          if (promptId) {
+            const mappedIndex = task.promptIds.findIndex((entry) => String(entry || '').trim() === promptId);
+            if (mappedIndex >= 0) task.activePromptIndex = mappedIndex;
+          }
+          if (message.type === 'progress') {
+            const progress = extractComfyProgressFromMessage(message.data);
+            if (progress.hasProgress) {
+              emitBackendPowerPrompterJobProgress(
+                requestId,
+                task,
+                getBackendPreviewPromptIndex(task, promptId),
+                progress,
+                sourceWs,
+              );
+            }
+          }
+          if (message.type === 'executing' && promptId) {
+            const index = getBackendPreviewPromptIndex(task, promptId);
+            if (index >= 0) task.activePromptIndex = index;
+          }
+          return;
+        }
 
-          const promptIndex = getBackendPreviewPromptIndex(task);
-          const promptId = String(task.promptIds[promptIndex] || '').trim();
-          const prompt = task.prompts[promptIndex];
-          const buffer = await bufferFromComfyWsData(event.data);
-          // A delayed decode must not inherit another prompt's privacy metadata.
-          if (!ownsMonitor() || getBackendPreviewPromptIndex(task) !== promptIndex
-            || String(task.promptIds[promptIndex] || '').trim() !== promptId
-            || task.prompts[promptIndex] !== prompt) return;
-          const dataUrl = dataUrlFromPreviewFrame(buffer ? readComfyPreviewBuffer(buffer) : null);
-          if (!dataUrl) return;
-          const now = Date.now();
-          if (BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS > 0 && now - task.lastPreviewFrameAt < BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS) return;
-          task.lastPreviewFrameAt = now;
-          const progressSignature = task.previewProgressSignatures.get(`${requestId}:${promptIndex}`) || '';
-          const [stepRaw, maxStepRaw] = progressSignature.split(':').map((entry) => Number(entry));
-          sendPrompterEventToTargets({
-            type: 'generation_preview',
-            requestId,
-            promptIndex,
-            promptId,
-            mediaType: getPowerPrompterRequestMediaType(requestId, promptIndex),
-            imageDataUrl: dataUrl,
-            privacyClass: classifyUmbraPrompt(prompt),
-            step: Number.isFinite(stepRaw) ? Math.max(0, Math.floor(stepRaw)) : 0,
-            maxStep: Number.isFinite(maxStepRaw) ? Math.max(0, Math.floor(maxStepRaw)) : 0,
-            updatedAt: Date.now(),
-            source: 'backend_comfy_ws',
-          }, sourceWs);
-        })().catch((error) => {
-          appendPowerPrompterQueueLog('backend_preview_ws_message_error', {
-            requestId,
-            error: String(error?.message || error || 'Failed to process preview websocket message.'),
-          });
-        });
-      };
-      ws.onerror = () => {
-        if (!ownsMonitor()) { finish(); return; }
-        appendPowerPrompterQueueLog('backend_preview_ws_error', { requestId });
-        finish();
-      };
-      ws.onclose = () => {
-        const wasCurrentSocket = task.previewWs === ws;
-        if (wasCurrentSocket) task.previewWs = null;
-        finish();
-        if (!wasCurrentSocket || task.previewMonitorClosed || task.canceled || task.abortController.signal.aborted || task.previewReconnectTimer) return;
-        task.previewReconnectAttempts += 1;
-        const delayMs = Math.min(8000, 1000 * task.previewReconnectAttempts);
-        appendPowerPrompterQueueLog('backend_preview_ws_reconnect_scheduled', {
+        const promptIndex = getBackendPreviewPromptIndex(task);
+        const promptId = String(task.promptIds[promptIndex] || '').trim();
+        const prompt = task.prompts[promptIndex];
+        const buffer = await bufferFromComfyWsData(event.data);
+        // A delayed decode must not inherit another prompt's privacy metadata.
+        if (!ownsMonitor() || getBackendPreviewPromptIndex(task) !== promptIndex
+          || String(task.promptIds[promptIndex] || '').trim() !== promptId
+          || task.prompts[promptIndex] !== prompt) return;
+        const dataUrl = dataUrlFromPreviewFrame(buffer ? readComfyPreviewBuffer(buffer) : null);
+        if (!dataUrl) return;
+        const now = Date.now();
+        if (BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS > 0 && now - task.lastPreviewFrameAt < BACKEND_PP_PREVIEW_FRAME_THROTTLE_MS) return;
+        task.lastPreviewFrameAt = now;
+        const progressSignature = task.previewProgressSignatures.get(`${requestId}:${promptIndex}`) || '';
+        const [stepRaw, maxStepRaw] = progressSignature.split(':').map((entry) => Number(entry));
+        sendPrompterEventToTargets({
+          type: 'generation_preview',
           requestId,
-          attempt: task.previewReconnectAttempts,
-          delayMs,
+          promptIndex,
+          promptId,
+          mediaType: getPowerPrompterRequestMediaType(requestId, promptIndex),
+          imageDataUrl: dataUrl,
+          privacyClass: classifyUmbraPrompt(prompt),
+          step: Number.isFinite(stepRaw) ? Math.max(0, Math.floor(stepRaw)) : 0,
+          maxStep: Number.isFinite(maxStepRaw) ? Math.max(0, Math.floor(maxStepRaw)) : 0,
+          updatedAt: Date.now(),
+          source: 'backend_comfy_ws',
+        }, sourceWs);
+      })().catch((error) => {
+        appendPowerPrompterQueueLog('backend_preview_ws_message_error', {
+          requestId,
+          error: String(error?.message || error || 'Failed to process preview websocket message.'),
         });
-        task.previewReconnectTimer = setTimeout(() => {
-          task.previewReconnectTimer = null;
-          startBackendPowerPrompterPreviewMonitor(requestId, task, sourceWs);
-        }, delayMs);
-      };
-    } catch (error: any) {
-      appendPowerPrompterQueueLog('backend_preview_ws_start_failed', {
-        requestId,
-        error: String(error?.message || error || 'Failed to open preview websocket.'),
       });
-      finish();
-    }
-  });
+    };
+    ws.onerror = () => {
+      if (!ownsMonitor()) return;
+      appendPowerPrompterQueueLog('backend_preview_ws_error', { requestId });
+    };
+    ws.onclose = () => {
+      const wasCurrentSocket = task.previewWs === ws;
+      if (wasCurrentSocket) task.previewWs = null;
+      if (!wasCurrentSocket || task.previewMonitorClosed || task.canceled || task.abortController.signal.aborted || task.previewReconnectTimer) return;
+      task.previewReconnectAttempts += 1;
+      const delayMs = Math.min(8000, 1000 * task.previewReconnectAttempts);
+      appendPowerPrompterQueueLog('backend_preview_ws_reconnect_scheduled', {
+        requestId,
+        attempt: task.previewReconnectAttempts,
+        delayMs,
+      });
+      task.previewReconnectTimer = setTimeout(() => {
+        task.previewReconnectTimer = null;
+        startBackendPowerPrompterPreviewMonitor(requestId, task, sourceWs);
+      }, delayMs);
+    };
+  } catch (error: any) {
+    appendPowerPrompterQueueLog('backend_preview_ws_start_failed', {
+      requestId,
+      error: String(error?.message || error || 'Failed to open preview websocket.'),
+    });
+  }
 }
 
 function closeBackendPowerPrompterPreviewMonitor(task: BackendPowerPrompterQueueTask) {
@@ -10023,6 +10015,7 @@ async function waitForComfyPromptDrain(
   onActiveHeartbeat?: () => void,
   taskSignal?: AbortSignal,
   getBaseUrl = getComfyProxyBaseUrl,
+  activity = new ComfyPromptActivity(),
 ) {
   const normalizedPromptId = String(promptId || '').trim();
   if (!normalizedPromptId) return;
@@ -10039,6 +10032,7 @@ async function waitForComfyPromptDrain(
   };
   while (Date.now() - startedAt < timeoutMs) {
     shouldStop?.();
+    const activityRevision = activity.revision;
     let ids: Set<string> | null = null;
     try {
       ids = await getComfyQueuePromptIdSet(taskSignal, getBaseUrl);
@@ -10058,7 +10052,7 @@ async function waitForComfyPromptDrain(
         // Heartbeats are best-effort; queue drain remains authoritative.
       }
     }
-    await Bun.sleep(1500);
+    await activity.wait(activityRevision, taskSignal);
   }
   shouldStop?.();
   failUncertainDrain(`Timed out waiting for ComfyUI prompt ${normalizedPromptId} to leave the queue.`);
@@ -11717,7 +11711,7 @@ async function runBackendPowerPrompterPipelineQueue(
     promptIds: prompts.map(() => ''),
     activePromptIndex: 0,
     previewWs: null,
-    previewReady: null,
+    comfyActivity: new ComfyPromptActivity(),
     previewReconnectTimer: null,
     previewReconnectAttempts: 0,
     previewMonitorClosed: false,
@@ -11876,7 +11870,6 @@ async function runBackendPowerPrompterPipelineQueue(
         };
         activePipeline = extendedImg2VideoPipeline!;
       }
-      await task.previewReady?.catch(() => undefined);
       let queuedWorkflow: ReturnType<typeof compileUmbraUiPipelineWorkflow> & { officialProvenance?: Record<string, unknown>; officialExecutionTarget?: ReturnType<typeof getOfficialComfyExecutionTarget> };
       while (true) {
         await waitForVideoPolicyEligibility(task, requestId, generation, activePipeline.document, sourceWs);
@@ -12149,6 +12142,7 @@ async function runBackendPowerPrompterPipelineQueue(
         },
         task.abortController.signal,
         () => getBackendPowerPrompterTaskComfyBaseUrl(task),
+        task.comfyActivity,
       );
       throwIfBackendPowerPrompterQueueCanceled(task);
       if (task.interruptedPromptIndices.has(index)) {
