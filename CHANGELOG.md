@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.90.3-beta - Umbra Remote Setup And Connection Checks
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio. Open **Umbra Remote → Connection** for the new numbered setup checklist.
+- **Step 1:** install Tailscale on the Umbra computer and your remote device, connect both to the same Tailscale network, and turn it on. **Get Tailscale** opens the official download page; **Check Tailscale** checks the host without discarding unsaved settings.
+- **Step 2:** enable Umbra Remote in **Connection Settings** and save. Open **Security** and create the **Remote Access Account** if Umbra login is required.
+- **Step 3:** enable **Tailscale Serve** under **HTTPS Front Door**, approve Serve in Tailscale if prompted, then copy the HTTPS URL or scan its QR on the remote device and sign in. **Test URL** checks reachability; it does not sign you in. No additional Umbra restart is needed solely for a working Serve route; genuine pending port changes still require a restart.
+- No model-weight download or ComfyUI reinstall is required for these Remote changes. **If ComfyUI cannot launch, Launch stays disabled, or automatic startup fails after updating an older/incomplete installation:** open **Neural Hub → ComfyUI → Install** to reinstall/repair, stop managed ComfyUI first if running, and wait for every setup stage to succeed. Then Launch, or restart Umbra to retry automatic startup if enabled. Existing models and user data remain in place; dependency repair may download required packages.
+- Linux managed-node prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Umbra Remote
+
+- Put a visible three-step setup checklist on Connection and Guide, with live host/settings/HTTPS status and buttons that open and focus the relevant setup sections. The final step waits for its prerequisites.
+- Correct the host-browser restart warning when Tailscale Serve already reaches the active listener. Preserve restart warnings for real pending port changes and intentional launch overrides.
+- Replace the cross-origin health test with an identity-checked, minimal connectivity probe. Its host-origin allowance applies only to that read-only probe; administration, authenticated APIs, and filesystem access retain their protections.
+- Distinguish reachable routes, missing account setup, login, timeouts, and connection failures. Keep disabled Remote instructions consistent with the saved state.
+- Improve URL action layout and feedback on phone/tablet widths.
+
+### Validation
+
+- 53 focused/existing Remote tests and 11 isolated actual-server API checks pass; the old cross-origin health-test 403 is reproduced and the new probe succeeds while protected APIs remain blocked. Build, lint, type checks, and phone/tablet/desktop UI checks pass.
+- Tailscale status/Serve responses used isolated fixtures. A real second-device tailnet/HTTPS connection and live Windows runtime execution remain unqualified. Windows packaging runs on Windows CI; Linux packaged-candidate checks are recorded separately.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: a working Tailscale Serve route could still show an unnecessary restart warning in the host browser.
+- Fixed: URL testing could return a false 403 from the origin check even though the Remote URL worked.
+- Fixed: disabled Remote could show misleading route-availability instructions.
+- Improved: numbered setup steps, direct setup actions, distinct account/login feedback, and readable phone/tablet URL controls.
+
 ## v0.90.2-beta
 
 ### TL;DR - Setup After Updating
