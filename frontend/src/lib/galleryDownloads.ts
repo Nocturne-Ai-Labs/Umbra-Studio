@@ -1,6 +1,7 @@
 export async function prepareGalleryDownload(
   paths: string[], metadata: 'keep' | 'strip' | null, signal?: AbortSignal,
 ): Promise<{ url: string; filename: string }> {
+  signal?.throwIfAborted();
   if (paths.length > 1000) throw new Error('Select at most 1000 files per export.');
   const response = await fetch(metadata === null ? '/api/fs/download-zip' : '/api/fs/download-jpeg-zip', {
     method: 'POST', signal,
@@ -8,6 +9,7 @@ export async function prepareGalleryDownload(
     body: JSON.stringify({ paths, ...(metadata === null ? {} : { metadata }) }),
   });
   const payload = await response.json().catch(() => null);
+  signal?.throwIfAborted();
   if (!response.ok) throw new Error(payload?.error || `Gallery export failed (${response.status}).`);
   if (!payload || typeof payload.url !== 'string' || !/^\/api\/fs\/download-archive\?id=[a-f0-9-]+$/.test(payload.url)) {
     throw new Error('The server did not return a valid Gallery download.');
