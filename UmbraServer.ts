@@ -86,6 +86,7 @@ import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { getLocalServerProxyCookieHeader, getLocalServerProxyCookiePrefix, rewriteLocalServerProxySetCookies } from './backend/LocalServerProxyCookies';
 import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
+import { resolvePowerPrompterBrowserPath } from './backend/PowerPrompterBrowserAccess';
 import { readRequestTextWithLimit, RequestBodyTooLargeError } from './backend/BoundedRequestBody';
 import { galleryFallbackSearchMediaType, inspectGalleryFallbackSearchMedia } from './backend/GalleryFallbackSearchMedia';
 import { buildGalleryDownloadArchive, prepareGalleryDownloadResponse, getPreparedGalleryDownload, type GalleryDownloadEntry } from './backend/GalleryDownloadArchiveService';
@@ -28066,7 +28067,9 @@ async function handleFsList(url: URL, signal?: AbortSignal): Promise<Response> {
     const resolved = resolvePath(targetPath);
     if (!resolved) return json({ error: 'Invalid path' }, 400);
 
-    const fullPath = await resolveAllowedGalleryPath(resolved.fullPath, getGalleryTransferAllowedRoots());
+    const fullPath = await resolvePowerPrompterBrowserPath(
+      resolved.fullPath, filter, PP_PROMPTS_ROOT_ABS, getGalleryTransferAllowedRoots(),
+    );
     if (!fullPath) {
       return json({ error: 'Access denied' }, 403);
     }

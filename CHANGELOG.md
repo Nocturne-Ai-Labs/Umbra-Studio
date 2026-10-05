@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.90.2-beta
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra. Power Prompter now lists its card documents when the card directory is a filesystem link. No sharing setup or helper scripts are included.
+- **If you cannot launch ComfyUI, the Launch button stays disabled, or ComfyUI does not start automatically after updating: reinstall/repair ComfyUI from Umbra.** Open **Neural Hub → ComfyUI → Install** (the reinstall/repair action), and wait for every setup stage to finish successfully. Stop managed ComfyUI first if it is running. This establishes the completion verification required by this update for older or previously failed installations. Once repair succeeds, select **Launch**, or restart Umbra to retry automatic startup if that setting is enabled. Existing models and user data remain in place; this update adds no required model-weight download. Dependency repairs download the packages required by the selected installation.
+- No new model-weight download is required. Linux managed-node prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Power Prompter Card Browser
+
+- Fix the card sidebar returning Access denied when its Prompts directory or PowerPrompter parent is a filesystem link outside the application directory. Existing card documents remain in place.
+- Limit the exception to text listings through the logical Power Prompter Prompts path. Media browsing, unrelated shared folders, and nested links escaping the approved directory retain their existing access restrictions.
+- Installation completion guards remain intact. Reinstall/repair is required if an older managed installation has no complete verification record.
+
+### Validation
+
+- Nine path authorization regressions pass, including shared parents, nested folders, broken links, and escape rejection. Isolated Linux folder-list and card-load checks, frontend build/lint, type checks, and pipeline audit pass. Windows packages are built in Windows CI; this is not a new Windows runtime qualification.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Power Prompter card files in linked folders were present but missing from the sidebar because folder listing was denied.
+- Improved: Release setup instructions explicitly explain reinstall/repair when ComfyUI cannot launch or automatic startup fails.
+
 ## v0.90.1-beta - ComfyUI Installation And Action Console Reliability
 
 ### TL;DR - Setup After Updating
