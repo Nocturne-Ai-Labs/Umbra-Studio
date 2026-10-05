@@ -308,7 +308,14 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
   syncPersistedProject: (project) => set((state) => {
     if (state.present.id !== project.id) return state;
     if ((project.serverRevision ?? 0) < (state.present.serverRevision ?? 0)) return state;
-    if (state.present.revision === project.revision) return { present: cloneProject(project) };
+    if (state.present.revision === project.revision) return {
+      present: {
+        ...cloneProject(project),
+        // Pan, zoom, and selection can change without advancing the document revision.
+        viewport: state.present.viewport,
+        activeEntityId: state.present.activeEntityId,
+      },
+    };
     return { present: hydratePersistedAssets(state.present, project) };
   }),
   newProject: () => set((state) => ({ past: [], present: createUmbraCanvasProjectDocument(), future: [], historyEpoch: state.historyEpoch + 1 })),
