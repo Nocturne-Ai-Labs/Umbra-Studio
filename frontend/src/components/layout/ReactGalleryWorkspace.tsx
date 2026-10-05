@@ -5586,7 +5586,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (!folderPath) return;
     const cursor = 0;
     const preserveScroll = options?.preserveScroll === true && pathsEqual(folderPath, currentFolder);
-    const preservedScrollTop = preserveScroll ? (scrollParentRef.current?.scrollTop ?? 0) : 0;
     const seq = ++loadSeqRef.current;
     selectAllAbortRef.current?.abort();
     selectAllAbortRef.current = null;
@@ -5624,6 +5623,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           stale: true,
         };
       }
+      // Read at commit time so scrolling during the request is retained too.
+      const preservedScrollTop = preserveScroll ? (scrollParentRef.current?.scrollTop ?? 0) : 0;
       currentFolderRef.current = folderPath;
       setCurrentFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
       setFocusedFolder((current) => (pathsEqual(current, folderPath) ? current : folderPath));
@@ -5651,7 +5652,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!appliedPage && preserveScroll) {
         window.requestAnimationFrame(() => {
           const node = scrollParentRef.current;
-          if (!node) return;
+          if (!node || seq !== loadSeqRef.current || !pathsEqual(folderPath, currentFolderRef.current)) return;
           node.scrollTop = Math.min(preservedScrollTop, Math.max(0, node.scrollHeight - node.clientHeight));
         });
       }
@@ -5712,6 +5713,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         }
         const response = await fetchGalleryFs('/list-progressive', params, { signal: abortController.signal }, (page) => {
           if (seq !== loadSeqRef.current) return;
+          // A short streamed preview would clamp an already-scrolled grid.
+          // Same-folder refreshes commit the complete listing atomically below.
+          if (preserveScroll) return;
           applyPayload(page as GalleryListPayload);
           setLoading(false);
         });
@@ -8542,7 +8546,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const requestedFolder = normalizePath(detail.folderPath || detail.path || '');
       if (requestedFolder && !pathsEqual(requestedFolder, currentFolder)) emitFolderChanged(currentFolder);
       if (manualRefresh) {
-        void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true });
+        void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
         return;
       }
       emitFilmstripFeed(currentFolder, files);
