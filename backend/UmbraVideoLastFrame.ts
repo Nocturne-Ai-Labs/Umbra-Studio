@@ -54,7 +54,7 @@ async function exportLastFrame(options: Parameters<typeof saveUmbraVideoLastFram
         '-hide_banner', '-loglevel', 'error', '-nostdin',
         '-protocol_whitelist', 'file', '-format_whitelist', LOCAL_VIDEO_FORMATS,
         '-sseof', '-1', '-i', video,
-        '-map', '0:v:0', '-an', '-sn', '-vsync', '0', '-threads', '1',
+        '-map', '0:v:0', '-an', '-sn', '-fps_mode', 'passthrough', '-threads', '1',
         '-compression_level', '1', '-update', '1', '-f', 'image2', temporary,
       ], { executable: resolveUmbraExtendedVideoFfmpeg(options.comfyRoot), maxBytes: 1024, timeoutMs: 60_000, signal: options.signal });
       await validatePng(temporary);
