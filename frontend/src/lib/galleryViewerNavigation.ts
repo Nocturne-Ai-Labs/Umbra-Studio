@@ -1,14 +1,12 @@
+import { galleryPathKey } from './galleryPathIdentity';
+
 export type GalleryViewerNavigationEntry = {
   path?: unknown;
   type?: unknown;
 };
 
 function navigationPathKey(value: unknown): string {
-  return String(value || '')
-    .replace(/\\/g, '/')
-    .replace(/\/+$/, '')
-    .trim()
-    .toLowerCase();
+  return galleryPathKey(value);
 }
 
 /**

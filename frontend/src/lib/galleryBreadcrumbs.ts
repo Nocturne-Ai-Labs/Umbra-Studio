@@ -1,3 +1,5 @@
+import { galleryPathKey } from './galleryPathIdentity';
+
 export type GalleryBreadcrumb = { path: string; label: string; parent: string };
 
 const normalize = (path: string) => {
@@ -10,8 +12,8 @@ export function buildGalleryBreadcrumbs(folder: string, roots: Array<{ path: str
   if (!folder) return [];
   const current = normalize(folder);
   const root = roots.map(entry => ({ ...entry, path: normalize(entry.path) }))
-    .filter(entry => current.toLowerCase() === entry.path.toLowerCase()
-      || current.toLowerCase().startsWith(`${entry.path.replace(/\/$/, '')}/`.toLowerCase()))
+    .filter(entry => galleryPathKey(current) === galleryPathKey(entry.path)
+      || galleryPathKey(current).startsWith(`${galleryPathKey(entry.path).replace(/\/$/, '')}/`))
     .sort((a, b) => b.path.length - a.path.length)[0];
   if (!root) return [{ path: current, label: current.split('/').pop() || current, parent: '' }];
   const crumbs: GalleryBreadcrumb[] = [{ path: root.path, label: root.label, parent: '' }];

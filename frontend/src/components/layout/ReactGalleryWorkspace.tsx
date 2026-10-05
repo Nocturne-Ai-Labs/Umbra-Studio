@@ -68,6 +68,8 @@ import {
   normalizeGalleryFsUrl,
 } from '@/lib/galleryBridgeFs';
 import { galleryMetadataCacheKey, galleryMediaRevision } from '@/lib/galleryMediaIdentity';
+import { galleryPathKey } from '@/lib/galleryPathIdentity';
+import { isGalleryMediaReadPath } from '../../../../shared/galleryMediaPath';
 import { buildTrashThumbnailUrl } from '@/lib/galleryTrashMedia';
 import { reconcileGalleryViewerNavigation } from '@/lib/galleryViewerNavigation';
 import { isGalleryDoubleTap, type GalleryTapSample } from '@/lib/galleryTouchNavigation';
@@ -657,7 +659,7 @@ function createGalleryUiSessionClientId(): string {
 }
 
 function selectionPathKey(value: unknown): string {
-  return normalizePath(value).toLowerCase();
+  return galleryPathKey(value);
 }
 
 function pathLeaf(value: unknown): string {
@@ -686,12 +688,12 @@ function isLikelyFilePath(value: unknown): boolean {
 }
 
 function pathsEqual(left: unknown, right: unknown): boolean {
-  return normalizePath(left).toLowerCase() === normalizePath(right).toLowerCase();
+  return selectionPathKey(left) === selectionPathKey(right);
 }
 
 function pathIsInsideRoot(pathValue: unknown, rootValue: unknown): boolean {
-  const path = normalizePath(pathValue).toLowerCase();
-  const root = normalizePath(rootValue).toLowerCase();
+  const path = selectionPathKey(pathValue);
+  const root = selectionPathKey(rootValue);
   return Boolean(path && root) && (path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`));
 }
 
@@ -812,7 +814,7 @@ function galleryPageCacheKey(
   sortOrder: GallerySortOrder,
 ): string {
   return [
-    normalizePath(folderPath).toLowerCase(),
+    selectionPathKey(folderPath),
     'all',
     sortBy,
     sortOrder,
@@ -825,7 +827,7 @@ function galleryFolderPreviewCacheKey(
   sortOrder: GallerySortOrder,
 ): string {
   return [
-    normalizePath(folderPath).toLowerCase(),
+    selectionPathKey(folderPath),
     FOLDER_PREVIEW_PAGE_SIZE,
     sortBy,
     sortOrder,
@@ -852,7 +854,7 @@ function uniqueNormalizedPaths(values: unknown[]): string[] {
   for (const value of values) {
     const normalized = normalizePath(value);
     if (!normalized) continue;
-    const key = normalized.toLowerCase();
+    const key = selectionPathKey(normalized);
     if (seen.has(key)) continue;
     seen.add(key);
     next.push(normalized);
@@ -1052,7 +1054,7 @@ function collectSavedOutputFiles(detail: unknown): GallerySavedOutputFile[] {
   for (const output of outputs) {
     const item = output && typeof output === 'object' ? output as Record<string, unknown> : {};
     const path = normalizePath(String(item.fullpath || item.fullPath || item.path || ''));
-    const key = path.toLowerCase();
+    const key = selectionPathKey(path);
     if (!path || seen.has(key)) continue;
     seen.add(key);
     const name = String(item.filename || item.name || pathLeaf(path) || '').trim();
@@ -1268,7 +1270,7 @@ function uniqueGalleryMediaFiles(files: GalleryFile[]): GalleryFile[] {
   for (const file of files) {
     const path = normalizePath(file?.path);
     if (!path || file?.type === 'folder' || file?.type === 'archive') continue;
-    const key = path.toLowerCase();
+    const key = selectionPathKey(path);
     if (seen.has(key)) continue;
     seen.add(key);
     next.push({
@@ -1365,13 +1367,13 @@ function buildRenamePreview(paths: string[], templateValue: string): GalleryRena
   });
   const desiredCounts = new Map<string, number>();
   for (const item of desired) {
-    const duplicateKey = `${pathParent(item.path).toLowerCase()}/${item.desiredName.toLowerCase()}`;
+    const duplicateKey = selectionPathKey(`${pathParent(item.path)}/${item.desiredName}`);
     desiredCounts.set(duplicateKey, Number(desiredCounts.get(duplicateKey) || 0) + 1);
   }
   const seenDesired = new Map<string, number>();
 
   return desired.map((item) => {
-    const duplicateKey = `${pathParent(item.path).toLowerCase()}/${item.desiredName.toLowerCase()}`;
+    const duplicateKey = selectionPathKey(`${pathParent(item.path)}/${item.desiredName}`);
     const duplicateIndex = Number(seenDesired.get(duplicateKey) || 0);
     seenDesired.set(duplicateKey, duplicateIndex + 1);
     const hasBatchDuplicate = Number(desiredCounts.get(duplicateKey) || 0) > 1;
@@ -1418,7 +1420,7 @@ function folderSummarySignature(summary: GalleryFolderSummary | null | undefined
     Math.max(0, Math.trunc(Number(summary.imageCount || 0))),
     Math.max(0, Math.trunc(Number(summary.videoCount || 0))),
     Math.max(0, Math.trunc(Number(summary.gifCount || 0))),
-    normalizePath(String(summary.firstMediaPath || '')).toLowerCase(),
+    selectionPathKey(String(summary.firstMediaPath || '')),
     String(summary.firstMediaType || '').toLowerCase(),
   ].join('|');
 }
@@ -1485,14 +1487,14 @@ function buildReorderedGalleryFiles(
   const movingPaths = uniqueNormalizedPaths(paths).filter((path) => !pathsEqual(path, target));
   if (movingPaths.length === 0) return null;
 
-  const byPath = new Map(currentFiles.map((file) => [normalizePath(file.path).toLowerCase(), file]));
+  const byPath = new Map(currentFiles.map((file) => [selectionPathKey(file.path), file]));
   const movingFiles = movingPaths
-    .map((path) => byPath.get(normalizePath(path).toLowerCase()) || null)
+    .map((path) => byPath.get(selectionPathKey(path)) || null)
     .filter((file): file is GalleryFile => Boolean(file));
   if (movingFiles.length === 0) return null;
 
-  const movingSet = new Set(movingFiles.map((file) => normalizePath(file.path).toLowerCase()));
-  const withoutMoving = currentFiles.filter((file) => !movingSet.has(normalizePath(file.path).toLowerCase()));
+  const movingSet = new Set(movingFiles.map((file) => selectionPathKey(file.path)));
+  const withoutMoving = currentFiles.filter((file) => !movingSet.has(selectionPathKey(file.path)));
   const targetIndex = withoutMoving.findIndex((file) => pathsEqual(file.path, target));
   if (targetIndex < 0) return null;
 
@@ -1567,7 +1569,7 @@ function buildSearchGroups(files: GalleryFile[], folders: GalleryFolder[]): Gall
   for (const folder of folders) {
     const folderPath = normalizePath(folder.path);
     if (!folderPath) continue;
-    const key = folderPath;
+    const key = selectionPathKey(folderPath);
     groupsByPath.set(key, {
       folder: { name: folder.name || pathLeaf(folderPath) || folderPath, path: folderPath },
       files: [],
@@ -1576,7 +1578,7 @@ function buildSearchGroups(files: GalleryFile[], folders: GalleryFolder[]): Gall
   for (const file of files) {
     const folderPath = pathParent(file.path) || normalizePath(file.path);
     if (!folderPath) continue;
-    const key = folderPath;
+    const key = selectionPathKey(folderPath);
     const existing = groupsByPath.get(key);
     if (existing) {
       existing.files.push(file);
@@ -2253,10 +2255,10 @@ function LibraryNavigator({
     pinned: false,
   });
   const focusedPinned = pinnedFolders.some((folderPath) => pathsEqual(folderPath, focusedFolder));
-  const rootPathSet = useMemo(() => new Set(roots.map((root) => normalizePath(root.path).toLowerCase()).filter(Boolean)), [roots]);
+  const rootPathSet = useMemo(() => new Set(roots.map((root) => selectionPathKey(root.path)).filter(Boolean)), [roots]);
   const canDragFolder = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
-    return Boolean(normalized) && !isTrashPath(normalized) && !rootPathSet.has(normalized.toLowerCase());
+    return Boolean(normalized) && !isTrashPath(normalized) && !rootPathSet.has(selectionPathKey(normalized));
   }, [rootPathSet]);
   const toggleSection = useCallback((section: 'pinned' | 'roots') => {
     setCollapsedSections((current) => ({
@@ -4835,7 +4837,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const externalRoots = useMemo(() => uniqueNormalizedPaths([
     externalOutputPath,
     ...(externalRootsEnabled && Array.isArray(externalRootsSetting) ? externalRootsSetting : []),
-  ]).filter((entry) => entry.toLowerCase() !== rootPath.toLowerCase()), [
+  ]).filter((entry) => !pathsEqual(entry, rootPath)), [
     externalOutputPath,
     externalRootsEnabled,
     externalRootsSetting,
@@ -5176,7 +5178,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, []);
 
   const clearPageCacheForFolder = useCallback((folderPath: string) => {
-    const normalized = normalizePath(folderPath).toLowerCase();
+    const normalized = selectionPathKey(folderPath);
     if (!normalized) return;
     for (const cacheKey of Array.from(pageCacheRef.current.keys())) {
       if (cacheKey.startsWith(`${normalized}${PAGE_CACHE_KEY_SEPARATOR}`)) {
@@ -5640,9 +5642,23 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       setFiles(nextFiles);
       setTotal(Math.max(0, Math.trunc(Number(payload.total || nextFiles.length))));
       if (!appliedPage && options?.keepSelection !== true) {
-        setSelectedPaths(new Set());
-        setLastSelectedPath('');
-        emitSelectionChanged([]);
+        applyGallerySelection(new Set(), '');
+      } else if (options?.keepSelection === true && !isTrashFolder && !cachedPayload
+        && payload.done === true && payload.nextCursor == null) {
+        // A failed partial page may have replaced the prior loaded files. Check
+        // selected direct media against the complete listing instead; descendants,
+        // other folders, archives, and non-media paths remain outside its scope.
+        const listedPaths = new Set(nextFiles.map((file) => selectionPathKey(file.path)));
+        const keepPath = (path: string) => !pathsEqual(pathParent(path), folderPath)
+          || !isGalleryMediaReadPath(normalizePath(path))
+          || listedPaths.has(selectionPathKey(path));
+        const nextSelection = new Set([...selectedPathsRef.current].filter(keepPath));
+        if (nextSelection.size !== selectedPathsRef.current.size) {
+          selectedPathsRef.current = nextSelection;
+          setSelectedPaths(nextSelection);
+          emitSelectionChanged(Array.from(nextSelection));
+        }
+        setLastSelectedPath((current) => keepPath(current) ? current : '');
       }
       emitFolderChanged(folderPath);
       emitFilmstripFeed(folderPath, nextFiles, {
@@ -5803,7 +5819,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         setOpeningFolder('');
       }
     }
-  }, [addOpenedFolder, addToast, currentFolder, emitFilmstripFeed, emitFolderChanged, emitSelectionChanged, fetchTrashListPayload, invalidateTreeChildrenCache, loadTreeChildren, markGalleryUiSessionDirty, readCachedPage, rootPath, sortBy, sortOrder, writeCachedPage, writeTreeChildrenCache]);
+  }, [addOpenedFolder, addToast, applyGallerySelection, currentFolder, emitFilmstripFeed, emitFolderChanged, emitSelectionChanged, fetchTrashListPayload, invalidateTreeChildrenCache, loadTreeChildren, markGalleryUiSessionDirty, readCachedPage, rootPath, sortBy, sortOrder, writeCachedPage, writeTreeChildrenCache]);
 
   const refreshCurrentFolderFromDisk = useCallback(() => {
     window.dispatchEvent(new Event('umbra:gallery-archives-refresh'));
@@ -5885,14 +5901,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const incomingFolders = Array.isArray(payload.folders) ? galleryFoldersToTreeNodes(payload.folders) : [];
       writeTreeChildrenCache(folderPath, incomingFolders);
 
-      const existingByPath = new Map(currentFiles.map((file) => [normalizePath(file.path).toLowerCase(), file]));
+      const existingByPath = new Map(currentFiles.map((file) => [selectionPathKey(file.path), file]));
       const mergedByPath = new Map<string, GalleryFile>();
 
       let added = 0;
       let updated = 0;
       const additions: GalleryFile[] = [];
       for (const incoming of incomingFiles) {
-        const key = normalizePath(incoming.path).toLowerCase();
+        const key = selectionPathKey(incoming.path);
         if (!key) continue;
         const previous = existingByPath.get(key);
         const merged = mergeGalleryFilePreservingIdentity(previous, incoming);
@@ -5906,12 +5922,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
 
       const nextFiles = Array.from(mergedByPath.values()).sort((left, right) => compareGalleryFiles(left, right, sortBy, sortOrder));
-      const removed = currentFiles.some(file => !mergedByPath.has(normalizePath(file.path).toLowerCase()));
+      const removed = currentFiles.some(file => !mergedByPath.has(selectionPathKey(file.path)));
       if (removed) {
         // This listing only establishes which direct children still exist.
         // Selections can also contain child-folder previews or search results.
         const keepPath = (path: string) => !pathsEqual(pathParent(path), folderPath)
-          || mergedByPath.has(normalizePath(path).toLowerCase());
+          || mergedByPath.has(selectionPathKey(path));
         const nextSelection = new Set([...selectedPathsRef.current].filter(keepPath));
         if (nextSelection.size !== selectedPathsRef.current.size) {
           selectedPathsRef.current = nextSelection;
@@ -6536,13 +6552,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const sendViewerToWaifu = useCallback(() => {
     const filesByPath = new Map<string, GalleryFile>();
     for (const file of [...knownFilesRef.current, ...viewerSessionFilesRef.current]) {
-      filesByPath.set(normalizePath(file.path).toLowerCase(), file);
+      filesByPath.set(selectionPathKey(file.path), file);
     }
     if (viewerFileFallback) {
-      filesByPath.set(normalizePath(viewerFileFallback.path).toLowerCase(), viewerFileFallback);
+      filesByPath.set(selectionPathKey(viewerFileFallback.path), viewerFileFallback);
     }
     const imagePaths = selectedOrViewerPaths().map(normalizePath).filter((path) => {
-      const file = filesByPath.get(path.toLowerCase());
+      const file = filesByPath.get(selectionPathKey(path));
       return file?.type === 'image' || file?.type === 'gif';
     });
     sendSelectionToWorkspace(imagePaths, 'waifudiffusion');
@@ -6740,8 +6756,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const seenTrashPaths = new Set<string>();
     for (const item of items) {
       const trashPath = normalizePath(item.trashPath);
-      if (!trashPath || seenTrashPaths.has(trashPath.toLowerCase())) continue;
-      seenTrashPaths.add(trashPath.toLowerCase());
+      if (!trashPath || seenTrashPaths.has(selectionPathKey(trashPath))) continue;
+      seenTrashPaths.add(selectionPathKey(trashPath));
       const originalPath = normalizePath(item.originalPath);
       undoItems.push({
         trashPath,
@@ -6785,7 +6801,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const rememberRestoredHighlights = useCallback((paths: string[]) => {
     const normalized = uniqueNormalizedPaths(paths);
     if (normalized.length === 0) return;
-    const keys = normalized.map((path) => path.toLowerCase());
+    const keys = normalized.map((path) => selectionPathKey(path));
     setRestoredHighlightPaths((current) => {
       const next = new Set(current);
       for (const key of keys) next.add(key);
@@ -6812,7 +6828,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   ): GalleryOptimisticRemovalSnapshot | null => {
     const normalized = uniqueNormalizedPaths(paths);
     if (normalized.length === 0) return null;
-    const removedSet = new Set(normalized.map((path) => normalizePath(path).toLowerCase()));
+    const removedSet = new Set(normalized.map((path) => selectionPathKey(path)));
     const previousState: GalleryOptimisticRemovalState = {
       files: filesRef.current,
       knownFiles: knownFilesRef.current,
@@ -6833,7 +6849,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
     const applied = snapshot.applied;
     const removeFromList = (source: GalleryFile[]) => source.filter((file) => (
-      !removedSet.has(normalizePath(file.path).toLowerCase())
+      !removedSet.has(selectionPathKey(file.path))
     ));
     const nextFiles = removeFromList(filesRef.current);
     const nextKnownFiles = removeFromList(knownFilesRef.current);
@@ -6843,7 +6859,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const shouldUseNextViewer = Boolean(
       options.clearViewer
       && nextViewerPath
-      && !removedSet.has(nextViewerPath.toLowerCase())
+      && !removedSet.has(selectionPathKey(nextViewerPath))
     );
 
     filesRef.current = nextFiles;
@@ -6880,19 +6896,19 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       }
     } else if (options.clearRemovedViewer) {
       setViewerPath((current) => {
-        const next = removedSet.has(normalizePath(current).toLowerCase()) ? '' : current;
+        const next = removedSet.has(selectionPathKey(current)) ? '' : current;
         applied.viewerPath = next;
         return next;
       });
       setViewerFileFallback((current) => {
-        const next = current && removedSet.has(normalizePath(current.path).toLowerCase()) ? null : current;
+        const next = current && removedSet.has(selectionPathKey(current.path)) ? null : current;
         applied.viewerFileFallback = next;
         return next;
       });
     }
     applied.viewerSessionFiles = viewerSessionFilesRef.current;
     const nextSelection = options.keepSelection
-      ? new Set(Array.from(selectedPathsRef.current).filter((path) => !removedSet.has(normalizePath(path).toLowerCase())))
+      ? new Set(Array.from(selectedPathsRef.current).filter((path) => !removedSet.has(selectionPathKey(path))))
       : shouldUseNextViewer
         ? new Set([nextViewerPath])
         : new Set<string>();
@@ -6901,7 +6917,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     setSelectedPaths(nextSelection);
     setLastSelectedPath((current) => {
       const next = shouldUseNextViewer ? nextViewerPath
-        : removedSet.has(normalizePath(current).toLowerCase()) ? '' : current;
+        : removedSet.has(selectionPathKey(current)) ? '' : current;
       applied.lastSelectedPath = next;
       return next;
     });
@@ -6963,7 +6979,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     for (const file of [...knownFilesRef.current, ...filesRef.current]) {
       const filePath = normalizePath(file.path);
       if (!filePath) continue;
-      nameByPath.set(filePath.toLowerCase(), String(file.name || pathLeaf(filePath) || 'item'));
+      nameByPath.set(selectionPathKey(filePath), String(file.name || pathLeaf(filePath) || 'item'));
     }
     const trashPaths = normalized.filter(isTrashPath);
     const deletePaths = normalized.filter((path) => !isTrashPath(path));
@@ -7001,7 +7017,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                 trashPath,
                 originalPath,
                 name: String(
-                  nameByPath.get(originalPath.toLowerCase())
+                  nameByPath.get(selectionPathKey(originalPath))
                   || pathLeaf(originalPath)
                   || pathLeaf(trashPath)
                   || 'item',
@@ -7067,7 +7083,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const deleteMarkedAt = Date.now();
       for (const folder of touchedFolders) {
         clearPageCacheForFolder(folder);
-        dirtyAfterDeleteFoldersRef.current.set(folder.toLowerCase(), deleteMarkedAt);
+        dirtyAfterDeleteFoldersRef.current.set(selectionPathKey(folder), deleteMarkedAt);
         window.dispatchEvent(new CustomEvent('umbra:gallery-content-changed', {
           detail: { path: folder, folderPath: folder, source: 'react-gallery', reason: 'delete' },
         }));
@@ -7114,10 +7130,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const currentViewerPath = normalizePath(viewerPath || lastSelectedPath);
     const deletePaths = currentViewerPath ? [currentViewerPath] : selectedOrViewerPaths().slice(0, 1);
     if (deletePaths.length === 0) return;
-    const pendingDeleteKey = normalizePath(deletePaths[0]).toLowerCase();
+    const pendingDeleteKey = selectionPathKey(deletePaths[0]);
     if (pendingDeleteKey && pendingDeletePathsRef.current.has(pendingDeleteKey)) return;
     if (pendingDeleteKey) pendingDeletePathsRef.current.add(pendingDeleteKey);
-    const deleteSet = new Set(deletePaths.map((path) => normalizePath(path).toLowerCase()));
+    const deleteSet = new Set(deletePaths.map((path) => selectionPathKey(path)));
     const ordered = getViewerOrderedFiles();
     const current = normalizePath(currentViewerPath || ordered[0]?.path);
     const currentIndex = ordered.findIndex((file) => pathsEqual(file.path, current));
@@ -7128,7 +7144,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       for (let index = startIndex; index < ordered.length; index += 1) {
         const candidate = ordered[index];
         const candidatePath = normalizePath(candidate?.path || '');
-        if (candidatePath && !deleteSet.has(candidatePath.toLowerCase())) {
+        if (candidatePath && !deleteSet.has(selectionPathKey(candidatePath))) {
           nextViewerPath = candidatePath;
           nextViewerFile = candidate;
           break;
@@ -7138,7 +7154,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         for (let index = currentIndex - 1; index >= 0; index -= 1) {
           const candidate = ordered[index];
           const candidatePath = normalizePath(candidate?.path || '');
-          if (candidatePath && !deleteSet.has(candidatePath.toLowerCase())) {
+          if (candidatePath && !deleteSet.has(selectionPathKey(candidatePath))) {
             nextViewerPath = candidatePath;
             nextViewerFile = candidate;
             break;
@@ -7148,7 +7164,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
     const nextSessionFiles = ordered.filter((candidate) => {
       const candidatePath = normalizePath(candidate.path);
-      return candidatePath && !deleteSet.has(candidatePath.toLowerCase());
+      return candidatePath && !deleteSet.has(selectionPathKey(candidatePath));
     });
     updateViewerSessionFiles(nextSessionFiles);
     if (nextViewerPath && nextViewerFile) {
@@ -7434,8 +7450,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
     setFolderPreviewRefreshVersion((current) => current + 1);
     if (mode === 'move') {
-      const movedSet = new Set(sourcePaths.map((path) => normalizePath(path).toLowerCase()));
-      const wasMoved = (path: string) => movedSet.has(normalizePath(path).toLowerCase())
+      const movedSet = new Set(sourcePaths.map((path) => selectionPathKey(path)));
+      const wasMoved = (path: string) => movedSet.has(selectionPathKey(path))
         || folderMoves.some(({ source, target }) => pathIsInsideRoot(path, source) || pathIsInsideRoot(path, target));
       const nextSelection = new Set(Array.from(selectedPathsRef.current).filter((path) => !wasMoved(path)));
       selectedPathsRef.current = nextSelection;
@@ -7834,17 +7850,17 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         if (result?.success !== true) continue;
         const oldPath = normalizePath(result.path);
         const newPath = normalizePath(result.newPath);
-        if (oldPath && newPath) newPathByOldPath.set(oldPath.toLowerCase(), newPath);
+        if (oldPath && newPath) newPathByOldPath.set(selectionPathKey(oldPath), newPath);
       }
       if (newPathByOldPath.size > 0) {
         setSelectedPaths((current) => {
           const next = new Set<string>();
           for (const path of current) {
-            next.add(newPathByOldPath.get(normalizePath(path).toLowerCase()) || path);
+            next.add(newPathByOldPath.get(selectionPathKey(path)) || path);
           }
           return next;
         });
-        setViewerPath((current) => newPathByOldPath.get(normalizePath(current).toLowerCase()) || current);
+        setViewerPath((current) => newPathByOldPath.get(selectionPathKey(current)) || current);
       }
       setRenameModal(null);
       addToast({
@@ -7866,11 +7882,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, [addToast, clearPageCacheForFolder, currentFolder, loadFolder, renameModal]);
 
   const getUnionTagsForPaths = useCallback((paths: string[]) => {
-    const requested = new Set(uniqueNormalizedPaths(paths).map((path) => path.toLowerCase()));
+    const requested = new Set(uniqueNormalizedPaths(paths).map((path) => selectionPathKey(path)));
     const tags: string[] = [];
     const seen = new Set<string>();
     for (const file of knownFilesRef.current) {
-      const key = normalizePath(file.path).toLowerCase();
+      const key = selectionPathKey(file.path);
       if (!requested.has(key)) continue;
       for (const tag of normalizeTags(file.tags)) {
         const tagKey = tag.toLowerCase();
@@ -7894,10 +7910,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, [getUnionTagsForPaths]);
 
   const applyTagsToLoadedFiles = useCallback((paths: string[], tags: string[]) => {
-    const pathSet = new Set(uniqueNormalizedPaths(paths).map((path) => path.toLowerCase()));
+    const pathSet = new Set(uniqueNormalizedPaths(paths).map((path) => selectionPathKey(path)));
     const nextTags = normalizeTags(tags);
     const updateFile = (file: GalleryFile): GalleryFile => (
-      pathSet.has(normalizePath(file.path).toLowerCase())
+      pathSet.has(selectionPathKey(file.path))
         ? {
             ...file,
             tags: nextTags,
@@ -7971,7 +7987,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       ...viewerSessionFilesRef.current,
     ]) {
       const filePath = normalizePath(file.path);
-      if (filePath) knownMediaKeys.add(filePath.toLowerCase());
+      if (filePath) knownMediaKeys.add(selectionPathKey(filePath));
     }
 
     const groups = folderPreviewGroupsRef.current;
@@ -7981,7 +7997,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     let mediaCount = 0;
 
     for (const path of normalized) {
-      const key = path.toLowerCase();
+      const key = selectionPathKey(path);
       const knownAsMedia = knownMediaKeys.has(key);
       const previewGroup = groups.find((group) => pathsEqual(group.folder.path, path));
       const isCurrentFolderDelete = pathsEqual(path, currentFolder);
@@ -8388,9 +8404,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (currentFolderFiles.length === 0) return childFolderPaths.length > 0;
 
     const now = Date.now();
-    directOutputSyncRef.current.set(normalizedCurrentFolder.toLowerCase(), now);
+    directOutputSyncRef.current.set(selectionPathKey(normalizedCurrentFolder), now);
     for (const file of currentFolderFiles) {
-      directOutputSyncRef.current.set(pathParent(file.path).toLowerCase(), now);
+      directOutputSyncRef.current.set(selectionPathKey(pathParent(file.path)), now);
     }
     for (const [folderPath, timestamp] of Array.from(directOutputSyncRef.current.entries())) {
       if (now - timestamp > 10_000) directOutputSyncRef.current.delete(folderPath);
@@ -8415,10 +8431,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       };
     });
 
-    const byPath = new Map(filesRef.current.map((file) => [normalizePath(file.path).toLowerCase(), file]));
+    const byPath = new Map(filesRef.current.map((file) => [selectionPathKey(file.path), file]));
     let added = 0;
     for (const incoming of incomingFiles) {
-      const key = normalizePath(incoming.path).toLowerCase();
+      const key = selectionPathKey(incoming.path);
       const previous = byPath.get(key);
       if (!previous) added += 1;
       byPath.set(key, mergeGalleryFilePreservingIdentity(previous, incoming));
@@ -8428,10 +8444,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     filesRef.current = nextFiles;
     setFiles(nextFiles);
     setTotal((current) => Math.max(current, nextFiles.length));
-    const dirtyAfterDeleteAt = dirtyAfterDeleteFoldersRef.current.get(normalizedCurrentFolder.toLowerCase()) || 0;
+    const dirtyAfterDeleteAt = dirtyAfterDeleteFoldersRef.current.get(selectionPathKey(normalizedCurrentFolder)) || 0;
     const shouldReconcileAfterDelete = dirtyAfterDeleteAt > 0 && now - dirtyAfterDeleteAt < 30_000;
     if (shouldReconcileAfterDelete) {
-      dirtyAfterDeleteFoldersRef.current.delete(normalizedCurrentFolder.toLowerCase());
+      dirtyAfterDeleteFoldersRef.current.delete(selectionPathKey(normalizedCurrentFolder));
       window.setTimeout(() => {
         void loadFolder({
           folder: normalizedCurrentFolder,
@@ -8627,9 +8643,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         ? uniqueNormalizedPaths(detail.paths.map(normalizePath))
         : [];
       if (removedPaths.length === 0) return;
-      const removedSet = new Set(removedPaths.map((path) => path.toLowerCase()));
+      const removedSet = new Set(removedPaths.map((path) => selectionPathKey(path)));
       const removeFromList = (source: GalleryFile[]) => source.filter((file) => (
-        !removedSet.has(normalizePath(file.path).toLowerCase())
+        !removedSet.has(selectionPathKey(file.path))
       ));
       setFiles((current) => {
         const next = removeFromList(current);
@@ -8653,12 +8669,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       activeViewerFilesRef.current = removeFromList(activeViewerFilesRef.current);
       updateViewerSessionFiles(removeFromList(viewerSessionFilesRef.current));
       setSelectedPaths((current) => {
-        const nextSelection = new Set(Array.from(current).filter((path) => !removedSet.has(normalizePath(path).toLowerCase())));
+        const nextSelection = new Set(Array.from(current).filter((path) => !removedSet.has(selectionPathKey(path))));
         selectedPathsRef.current = nextSelection;
         return nextSelection;
       });
-      setLastSelectedPath((current) => (removedSet.has(normalizePath(current).toLowerCase()) ? '' : current));
-      setViewerPath((current) => (removedSet.has(normalizePath(current).toLowerCase()) ? '' : current));
+      setLastSelectedPath((current) => (removedSet.has(selectionPathKey(current)) ? '' : current));
+      setViewerPath((current) => (removedSet.has(selectionPathKey(current)) ? '' : current));
       for (const removedPath of removedPaths) {
         clearPageCacheForFolder(pathParent(removedPath));
       }
@@ -8720,14 +8736,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const source = String(detail.source || '').trim();
       if (source === 'react-gallery' && reason === 'delete') {
         clearPageCacheForFolder(currentFolder);
-        dirtyAfterDeleteFoldersRef.current.set(changedPath.toLowerCase(), Date.now());
+        dirtyAfterDeleteFoldersRef.current.set(selectionPathKey(changedPath), Date.now());
         if (pathsEqual(changedPath, currentFolder)) {
           void loadFolder({ folder: currentFolder, keepSelection: true, forceRefresh: true, preserveScroll: true });
         }
         return;
       }
 
-      const recentDirectSync = directOutputSyncRef.current.get(changedPath.toLowerCase()) || 0;
+      const recentDirectSync = directOutputSyncRef.current.get(selectionPathKey(changedPath)) || 0;
       if (reason === 'generation' && recentDirectSync && Date.now() - recentDirectSync < 5_000) {
         return;
       }
@@ -8737,7 +8753,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         return;
       }
 
-      const refreshKey = `${normalizePath(currentFolder).toLowerCase()}|${normalizePath(changedPath).toLowerCase()}|${Math.floor(Date.now() / 750)}`;
+      const refreshKey = `${selectionPathKey(currentFolder)}|${selectionPathKey(changedPath)}|${Math.floor(Date.now() / 750)}`;
       if (contentRefreshKeyRef.current === refreshKey) return;
       contentRefreshKeyRef.current = refreshKey;
       clearPageCacheForFolder(currentFolder);
@@ -8827,7 +8843,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (!metadataSearchActive) return map;
     for (const match of metadataMatches) {
       const path = normalizePath(match.path);
-      if (path) map.set(path.toLowerCase(), match);
+      if (path) map.set(selectionPathKey(path), match);
     }
     return map;
   }, [metadataMatches, metadataSearchActive]);
@@ -9069,7 +9085,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           while (queueIndex < queue.length && scannedFolders < GLOBAL_SEARCH_MAX_FOLDERS) {
             if (controller.signal.aborted) return;
             const folderPath = normalizePath(queue[queueIndex++]);
-            const folderKey = folderPath.toLowerCase();
+            const folderKey = selectionPathKey(folderPath);
             if (!folderPath || isTrashPath(folderPath) || visited.has(folderKey)) continue;
             visited.add(folderKey);
             scannedFolders += 1;
@@ -9143,7 +9159,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               const childMatches: GalleryFolder[] = [];
               for (const child of children) {
                 const childPath = normalizePath(child.path);
-                const childKey = childPath.toLowerCase();
+                const childKey = selectionPathKey(childPath);
                 if (!childPath || visited.has(childKey)) continue;
                 queue.push(childPath);
                 if (textMatchesSearch(child.name || pathLeaf(childPath), searchNeedle) || textMatchesSearch(childPath, searchNeedle)) {
@@ -9163,7 +9179,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         await Promise.all(Array.from({ length: Math.min(3, queue.length) }, () => scanNextFolder()));
 
         if (controller.signal.aborted) return;
-        const limitReached = queue.slice(queueIndex).some((path) => normalizePath(path) && !isTrashPath(path) && !visited.has(normalizePath(path).toLowerCase()));
+        const limitReached = queue.slice(queueIndex).some((path) => selectionPathKey(path) && !isTrashPath(path) && !visited.has(selectionPathKey(path)));
         if (limitReached) setSearchError(`Search incomplete: the ${GLOBAL_SEARCH_MAX_FOLDERS.toLocaleString()} folder scan limit was reached.${failedFolders ? ` ${failedFolders} folders could not be fully scanned.` : ''}`);
         const done = failedFolders === 0 && !limitReached;
         appendResults({ scannedFolders, done });
@@ -9200,13 +9216,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
 
   const searchFiles = globalSearchActive && Array.isArray(searchResults?.files) ? searchResults.files : [];
   const searchFolders = globalSearchActive && Array.isArray(searchResults?.folders) ? searchResults.folders : [];
-  const searchSelectablePaths = globalSearchActive
-    ? uniqueNormalizedPaths(searchFiles
-      .filter((file) => file.type !== 'folder' && !isLiveGenerationPreviewPath(file.path))
+  const searchSelectablePaths = globalSearchActive || searchNeedle
+    ? uniqueNormalizedPaths((globalSearchActive ? searchFiles : localFilteredFiles)
+      .filter((file) => (!globalSearchActive || file.type !== 'folder') && !isLiveGenerationPreviewPath(file.path))
       .map((file) => file.path))
     : [];
   const selectAllForCurrentView = () => {
-    if (!globalSearchActive) {
+    if (!globalSearchActive && !searchNeedle) {
       void selectAllInFolder();
       return;
     }
@@ -9364,19 +9380,19 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const knownFiles = useMemo(() => {
     const byPath = new Map<string, GalleryFile>();
     for (const file of files) {
-      const key = normalizePath(file.path).toLowerCase();
+      const key = selectionPathKey(file.path);
       if (key) byPath.set(key, file);
     }
     for (const file of searchFiles) {
-      const key = normalizePath(file.path).toLowerCase();
+      const key = selectionPathKey(file.path);
       if (key) byPath.set(key, file);
     }
     for (const file of folderPreviewFiles) {
-      const key = normalizePath(file.path).toLowerCase();
+      const key = selectionPathKey(file.path);
       if (key) byPath.set(key, file);
     }
     for (const file of liveDisplayFiles) {
-      const key = normalizePath(file.path).toLowerCase();
+      const key = selectionPathKey(file.path);
       if (key) byPath.set(key, file);
     }
     return Array.from(byPath.values());
@@ -9393,7 +9409,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (groupBySet && !trashMode) return withLive(setGroupedFiles);
     if (folderPreviewMode) return withLive([...displayFiles, ...folderPreviewFiles]);
     if (globalSearchActive) return withLive(searchFiles);
-    return withLive(files);
+    return withLive(displayFiles);
   }, [displayFiles, files, folderPreviewFiles, folderPreviewMode, globalSearchActive, groupBySet, liveDisplayFiles, searchFiles, setGroupedFiles, trashMode]);
   const tagScopeFolders = useMemo(() => {
     if (trashMode) return [];
@@ -9530,7 +9546,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       parentPath: currentFolder,
       rootPath: folder.path,
     }));
-    const queuedOrSeen = new Set(initialTargets.map((target) => normalizePath(target.folder.path).toLowerCase()).filter(Boolean));
+    const queuedOrSeen = new Set(initialTargets.map((target) => selectionPathKey(target.folder.path)).filter(Boolean));
     const pending: FolderPreviewTarget[] = [...initialTargets];
 
     setFolderPreviewGroups(initialTargets.map((target) => (
@@ -9547,7 +9563,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       for (const folder of folders) {
         if (queuedOrSeen.size >= FOLDER_PREVIEW_MAX_GROUPS) break;
         const path = normalizePath(folder.path);
-        const key = path.toLowerCase();
+        const key = selectionPathKey(path);
         if (!path || !key || queuedOrSeen.has(key)) continue;
         queuedOrSeen.add(key);
         additions.push({
@@ -9566,9 +9582,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       pending.push(...additions);
       if (controller.signal.aborted || cancelled) return;
       setFolderPreviewGroups((current) => {
-        const existing = new Set(current.map((group) => normalizePath(group.folder.path).toLowerCase()));
+        const existing = new Set(current.map((group) => selectionPathKey(group.folder.path)));
         const nextGroups = additions
-          .filter((target) => !existing.has(normalizePath(target.folder.path).toLowerCase()))
+          .filter((target) => !existing.has(selectionPathKey(target.folder.path)))
           .map((target) => previewGroupForTarget(target, folderPreviewCacheRef.current.get(cacheKeyFor(target.folder.path))));
         if (nextGroups.length === 0) return current;
         const parentIndex = current.findIndex((group) => pathsEqual(group.folder.path, parentTarget.folder.path));
@@ -9700,9 +9716,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, [sortBy, sortOrder]);
 
   const applyManualNsfwToLoadedFiles = useCallback((paths: string[], marked: boolean) => {
-    const pathSet = new Set(uniqueNormalizedPaths(paths).map((path) => path.toLowerCase()));
+    const pathSet = new Set(uniqueNormalizedPaths(paths).map((path) => selectionPathKey(path)));
     const updateFile = (file: GalleryFile): GalleryFile => {
-      if (!pathSet.has(normalizePath(file.path).toLowerCase())) return file;
+      if (!pathSet.has(selectionPathKey(file.path))) return file;
       const currentTags = normalizeTags(file.tags);
       const nextTags = marked
         ? normalizeTags([...currentTags, UMBRA_MANUAL_NSFW_TAG])
@@ -10018,11 +10034,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       const selected = paths.length > 0 ? paths : [targetPath];
       const mediaItems: NonNullable<GalleryContextMenuState['mediaItems']> = [];
       if ((detail.source === 'filmstrip' || detail.source === 'powerprompter-recent-output') && Array.isArray(detail.mediaItems)) {
-        const selectedKeys = new Set(selected.map((path) => path.toLowerCase()));
+        const selectedKeys = new Set(selected.map((path) => selectionPathKey(path)));
         for (const item of detail.mediaItems) {
           const path = normalizePath(item?.path);
           const type = String(item?.type || '').toLowerCase();
-          if (!path || !selectedKeys.has(path.toLowerCase())) continue;
+          if (!path || !selectedKeys.has(selectionPathKey(path))) continue;
           if (type === 'image' || type === 'gif' || type === 'video') mediaItems.push({ path, type });
         }
       }
@@ -10256,9 +10272,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
 
     const targetFile = knownFiles.find((file) => pathsEqual(file.path, targetPath));
-    const filmstripMediaTypes = new Map((contextMenu.mediaItems || []).map((item) => [item.path.toLowerCase(), item.type]));
+    const filmstripMediaTypes = new Map((contextMenu.mediaItems || []).map((item) => [selectionPathKey(item.path), item.type]));
     const mediaTypeForPath = (path: string) => knownFiles.find((file) => pathsEqual(file.path, path))?.type
-      || filmstripMediaTypes.get(path.toLowerCase());
+      || filmstripMediaTypes.get(selectionPathKey(path));
     const downloadablePaths = paths.filter((path) => {
       const file = knownFiles.find((entry) => pathsEqual(entry.path, path));
       return !file || file.type !== 'folder';
@@ -10303,15 +10319,15 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             },
           },
         ];
-    const orderablePathSet = new Set(files.map((file) => normalizePath(file.path).toLowerCase()).filter(Boolean));
+    const orderablePathSet = new Set(files.map((file) => selectionPathKey(file.path)).filter(Boolean));
     const reorderSourcePaths = contextMenu.reorderPaths && contextMenu.reorderPaths.length > 0
       ? contextMenu.reorderPaths
       : paths;
     const reorderPaths = uniqueNormalizedPaths(reorderSourcePaths)
       .filter((path) => !pathsEqual(path, targetPath))
-      .filter((path) => orderablePathSet.has(normalizePath(path).toLowerCase()));
+      .filter((path) => orderablePathSet.has(selectionPathKey(path)));
     const canReorder = !globalSearchActive
-      && orderablePathSet.has(targetPath.toLowerCase())
+      && orderablePathSet.has(selectionPathKey(targetPath))
       && reorderPaths.length > 0;
     const umbraUiImageItems: ContextMenuItem[] = [
       { label: 'TXT2IMG From Parameters', icon: <Sparkles size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'txt2img') },
@@ -10866,7 +10882,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                     </button>
                     <button
                       type="button"
-                      disabled={selectAllLoading || (globalSearchActive
+                      disabled={selectAllLoading || (globalSearchActive || searchNeedle
                         ? searchSelectablePaths.length === 0
                         : activeViewerFiles.length === 0 && files.length === 0 && total === 0)}
                       onClick={selectAllForCurrentView}
@@ -10889,7 +10905,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                   <button
                     type="button"
                     data-umbra-gallery-mobile-select=""
-                    disabled={globalSearchActive
+                    disabled={globalSearchActive || searchNeedle
                       ? searchSelectablePaths.length === 0
                       : activeViewerFiles.length === 0 && files.length === 0 && total === 0}
                     onClick={() => setTouchSelectionMode(true)}
@@ -10902,7 +10918,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
               ) : (
                 <button
                   type="button"
-                  disabled={selectAllLoading || (globalSearchActive
+                  disabled={selectAllLoading || (globalSearchActive || searchNeedle
                     ? searchSelectablePaths.length === 0
                     : files.length === 0 && total === 0)}
                   onClick={selectAllForCurrentView}
@@ -11205,14 +11221,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                           const id = fileId(file);
                           const path = normalizePath(file.path);
                           const selected = selectedPathKeys.has(selectionPathKey(path));
-                          const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
+                          const metadataMatch = metadataMatchByPath.get(selectionPathKey(path));
                           return (
                             <GalleryImageTile
                               key={id}
                               file={file}
                               selected={selected}
                               contextTargeted={pathsEqual(path, reorderContextTargetPath)}
-                              restoredHighlighted={restoredHighlightPaths.has(path.toLowerCase())}
+                              restoredHighlighted={restoredHighlightPaths.has(selectionPathKey(path))}
                               metadataHighlighted={Boolean(metadataMatch)}
                               metadataSnippet={metadataMatch?.snippet || ''}
                               setColor={group.setId > 0 ? group.color : undefined}
@@ -11280,14 +11296,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                           const id = fileId(file);
                           const path = normalizePath(file.path);
                           const selected = selectedPathKeys.has(selectionPathKey(path));
-                          const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
+                          const metadataMatch = metadataMatchByPath.get(selectionPathKey(path));
                           return (
                             <GalleryImageTile
                               key={id}
                               file={file}
                               selected={selected}
                               contextTargeted={pathsEqual(path, reorderContextTargetPath)}
-                              restoredHighlighted={restoredHighlightPaths.has(path.toLowerCase())}
+                              restoredHighlighted={restoredHighlightPaths.has(selectionPathKey(path))}
                               metadataHighlighted={Boolean(metadataMatch)}
                               metadataSnippet={metadataMatch?.snippet || ''}
                               prioritize={groupIndex === 0 && fileIndex <= 8}
@@ -11353,14 +11369,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                             const id = fileId(file);
                             const path = normalizePath(file.path);
                             const selected = selectedPathKeys.has(selectionPathKey(path));
-                            const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
+                            const metadataMatch = metadataMatchByPath.get(selectionPathKey(path));
                             return (
                               <GalleryImageTile
                                 key={id}
                                 file={file}
                                 selected={selected}
                                 contextTargeted={pathsEqual(path, reorderContextTargetPath)}
-                                restoredHighlighted={restoredHighlightPaths.has(path.toLowerCase())}
+                                restoredHighlighted={restoredHighlightPaths.has(selectionPathKey(path))}
                                 metadataHighlighted={Boolean(metadataMatch)}
                                 metadataSnippet={metadataMatch?.snippet || ''}
                                 prioritize={groupIndex === 0 && fileIndex <= 8}
@@ -11479,14 +11495,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                         const id = fileId(file);
                         const path = normalizePath(file.path);
                         const selected = selectedPathKeys.has(selectionPathKey(path));
-                        const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
+                        const metadataMatch = metadataMatchByPath.get(selectionPathKey(path));
                         return (
                           <GalleryImageTile
                             key={id}
                             file={file}
                             selected={selected}
                             contextTargeted={pathsEqual(path, reorderContextTargetPath)}
-                            restoredHighlighted={restoredHighlightPaths.has(path.toLowerCase())}
+                            restoredHighlighted={restoredHighlightPaths.has(selectionPathKey(path))}
                             metadataHighlighted={Boolean(metadataMatch)}
                             metadataSnippet={metadataMatch?.snippet || ''}
                             prioritize={fileIndex <= 8}
@@ -11630,14 +11646,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                             const id = fileId(file);
                             const path = normalizePath(file.path);
                             const selected = selectedPathKeys.has(selectionPathKey(path));
-                            const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
+                            const metadataMatch = metadataMatchByPath.get(selectionPathKey(path));
                             return (
                               <GalleryImageTile
                                 key={id}
                                 file={file}
                                 selected={selected}
                                 contextTargeted={pathsEqual(path, reorderContextTargetPath)}
-                                restoredHighlighted={restoredHighlightPaths.has(path.toLowerCase())}
+                                restoredHighlighted={restoredHighlightPaths.has(selectionPathKey(path))}
                                 metadataHighlighted={Boolean(metadataMatch)}
                                 metadataSnippet={metadataMatch?.snippet || ''}
                                 prioritize={displayFiles.length === 0 && groupIndex === 0 && fileIndex <= 8}
@@ -11734,7 +11750,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                         const id = fileId(file);
                         const path = normalizePath(file.path);
                         const selected = selectedPathKeys.has(selectionPathKey(path));
-                        const metadataMatch = metadataMatchByPath.get(path.toLowerCase());
+                        const metadataMatch = metadataMatchByPath.get(selectionPathKey(path));
                         const prioritizeThumbnail = rowIndex <= 1;
                         return (
                           <GalleryImageTile
@@ -11742,7 +11758,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                             file={file}
                             selected={selected}
                             contextTargeted={pathsEqual(path, reorderContextTargetPath)}
-                            restoredHighlighted={restoredHighlightPaths.has(path.toLowerCase())}
+                            restoredHighlighted={restoredHighlightPaths.has(selectionPathKey(path))}
                             metadataHighlighted={Boolean(metadataMatch)}
                             metadataSnippet={metadataMatch?.snippet || ''}
                             prioritize={prioritizeThumbnail}
@@ -11776,7 +11792,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         <GalleryMediaViewer
           file={viewerFile}
           files={viewerFilesForRender}
-          totalCount={globalSearchActive || folderPreviewMode ? viewerFilesForRender.length : total}
+          totalCount={globalSearchActive || searchNeedle || folderPreviewMode ? viewerFilesForRender.length : total}
           remoteMode={remoteMode}
           selectedCount={viewerSelectionCount}
           remoteViewerOriginals={remoteViewerOriginals}

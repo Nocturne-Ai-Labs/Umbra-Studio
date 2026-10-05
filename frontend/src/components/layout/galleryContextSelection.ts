@@ -1,3 +1,5 @@
+import { galleryPathKey } from '../../lib/galleryPathIdentity';
+
 export type GalleryContextSelectionState = {
   kind?: string;
   targetPath?: unknown;
@@ -9,7 +11,7 @@ export function normalizeGalleryContextPath(value: unknown): string {
 }
 
 export function galleryContextPathsEqual(left: unknown, right: unknown): boolean {
-  return normalizeGalleryContextPath(left).toLowerCase() === normalizeGalleryContextPath(right).toLowerCase();
+  return galleryPathKey(left) === galleryPathKey(right);
 }
 
 export function uniqueGalleryContextPaths(values: unknown[]): string[] {
@@ -18,7 +20,7 @@ export function uniqueGalleryContextPaths(values: unknown[]): string[] {
   for (const value of values) {
     const normalized = normalizeGalleryContextPath(value);
     if (!normalized) continue;
-    const key = normalized.toLowerCase();
+    const key = galleryPathKey(normalized);
     if (seen.has(key)) continue;
     seen.add(key);
     next.push(normalized);
