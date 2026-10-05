@@ -49,8 +49,10 @@ export function resolveUmbraUiVideoLoraNames(
   if (!choices?.length) throw new Error('Video LoRA names could not be verified against ComfyUI. Refresh its model catalog and try again.');
   for (const node of nodes) {
     const selected = String(node.inputs?.lora_name || '');
-    const normalized = selected.replace(/\\/g, '/').toLowerCase();
-    const matches = choices.filter((choice) => choice.replace(/\\/g, '/').toLowerCase() === normalized);
+    const normalized = selected.replace(/\\/g, '/');
+    // Linux catalogs can contain distinct files whose names differ only by case.
+    const exact = choices.filter((choice) => choice.replace(/\\/g, '/') === normalized);
+    const matches = exact.length ? exact : choices.filter((choice) => choice.replace(/\\/g, '/').toLowerCase() === normalized.toLowerCase());
     if (matches.length !== 1) {
       throw new Error(matches.length > 1
         ? `Video LoRA "${selected}" is ambiguous in ComfyUI.`
