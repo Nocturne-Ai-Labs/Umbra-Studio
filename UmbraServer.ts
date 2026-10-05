@@ -1,4 +1,3 @@
-import { beginComfyCompletion, hasComfyCompletion } from './setup/ComfyInstallCompletion';
 import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
 import { createToolLineFramer, MAX_TOOL_LOGS, MAX_TOOL_JOBS } from './backend/ToolActionConsole';
 import { createActionRelay } from './shared/backendActionRelay';
@@ -15798,10 +15797,6 @@ function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'ai
   let proc: ChildProcess;
   let spawnError: Error | undefined;
   try {
-    if (tool === 'comfyui' && (action === 'install' || action === 'update' || action === 'set_comfyui_version')) {
-      const toolPath = findToolDir(['comfyui', 'comfy']);
-      if (toolPath) beginComfyCompletion(toolPath);
-    }
     proc = spawn(bunBin, ['setup-tools.ts', ...args], {
       cwd: SOURCE_DIR,
       env: {
@@ -16553,19 +16548,10 @@ function getComfyLaunchReady(comfy = detectComfyUI()): boolean {
   const active = toolOperations.get('comfyui');
   if (active && active.action !== 'launch') return false;
   if (officialComfySession || !isManagedComfyTarget(getComfyProxyTarget())) return true;
-  if (!comfy.detected || !comfy.pythonPath || !comfy.mainScript ||
-    !existsSync(comfy.pythonPath) || !existsSync(comfy.mainScript)) return false;
-  // Full Update/version setup can repair an earlier failed Install. Partial actions cannot.
-  const install = [...toolActionJobs.values()].reverse().filter(job => job.tool === 'comfyui' && ['install', 'update', 'set_comfyui_version'].includes(job.action))
-    .sort((a, b) => b.startedAt - a.startedAt)[0];
-  if (install && install.status !== 'completed') return false;
-  try {
-    // Core pip cache alone precedes node/model/compatibility setup and is not final proof.
-    const requirements = readFileSync(join(comfy.path, 'requirements.txt'), 'utf8');
-    const hash = Bun.hash(requirements).toString();
-    return readFileSync(join(comfy.path, '.requirements_installed'), 'utf8').trim() === hash &&
-      hasComfyCompletion(comfy.path, hash);
-  } catch { return false; }
+  // Existing runtimes remain launchable across Umbra updates. Installer history
+  // and dependency-cache hashes are not authority for these actual files.
+  return Boolean(comfy.detected && comfy.pythonPath && comfy.mainScript
+    && existsSync(comfy.pythonPath) && existsSync(comfy.mainScript));
 }
 
 function detectAIToolkit(): DetectedTool {

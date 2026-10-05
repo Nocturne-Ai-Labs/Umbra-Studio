@@ -12,7 +12,6 @@
 import { join, basename, dirname, relative, resolve } from 'path';
 import { existsSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, mkdirSync, readFileSync, writeFileSync, cpSync, renameSync, symlinkSync } from 'fs';
 import { spawn, spawnSync, execSync } from 'child_process';
-import { beginComfyCompletion, completeComfyCompletion, type ComfyInstallAttempt } from './setup/ComfyInstallCompletion';
 import { installOrdinaryNodeRequirements } from './setup/OrdinaryNodeRequirements';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
@@ -2255,7 +2254,6 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
         }
     } else {
         log('OK', 'Found at: ' + toolDir);
-        if (key === 'comfyui' && !coreOnly) beginComfyInstallCompletion(toolDir);
 
         if (cfg.repo && !hasValidGitCheckout(toolDir)) {
             log('->', cfg.name + ' source missing in existing folder. Downloading repository...');
@@ -2268,7 +2266,6 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
         }
     }
 
-    if (key === 'comfyui' && !coreOnly) beginComfyInstallCompletion(toolDir!);
     const setupOk = setupPythonEnv(toolDir, cfg.id);
 
     if (!setupOk) {
@@ -2330,7 +2327,6 @@ async function updateTool(key: keyof typeof CONFIG, coreOnly = false) {
         return;
     }
 
-    if (key === 'comfyui' && !coreOnly) beginComfyInstallCompletion(toolDir);
     if (cfg.repo && !hasValidGitCheckout(toolDir)) {
         log('->', cfg.name + ' repository missing. Bootstrapping source checkout...');
         if (!cloneRepo(cfg.repo, toolDir, cfg.branch)) {
@@ -2366,7 +2362,6 @@ async function updateTool(key: keyof typeof CONFIG, coreOnly = false) {
         }
     }
 
-    if (key === 'comfyui' && !coreOnly) beginComfyInstallCompletion(toolDir);
     const setupOk = setupPythonEnv(toolDir, cfg.id);
 
     if (!setupOk) {
@@ -2493,7 +2488,6 @@ async function setComfyUIVersion(ref: string) {
         );
     }
 
-    beginComfyInstallCompletion(toolDir);
     const escapedRef = targetRef.replace(/"/g, '\\"');
     if (hasValidGitCheckout(toolDir)) {
         configureGitRepoForPortableUpdates(toolDir);
@@ -2947,24 +2941,12 @@ function installSageAttentionForComfyUIEnhanced() {
     log('->', 'Restart ComfyUI to apply SageAttention runtime changes.');
 }
 
-let comfyInstallCompletion: ComfyInstallAttempt | null = null;
-
-function beginComfyInstallCompletion(toolDir: string, fullInstall = true) {
-    if (comfyInstallCompletion?.path === toolDir) return;
-    comfyInstallCompletion = beginComfyCompletion(toolDir, fullInstall);
-}
-
 async function main() {
     console.log(`\n${c.cyan}+------------------------------------------------+${c.reset}`);
     console.log(`${c.cyan}|${c.reset}  ${c.bold}Umbra Studio - Universal Setup${c.reset}                  ${c.cyan}|${c.reset}`);
     console.log(`${c.cyan}+------------------------------------------------+${c.reset}\n`);
 
     const arg = process.argv[2]?.toLowerCase();
-    const fullComfyInstall = !arg || ['all', 'comfyui', 'update-comfyui', 'set-comfyui-version', 'downgrade-comfyui'].includes(arg);
-    if (fullComfyInstall || arg?.includes('comfy') || arg === 'umbra-nodes' || arg === 'umbra-ui-models' || arg === 'background-compatibility') {
-        const toolDir = findToolPath(CONFIG.comfyui.search);
-        if (toolDir) beginComfyInstallCompletion(toolDir, fullComfyInstall);
-    }
     const pythonNotRequiredActions = new Set([
         'umbra-ui-models',
         'umbra-nodes'
@@ -3105,7 +3087,6 @@ async function main() {
         await repairBackgroundPackages();
     }
     if (VERIFY_FAILURE) exitWithExistingVerifyFailure();
-    if (comfyInstallCompletion) completeComfyCompletion(comfyInstallCompletion);
     console.log('UMBRA_VERIFY_OK|setup-tools');
     console.log(`\n${c.green}All operations complete!${c.reset}\n`);
 }
