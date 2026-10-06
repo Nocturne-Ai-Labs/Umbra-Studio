@@ -98,7 +98,8 @@
 
 - Fixed: fresh ComfyUI setup handles pinned Git tags without looking for a
   nonexistent remote branch with the tag's name.
-
+- Fixed: image generation skips disabled output-upscale stages, so they no
+  longer require an uninstalled upscale model to validate the workflow.
 - Fixed: missing-PATH video thumbnail failures when the installation already
   has a usable ComfyUI imageio FFmpeg.
 - Improved: portable FFmpeg and ffprobe verification and repair through Setup

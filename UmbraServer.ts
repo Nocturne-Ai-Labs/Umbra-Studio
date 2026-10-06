@@ -149,7 +149,7 @@ import {
   detectUmbraUiCensorRegions,
   type UmbraUiCensorTarget,
 } from './backend/UmbraUiCensorDetectorService';
-import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
+import { applyUmbraUiClipSkipToGraph, bypassDisabledUmbraUiOutputUpscale } from './backend/UmbraUiGraphControls';
 import { applyLtx25PromptEnhancerInputs } from './backend/Ltx25PromptEnhancer';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
 import { REMOTE_CONNECTIVITY_PATH, createRemoteConnectivityStatus, isHostConnectivityProbeOrigin } from './backend/remoteConnectivity';
@@ -9593,6 +9593,7 @@ function compileUmbraUiPipelineWorkflow(
   }
 
   if (workflowDescriptor.mediaType === 'image') {
+    bypassDisabledUmbraUiOutputUpscale(promptGraph);
     applyUmbraUiClipSkipToGraph(promptGraph, supportsClipSkip ? generation.clipSkip : 1);
     applyPPTiledVaeToGraph(promptGraph, generation.tiledVae);
     if (Object.values(promptGraph).some((node: any) => node?.class_type === 'Anima38BV2Loader')) {
