@@ -6,6 +6,9 @@ import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { readManagedToolRequirements } from './ManagedToolRequirements';
 import { ordinaryNodeRequirementsMarker } from './OrdinaryNodeRequirements';
+import { aiToolkitRequirementsVerified, aiToolkitRequirementsFingerprint } from './AIToolkitPython';
+import { inspectComfyPython, inspectAIToolkitPython } from './ComfyPythonRuntime';
+import { comfyPythonUpgradePending, toolPythonUpgradePending } from '../shared/toolMaintenanceLock';
 
 export type OnboardingState = {
   schemaVersion: 1; languageSaved: boolean; training: 'undecided' | 'skip' | 'install';
@@ -173,7 +176,9 @@ export async function inspectOnboarding(source: string, root: string) {
   for (const feature of readManagedToolRequirements(source)) for (const node of feature.customNodes) assertLocalPath(root, join(root, 'Tools', 'ComfyUI', 'custom_nodes', node.name));
   const catalog = await modelSetupCatalog(source, root);
   const dependencies = inspectManagedDependencies(source, root), core = dependencies.comfyui;
-  const comfyComplete = core.installed && core.filesVerified && core.pythonDependencies.verified
+  const python = inspectComfyPython(join(root, 'Tools', 'ComfyUI'));
+  const pythonPending = comfyPythonUpgradePending(root);
+  const comfyComplete = core.installed && !pythonPending && python.healthy && !python.upgradeAvailable && core.filesVerified && core.pythonDependencies.verified
     && compareUmbraVersions(core.version, core.minimumRequired || '0.0.0') >= 0
     && compareUmbraVersions(core.frontendVersion || '0.0.0', core.minimumFrontendRequired || '0.0.0') >= 0;
   const relevant = dependencies.features.filter(feature => !feature.optional || feature.modelProfiles.some(profile => state.profiles.includes(profile)));
@@ -197,11 +202,13 @@ export async function inspectOnboarding(source: string, root: string) {
   const checkpointIntegrity = state.checkpointVerification?.path === checkpoint
     && JSON.stringify(state.checkpointVerification.identity) === JSON.stringify(checkpoint && identity(join(root, 'Tools', 'ComfyUI', 'models', checkpoint)));
   const generationComplete = state.profiles.length === 1 && generationProfiles.has(state.profiles[0]) && generation.complete && !!checkpoint && validCheckpoint(root, checkpoint);
+  const trainingPython = inspectAIToolkitPython(join(root, 'Tools', 'AI-Toolkit'));
+  const trainingAssets = ['ui/.next/BUILD_ID', 'ui/dist/cron/worker.js', 'ui/.umbra_ui_built'].every(path => existsSync(join(root, 'Tools', 'AI-Toolkit', path)));
   const trainingComplete = state.training === 'skip' || state.training === 'install' && existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py'))
-    && existsSync(join(root, 'Tools', 'AI-Toolkit', 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'));
+    && trainingAssets && trainingPython.healthy && !trainingPython.multipleEnvironments && aiToolkitRequirementsVerified(join(root, 'Tools', 'AI-Toolkit')) && !trainingPython.upgradeAvailable && !toolPythonUpgradePending(root, 'aitoolkit');
   const media = dependencies.mediaTools;
   const fingerprint = createHash('sha256').update(JSON.stringify({ media: media.tools.map(tool => ({ tool: tool.tool, source: tool.source, ready: tool.ready, version: tool.version })), state: { languageSaved: state.languageSaved, training: state.training, profiles: state.profiles, supportProfiles: state.supportProfiles, checkpoint },
-    core: [core.installedCommit, core.version, core.frontendVersion, core.pythonDependencies.verified], nodesFingerprint, support, generation, checkpointIdentity: checkpoint && identity(join(root, 'Tools', 'ComfyUI', 'models', checkpoint)), checkpointVerification: state.checkpointVerification })).digest('hex');
+    trainingPython: [trainingPython.version, trainingPython.healthy, trainingAssets, identity(join(root, 'Tools', 'AI-Toolkit', 'ui/.next/BUILD_ID')),  toolPythonUpgradePending(root, 'aitoolkit'), aiToolkitRequirementsFingerprint(join(root, 'Tools', 'AI-Toolkit')), identity(join(root, 'Tools', 'AI-Toolkit', trainingPython.environment, 'pyvenv.cfg'))], core: [core.installedCommit, core.version, core.frontendVersion, core.pythonDependencies.verified, python.version, identity(join(root, 'Tools', 'ComfyUI', python.environment, 'pyvenv.cfg'))], nodesFingerprint, support, generation, checkpointIdentity: checkpoint && identity(join(root, 'Tools', 'ComfyUI', 'models', checkpoint)), checkpointVerification: state.checkpointVerification })).digest('hex');
   const checks = [state.languageSaved, comfyComplete, trainingComplete, nodesComplete, support.complete, generationComplete];
   const ready = checks.every(Boolean) && media.ready && checkpointIntegrity && state.verificationFingerprint === fingerprint;
   const details = ['Save your preferred language.', 'Install and verify managed ComfyUI and its Python environment.', 'Install AI Toolkit for training, or skip it.', 'Install and verify custom nodes.', 'Install or verify selected support models.', 'Select a model family and a compatible generation checkpoint.', 'Verify the selected installation.'];
@@ -210,6 +217,6 @@ export async function inspectOnboarding(source: string, root: string) {
   if (state.profiles.length && !checkpoint) issues.push('Add a compatible generation checkpoint in Umbra Model Manager; prerequisites alone do not include one.');
   const issueCodes = stages.slice(0, 6).filter(stage => !stage.complete).map(stage => stage.id);
   if (!media.ready) { issueCodes.push('media'); issues.push('Install or repair FFmpeg and ffprobe.'); }
-  return { success: true, state, stages, issueCodes, media, selectedCheckpoint: checkpoint, checkpointIntegrity, catalog: { ...catalog, checkpoints, generationProfiles: [...generationProfiles] }, ready, issues, fingerprint, nodesFingerprint,
+  return { success: true, state, stages, issueCodes, media, trainingPython: { ...trainingPython, installed: existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py')), upgradeAvailable: trainingPython.upgradeAvailable || toolPythonUpgradePending(root, 'aitoolkit') }, python: { installed: core.installed, version: python.version, healthy: python.healthy, target: python.targetVersion, upgradeAvailable: python.upgradeAvailable || pythonPending }, selectedCheckpoint: checkpoint, checkpointIntegrity, catalog: { ...catalog, checkpoints, generationProfiles: [...generationProfiles] }, ready, issues, fingerprint, nodesFingerprint,
     qualification: 'Installation files and model integrity verified. Launch managed ComfyUI from Umbra; GPU execution and image quality have not been tested.' };
 }

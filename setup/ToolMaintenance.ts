@@ -2,6 +2,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createConnection } from 'node:net';
+import { inspectComfyPython, inspectAIToolkitPython } from './ComfyPythonRuntime';
 
 export type MaintenanceTool = 'comfyui' | 'aitoolkit';
 const folders = { comfyui: 'ComfyUI', aitoolkit: 'AI-Toolkit' };
@@ -10,6 +11,7 @@ export function toolMaintenanceArgs(tool: unknown, action: unknown, ref: unknown
   if (tool !== 'comfyui' && tool !== 'aitoolkit') throw new Error('Choose ComfyUI or AI Toolkit.');
   if (action === 'install') return [tool];
   if (action === 'update') return [`update-${tool}`];
+  if (action === 'update_python') return [`update-python-${tool}`];
   if (action === 'update_pytorch') return [`update-pytorch-${tool}`];
   if (tool === 'comfyui') {
     if (action === 'install_core') return ['managed-comfyui'];
@@ -26,8 +28,10 @@ export function inspectToolMaintenance(root: string) {
   return (Object.keys(folders) as MaintenanceTool[]).map(id => {
     const path = join(root, 'Tools', folders[id]);
     const installed = existsSync(join(path, id === 'comfyui' ? 'main.py' : 'run.py'));
-    const git = installed ? spawnSync('git', ['-C', path, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 3000 }) : null;
-    return { id, name: id === 'comfyui' ? 'ComfyUI' : 'AI Toolkit', path, installed, commit: git?.status === 0 ? git.stdout.trim() : '' };
+    const managedGit = join(root, 'Runtime', 'Git', 'cmd', 'git.exe');
+    const git = installed ? spawnSync(process.platform === 'win32' && existsSync(managedGit) ? managedGit : 'git', ['-C', path, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 3000 }) : null;
+    return { id, name: id === 'comfyui' ? 'ComfyUI' : 'AI Toolkit', path, installed, commit: git?.status === 0 ? git.stdout.trim() : '',
+      python: installed ? (id === 'comfyui' ? inspectComfyPython(path) : inspectAIToolkitPython(path)) : null };
   });
 }
 
@@ -49,11 +53,17 @@ export async function assertAIToolkitStopped(root: string): Promise<void> {
   const path = join(root, 'Tools', 'AI-Toolkit');
   const canonical = (value: string) => value.replace(/\\/g, '/').toLowerCase();
   const target = canonical(existsSync(path) ? realpathSync(path) : path) + '/';
-  const command = "$ErrorActionPreference='Stop'; ConvertTo-Json -InputObject @((Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID }).CommandLine) -Compress";
-  const result = process.platform === 'win32'
-    ? spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
-    : spawnSync('ps', ['-eo', 'args='], { encoding: 'utf8', timeout: 5000 });
+  if (process.platform === 'win32') {
+    // Return a bounded result, rather than serializing every host command line.
+    // Large Windows process inventories can otherwise truncate the JSON pipe.
+    const encodedTarget = Buffer.from(target, 'utf8').toString('base64');
+    const command = `$ErrorActionPreference='Stop'; $target=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedTarget}')); $active=@(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ([string]$_.CommandLine).Replace('\\','/').ToLowerInvariant().Contains($target) }).Count -gt 0; if($active){[Console]::WriteLine('active')}else{[Console]::WriteLine('stopped')}`;
+    const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+    if (result.status !== 0 || !['active', 'stopped'].includes(result.stdout.trim())) throw new Error('AI Toolkit process shutdown could not be verified. Stop the toolkit and training workers, then retry.');
+    if (result.stdout.trim() === 'active') throw new Error('Stop AI Toolkit and its training workers before installing or updating it.');
+    return;
+  }
+  const result = spawnSync('ps', ['-eo', 'args='], { encoding: 'utf8', timeout: 5000 });
   if (result.status !== 0) throw new Error('AI Toolkit process shutdown could not be verified.');
-  const lines: string[] = process.platform === 'win32' ? JSON.parse(result.stdout) : result.stdout.split(/\r?\n/);
-  if (!Array.isArray(lines) || lines.some(line => typeof line === 'string' && canonical(line).includes(target))) throw new Error('Stop AI Toolkit and its training workers before installing or updating it.');
+  if (result.stdout.split(/\r?\n/).some(line => canonical(line).includes(target))) throw new Error('Stop AI Toolkit and its training workers before installing or updating it.');
 }

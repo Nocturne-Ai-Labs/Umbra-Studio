@@ -190,10 +190,28 @@ Managed tools and optional model packs are installed from inside Umbra or with t
 release's helper scripts. GPU drivers and compatible generation model files remain
 the user's responsibility.
 
-When a managed Python tool is installed, Umbra can bootstrap its private Python
-3.11 runtime into `Runtime/Python311`; users do not need to place Python inside
-the application folder manually. The initial GitHub core archive keeps that
-download out of the release asset and creates it on demand.
+ComfyUI uses a private Python 3.13 runtime in `Runtime/Python313`. AI Toolkit uses
+a private Python 3.12 runtime in `Runtime/Python312`. Python Helpers retain
+their separate Python 3.11 runtime. Setup downloads these
+on demand; no Microsoft Store Python installation is required. On Windows, Setup
+also downloads verified portable Git into `Runtime/Git` when Git is missing.
+
+To migrate an existing or broken ComfyUI environment, stop ComfyUI in Umbra and
+choose **Umbra Setup > Tools > Update Python 3.13**. Setup rebuilds the virtual
+environment and reinstalls core and installed custom-node requirements. Models,
+outputs, settings and custom-node code stay in place. The previous environment
+is retained under `Tools/ComfyUI/.umbra-python-backups`; failed upgrades restore
+it automatically. Attention packages without compatible wheels hold the upgrade
+instead of silently removing them. Launch ComfyUI from Umbra after maintenance
+to verify custom-node registration and your workflows.
+
+For AI Toolkit, **Setup > Tools > Update Python 3.12** rebuilds its managed
+training environment with upstream runtime pins and verifies a CUDA training
+step when an NVIDIA GPU is detected. Datasets, configurations and checkpoints remain in place; its previous
+venv is retained under `Tools/AI-Toolkit/.umbra-python-backups`. The current
+For older AI Toolkit checkouts, update the toolkit before upgrading Python.
+AI Toolkit runtime specification recommends Python 3.12:
+https://github.com/ostris/ai-toolkit/blob/main/manager/spec.py
 
 ### Standalone Setup
 

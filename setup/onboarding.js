@@ -151,6 +151,19 @@ function renderOnboarding() {
   const detail = onboardingData.stages.find(entry => entry.id === onboardingIds[stage]);
   if (languagePanel) { languagePanel.hidden = stage !== 0; if (stage === 0) content.append(languagePanel); }
   if (stage === 1) content.append(onboardingButton(onboardingText(18), () => runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'install_core' })));
+  if (stage === 1 && onboardingData.python?.installed && onboardingData.python.upgradeAvailable) {
+    content.append(onboardingElement('p', `Python ${onboardingData.python.version || tr('unavailable')} → ${onboardingData.python.target}`), onboardingButton(tr('updatePython'), async () => {
+      if (!window.confirm(tr('pythonUpgradeWarning'))) return;
+      await runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'update_python' });
+    }));
+  }
+  if (stage === 2 && onboardingData.trainingPython?.installed && onboardingData.trainingPython.upgradeAvailable) {
+    content.append(onboardingElement('p', `Python ${onboardingData.trainingPython.version || tr('unavailable')} → ${onboardingData.trainingPython.targetVersion || onboardingData.trainingPython.target}`), onboardingButton(tr('updateTrainingPython'), async () => {
+      if (!window.confirm(tr('trainingPythonWarning'))) return;
+      await saveOnboarding({ training: 'install' });
+      await runOnboardingJob('/api/tools/action', { tool: 'aitoolkit', action: 'update_python' });
+    }));
+  }
   if (stage === 2) {
     const controls = onboardingElement('div', undefined, 'tool-controls');
     controls.append(onboardingButton(onboardingText(19), async () => { await saveOnboarding({ training: 'install' }); await runOnboardingJob('/api/tools/action', { tool: 'aitoolkit', action: 'install' }); }), onboardingButton(onboardingText(20), () => saveOnboarding({ training: 'skip' })));

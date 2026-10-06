@@ -188,6 +188,12 @@ async function runScript(runtimeRoot: string, scriptPath: string, args: string[]
 }
 
 async function runManagedToolScript(runtimeRoot: string, sourceRoot: string, args: string[], job: SetupJobState) {
+  // Old interpreter constraints cannot be applied to a fresh Python ABI. The migration
+  // snapshots optional attention packages and rolls back if they cannot be restored.
+  if (args[0] === 'update-python-comfyui') {
+    await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), args, job, '', sourceRoot);
+    return;
+  }
   const before = inspectManagedDependencies(sourceRoot, runtimeRoot);
   const policy = prepareManagedDependencyInstallPolicy(runtimeRoot, before.features.flatMap((feature) => feature.runtimePackages));
   try {

@@ -41,3 +41,22 @@ export function trackToolMaintenanceChild(root: string, tool: string, childPid: 
   if (record.ownerPid !== process.pid) throw new Error('Tool maintenance ownership changed before installer start.');
   writeFileSync(path, JSON.stringify({ ...record, childPid }));
 }
+
+export function joinToolMaintenance(root: string, tool: string): () => void {
+  const active = readToolMaintenance(root, tool);
+  if (!active) return claimToolMaintenance(root, tool);
+  const record = JSON.parse(readFileSync(lockPath(root, tool), 'utf8'));
+  if (record.childPid !== process.pid || !active.ownerPid) throw new Error('Tool maintenance belongs to another operation.');
+  return () => {}; // The owning Setup job releases its own lock after the child exits.
+}
+
+export function comfyPythonUpgradePending(root: string): boolean { return toolPythonUpgradePending(root, 'comfyui'); }
+
+export function toolPythonUpgradePending(root: string, tool: 'comfyui' | 'aitoolkit'): boolean {
+  const path = join(root, 'Tools', tool === 'comfyui' ? 'ComfyUI' : 'AI-Toolkit', '.umbra-python-upgrade.json');
+  if (!existsSync(path)) return false;
+  try {
+    const receipt = JSON.parse(readFileSync(path, 'utf8'));
+    return receipt.version !== 1 || !['complete', 'rolled-back'].includes(receipt.phase);
+  } catch { return true; }
+}

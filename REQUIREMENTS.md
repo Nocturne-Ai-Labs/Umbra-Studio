@@ -49,8 +49,12 @@ or Python installation for Umbra itself.
 Required:
 
 - A 64-bit supported operating system.
-- Git for installing and updating managed tools such as ComfyUI and AI Toolkit.
+- Git for installing and updating managed tools. On Windows, Setup downloads
+  checksum-verified portable Git if it is missing; Linux requires distribution Git.
 - Internet access for first-time tool, custom-node, runtime, and model downloads.
+  ComfyUI uses managed Python 3.13, AI Toolkit uses managed Python 3.12, and
+  Python Helpers use a separate Python 3.11 environment. A Python migration downloads dependencies again and
+  needs space for both environments until the retained backup is removed.
 - Compatible GPU drivers and user-supplied checkpoints, LoRAs, VAEs, text
   encoders, ControlNet models, upscale models, and video models.
 
@@ -68,7 +72,7 @@ Optional host requirements:
   detects this installation's ComfyUI imageio FFmpeg. Linux repair requires
   `tar` and `xz-utils` or equivalent archive extraction tools.
 
-The portable installer can bootstrap managed Python 3.11 runtimes and isolated
+The portable installer can bootstrap managed Python 3.11/3.12/3.13 runtimes and isolated
 virtual environments. ComfyUI and AI Toolkit use their own tool-local virtual
 environments; Data Forge Python helpers use `Runtime/PythonHelpers/venv`.
 Portable releases additionally include `Runtime/PythonHelpers/bundled/<platform>`

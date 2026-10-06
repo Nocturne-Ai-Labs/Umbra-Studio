@@ -121,6 +121,10 @@ updateCuda¦Update CUDA / PyTorch¦CUDA / PyTorch を更新¦更新 CUDA / PyTor
 updateCustomNodes¦Install / update custom nodes¦カスタムノードをインストール／更新¦安装／更新自定义节点¦사용자 노드 설치 / 업데이트¦Zusatz-Nodes installieren / aktualisieren
 updateH3Nodes¦Install / update H3 nodes¦H3 ノードをインストール／更新¦安装／更新 H3 节点¦H3 노드 설치 / 업데이트¦H3-Nodes installieren / aktualisieren
 repairSage¦Install / repair SageAttention¦SageAttention をインストール／修復¦安装／修复 SageAttention¦SageAttention 설치 / 복구¦SageAttention installieren / reparieren
+updatePython¦Update Python 3.13¦Python 3.13 に更新¦升级到 Python 3.13¦Python 3.13 업데이트¦Python auf 3.13 aktualisieren
+updateTrainingPython¦Update Python 3.12¦Python 3.12 に更新¦升级到 Python 3.12¦Python 3.12 업데이트¦Python auf 3.12 aktualisieren
+trainingPythonWarning¦Rebuild AI Toolkit with Python 3.12? Dependencies will be downloaded again. Datasets, configurations and checkpoints stay in place. The previous environment is kept for rollback.¦AI Toolkit を Python 3.12 で再構築しますか？依存関係を再ダウンロードします。データセット、設定、チェックポイントは維持され、以前の環境は復元用に保存されます。¦使用 Python 3.12 重建 AI Toolkit？将重新下载依赖。数据集、配置和检查点保留，旧环境将保留用于回退。¦Python 3.12로 AI Toolkit을 다시 구성할까요? 의존성을 다시 다운로드합니다. 데이터셋, 설정과 체크포인트는 유지하며 이전 환경은 복구용으로 보관합니다.¦AI Toolkit mit Python 3.12 neu erstellen? Abhängigkeiten werden erneut heruntergeladen. Datensätze, Konfigurationen und Checkpoints bleiben erhalten. Die bisherige Umgebung wird für die Wiederherstellung aufbewahrt.
+pythonUpgradeWarning¦Rebuild ComfyUI with Python 3.13? Dependencies will be downloaded again. Models and custom-node code stay in place. The previous environment is kept for rollback.¦ComfyUI を Python 3.13 で再構築しますか？依存関係を再ダウンロードします。モデルとカスタムノードのコードは維持され、以前の環境は復元用に保存されます。¦使用 Python 3.13 重建 ComfyUI？将重新下载依赖。模型和自定义节点代码保留在原位置，旧环境将保留用于回退。¦Python 3.13으로 ComfyUI를 다시 구성할까요? 의존성을 다시 다운로드합니다. 모델과 사용자 노드 코드는 유지하며 이전 환경은 복구용으로 보관합니다.¦ComfyUI mit Python 3.13 neu erstellen? Abhängigkeiten werden erneut heruntergeladen. Modelle und Custom-Node-Code bleiben erhalten. Die bisherige Umgebung wird für die Wiederherstellung aufbewahrt.
 comfyVersion¦ComfyUI version tag / branch / commit¦ComfyUI のタグ／ブランチ／コミット¦ComfyUI 版本标签／分支／提交¦ComfyUI 버전 태그 / 브랜치 / 커밋¦ComfyUI-Versionstag / Branch / Commit
 switchVersion¦Install / switch version¦インストール／バージョン切替¦安装／切换版本¦설치 / 버전 전환¦Version installieren / wechseln
 switchWarning¦Switch ComfyUI to {ref}? This rebuild can remove nodes not preinstalled by Umbra. Use Update to preserve custom nodes.¦ComfyUI を {ref} に切り替えますか？再構築で Umbra に同梱されていないノードが削除される場合があります。カスタムノードを保持するには「更新」を使用してください。¦将 ComfyUI 切换到 {ref}？重建可能删除 Umbra 未预装的节点。请使用“更新”保留自定义节点。¦ComfyUI를 {ref}(으)로 전환할까요? 재구축 시 Umbra가 사전 설치하지 않은 노드가 제거될 수 있습니다. 사용자 노드를 유지하려면 업데이트를 사용하세요.¦ComfyUI auf {ref} wechseln? Der Neuaufbau kann nicht von Umbra vorinstallierte Nodes entfernen. Zum Behalten eigener Nodes Aktualisieren verwenden.
@@ -469,12 +473,15 @@ async function loadManagedTools() {
     const row = document.createElement('div'); row.className = 'model-file';
     const title = document.createElement('strong'); title.textContent = tool.name;
     const detail = document.createElement('small'); detail.textContent = `${tr(tool.installed ? 'installed' : 'missing')}${tool.commit ? ` | ${tool.commit}` : ''}. ${setupFormat('stopBeforeMaintenance', { tool: tool.name })}`;
+    if (tool.python) detail.textContent += ` Python ${tool.python.version || tr('unavailable')} → ${tool.python.targetVersion || tool.python.target}.`;
     row.append(title, detail);
     row.dataset.maintenanceTool = tool.id;
     const controls = document.createElement('div'); controls.className = 'tool-maintenance-actions'; row.append(controls);
     const actions = [['install', tr(tool.installed ? 'reinstallTool' : 'installTool')], ['update', tr('updateTool')], ['update_pytorch', tr('updateCuda')]];
-    if (tool.id === 'comfyui') actions.push(['custom_nodes', tr('updateCustomNodes')], ['h3_nodes', tr('updateH3Nodes')], ['install_sageattention', tr('repairSage')]);
+    if (tool.id === 'aitoolkit') actions.push(['update_python', tr('updateTrainingPython')]);
+    if (tool.id === 'comfyui') actions.push(['update_python', tr('updatePython')], ['custom_nodes', tr('updateCustomNodes')], ['h3_nodes', tr('updateH3Nodes')], ['install_sageattention', tr('repairSage')]);
     const runAction = async (action, ref = '') => {
+      if (action === 'update_python' && !window.confirm(tr(tool.id === 'aitoolkit' ? 'trainingPythonWarning' : 'pythonUpgradeWarning'))) return;
       setBusy(true);
       try {
         const result = await api('/api/tools/action', { method: 'POST', body: JSON.stringify({ tool: tool.id, action, ref }) });
