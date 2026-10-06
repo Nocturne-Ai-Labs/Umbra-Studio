@@ -29,6 +29,16 @@ const onboardingCheckpointCopy = {
   ko: '이 Umbra 폴더에 설치된 호환 생성 체크포인트를 선택하세요. 선택한 모델 계열용 체크포인트만 선택하세요.',
   de: 'Einen kompatiblen Generierungs-Checkpoint aus diesem Umbra-Ordner auswählen. Nur einen zur gewählten Modellfamilie passenden Checkpoint verwenden.',
 };
+const ONBOARDING_UX = {
+  en: ['{done} of 7 steps complete', 'Step {step} of 7', 'Already set up', 'This step is complete. Continue when you are ready.', 'Python repair required', 'ComfyUI still uses an older or unavailable Python environment. Stop ComfyUI in Umbra, then repair it here. Your models stay in place.', 'Repair ComfyUI', 'Selected files', 'File list and licenses', 'Download access (optional)', 'Installation details', 'Advanced', 'Individual repairs and additional models.', 'Setup progress is saved automatically.', 'Save and continue', 'Training is optional', 'Generate images without AI Toolkit. Install it only if you want to train models on this computer.', 'Check this step', 'Ready to verify', 'Verify your installation before launching. No test image will be generated.', 'Choose what to install', 'Select a model family', 'No download selected', 'Completed installation', 'Setup is in progress'],
+  ja: ['7 ステップ中 {done} 完了', 'ステップ {step} / 7', '設定済み', 'このステップは完了しています。準備ができたら次へ進んでください。', 'Python の修復が必要です', 'ComfyUI の Python が古いか利用できません。Umbra で ComfyUI を停止してから修復してください。モデルは保持されます。', 'ComfyUI を修復', '選択したファイル', 'ファイルとライセンス', 'ダウンロード認証（任意）', 'インストールの詳細', '詳細設定', '個別の修復と追加モデル。', '進行状況は自動保存されます。', '保存して次へ', '学習機能は任意です', 'AI Toolkit がなくても画像を生成できます。この PC でモデルを学習する場合だけインストールしてください。', 'このステップを確認', '検証の準備ができました', '起動前にインストールを検証してください。テスト画像は生成しません。', 'インストール対象を選択', 'モデル系列を選択', 'ダウンロード未選択', 'インストール完了', 'セットアップ中'],
+  'zh-CN': ['7 个步骤已完成 {done} 个', '第 {step} 步，共 7 步', '已设置', '此步骤已完成，准备好后可继续。', '需要修复 Python', 'ComfyUI 的 Python 环境过旧或不可用。请在 Umbra 中停止 ComfyUI 后修复。模型将保留。', '修复 ComfyUI', '所选文件', '文件列表和许可证', '下载凭据（可选）', '安装详情', '高级', '单独修复和其他模型。', '设置进度会自动保存。', '保存并继续', '训练为可选功能', '无需 AI Toolkit 即可生成图像。仅在此电脑上训练模型时才需安装。', '检查此步骤', '可以开始验证', '启动前请验证安装。不会生成测试图像。', '选择安装内容', '选择模型系列', '未选择下载', '安装完成', '正在设置'],
+  ko: ['7단계 중 {done}단계 완료', '7단계 중 {step}단계', '설정 완료', '이 단계가 완료되었습니다. 준비되면 계속하세요.', 'Python 복구 필요', 'ComfyUI의 Python 환경이 오래되었거나 사용할 수 없습니다. Umbra에서 ComfyUI를 중지한 후 복구하세요. 모델은 보존됩니다.', 'ComfyUI 복구', '선택한 파일', '파일 목록 및 라이선스', '다운로드 인증 (선택)', '설치 세부 정보', '고급', '개별 복구 및 추가 모델.', '설정 진행 상황은 자동 저장됩니다.', '저장하고 계속', '학습은 선택 사항입니다', 'AI Toolkit 없이도 이미지를 생성할 수 있습니다. 이 컴퓨터에서 모델을 학습하려는 경우에만 설치하세요.', '이 단계 확인', '검증 준비 완료', '실행 전에 설치를 검증하세요. 테스트 이미지는 생성하지 않습니다.', '설치할 항목 선택', '모델 계열 선택', '다운로드 미선택', '설치 완료', '설정 진행 중'],
+  de: ['{done} von 7 Schritten abgeschlossen', 'Schritt {step} von 7', 'Bereits eingerichtet', 'Dieser Schritt ist abgeschlossen. Fahren Sie fort, wenn Sie bereit sind.', 'Python-Reparatur erforderlich', 'ComfyUI verwendet eine alte oder nicht verfügbare Python-Umgebung. ComfyUI in Umbra stoppen und hier reparieren. Ihre Modelle bleiben erhalten.', 'ComfyUI reparieren', 'Ausgewählte Dateien', 'Dateiliste und Lizenzen', 'Download-Zugang (optional)', 'Installationsdetails', 'Erweitert', 'Einzelne Reparaturen und zusätzliche Modelle.', 'Der Einrichtungsfortschritt wird automatisch gespeichert.', 'Speichern und weiter', 'Training ist optional', 'Bilder lassen sich ohne AI Toolkit generieren. Nur installieren, wenn Sie auf diesem Computer Modelle trainieren möchten.', 'Diesen Schritt prüfen', 'Bereit zur Prüfung', 'Installation vor dem Start prüfen. Es wird kein Testbild erzeugt.', 'Installationsumfang wählen', 'Modellfamilie wählen', 'Kein Download ausgewählt', 'Installation abgeschlossen', 'Einrichtung läuft'],
+};
+const onboardingUx = (index, values = {}) => (ONBOARDING_UX[currentLanguage] || ONBOARDING_UX.en)[index].replace(/\{(\w+)\}/g, (match, key) => values[key] ?? match);
+for (const [locale, copy] of Object.entries(ONBOARDING_UX)) Object.assign(SETUP_TRANSLATIONS[locale], { advancedSetup: copy[11], advancedSetupHint: copy[12], setupProgressSaved: copy[13], saveLanguageContinue: copy[14] });
+let onboardingFocusedStage = null;
 let onboardingData = null;
 let onboardingBusy = false;
 let onboardingCompletedJob = '';
@@ -47,6 +57,7 @@ function onboardingButton(text, callback, disabled = false) {
 }
 async function saveOnboarding(patch) {
   await api('/api/onboarding', { method: 'POST', body: JSON.stringify(patch) });
+  if (patch.stage !== undefined) onboardingFocusedStage = patch.stage;
   await loadOnboarding();
 }
 async function runOnboardingJob(path, body) {
@@ -57,7 +68,7 @@ async function runOnboardingJob(path, body) {
     renderJob(result.job); void poll();
   } catch (error) { setBusy(false); throw error; }
 }
-function onboardingPackSelection(packId, container) {
+function onboardingPackSelection(packId, container, primary) {
   const pack = onboardingData.catalog?.packs?.find(item => item.id === packId);
   if (!pack) return;
   const key = packId === 'support' ? 'supportProfiles' : 'profiles';
@@ -75,7 +86,9 @@ function onboardingPackSelection(packId, container) {
     const description = onboardingElement('div'); description.append(onboardingElement('strong', setupProfileLabel(profile, pack)), onboardingElement('p', setupProfileDescription(profile, pack)));
     label.append(checkbox, description); options.append(label);
   }
-  container.append(options);
+  const layout = onboardingElement('div', undefined, 'wizard-model-layout');
+  const chooser = onboardingElement('div'); chooser.append(onboardingElement('h3', onboardingUx(packId === 'support' ? 20 : 21)), options);
+  const review = onboardingElement('div', undefined, 'wizard-model-review'); review.append(onboardingElement('h3', onboardingUx(7))); layout.append(chooser, review); container.append(layout);
   const required = new Set(selected);
   const include = id => {
     for (const dependency of pack.profiles.find(profile => profile.id === id)?.requiresProfiles || []) {
@@ -84,7 +97,7 @@ function onboardingPackSelection(packId, container) {
   };
   [...required].forEach(include);
   const files = pack.files.filter(file => file.profiles.some(id => required.has(id)));
-  container.append(onboardingElement('p', `${onboardingText(29)}: ${files.length} · ${modelBytes(files.reduce((sum, file) => sum + file.bytes, 0))}`));
+  review.append(onboardingElement('p', `${onboardingText(29)}: ${files.length} · ${modelBytes(files.reduce((sum, file) => sum + file.bytes, 0))}`));
   const fileList = onboardingElement('div', undefined, 'model-files');
   for (const file of files) {
     const row = onboardingElement('div', file.destination, 'model-file');
@@ -97,7 +110,7 @@ function onboardingPackSelection(packId, container) {
     }
     fileList.append(row);
   }
-  container.append(fileList, onboardingElement('p', onboardingText(34)));
+  const filesDetail = onboardingElement('details'); filesDetail.append(onboardingElement('summary', onboardingUx(8)), fileList); review.append(onboardingElement('p', onboardingText(34)), filesDetail);
   for (const model of pack.manualModels || []) {
     const row = onboardingElement('div', undefined, 'model-file');
     const link = onboardingElement('a', `${model.purpose} · ${onboardingText(32)}`); link.href = model.reference; link.target = '_blank'; link.rel = 'noopener noreferrer'; row.append(link);
@@ -105,13 +118,13 @@ function onboardingPackSelection(packId, container) {
       const separator = destination.lastIndexOf('/');
       row.append(onboardingElement('small', onboardingText(33).replace('{file}', destination.slice(separator + 1)).replace('{folder}', `Tools/ComfyUI/models/${destination.slice(0, separator + 1)}`)));
     }
-    container.append(row);
+    const manual = onboardingElement('details'); manual.append(onboardingElement('summary', `${model.purpose} · ${onboardingText(32)}`), row); review.append(manual);
   }
   if (packId === 'requirements') {
     const checkpoints = onboardingData.catalog?.checkpoints || [];
-    if (!checkpoints.length) container.append(onboardingElement('p', onboardingDownloadCopy[document.getElementById('language')?.value] || onboardingDownloadCopy.en));
+    if (!checkpoints.length) review.append(onboardingElement('p', onboardingDownloadCopy[document.getElementById('language')?.value] || onboardingDownloadCopy.en));
     if (checkpoints.length) {
-      container.append(onboardingElement('p', onboardingCheckpointCopy[document.getElementById('language')?.value] || onboardingCheckpointCopy.en));
+      review.append(onboardingElement('p', onboardingCheckpointCopy[document.getElementById('language')?.value] || onboardingCheckpointCopy.en));
       const list = onboardingElement('div', undefined, 'model-families');
       for (const checkpoint of checkpoints) {
         const label = onboardingElement('label', undefined, 'model-family');
@@ -119,85 +132,103 @@ function onboardingPackSelection(packId, container) {
         radio.addEventListener('change', () => { if (radio.checked) void saveOnboarding({ checkpoint: checkpoint.path }).catch(modelError); });
         label.append(radio, onboardingElement('span', checkpoint.path)); list.append(label);
       }
-      container.append(list);
+      review.append(list);
     }
     const label = onboardingElement('label', onboardingText(30)); label.htmlFor = 'onboarding-token';
     const input = document.createElement('input'); input.id = 'onboarding-token'; input.type = 'password'; input.autocomplete = 'off'; input.value = onboardingToken;
     input.addEventListener('input', () => { onboardingToken = input.value; });
-    container.append(label, input, onboardingElement('p', onboardingText(31)));
+    const access = onboardingElement('details'); access.append(onboardingElement('summary', onboardingUx(9)), label, input, onboardingElement('p', onboardingText(31))); review.append(access);
   }
-  const controls = onboardingElement('div', undefined, 'tool-controls');
-  for (const [check, index] of [[false, 22], [true, 23]]) controls.append(onboardingButton(onboardingText(index), () => runOnboardingJob('/api/install', { kind: packId, profiles: [...selected], check, ...(packId === 'requirements' && onboardingToken ? { hfToken: onboardingToken } : {}) }), !selected.size));
-  container.append(controls);
+  const allPresent = files.length > 0 && files.every(file => file.present);
+  primary(onboardingText(allPresent ? 23 : 22), () => runOnboardingJob('/api/install', { kind: packId, profiles: [...selected], check: allPresent, ...(packId === 'requirements' && onboardingToken ? { hfToken: onboardingToken } : {}) }), !selected.size);
+  const checks = onboardingElement('details'); checks.append(onboardingElement('summary', onboardingUx(17)), onboardingButton(onboardingText(23), () => runOnboardingJob('/api/install', { kind: packId, profiles: [...selected], check: true }), !selected.size)); review.append(checks);
 }
 function renderOnboarding() {
   const host = document.getElementById('onboarding'); if (!host || !onboardingData) return;
   const languagePanel = document.getElementById('onboarding-language');
-  // Preserve the existing language controls and their listeners when changing steps.
+  const saveLanguage = document.getElementById('save-language');
+  // Keep the original controls and listeners alive across wizard rerenders.
   if (languagePanel && host.contains(languagePanel)) host.before(languagePanel);
+  if (saveLanguage && host.contains(saveLanguage)) languagePanel.append(saveLanguage);
   host.replaceChildren();
-  host.append(onboardingElement('h2', onboardingText(0)), onboardingElement('p', onboardingText(1)));
-  const stage = Math.max(0, Math.min(6, onboardingData.state.stage || 0));
-  const list = onboardingElement('ol'); list.setAttribute('aria-label', onboardingText(0));
-  onboardingIds.forEach((id, index) => {
-    const item = onboardingElement('li'); const complete = onboardingData.stages.find(entry => entry.id === id)?.complete;
-    const button = onboardingButton(`${index + 1}. ${onboardingText(index + 2)} · ${onboardingText(complete ? 26 : 27)}`, () => saveOnboarding({ stage: index }), index > stage && onboardingIds.slice(0, index).some(prior => !onboardingData.stages.find(entry => entry.id === prior)?.complete));
-    button.setAttribute('aria-current', index === stage ? 'step' : 'false');
-    if (index === stage) button.classList.add('primary'); item.append(button); list.append(item);
-  });
-  host.append(list);
-  const content = onboardingElement('section'); content.id = 'onboarding-stage'; content.setAttribute('aria-label', onboardingText(stage + 2));
-  content.append(onboardingElement('h3', `${stage + 1}. ${onboardingText(stage + 2)}`), onboardingElement('p', onboardingText(stage + 9)));
+  const stage = onboardingFocusedStage ?? Math.max(0, Math.min(6, onboardingData.state.stage || 0));
   const detail = onboardingData.stages.find(entry => entry.id === onboardingIds[stage]);
+  const complete = !!detail?.complete;
+  const list = document.getElementById('setup-steps'); list.replaceChildren(); list.setAttribute('aria-label', onboardingText(0));
+  document.getElementById('language-options').setAttribute('aria-label', onboardingText(2));
+  document.getElementById('setup-step-summary').textContent = onboardingUx(0, { done: onboardingData.stages.filter(entry => entry.complete).length });
+  onboardingIds.forEach((id, index) => {
+    const done = !!onboardingData.stages.find(entry => entry.id === id)?.complete;
+    const blocked = index > stage && onboardingIds.slice(0, index).some(prior => !onboardingData.stages.find(entry => entry.id === prior)?.complete);
+    const item = onboardingElement('li');
+    const button = onboardingButton('', () => { showSetupTab('general'); return saveOnboarding({ stage: index }); }, blocked);
+    button.className = 'setup-step'; button.dataset.complete = String(done); button.dataset.stage = String(index);
+    button.setAttribute('aria-current', index === stage ? 'step' : 'false');
+    button.append(onboardingElement('span', done ? '✓' : String(index + 1), 'step-number'));
+    const label = onboardingElement('span'); label.append(onboardingElement('strong', onboardingText(index + 2)), onboardingElement('small', onboardingText(done ? 26 : 27)));
+    button.append(label); item.append(button); list.append(item);
+  });
+  const heading = onboardingElement('div', undefined, 'wizard-heading');
+  heading.append(onboardingElement('div', onboardingUx(1, { step: stage + 1 }), 'eyebrow'), onboardingElement('h2', onboardingText(stage + 2)), onboardingElement('p', onboardingText(stage + 9)));
+  host.append(heading);
+  const content = onboardingElement('section'); content.id = 'onboarding-stage'; content.setAttribute('aria-label', onboardingText(stage + 2));
+  const actions = onboardingElement('div', undefined, 'wizard-actions');
+  const secondary = onboardingElement('div', undefined, 'secondary-actions');
+  if (stage > 0) secondary.append(onboardingButton(onboardingText(16), () => saveOnboarding({ stage: stage - 1 })));
+  actions.append(secondary);
+  const primary = (label, callback, disabled = false) => { const button = onboardingButton(label, callback, disabled); button.classList.add('primary'); button.dataset.wizardPrimary = 'true'; actions.append(button); return button; };
   if (languagePanel) { languagePanel.hidden = stage !== 0; if (stage === 0) content.append(languagePanel); }
-  if (stage === 1) content.append(onboardingButton(onboardingText(18), () => runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'install_core' })));
-  if (stage === 1 && onboardingData.python?.installed && onboardingData.python.upgradeAvailable) {
-    content.append(onboardingElement('p', `Python ${onboardingData.python.version || tr('unavailable')} → ${onboardingData.python.target}`), onboardingButton(tr('updatePython'), async () => {
-      if (!window.confirm(tr('pythonUpgradeWarning'))) return;
-      await runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'update_python' });
-    }));
-  }
-  if (stage === 2 && onboardingData.trainingPython?.installed && onboardingData.trainingPython.upgradeAvailable) {
-    content.append(onboardingElement('p', `Python ${onboardingData.trainingPython.version || tr('unavailable')} → ${onboardingData.trainingPython.targetVersion || onboardingData.trainingPython.target}`), onboardingButton(tr('updateTrainingPython'), async () => {
-      if (!window.confirm(tr('trainingPythonWarning'))) return;
+  if (stage === 0) {
+    saveLanguage.dataset.i18n = 'saveLanguageContinue'; saveLanguage.textContent = onboardingUx(14); saveLanguage.disabled = onboardingBusy; saveLanguage.dataset.wizardPrimary = 'true'; actions.append(saveLanguage);
+  } else if (complete && stage < 6) {
+    const notice = onboardingElement('div', undefined, 'wizard-state'); notice.append(onboardingElement('div', onboardingUx(2)), onboardingElement('p', onboardingUx(3))); content.append(notice);
+    primary(onboardingText(17), () => saveOnboarding({ stage: stage + 1 }));
+  } else if (stage === 1) {
+    const repair = onboardingData.python?.installed && onboardingData.python.upgradeAvailable;
+    const card = onboardingElement('div', undefined, repair ? 'wizard-state pending' : 'wizard-card');
+    card.append(onboardingElement('strong', repair ? onboardingUx(4) : onboardingText(3)), onboardingElement('p', repair ? onboardingUx(5) : onboardingText(10)));
+    const technical = onboardingElement('details'); technical.append(onboardingElement('summary', onboardingUx(10)), onboardingElement('p', `Python ${onboardingData.python?.version || tr('unavailable')} → ${onboardingData.python?.target || '3.13'}`)); card.append(technical); content.append(card);
+    primary(repair ? tr('updatePython') : onboardingData.python?.installed ? onboardingUx(6) : onboardingText(18), async () => {
+      if (repair && !window.confirm(tr('pythonUpgradeWarning'))) return;
+      await runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: repair ? 'update_python' : 'install_core' });
+    });
+  } else if (stage === 2) {
+    const card = onboardingElement('div', undefined, 'wizard-card'); card.append(onboardingElement('h3', onboardingUx(15)), onboardingElement('p', onboardingUx(16))); content.append(card);
+    const repair = onboardingData.trainingPython?.installed && onboardingData.trainingPython.upgradeAvailable;
+    secondary.append(onboardingButton(onboardingText(20), async () => { await saveOnboarding({ training: 'skip', stage: 3 }); }));
+    primary(repair ? tr('updateTrainingPython') : onboardingText(19), async () => {
+      if (repair && !window.confirm(tr('trainingPythonWarning'))) return;
       await saveOnboarding({ training: 'install' });
-      await runOnboardingJob('/api/tools/action', { tool: 'aitoolkit', action: 'update_python' });
-    }));
+      await runOnboardingJob('/api/tools/action', { tool: 'aitoolkit', action: repair ? 'update_python' : 'install' });
+    });
+  } else if (stage === 3) {
+    const card = onboardingElement('div', undefined, 'wizard-card'); card.append(onboardingElement('h3', onboardingText(5)), onboardingElement('p', onboardingText(12))); content.append(card);
+    primary(onboardingText(21), () => runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'nodes_only' }));
+  } else if (stage === 4 || stage === 5) onboardingPackSelection(stage === 4 ? 'support' : 'requirements', content, primary);
+  else if (stage === 6) {
+    const checks = onboardingElement('ul', undefined, 'wizard-checks');
+    onboardingData.stages.slice(0, 6).forEach((entry, index) => { const item = onboardingElement('li', `${entry.complete ? '✓' : '○'} ${onboardingText(index + 2)}`); item.append(onboardingElement('small', onboardingText(entry.complete ? 26 : 27))); checks.append(item); });
+    const media = onboardingData.media; const mediaCopy = onboardingMediaCopy[currentLanguage] || onboardingMediaCopy.en;
+    const item = onboardingElement('li', `${media?.ready ? '✓' : '○'} ${mediaCopy[0]}`); item.append(onboardingElement('small', mediaCopy[media?.ready ? 1 : 2])); checks.append(item); content.append(checks);
+    if (!media?.ready && media?.supported) primary(mediaCopy[3], () => runOnboardingJob('/api/dependencies/action', { kind: 'media', target: 'FFmpeg' }));
+    else if (onboardingData.ready) { content.append(onboardingElement('p', onboardingText(35))); primary(onboardingText(25), () => document.getElementById('launch').click()); }
+    else { content.append(onboardingElement('p', onboardingUx(19))); primary(onboardingText(24), () => runOnboardingJob('/api/onboarding/verify', {})); }
+    const diagnostics = onboardingElement('details'); diagnostics.append(onboardingElement('summary', onboardingUx(10)));
+    const issues = onboardingElement('ul'); for (const issue of onboardingData.issues || []) issues.append(onboardingElement('li', issue)); diagnostics.append(issues); content.append(diagnostics);
   }
-  if (stage === 2) {
-    const controls = onboardingElement('div', undefined, 'tool-controls');
-    controls.append(onboardingButton(onboardingText(19), async () => { await saveOnboarding({ training: 'install' }); await runOnboardingJob('/api/tools/action', { tool: 'aitoolkit', action: 'install' }); }), onboardingButton(onboardingText(20), () => saveOnboarding({ training: 'skip' })));
-    controls.querySelectorAll('button')[onboardingData.state.training === 'skip' ? 1 : 0].setAttribute('aria-pressed', String(onboardingData.state.training !== 'undecided'));
-    content.append(controls);
-  }
-  if (stage === 3) content.append(onboardingButton(onboardingText(21), () => runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'nodes_only' })));
-  if (stage === 4 || stage === 5) onboardingPackSelection(stage === 4 ? 'support' : 'requirements', content);
-  if (stage === 6) {
-    const media = onboardingData.media;
-    const mediaCopy = onboardingMediaCopy[document.getElementById('language')?.value] || onboardingMediaCopy.en;
-    content.append(onboardingElement('h4', mediaCopy[0]), onboardingElement('p', mediaCopy[media?.ready ? 1 : 2]));
-    for (const tool of media?.tools || []) content.append(onboardingElement('p', `${tool.tool}: ${tool.ready ? tool.version : onboardingText(27)}`));
-    if (!media?.ready && media?.supported) content.append(onboardingElement('p', `${setupFormat('repairDownload', { size: Math.round(media.downloadBytes / 1024 / 1024) })} (${media.license}). ${mediaCopy[4]}`), onboardingButton(mediaCopy[3], () => runOnboardingJob('/api/dependencies/action', { kind: 'media', target: 'FFmpeg' })));
-    content.append(onboardingButton(onboardingText(24), () => runOnboardingJob('/api/onboarding/verify', {})));
-    if (onboardingData.ready) content.append(onboardingElement('p', onboardingText(35)), onboardingButton(onboardingText(25), () => document.getElementById('launch').click()));
-    else if (onboardingData.issues?.length) {
-      const issues = onboardingElement('ul');
-      onboardingData.stages.slice(0, 6).forEach((entry, index) => { if (!entry.complete) issues.append(onboardingElement('li', onboardingText(index + 9))); });
-      if (onboardingData.issueCodes?.includes('media')) issues.append(onboardingElement('li', mediaCopy[2]));
-      content.append(onboardingElement('p', onboardingText(36)), issues);
-    }
-  }
-  host.append(content);
-  const controls = onboardingElement('div', undefined, 'tool-controls');
-  controls.append(onboardingButton(onboardingText(16), () => saveOnboarding({ stage: stage - 1 }), stage === 0), onboardingButton(onboardingText(37), loadOnboarding));
-  if (stage < 6) controls.append(onboardingButton(onboardingText(17), () => saveOnboarding({ stage: stage + 1 }), !detail?.complete));
-  host.append(controls);
-  if (stage < 6 && !detail?.complete) host.append(onboardingElement('p', onboardingText(39)));
+  host.append(content, actions);
+  host.setAttribute('aria-busy', String(onboardingBusy));
+  document.getElementById('setup-footer-status').textContent = onboardingBusy ? onboardingText(28) : onboardingData.ready ? onboardingUx(23) : onboardingUx(13);
 }
 function setOnboardingBusy(busy) { if (onboardingBusy !== busy) { onboardingBusy = busy; renderOnboarding(); } }
 function loadOnboarding() {
   if (onboardingLoading) return onboardingLoading;
-  onboardingLoading = api('/api/onboarding').then(result => { onboardingData = result; renderOnboarding(); }).finally(() => { onboardingLoading = null; });
+  onboardingLoading = api('/api/onboarding').then(result => { onboardingData = result;
+    if (onboardingFocusedStage === null) {
+      const firstPending = result.stages.findIndex(entry => !entry.complete);
+      onboardingFocusedStage = !result.state.languageSaved ? 0 : firstPending < 0 ? 6 : firstPending;
+    }
+    renderOnboarding(); }).finally(() => { onboardingLoading = null; });
   return onboardingLoading;
 }
 function renderOnboardingProgress(job) {

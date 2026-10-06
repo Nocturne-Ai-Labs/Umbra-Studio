@@ -67,7 +67,7 @@ Optional host requirements:
   native libraries.
 - FFmpeg and ffprobe are bundled in portable Windows and Linux releases for
   video thumbnails and metadata; no global installation is required. Use **Umbra Setup >
-  Tools > Install / repair media tools**
+  Advanced > Tools > Install / repair media tools**
   to verify or repair the portable pair. Gallery also
   detects this installation's ComfyUI imageio FFmpeg. Linux repair requires
   `tar` and `xz-utils` or equivalent archive extraction tools.
@@ -157,7 +157,7 @@ The automatic `core` profile is approximately 566 MB and contains:
 - RIFE 4.26 for optional frame interpolation
 
 Guided Setup installs this profile in its separate support-model stage. Portable packages
-include **Umbra Setup > Models > Pipeline support** for repair or manual installation.
+include **Umbra Setup > Advanced > Models > Pipeline support** for repair or manual installation.
 
 The optional `reference` profile adds the SDXL IP-Adapter ViT-H model and its
 CLIP Vision encoder. It is kept separate because it is roughly 3 GB. The
@@ -176,7 +176,7 @@ encoders, ControlNet weights, or video diffusion models. Users choose those
 according to the model families and hardware they intend to run.
 
 ComfyUI and AI Toolkit installation and updates are managed in **Umbra Setup >
-Tools**. Open Setup from either tool's main-app panel, or run `UmbraSetup.bat`
+Advanced > Tools**. Open Setup from either tool's main-app panel, or run `UmbraSetup.bat`
 on Windows / `./umbra-setup.sh` on Linux. This includes CUDA/PyTorch updates,
 ComfyUI custom nodes, SageAttention and ComfyUI version switching. Stop the
 corresponding tool before maintenance and follow the progress and installer log
@@ -184,7 +184,8 @@ in Setup. Launch, stop and connection checks remain in Umbra Studio.
 
 Umbra Setup also owns application updates under **Updates**. Guided setup starts
 with language, then ComfyUI, optional AI Toolkit, nodes, support models, generation
-resources and verification. Skipping AI Toolkit does not block generation setup.
+resources and verification. The desktop wizard shows one step at a time; individual
+repairs and extra model packs are under **Advanced**. Skipping AI Toolkit does not block generation setup.
 Readiness checks verify installation and model integrity without generating an image.
 
 ## Source Development

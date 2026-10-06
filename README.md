@@ -47,8 +47,9 @@ See [CHANGELOG.md](CHANGELOG.md) for release highlights. Portable builds include
 model downloads, and application updates. Setup does not block normal Umbra startup.
 
 The version button at the bottom-left opens **Setup > Updates**. `(+x)` reports
-newer compatible GitHub releases. Save your work before opening it from Umbra:
-the main app and its managed tools close cleanly. Select a release, follow the
+newer compatible GitHub releases. Setup opens in a separate tab while Umbra
+remains running. Save your work before installing an update; the main app and
+its managed tools close cleanly during installation. Select a release, follow the
 download and installation progress, then use **Launch Umbra Studio** when the
 update finishes. Updates preserve `User/` and `Tools/`. Downloads, rollback
 backups, and logs use the root-local `User/Cache/UmbraUpdater` workspace.
@@ -92,7 +93,7 @@ The original files and their GPL provenance are under
 [`defaults/PowerPrompter/Official Workflows/DaSiWa`](defaults/PowerPrompter/Official%20Workflows/DaSiWa/PROVENANCE.md).
 Umbra does not substitute an adapted graph when an official workflow is held.
 
-1. Review the workflow dependency repair in Umbra Setup > Tools. It
+1. Review the workflow dependency repair in Umbra Setup > Advanced > Tools. It
    uses the existing managed installer for compatible ComfyUI/frontend and node
    suites. Finish queued work and stop managed ComfyUI before repair. Conflicting
    local edits are retained and reported. Models are a separate selection/setup
@@ -197,7 +198,7 @@ on demand; no Microsoft Store Python installation is required. On Windows, Setup
 also downloads verified portable Git into `Runtime/Git` when Git is missing.
 
 To migrate an existing or broken ComfyUI environment, stop ComfyUI in Umbra and
-choose **Umbra Setup > Tools > Update Python 3.13**. Setup rebuilds the virtual
+choose **Umbra Setup > Advanced > Tools > Update Python 3.13**. Setup rebuilds the virtual
 environment and reinstalls core and installed custom-node requirements. Models,
 outputs, settings and custom-node code stay in place. The previous environment
 is retained under `Tools/ComfyUI/.umbra-python-backups`; failed upgrades restore
@@ -205,7 +206,7 @@ it automatically. Attention packages without compatible wheels hold the upgrade
 instead of silently removing them. Launch ComfyUI from Umbra after maintenance
 to verify custom-node registration and your workflows.
 
-For AI Toolkit, **Setup > Tools > Update Python 3.12** rebuilds its managed
+For AI Toolkit, **Setup > Advanced > Tools > Update Python 3.12** rebuilds its managed
 training environment with upstream runtime pins and verifies a CUDA training
 step when an NVIDIA GPU is detected. Datasets, configurations and checkpoints remain in place; its previous
 venv is retained under `Tools/AI-Toolkit/.umbra-python-backups`. The current
@@ -236,7 +237,12 @@ chmod +x umbra-setup.sh
 
 The utility uses the bundled Bun runtime and serves one local-only Setup app
 (default port `8214`; in-app tool shortcuts can allocate a free local port).
-**Guided setup** saves your progress and follows this order:
+**Guided setup** uses the full desktop window: steps and completion status on the
+left, one focused task and primary action in the working area, and installation
+progress at the bottom. Language is the first step. Existing installations resume
+at the first step that needs attention, including a clear Python repair action.
+File inventories, logs and individual repairs stay collapsed until needed. Setup
+saves your progress and follows this order:
 
 1. Choose and save English, Japanese, Simplified Chinese, Korean, or German.
    The guided instructions change immediately to the selected language.
@@ -248,7 +254,7 @@ The utility uses the bundled Bun runtime and serves one local-only Setup app
 6. Choose one generation family, install its prerequisites, and select a compatible
    checkpoint. Some packs include generation weights; prerequisite-only packs
    require a separate checkpoint from Umbra's Model Manager. Additional families
-   and feature models can be installed later through **Models**.
+   and feature models can be installed later through **Advanced > Models**.
 7. Verify installed requirements, nodes, model checksums, checkpoint integrity,
    FFmpeg and ffprobe. If media tools are missing, use **Ready > Install / repair
    media tools** to download and checksum-verify the portable pair.
@@ -256,12 +262,12 @@ The utility uses the bundled Bun runtime and serves one local-only Setup app
    installation verification does not qualify GPU execution or image quality.
 
 Existing valid model files are retained, supported partial downloads resume, and
-only one installation or application update runs at a time. **Tools** retains
+only one installation or application update runs at a time. **Advanced > Tools** retains
 ComfyUI and AI Toolkit repairs, CUDA/PyTorch updates, custom nodes, SageAttention,
-and ComfyUI version switching. **Models** retains optional Data Forge packs and
+and ComfyUI version switching. **Advanced > Models** retains optional Data Forge packs and
 model-family downloads. **Updates** lists newer portable releases and shows a
-progress bar, transferred bytes, and installation stages. Reopen Setup after an
-application update before performing further maintenance.
+progress bar, transferred bytes, and installation stages. Reopening Setup after
+an update replaces an outdated cached session before further maintenance.
 
 The unified app preserves `User/` and `Tools/` during updates and does not migrate
 files between versioned folders. Language can also be changed later under
@@ -278,13 +284,13 @@ Releases also include a portable CPU Python 3.11 helper environment with pandas,
 NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors and psutil under
 `Runtime/PythonHelpers/bundled/<platform>`. WD Tagger dependencies work without a
 system Python or ComfyUI install. **Tagger model weights are not bundled**;
-download the desired models through **Umbra Setup > Models**. PyTorch,
+download the desired models through **Umbra Setup > Advanced > Models**. PyTorch,
 Transformers, PixAI and natural-language captioning remain separate managed
 installations. Setup shows bundled library verification separately
 from model and managed-tool readiness. Existing helper venvs are preserved by
 app updates, and explicit `UMBRA_PYTHON` overrides keep priority.
 
-For video thumbnail or metadata errors, open **Umbra Setup > Tools**, then select **Install / repair media tools**.
+For video thumbnail or metadata errors, open **Umbra Setup > Advanced > Tools**, then select **Install / repair media tools**.
 Umbra verifies FFmpeg and ffprobe separately. When needed, it downloads a
 checksum-pinned portable pair into `Tools/FFmpeg` (about 184 MiB on Windows,
 143 MiB on Linux). Repair tools retain their upstream license notices.
@@ -404,7 +410,7 @@ UmbraSetup.bat --tab models
 ```
 
 Windows and Linux packages no longer include separate model-download shortcuts.
-Use **Umbra Setup > Models** for recommendations, family resources, and verification.
+Use **Umbra Setup > Advanced > Models** for recommendations, family resources, and verification.
 
 Linux:
 
@@ -523,7 +529,7 @@ Single-tool examples:
 AI Toolkit and ComfyUI are managed installations stored under `Tools/`; their
 large upstream checkouts and virtual environments are not committed to this
 repository. Data Forge model weights are pinned by the included downloader
-scripts. GitHub portable packages include **Umbra Setup > Models** so users
+scripts. GitHub portable packages include **Umbra Setup > Advanced > Models** so users
 can install those weights after
 extracting the core package. Downloads are checked against the byte sizes and
 SHA-256 values in the bundled manifest before installation completes.
