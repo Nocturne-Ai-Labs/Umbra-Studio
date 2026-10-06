@@ -231,7 +231,7 @@ let toolsBusy = false;
 let completedToolsJob = '';
 function setToolsBusy(busy) {
   toolsBusy = busy;
-  modelElement('tools-list').querySelectorAll('button').forEach(button => { button.disabled = busy; });
+  modelElement('tools-list').querySelectorAll('button').forEach(button => { button.disabled = busy || button.dataset.requiresInstall === 'true'; });
   modelElement('tools-refresh').disabled = busy;
 }
 function toolsRow(label, detail, kind = '', target = '', action = null, actionLabel = '') {
@@ -281,6 +281,41 @@ async function loadManagedTools() {
   modelElement('shared-support-size').textContent = `Shared support models: ${(dependencies.sharedSupport.bytes / 1024 ** 3).toFixed(2)} GiB, plus Python packages. Existing valid files are verified and kept.`;
   modelElement('tools-list').replaceChildren();
   modelElement('tools-summary').textContent = tr(dependencies.features.length ? 'toolsHint' : 'noManagedTools');
+  for (const tool of dependencies.maintenanceTools || []) {
+    const row = document.createElement('div'); row.className = 'model-file';
+    const title = document.createElement('strong'); title.textContent = tool.name;
+    const detail = document.createElement('small'); detail.textContent = `${tool.installed ? 'Installed' : 'Missing'}${tool.commit ? ` | ${tool.commit}` : ''}. Stop ${tool.name} in Umbra before maintenance.`;
+    row.append(title, detail);
+    row.dataset.maintenanceTool = tool.id;
+    const controls = document.createElement('div'); controls.className = 'tool-maintenance-actions'; row.append(controls);
+    const actions = [['install', tool.installed ? 'Repair / reinstall' : 'Install'], ['update', 'Update'], ['update_pytorch', 'Update CUDA / PyTorch']];
+    if (tool.id === 'comfyui') actions.push(['custom_nodes', 'Install / update custom nodes'], ['h3_nodes', 'Install / update H3 nodes'], ['install_sageattention', 'Install / repair SageAttention']);
+    const runAction = async (action, ref = '') => {
+      setBusy(true);
+      try {
+        const result = await api('/api/tools/action', { method: 'POST', body: JSON.stringify({ tool: tool.id, action, ref }) });
+        renderJob(result.job); void poll();
+      } catch (error) { modelError(error); setBusy(false); }
+    };
+    for (const [action, label] of actions) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'button'; button.textContent = label;
+      button.disabled = toolsBusy || (action !== 'install' && !tool.installed);
+      button.dataset.requiresInstall = String(action !== 'install' && !tool.installed);
+      button.addEventListener('click', () => { void runAction(action); }); controls.append(button);
+    }
+    if (tool.id === 'comfyui') {
+      const label = document.createElement('label'); label.textContent = 'ComfyUI version tag / branch / commit';
+      const input = document.createElement('input'); input.type = 'text'; input.placeholder = 'e.g. v0.38.0'; label.append(input); row.append(label);
+      const switchButton = document.createElement('button'); switchButton.type = 'button'; switchButton.className = 'button'; switchButton.textContent = 'Install / switch version';
+      switchButton.addEventListener('click', () => {
+        const ref = input.value.trim();
+        if (!ref) { input.focus(); return; }
+        if (!window.confirm(`Switch ComfyUI to ${ref}? This rebuild can remove custom nodes that are not preinstalled by Umbra. Use Update to preserve your custom nodes.`)) return;
+        void runAction('set_comfyui_version', ref);
+      }); row.append(switchButton);
+    }
+    modelElement('tools-list').append(row);
+  }
   const media = dependencies.mediaTools;
   const helpers = dependencies.pythonHelpers;
   if (helpers) {
@@ -297,7 +332,7 @@ async function loadManagedTools() {
     return required.some((part, index) => installed.slice(0, index).every((value, i) => value === required[i]) && (installed[index] || 0) < part);
   };
   const outdated = isOutdated(core.version, core.minimumRequired) || isOutdated(core.frontendVersion, core.minimumFrontendRequired);
-  toolsRow('ComfyUI', `${core.version || 'Missing'}${core.minimumRequired ? ` | Required ${core.minimumRequired}+` : ''} | Frontend ${core.frontendVersion || 'unverified'}${core.minimumFrontendRequired ? ` | Required ${core.minimumFrontendRequired}+` : ''}`,
+  toolsRow('Reviewed ComfyUI requirements', `${core.version || 'Missing'}${core.minimumRequired ? ` | Required ${core.minimumRequired}+` : ''} | Frontend ${core.frontendVersion || 'unverified'}${core.minimumFrontendRequired ? ` | Required ${core.minimumFrontendRequired}+` : ''}`,
     !core.installed || outdated ? 'comfyui' : '', 'ComfyUI');
   const suites = new Map();
   const background = dependencies.backgroundCompatibility;
@@ -340,7 +375,7 @@ async function loadManagedTools() {
 }
 function renderToolsProgress(job) {
   if (!['managed-tools', 'media-tools'].includes(job.kind)) return;
-  modelElement('tools-message').textContent = job.error || (job.phase === 'complete' && job.kind === 'managed-tools'
+  modelElement('tools-message').textContent = job.error || (job.phase === 'complete' && job.kind === 'managed-tools' && !job.step.includes('maintenance complete')
     ? 'Managed files verified. Restart managed ComfyUI and refresh its frontend; runtime registration remains to be checked.' : job.step);
   if (job.phase !== 'running' && completedToolsJob !== job.id) {
     completedToolsJob = job.id; void loadManagedTools().catch(modelError);

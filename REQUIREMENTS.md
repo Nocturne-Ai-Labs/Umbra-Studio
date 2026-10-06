@@ -167,6 +167,13 @@ These support files do not include generation checkpoints, LoRAs, VAEs, text
 encoders, ControlNet weights, or video diffusion models. Users choose those
 according to the model families and hardware they intend to run.
 
+ComfyUI and AI Toolkit installation and updates are managed in **Umbra Setup >
+Tools**. Open Setup from either tool's main-app panel, or run `UmbraSetup.bat`
+on Windows / `./umbra-setup.sh` on Linux. This includes CUDA/PyTorch updates,
+ComfyUI custom nodes, SageAttention and ComfyUI version switching. Stop the
+corresponding tool before maintenance and follow the progress and installer log
+in Setup. Launch, stop and connection checks remain in Umbra Studio.
+
 ## Source Development
 
 Required:

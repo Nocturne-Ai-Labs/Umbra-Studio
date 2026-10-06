@@ -13,6 +13,8 @@ import { invalidateManagedPythonSetupEvidence, prepareManagedDependencyInstallPo
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { MODEL_MANIFESTS, SHARED_VISION_PROFILES, sharedSupportCatalog, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
+import { assertAIToolkitStopped, inspectToolMaintenance, toolMaintenanceArgs } from './ToolMaintenance';
+import { claimToolMaintenance, trackToolMaintenanceChild } from '../shared/toolMaintenanceLock';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { installMediaTools, inspectMediaTools } from './MediaTools';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
@@ -32,6 +34,7 @@ type SetupJobState = {
   completedAt: string | null;
   error: string;
   cancellable?: boolean;
+  maintenanceTool?: 'comfyui' | 'aitoolkit';
   cancelRequested?: boolean;
   progress?: { stage?: string; file?: string; bytes?: number; totalBytes?: number; completedFiles?: number; totalFiles?: number };
 };
@@ -146,6 +149,10 @@ async function runScript(runtimeRoot: string, scriptPath: string, args: string[]
     windowsHide: true,
   });
   jobChildren.set(job.id, child);
+  if (job.maintenanceTool && child.pid) {
+    try { trackToolMaintenanceChild(runtimeRoot, job.maintenanceTool, child.pid); }
+    catch (error) { child.kill(); child.on('error', () => {}); jobChildren.delete(job.id); throw error; }
+  }
   const redact = (value: string) => hfToken ? value.split(hfToken).join('[redacted]') : value;
   child.stdin?.on('error', (error) => {
     appendOutput(job, redact(`Installer input pipe failed: ${error.message}`));
@@ -258,7 +265,8 @@ function launchUmbra(runtimeRoot: string) {
 async function main() {
   const runtimeRoot = resolve(readArg('--root', process.env.UMBRA_ROOT || process.cwd()));
   const sourceRoot = resolve(readArg('--source', join(runtimeRoot, 'resources', 'app')));
-  const port = Math.max(1, Number.parseInt(readArg('--port', String(DEFAULT_SETUP_PORT)), 10) || DEFAULT_SETUP_PORT);
+  const requestedPort = Number(readArg('--port', String(DEFAULT_SETUP_PORT)));
+  const port = Number.isInteger(requestedPort) && requestedPort >= 0 && requestedPort <= 65535 ? requestedPort : DEFAULT_SETUP_PORT;
   const token = readArg('--token') || randomUUID();
   const htmlPath = join(sourceRoot, 'setup', 'index.html');
   if (!existsSync(htmlPath)) throw new Error(`Setup page is missing: ${htmlPath}`);
@@ -287,7 +295,7 @@ async function main() {
       if (suppliedToken !== token) return json({ success: false, error: 'Unauthorized setup session.' }, 403);
 
       if (url.pathname === '/api/health') {
-        return json({ success: true, port: server.port });
+        return json({ success: true, port: server.port, runtimeRoot });
       }
       if (url.pathname === '/api/models' && request.method === 'GET') {
         try { return json({ success: true, ...await modelSetupCatalog(sourceRoot, runtimeRoot) }); }
@@ -296,10 +304,49 @@ async function main() {
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
         try {
           const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
-          return json({ success: true, ...status, sharedSupport: sharedSupportCatalog(sourceRoot), repairState: managedRepairState,
+          return json({ success: true, ...status, maintenanceTools: inspectToolMaintenance(runtimeRoot), sharedSupport: sharedSupportCatalog(sourceRoot), repairState: managedRepairState,
             repairPlans: managedWorkflowRepairPlans(status) });
         }
         catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
+      if (url.pathname === '/api/tools/action' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
+        const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+        let args: string[];
+        try { args = toolMaintenanceArgs(body.tool, body.action, body.ref); }
+        catch (error) { return json({ success: false, error: String((error as Error).message) }, 400); }
+        let releaseMaintenance: (() => void) | null = null;
+        try {
+          const release = claimToolMaintenance(runtimeRoot, String(body.tool));
+          releaseMaintenance = release;
+          try {
+            const health = await fetch(`${umbraOrigin()}/api/healthz`, { signal: AbortSignal.timeout(1500) }).then(response => response.json()).catch(() => null) as any;
+            if (health && health.runtimeRoot !== runtimeRoot) throw new Error('The Umbra endpoint belongs to another installation.');
+            if (health) {
+              const detect = await fetch(`${umbraOrigin()}/api/tools/detect`, { signal: AbortSignal.timeout(1500) }).then(response => response.json()) as any;
+              const action = detect[body.tool as string]?.activeAction;
+              if (action && action.ownerPid !== process.pid) throw new Error('Finish the active Umbra tool operation before maintenance.');
+            }
+            if (body.tool === 'comfyui') await assertDependencyIdle();
+            else await assertAIToolkitStopped(runtimeRoot);
+          } catch (error) { release(); throw error; }
+          if (hasRunningInstaller()) { release(); return json({ success: false, error: 'Finish the current installation first.' }, 409); }
+          const tool = inspectToolMaintenance(runtimeRoot).find(item => item.id === body.tool)!;
+          if (body.action !== 'install' && body.action !== 'set_comfyui_version' && !tool.installed) { release(); return json({ success: false, error: `Install ${tool.name} first.` }, 400); }
+          const job: SetupJobState = { id: randomUUID(), kind: 'managed-tools', maintenanceTool: tool.id, phase: 'running', step: `${tool.name}: ${String(body.action).replaceAll('_', ' ')}`,
+            lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false };
+          activeJob = job;
+          // AI Toolkit has its own environment; ComfyUI's constraints must not leak into it.
+          void (body.tool === 'comfyui' ? runManagedToolScript(runtimeRoot, sourceRoot, args, job)
+            : runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), args, job, '', sourceRoot))
+            .then(() => {
+              if (!job.lines.includes('UMBRA_VERIFY_OK|setup-tools')) throw new Error('Tool installer verification did not complete. Review the log.');
+              if (!inspectToolMaintenance(runtimeRoot).find(item => item.id === body.tool)?.installed) throw new Error(`${tool.name} installation is missing after maintenance.`);
+              appendOutput(job, 'Maintenance verified. Launch the tool from Umbra Studio to check runtime readiness.');
+              job.phase = 'complete'; job.step = `${tool.name} maintenance complete`; job.completedAt = new Date().toISOString();
+            }).catch(error => { job.phase = 'failed'; job.step = `${tool.name} maintenance failed`; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(release);
+          return json({ success: true, accepted: true, job }, 202);
+        } catch (error) { releaseMaintenance?.(); return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
       if (url.pathname === '/api/dependencies/action' && request.method === 'POST') {
         if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
@@ -535,7 +582,7 @@ async function main() {
     },
   });
 
-  const setupUrl = `http://127.0.0.1:${server.port}/?token=${encodeURIComponent(token)}&tab=${readArg('--tab') === 'models' ? 'models' : 'general'}&pack=${encodeURIComponent(readArg('--pack', 'requirements'))}`;
+  const setupUrl = `http://127.0.0.1:${server.port}/?token=${encodeURIComponent(token)}&tab=${['models', 'tools'].includes(readArg('--tab')) ? readArg('--tab') : 'general'}&pack=${encodeURIComponent(readArg('--pack', 'requirements'))}`;
   console.log(`[UmbraSetup] Ready: ${setupUrl}`);
   if (!hasArg('--no-open')) openBrowser(setupUrl);
 }

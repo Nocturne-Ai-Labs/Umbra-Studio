@@ -8,6 +8,12 @@
 
 ### TL;DR - Setup After Updating
 
+- ComfyUI and AI Toolkit install/update controls now live in **Umbra Setup >
+  Tools**, including CUDA/PyTorch, SageAttention, custom nodes and ComfyUI version
+  switching. Main-app tool panels open Setup; launch, stop and connection checks
+  remain in Umbra. Setup keeps installer progress/logs visible and blocks launches
+  while a maintenance job owns the tool.
+
 **Umbra Studio Mobile is experimental and is not ready for feedback.**
 
 **Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**

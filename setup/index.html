@@ -125,6 +125,12 @@
     .model-file { border-bottom: 1px solid var(--line); padding: 9px 0; overflow-wrap: anywhere; font-size: 12px; }
     .model-file small { display: block; color: var(--muted); margin-top: 5px; }
     .model-file a { color: #9ee8d0; }
+    .tool-maintenance-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+    .tool-maintenance-actions .button { min-height: 36px; }
+    #tools-list { max-height: none; overflow: visible; }
+    @media (max-width: 600px) { .tool-maintenance-actions .button { min-height: 44px; } }
+    [data-maintenance-tool] label { display: block; margin-top: 12px; }
+    [data-maintenance-tool] input { display: block; width: 100%; margin: 6px 0; }
     .model-license-notice { color: #eab86b !important; }
     .model-requirements { display: block; color: #eab86b; font-size: 11px; margin-top: 7px; }
     .model-license-disclaimer { margin: 12px 0 16px; border-left: 3px solid #eab86b; padding: 10px 12px; background: #17120a; color: #e8dbc0; }

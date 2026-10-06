@@ -1,6 +1,7 @@
 'use client';
 
 import { comfyToolActions } from '@/lib/toolActionController';
+import { openUmbraToolsSetup } from '@/lib/openUmbraSetup';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '@/store/useStore';
@@ -316,13 +317,9 @@ export const BackendSplash = ({
   const [hasToolUpdate, setHasToolUpdate] = useState(false);
   const [hasPyTorchUpdate, setHasPyTorchUpdate] = useState(false);
   const toolActionLoading = sharedActionBusy && sharedAction.action !== 'set_comfyui_version' ? sharedAction.action : null;
-  const [comfyVersions, setComfyVersions] = useState<ComfyVersionOption[]>([]);
   const [currentComfyRef, setCurrentComfyRef] = useState('');
   const [currentComfyCommit, setCurrentComfyCommit] = useState('');
-  const [selectedComfyRef, setSelectedComfyRef] = useState('');
-  const [isLoadingComfyVersions, setIsLoadingComfyVersions] = useState(false);
   const isSwitchingComfyVersion = sharedActionBusy && sharedAction.action === 'set_comfyui_version';
-  const [comfyVersionError, setComfyVersionError] = useState<string | null>(null);
   const fetchSystemStatus = useStore((state) => state.fetchSystemStatus);
   const isLaunching = useStore((state) => state.booting[backend]);
   const backendConnection = useStore((state) => state.connections[backend]);
@@ -417,8 +414,6 @@ export const BackendSplash = ({
 
   const loadComfyVersions = React.useCallback(async () => {
     if (!versionBackend) return;
-    setIsLoadingComfyVersions(true);
-    setComfyVersionError(null);
 
     try {
       const response = await fetch(`/api/tools/${versionBackend}/versions?limit=500`, { signal: componentControllerRef.current?.signal });
@@ -428,36 +423,21 @@ export const BackendSplash = ({
         throw new Error(data?.error || `Failed to load ${versionBackendLabel} versions`);
       }
       if (data?.available === false) {
-        setComfyVersions([]);
         setCurrentComfyRef('');
         setCurrentComfyCommit('');
-        setComfyVersionError(String(data?.unavailableReason || `${versionBackendLabel} version switching is unavailable.`));
         return;
       }
 
-      const versions = Array.isArray(data?.versions) ? data.versions as ComfyVersionOption[] : [];
       const currentRef = String(data?.currentRef || '').trim();
       const currentCommit = String(data?.currentCommit || '').trim();
 
-      setComfyVersions(versions);
       setCurrentComfyRef(currentRef);
       setCurrentComfyCommit(currentCommit);
-      setSelectedComfyRef((prev) => {
-        const normalizedPrev = String(prev || '').trim();
-        if (normalizedPrev && versions.some((entry) => entry.ref === normalizedPrev)) {
-          return normalizedPrev;
-        }
-        return currentRef || normalizedPrev || (versions[0]?.ref || '');
-      });
     } catch (err: any) {
       if (!isMountedRef.current) return;
-      const message = err?.message || `Failed to load ${versionBackendLabel} versions`;
-      setComfyVersions([]);
       setCurrentComfyRef('');
       setCurrentComfyCommit('');
-      setComfyVersionError(message);
     } finally {
-      if (isMountedRef.current) setIsLoadingComfyVersions(false);
       useStore.getState().setBooting('comfyuiVersions', false);
     }
   }, [versionBackend, versionBackendLabel]);
@@ -690,14 +670,9 @@ export const BackendSplash = ({
     }
   };
 
-  const handleToolAction = async (action: 'install' | 'update' | 'custom_nodes' | 'h3_nodes' | 'update_pytorch' | 'install_sageattention') => {
-    if (managementBlocked) {
-      setError('Install and update actions are only available from the host PC.');
-      setStatusText('Host-only action blocked');
-      return;
-    }
-    if (useStore.getState().booting.comfyui || isStopping) return;
-    void comfyToolActions.start(action);
+  const handleOpenSetup = async () => {
+    try { await openUmbraToolsSetup(); }
+    catch (error) { useStore.getState().showToast(error instanceof Error ? error.message : 'Unable to open Umbra Setup.', 'error'); }
   };
 
   React.useEffect(() => {
@@ -707,29 +682,6 @@ export const BackendSplash = ({
       void Promise.all([fetchSystemStatus(), loadToolMeta(), loadComfyVersions()]);
     }
   }, [sharedAction.action, sharedAction.busy, sharedAction.status, fetchSystemStatus, loadToolMeta, loadComfyVersions]);
-
-  const formatComfyVersionDate = (value: string | null) => {
-    if (!value) return '';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleDateString();
-  };
-
-  const handleComfyVersionSwitch = async () => {
-    if (!versionBackend) return;
-    if (managementBlocked) {
-      const message = 'Version switching is only available from the host PC.';
-      setComfyVersionError(message);
-      setError(message);
-      setStatusText('Host-only action blocked');
-      return;
-    }
-    const targetRef = String(selectedComfyRef || '').trim();
-    if (!targetRef || isSwitchingComfyVersion) return;
-
-    if (useStore.getState().booting.comfyui || isStopping) return;
-    void comfyToolActions.start('set_comfyui_version', targetRef);
-  };
 
   const showConsolePanel = isLaunching || !!toolActionLoading || isSwitchingComfyVersion || !!error || consoleLines.length > 0;
   const mobileManagerBusy = sharedActionBusy || isLaunching || isStopping || isChecking || !!toolActionLoading || isSwitchingComfyVersion;
@@ -831,73 +783,11 @@ export const BackendSplash = ({
           </section>
 
           <section className="rounded-lg border border-white/10 bg-black/25 p-3">
-            <div className="mb-3 flex items-center justify-between px-1">
-              <h3 className="text-sm font-semibold text-white">Installation</h3>
-              <span className="text-xs text-zinc-500">
-                {toolInstalled === null ? 'Checking' : toolInstalled ? 'Installed' : 'Missing'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleToolAction('install')}
-                disabled={mobileManagerBusy}
-                className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2 text-sm font-semibold text-zinc-200 disabled:opacity-40"
-              >
-                {toolActionLoading === 'install' ? <Loader2 size={17} className="animate-spin" /> : <FolderOpen size={17} />}
-                {toolInstalled ? 'Repair' : 'Install'}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToolAction('update')}
-                disabled={mobileManagerBusy || isBackendRunning || toolInstalled === false}
-                title={isBackendRunning ? 'Stop ComfyUI before updating it' : 'Update managed ComfyUI'}
-                className="relative flex min-h-12 items-center justify-center gap-2 rounded-lg border border-amber-400/25 bg-amber-500/10 px-2 text-sm font-semibold text-amber-100 disabled:opacity-40"
-              >
-                {toolActionLoading === 'update' ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
-                Update
-                {hasToolUpdate ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-300" /> : null}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToolAction('custom_nodes')}
-                disabled={mobileManagerBusy || isBackendRunning || toolInstalled === false}
-                title={isBackendRunning ? 'Stop ComfyUI before installing or updating custom nodes' : 'Install or update managed custom nodes'}
-                className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-2 text-sm font-semibold text-emerald-100 disabled:opacity-40"
-              >
-                {toolActionLoading === 'custom_nodes' ? <Loader2 size={17} className="animate-spin" /> : <Zap size={17} />}
-                Custom Nodes
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToolAction('h3_nodes')}
-                disabled={mobileManagerBusy || isBackendRunning || toolInstalled === false}
-                title={isBackendRunning ? 'Stop ComfyUI before updating DaSiWa nodes' : 'Install or update DaSiWa H3 Director and Prompt Forge nodes'}
-                className="flex min-h-12 items-center justify-center gap-2 rounded-lg border border-fuchsia-400/25 bg-fuchsia-500/10 px-2 text-sm font-semibold text-fuchsia-100 disabled:opacity-40"
-              >
-                {toolActionLoading === 'h3_nodes' ? <Loader2 size={17} className="animate-spin" /> : <Clapperboard size={17} />}
-                H3 Nodes
-              </button>
-              <button
-                type="button"
-                onClick={() => handleToolAction('update_pytorch')}
-                disabled={mobileManagerBusy || toolInstalled === false}
-                className="relative flex min-h-12 items-center justify-center gap-2 rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-2 text-sm font-semibold text-cyan-100 disabled:opacity-40"
-              >
-                {toolActionLoading === 'update_pytorch' ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
-                PyTorch
-                {hasPyTorchUpdate ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-cyan-300" /> : null}
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleToolAction('install_sageattention')}
-              disabled={mobileManagerBusy || toolInstalled === false}
-              className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 text-sm font-semibold text-fuchsia-100 disabled:opacity-40"
-            >
-              {toolActionLoading === 'install_sageattention' ? <Loader2 size={17} className="animate-spin" /> : <Zap size={17} />}
-              Install SageAttention
+            <button type="button" onClick={() => void handleOpenSetup()} disabled={isRemoteClient}
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 text-sm font-semibold disabled:opacity-40">
+              <FolderOpen size={17} /> Open Umbra Setup
             </button>
+            <p className="mt-2 text-xs text-zinc-400">Install, update, CUDA/PyTorch and SageAttention are in Setup &gt; Tools on the host PC.</p>
           </section>
 
           {(currentComfyRef || currentComfyCommit) ? (
@@ -1047,135 +937,13 @@ export const BackendSplash = ({
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-white/10 pt-5 mb-6">
-          <button
-            onClick={() => handleToolAction('install')}
-            disabled={sharedActionBusy || managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
-            className="glass-panel px-4 py-2 bg-white/5 hover:bg-white/10 border-white/10 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
-          >
-            {toolActionLoading === 'install' ? 'Installing...' : (toolInstalled ? `Reinstall ${name}` : `Install ${name}`)}
+        <div className="border-t border-white/10 pt-5 mb-6">
+          <button type="button" onClick={() => void handleOpenSetup()} disabled={isRemoteClient}
+            className="glass-panel px-4 py-2 bg-white/5 hover:bg-white/10 border-white/10 disabled:opacity-50 text-xs font-bold uppercase tracking-wider">
+            Open Umbra Setup
           </button>
-          <button
-            onClick={() => handleToolAction('update')}
-            disabled={sharedActionBusy || managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
-            title={isBackendRunning ? 'Stop ComfyUI before updating it' : 'Update managed ComfyUI'}
-            className="glass-panel px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
-          >
-            {toolActionLoading === 'update' ? 'Updating...' : `Update ${name}`}
-          </button>
-          {(backend === 'comfyui') && (
-            <button
-              onClick={() => handleToolAction('custom_nodes')}
-              disabled={sharedActionBusy || managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
-              title={isBackendRunning ? 'Stop ComfyUI before installing or updating custom nodes' : 'Install or update managed custom nodes'}
-              className="glass-panel px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
-            >
-              {toolActionLoading === 'custom_nodes' ? 'Installing Nodes...' : 'Install Custom Nodes'}
-            </button>
-          )}
-          {backend === 'comfyui' && (
-            <button
-              onClick={() => handleToolAction('h3_nodes')}
-              disabled={sharedActionBusy || managementBlocked || isBackendRunning || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
-              title={isBackendRunning ? 'Stop ComfyUI before updating DaSiWa nodes' : 'Install or update DaSiWa H3 Director and Prompt Forge nodes'}
-              className="glass-panel px-4 py-2 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
-            >
-              {toolActionLoading === 'h3_nodes' ? 'Updating H3 Nodes...' : 'Install/Update H3 Nodes'}
-            </button>
-          )}
-          {backend === 'comfyui' && (
-            <button
-              onClick={() => handleToolAction('update_pytorch')}
-              disabled={sharedActionBusy || managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
-              className="glass-panel px-4 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
-            >
-              {toolActionLoading === 'update_pytorch' ? 'Updating Torch...' : 'Update CUDA/PyTorch'}
-            </button>
-          )}
-          {backend === 'comfyui' && (
-            <button
-              onClick={() => handleToolAction('install_sageattention')}
-              disabled={sharedActionBusy || managementBlocked || isLaunching || isChecking || !!toolActionLoading || isSwitchingComfyVersion}
-              className="glass-panel px-4 py-2 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 border-fuchsia-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold uppercase tracking-wider"
-            >
-              {toolActionLoading === 'install_sageattention' ? 'Installing Sage...' : 'Install SageAttention'}
-            </button>
-          )}
+          <p className="mt-2 text-xs text-zinc-400">Install, update, versions, CUDA/PyTorch and SageAttention are in Setup &gt; Tools on the host PC.</p>
         </div>
-
-        {versionBackend && !isLaunching && (
-          <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-left">
-            <p className="text-[11px] leading-relaxed text-amber-200">
-              {ui(`If ${versionBackendLabel} has issues after updating Umbra Studio or ${versionBackendLabel}, press Reinstall ${versionBackendLabel}. It fixes most startup/runtime problems.`)}
-            </p>
-          </div>
-        )}
-
-        {versionBackend && (
-          <div className="glass-panel p-4 bg-black/40 border-white/5 mb-6 text-left">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 font-bold">{versionBackendLabel} Version</p>
-              <button
-                type="button"
-                onClick={() => loadComfyVersions()}
-                disabled={sharedActionBusy || managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading}
-                className="text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-              >
-                <RefreshCw className={`w-3 h-3 ${isLoadingComfyVersions ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
-            </div>
-
-            <p className="text-xs text-zinc-300 mb-3">
-              {ui('Current')}: <span className="font-bold text-white">{currentComfyRef || ui('Unknown')}</span>
-              {currentComfyCommit && <span className="text-zinc-500 ml-2">({currentComfyCommit})</span>}
-            </p>
-
-            <div className="flex flex-wrap gap-2">
-              <UmbraSelectControl
-                value={selectedComfyRef}
-                onChange={(event) => setSelectedComfyRef(event.target.value)}
-                disabled={sharedActionBusy || managementBlocked || isLoadingComfyVersions || isSwitchingComfyVersion || isLaunching || !!toolActionLoading || comfyVersions.length === 0}
-                className="flex-1 min-w-[240px] px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-white text-xs focus:border-[var(--umbra-accent)] outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">{ui(`Select ${versionBackendLabel} version...`)}</option>
-                {comfyVersions.map((version) => (
-                  <option key={`${version.ref}-${version.commit}`} value={version.ref}>
-                    {version.ref}
-                    {version.date ? ` • ${formatComfyVersionDate(version.date)}` : ''}
-                  </option>
-                ))}
-              </UmbraSelectControl>
-              <button
-                type="button"
-                onClick={handleComfyVersionSwitch}
-                disabled={
-                  isLoadingComfyVersions ||
-                  managementBlocked ||
-                  isSwitchingComfyVersion ||
-                  isLaunching ||
-                  !!toolActionLoading ||
-                  !selectedComfyRef ||
-                  selectedComfyRef === currentComfyRef
-                }
-                className="px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSwitchingComfyVersion ? ui('Switching...') : ui(toolInstalled ? 'Switch to Selected Version' : 'Install Selected Version')}
-              </button>
-            </div>
-            <p className="mt-2 text-xs font-semibold text-red-400">
-              {backend === 'comfyui'
-                ? 'Warning: Switching ComfyUI versions will uninstall all custom nodes not set to preinstall with Umbra Studio. To update ComfyUI while preserving your custom nodes, use the Update ComfyUI button instead of switching versions.'
-                : `Warning: Switching ${versionBackendLabel} versions performs a source/runtime rebuild at the selected reference. Stop running jobs before switching.`}
-            </p>
-
-            {(comfyVersionError || (selectedComfyRef && selectedComfyRef === currentComfyRef)) && (
-              <p className={`mt-2 text-xs ${comfyVersionError ? 'text-red-400' : 'text-zinc-500'}`}>
-                {comfyVersionError || 'Selected version is already active.'}
-              </p>
-            )}
-          </div>
-        )}
 
         {!isLaunching && !error && (
           <div className="glass-panel p-4 bg-black/40 border-white/5">
@@ -1184,7 +952,7 @@ export const BackendSplash = ({
               <br />
               <strong className="text-white">{ui('Check Connection')}:</strong> {ui(`Detect if ${name} is running externally`)}
               <br />
-              <strong className="text-white">{ui('Install/Update')}:</strong> {ui('Manage native tool installs directly from Umbra')}
+              <strong className="text-white">{ui('Install/Update')}:</strong> {ui('Open Umbra Setup > Tools on the host PC')}
               {hasToolUpdate && (
                 <>
                   <br />

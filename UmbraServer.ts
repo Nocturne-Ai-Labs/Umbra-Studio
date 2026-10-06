@@ -1,4 +1,6 @@
 import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
+import { openToolsSetup } from './backend/SetupLaunchService';
+import { readToolMaintenance } from './shared/toolMaintenanceLock';
 import { createToolLineFramer, MAX_TOOL_LOGS, MAX_TOOL_JOBS } from './backend/ToolActionConsole';
 import { createActionRelay } from './shared/backendActionRelay';
 import { bundledHelperPython } from './shared/bundledPythonHelpers';
@@ -14818,7 +14820,7 @@ interface ToolActionJob {
 }
 
 const toolActionJobs = new Map<string, ToolActionJob>();
-const toolOperations = createToolOperationAdmission();
+const toolOperations = createToolOperationAdmission(tool => readToolMaintenance(ROOT_DIR, tool));
 function toolBusy(tool: string) {
   return { success: false, error: `${tool} is busy with another tool operation.`, busy: true, activeAction: toolOperations.get(tool) };
 }
@@ -18240,6 +18242,12 @@ async function stopComfyUI() {
 }
 
 async function startAIToolkit() {
+  const claim = toolOperations.claim('aitoolkit', 'launch');
+  if (!claim) return toolBusy('aitoolkit');
+  try { return await startAIToolkitProcess(); } finally { claim.release(); }
+}
+
+async function startAIToolkitProcess() {
   try {
     if (isChildProcessAlive(aitoolkitProcess)) {
       return { success: true, message: 'AI-Toolkit is already running', running: true, healthy: await probeConfiguredAIToolkit(getBackendConfig().aitoolkit) };
@@ -35472,6 +35480,11 @@ const server = Bun.serve<UmbraSocketData>({
         } finally { if (!transferred) claim.release(); }
       }
 
+      if (path === '/api/tools/setup' && method === 'POST') {
+        if (isRemoteRequest(req, url, server)) return json({ error: 'Umbra Setup is only available from the host PC.' }, 403);
+        try { return json({ success: true, url: await openToolsSetup(ROOT_DIR, SOURCE_DIR) }); }
+        catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
       if (path === '/api/tools/actions' && method === 'POST') {
         if (isRemoteRequest(req, url, server)) {
           return json({ error: 'Tool install and update actions are only available from the host PC.' }, 403);
