@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { managedChildPath } from './ManagedToolRequirements';
 
 export const BACKGROUND_COMPATIBILITY_VERSION = '1.3.4+umbra.1';
@@ -11,6 +12,8 @@ const BACKGROUND_SHA = 'aa823962e124ae06ea16eb722c18d00cafdda2eda729e9d84d1ab038
 const AUGMENTATION_WHEEL = 'albumentationsx-2.4.11-py3-none-any.whl';
 const AUGMENTATION_SHA = '9a7a361aa4b08b4f63a382451039deafb0b2cebc5d1cbc20a976406394d19d2c';
 const PATCHED_UTILS_SHA = 'ec891f8219cb1df117ba09ebc39652bca82571872379389d8185336916ec6d98';
+const CORE_WHEEL = 'albucore-0.2.18-py3-none-any.whl';
+const CORE_SHA = '515dc6aae53b999a5e0359aced9afac2ac73967e7b3f78bc5cde09107eb83449';
 
 export type BackgroundCompatibilityStatus = {
   status: 'not-needed' | 'ready' | 'repair-required' | 'held';
@@ -151,17 +154,76 @@ for h,w in [(96,160),(160,96),(96,96)]:
  assert result.shape[:2]==(int(round(h/(min(h,w)/64)/32))*32,int(round(w/(min(h,w)/64)/32))*32)
 print('UMBRA_BACKGROUND_PREPROCESS_OK')`;
 
-export async function repairBackgroundRemovalCompatibility(sourceRoot: string, runtimeRoot: string, hooks: {
+type BackgroundRepairHooks = {
   assertIdle: () => Promise<void>; log?: (line: string) => void;
   runPython?: (python: string, args: string[], options: { env: NodeJS.ProcessEnv; cwd: string }) => PythonResult;
   probe?: BackgroundCompatibilityProbeOptions;
-}): Promise<void> {
+};
+
+function prepareCompatibilityWheels(sourceRoot: string, cache: string, run: (args: string[]) => string, includeCore = false) {
+  const helper = join(sourceRoot, 'setup', 'python', 'background_compat.py');
+  if (!existsSync(helper)) throw new Error('The bundled background compatibility recipe is missing. Repair the Umbra installation first.');
+  const requirements = join(cache, 'wheels.txt');
+  writeFileSync(requirements, `transparent-background==1.3.4 --hash=sha256:${BACKGROUND_SHA}\nalbumentationsx==2.4.11 --hash=sha256:${AUGMENTATION_SHA}\n`
+    + (includeCore ? `albucore==0.2.18 --hash=sha256:${CORE_SHA}\n` : ''), { flag: 'wx' });
+  run(['-I', '-m', 'pip', '--isolated', 'download', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--require-hashes', '-r', requirements, '--dest', cache]);
+  const wheels = [[BACKGROUND_WHEEL, BACKGROUND_SHA], [AUGMENTATION_WHEEL, AUGMENTATION_SHA], ...(includeCore ? [[CORE_WHEEL, CORE_SHA]] : [])];
+  for (const [filename, hash] of wheels) {
+    if (createHash('sha256').update(readFileSync(join(cache, filename))).digest('hex') !== hash) throw new Error('Background compatibility wheel checksum mismatch. No installed package was changed.');
+  }
+  const built = JSON.parse(run(['-I', helper, 'build', join(cache, BACKGROUND_WHEEL), cache]));
+  const patchedName = `transparent_background-${BACKGROUND_COMPATIBILITY_VERSION}-py3-none-any.whl`;
+  const patched = join(cache, patchedName);
+  if (built.wheel !== patchedName || built.utilsSha256 !== PATCHED_UTILS_SHA
+    || built.sha256 !== createHash('sha256').update(readFileSync(patched)).digest('hex')) throw new Error('The compatibility wheel does not match the reviewed recipe. No installed package was changed.');
+  return patched;
+}
+
+// Only a fresh environment inside the rollback-protected rebuild may use these pins.
+export async function prepareComfyRebuildBackgroundPackages(sourceRoot: string, runtimeRoot: string, requirements: string[], hooks: {
+  assertIdle: () => Promise<void>; log: (line: string) => void;
+}): Promise<string | null> {
+  const python = pythonPath(runtimeRoot);
+  const read = (args: string[]) => {
+    const result = spawnSync(python, args, { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    if (result.status !== 0) throw new Error(`Python rebuild requirements could not be inspected: ${result.stderr || result.error || 'unknown error'}`);
+    return JSON.parse(result.stdout);
+  };
+  const names: string[] = read(['-I', join(sourceRoot, 'setup/python/comfy_rebuild_requirements.py'), ...requirements]);
+  if (!names.includes('transparent-background') || !names.includes('albumentationsx')) return null;
+  if (names.includes('albumentations')) throw new Error('A custom node explicitly requires legacy Albumentations alongside AlbumentationsX. Review that node before retrying; the old Python environment will be restored.');
+  const receipt = JSON.parse(readFileSync(managedChildPath(runtimeRoot, 'Tools/ComfyUI/.umbra-python-upgrade.json'), 'utf8'));
+  if (receipt.version !== 1 || receipt.phase !== 'rebuilding' || receipt.environment !== 'venv') throw new Error('Background rebuild pins require an active managed Python upgrade transaction.');
+  const versions: Record<string, string> = read(['-I', '-c', "import sys,importlib.metadata as m,json; assert sys.version_info[:2]==(3,13); print(json.dumps({n:m.version(n) for n in ('torch','torchvision','torchaudio')}))"]);
+  const cacheRoot = managedChildPath(runtimeRoot, 'User/Cache/BackgroundCompatibility'); mkdirSync(cacheRoot, { recursive: true });
+  const cache = managedChildPath(cacheRoot, randomUUID()); mkdirSync(cache);
+  const constraint = join(cache, 'rebuild-constraints.txt');
+  writeFileSync(constraint, `transparent-background==${BACKGROUND_COMPATIBILITY_VERSION}\nalbumentationsx==2.4.11\nalbucore==0.2.18\nalbumentations<0\n`
+    + Object.entries(versions).map(([name, version]) => {
+      if (!/^[0-9][A-Za-z0-9.!+_-]*$/.test(version)) throw new Error('Unverified Torch/CUDA version; background rebuild held.');
+      return `${name}==${version}\n`;
+    }).join(''), { flag: 'wx' });
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^PIP_/i.test(name) && !/^PYTHON(?:PATH|HOME|USERBASE)$/i.test(name)));
+  env.PIP_CONFIG_FILE = process.platform === 'win32' ? 'nul' : '/dev/null';
+  const run = (args: string[]) => {
+    const result = spawnSync(python, args, { env, cwd: cache, encoding: 'utf8', windowsHide: true, timeout: 180000, maxBuffer: 8000000 });
+    for (const line of `${result.stdout || ''}\n${result.stderr || ''}`.split(/\r?\n/).filter(Boolean)) hooks.log(line);
+    if (result.status !== 0 || result.error) throw new Error('Reviewed background packages could not be prepared for the Python rebuild. See the dependency error above; the old environment will be restored.');
+    return result.stdout;
+  };
+  await hooks.assertIdle();
+  const patched = prepareCompatibilityWheels(sourceRoot, cache, run, true);
+  hooks.log('Preparing the reviewed background-removal packages before custom-node requirements; Torch/CUDA versions are held.');
+  run(['-I', '-m', 'pip', '--isolated', 'install', '--prefer-binary', '--only-binary=stringzilla', '--constraint', pathToFileURL(constraint).href,
+    patched, join(cache, AUGMENTATION_WHEEL), join(cache, CORE_WHEEL)]);
+  return constraint;
+}
+
+export async function repairBackgroundRemovalCompatibility(sourceRoot: string, runtimeRoot: string, hooks: BackgroundRepairHooks): Promise<void> {
   const before = inspectBackgroundRemovalCompatibility(runtimeRoot, hooks.probe);
   if (before.verified) return;
   if (before.status !== 'repair-required') throw new Error(before.detail);
   await hooks.assertIdle();
-  const helper = join(sourceRoot, 'setup', 'python', 'background_compat.py');
-  if (!existsSync(helper)) throw new Error('The bundled background compatibility recipe is missing. Repair the Umbra installation first.');
   const cacheRoot = managedChildPath(runtimeRoot, 'User/Cache/BackgroundCompatibility');
   mkdirSync(cacheRoot, { recursive: true });
   const cache = managedChildPath(cacheRoot, randomUUID());
@@ -179,19 +241,8 @@ export async function repairBackgroundRemovalCompatibility(sourceRoot: string, r
     if (result.status !== 0 || result.error) throw new Error(`Background compatibility repair failed: ${args.includes('uninstall') ? 'legacy package removal' : args.includes('install') ? 'package installation' : 'package verification'}. Review the installer log and retry; no automatic rollback was attempted.`);
     return String(result.stdout || '');
   };
-  const requirements = join(cache, 'wheels.txt');
-  writeFileSync(requirements, `transparent-background==1.3.4 --hash=sha256:${BACKGROUND_SHA}\nalbumentationsx==2.4.11 --hash=sha256:${AUGMENTATION_SHA}\n`, { flag: 'wx' });
   hooks.log?.('Preparing checksum-verified background compatibility wheels; Torch/CUDA and model files remain untouched.');
-  // Downloads use PyPI explicitly, ignore custom indexes, and cannot install dependencies.
-  run(['-I', '-m', 'pip', '--isolated', 'download', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--require-hashes', '-r', requirements, '--dest', cache]);
-  for (const [filename, hash] of [[BACKGROUND_WHEEL, BACKGROUND_SHA], [AUGMENTATION_WHEEL, AUGMENTATION_SHA]]) {
-    if (createHash('sha256').update(readFileSync(join(cache, filename))).digest('hex') !== hash) throw new Error('Background compatibility wheel checksum mismatch. No installed package was changed.');
-  }
-  const built = JSON.parse(run(['-I', helper, 'build', join(cache, BACKGROUND_WHEEL), cache]));
-  const patchedName = `transparent_background-${BACKGROUND_COMPATIBILITY_VERSION}-py3-none-any.whl`;
-  const patched = join(cache, patchedName);
-  if (built.wheel !== patchedName || built.utilsSha256 !== PATCHED_UTILS_SHA
-    || built.sha256 !== createHash('sha256').update(readFileSync(patched)).digest('hex')) throw new Error('The compatibility wheel does not match the reviewed recipe. No installed package was changed.');
+  const patched = prepareCompatibilityWheels(sourceRoot, cache, run);
   const current = inspectBackgroundRemovalCompatibility(runtimeRoot, hooks.probe);
   if (JSON.stringify(current) !== JSON.stringify(before)) throw new Error('Background packages changed while preparing repair. Review the current plan before retrying.');
   await hooks.assertIdle();

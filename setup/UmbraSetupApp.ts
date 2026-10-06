@@ -18,6 +18,7 @@ import { assertAIToolkitStopped, inspectToolMaintenance, toolMaintenanceArgs } f
 import { claimToolMaintenance, readToolMaintenance, trackToolMaintenanceChild } from '../shared/toolMaintenanceLock';
 import { createUmbraUpdateController } from '../updater/UmbraUpdaterApp';
 import { setupSourceFingerprint } from '../launcher/UmbraUpdaterBootstrap';
+import { installerFailureMessage } from '../shared/installerFailure';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { installMediaTools, inspectMediaTools } from './MediaTools';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
@@ -185,7 +186,7 @@ async function runScript(runtimeRoot: string, scriptPath: string, args: string[]
     child.once('close', (value) => resolveExit(value ?? 1));
   }).finally(() => jobChildren.delete(job.id));
   if (job.cancelRequested) throw new Error('Installation cancelled.');
-  if (code !== 0) throw new Error(`Installer exited with code ${code}.`);
+  if (code !== 0) throw new Error(installerFailureMessage(job.lines, code));
 }
 
 async function runManagedToolScript(runtimeRoot: string, sourceRoot: string, args: string[], job: SetupJobState) {

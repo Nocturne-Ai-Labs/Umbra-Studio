@@ -22,7 +22,7 @@ import { repairManagedNodeCheckout } from './setup/ManagedNodeRepair';
 import { repairManagedComfyCheckout } from './setup/ManagedComfyCore';
 import { inspectManagedDependencies, inspectManagedNode } from './updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from './shared/appUpdate';
-import { inspectBackgroundRemovalCompatibility, repairBackgroundRemovalCompatibility } from './setup/BackgroundRemovalCompatibility';
+import { inspectBackgroundRemovalCompatibility, prepareComfyRebuildBackgroundPackages, repairBackgroundRemovalCompatibility } from './setup/BackgroundRemovalCompatibility';
 import { assertManagedDependencyRepairIdle } from './updater/ManagedDependencyRepair';
 import { prepareManagedDependencyInstallPolicy } from './updater/ManagedDependencyInstallPolicy';
 import { pathToFileURL } from 'node:url';
@@ -34,6 +34,7 @@ import { assertAIToolkitStopped } from './setup/ToolMaintenance';
 import { installAIToolkitPythonDependencies, verifyAIToolkitPython } from './setup/AIToolkitPython';
 import { restoreComfyAttention } from './setup/ComfyAttentionUpgrade';
 import { isComfyInstallScaffold } from './setup/ComfyInstallScaffold';
+import { resolveHostNodeRuntime } from './shared/hostNodeRuntime';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
 const MANAGED_SOURCE_ROOT = process.env.UMBRA_SOURCE_ROOT || import.meta.dir;
@@ -1615,26 +1616,19 @@ function setupAIToolkitUI(toolDir: string): boolean {
         );
     }
 
-    if (!hasCommand('node') || !hasCommand('npm')) {
+    const nodeRuntime = resolveHostNodeRuntime();
+    if (!nodeRuntime.available) {
         return failWithVerify(
             'aitoolkit-node-missing',
             'AI-Toolkit requires Node.js 20 or newer.',
-            ['The node and npm commands were not both available.'],
-            ['Install Node.js 20+ on the host, then retry AI-Toolkit installation.']
+            [`Node.js 20+ with npm could not be verified. Detected: ${nodeRuntime.version || 'unavailable'}.`],
+            ['Install Node.js 20+ with npm, then retry this action. Umbra checks the current system PATH without requiring an app restart.']
         );
     }
 
-    const nodeVersionResult = spawnSync('node', ['--version'], { encoding: 'utf-8', shell: true });
-    const nodeVersion = String(nodeVersionResult.stdout || nodeVersionResult.stderr || '').trim();
-    const nodeMajor = Number(nodeVersion.match(/v?(\d+)/i)?.[1] || 0);
-    if (nodeVersionResult.status !== 0 || nodeMajor < 20) {
-        return failWithVerify(
-            'aitoolkit-node-version-unsupported',
-            'AI-Toolkit requires Node.js 20 or newer.',
-            [`Detected Node.js version: ${nodeVersion || 'unknown'}`],
-            ['Install Node.js 20+ on the host, then retry AI-Toolkit installation.']
-        );
-    }
+    const nodeVersion = nodeRuntime.version;
+    const runNpm = (args: string[]) => spawnSync(nodeRuntime.executable, [nodeRuntime.npmCli, ...args],
+        { cwd: uiDir, env: nodeRuntime.env, stdio: 'inherit', windowsHide: true }).status === 0;
 
     const lockPath = join(uiDir, 'package-lock.json');
     const dependencyMarkerPath = join(uiDir, '.umbra_npm_installed');
@@ -1670,7 +1664,7 @@ function setupAIToolkitUI(toolDir: string): boolean {
 
     if (!dependenciesReady) {
         log('->', `Installing AI-Toolkit UI dependencies with Node ${nodeVersion}...`);
-        if (!runCmd('npm install --include=dev --no-audit --no-fund', uiDir)) {
+        if (!runNpm(['install', '--include=dev', '--no-audit', '--no-fund'])) {
             return failWithVerify(
                 'aitoolkit-ui-install-failed',
                 'AI-Toolkit UI dependency installation failed.',
@@ -1716,7 +1710,7 @@ function setupAIToolkitUI(toolDir: string): boolean {
             );
         }
     }
-    if (!runCmd('npm run update_db', uiDir) || !runCmd('npm run build', uiDir)) {
+    if (!runNpm(['run', 'update_db']) || !runNpm(['run', 'build'])) {
         return failWithVerify(
             'aitoolkit-ui-build-failed',
             'AI-Toolkit production UI build failed.',
@@ -3089,16 +3083,21 @@ async function rebuildComfyPython(): Promise<void> {
             const create = spawnSync(COMFY_PYTHON, ['-m', 'venv', environment], { stdio: 'inherit', windowsHide: true });
             if (create.status !== 0) throw new Error('Python 3.13 virtual environment creation failed.');
             if (!setupPythonEnv(comfy, 'comfyui') || !refreshComfyPinnedPackages(comfy)) throw new Error('ComfyUI Python dependencies failed to install.');
-            for (const node of nodes) {
-                log('->', `Reinstalling Python requirements: ${node.name}`);
-                if (!installComfyNodeRequirements(comfy, node.path, node.name, true)) throw new Error(`Python 3.13 requirements failed for ${node.name}.`);
-            }
-            const python = getVenvPython(comfy)!;
-            for (const [name, version] of Object.entries(optional).sort(([a], [b]) => Number(a === 'sageattention') - Number(b === 'sageattention'))) {
-                if (!/^[A-Za-z0-9_.-]+$/.test(name) || !/^[0-9][A-Za-z0-9.!+_-]*$/.test(version)) throw new Error('Unverified attention dependency version.');
-                await restoreComfyAttention(ROOT_DIR, python, name, version, (line) => log('->', line));
-            }
-            await repairBackgroundPackages();
+            const constraint = await prepareComfyRebuildBackgroundPackages(MANAGED_SOURCE_ROOT, ROOT_DIR,
+                nodes.map(node => join(node.path, 'requirements.txt')).filter(existsSync), { assertIdle, log: (line) => log('->', line) });
+            try {
+                if (constraint) process.env.PIP_CONSTRAINT = pathToFileURL(constraint).href;
+                for (const node of nodes) {
+                    log('->', `Reinstalling Python requirements: ${node.name}`);
+                    if (!installComfyNodeRequirements(comfy, node.path, node.name, true)) throw new Error(`Python 3.13 requirements failed for ${node.name}. Review that node's dependency error above; the old environment will be restored.`);
+                }
+                const python = getVenvPython(comfy)!;
+                for (const [name, version] of Object.entries(optional).sort(([a], [b]) => Number(a === 'sageattention') - Number(b === 'sageattention'))) {
+                    if (!/^[A-Za-z0-9_.-]+$/.test(name) || !/^[0-9][A-Za-z0-9.!+_-]*$/.test(version)) throw new Error('Unverified attention dependency version.');
+                    await restoreComfyAttention(ROOT_DIR, python, name, version, (line) => log('->', line));
+                }
+                await repairBackgroundPackages();
+            } finally { delete process.env.PIP_CONSTRAINT; }
         },
         verify: async () => {
             const python = getVenvPython(comfy)!;
