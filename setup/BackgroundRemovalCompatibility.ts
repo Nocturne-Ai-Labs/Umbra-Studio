@@ -42,7 +42,7 @@ for distribution in m.distributions():
   try:
    requirement=Requirement(value)
    if re.sub(r'[-_.]+','-',requirement.name.lower())!='albumentations': continue
-   if requirement.marker and 'extra' not in str(requirement.marker) and not requirement.marker.evaluate(): continue
+   if requirement.marker and not requirement.marker.evaluate({'extra':''}): continue
    consumers.append(distribution.metadata['Name'])
   except Exception:
    if re.match(r'^albumentations(?:\s|[<>=!;\[]|$)',value,re.I): issues.append('Unverified legacy dependency declaration')
