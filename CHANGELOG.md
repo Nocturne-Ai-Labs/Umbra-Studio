@@ -96,6 +96,9 @@
 
 ### Fixes And Quality-of-Life Recap
 
+- Fixed: fresh ComfyUI setup handles pinned Git tags without looking for a
+  nonexistent remote branch with the tag's name.
+
 - Fixed: missing-PATH video thumbnail failures when the installation already
   has a usable ComfyUI imageio FFmpeg.
 - Improved: portable FFmpeg and ffprobe verification and repair through Setup
