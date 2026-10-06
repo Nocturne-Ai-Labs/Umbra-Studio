@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.90.9-beta - Existing Installation And Dependency Repairs
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**This release continues the massive refactor of Umbra Studio's setup flow and repairs upgrade failures affecting existing installations.**
+
+- After updating, close and reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux to use the installed Setup version. Finish active installations or downloads first.
+- If ComfyUI still reports a missing Microsoft Store Python or a dependency conflict, stop ComfyUI, then use **Advanced > Tools > ComfyUI > Update Python 3.13**. The rebuild prepares the reviewed background-removal dependencies before custom-node installation. An incompatible explicit node requirement stops the upgrade and restores the previous environment; review the named node's dependency error before retrying.
+- AI Toolkit remains optional. Its web UI needs host Node.js 20+ with npm. On Windows, if Node was installed while Umbra was open, retry installation or launch: Umbra now checks the current registered PATH without requiring an app restart or changing the system PATH. Older AI Toolkit checkouts should be updated before **Update Python 3.12**.
+- No new model downloads are required. App updates preserve installed tools and Python environments. Explicit Python rebuilds need internet access, several GB of dependency downloads and space for the retained backup. Models, outputs, datasets and custom-node code remain in place. Launch the repaired tool from Umbra after maintenance to verify your workflows.
+- Windows and Linux archives include FFmpeg/ffprobe and lightweight CPU helpers; tagger weights remain optional. Linux requires glibc 2.35+ and the host packages described in `REQUIREMENTS.md`.
+
+### Existing Installation Reliability
+
+- ComfyUI Python rebuilds recognize local and nested custom-node requirements for transparent-background and AlbumentationsX. Setup prepares the checksum-verified compatibility recipe first and holds its packages and the installed Torch/CUDA versions through dependency installation.
+- Explicit incompatible node requirements remain a compatibility hold. Failed rebuilds restore the previous background-compatibility record along with the old Python environment and setup markers.
+- Inactive optional augmentation extras no longer cause false background-removal compatibility warnings; active legacy dependency consumers still require review.
+- Setup displays structured dependency and recovery instructions when an installer fails, instead of showing only an exit code.
+- AI Toolkit installation and launch share verification of a supported Node executable and its matching npm CLI. Missing npm and unsupported Node versions still show a prerequisite error.
+
+### Validation
+
+Windows checks covered 24 regression tests, real managed Python 3.13.16 dependency rebuilding, pip consistency, a CUDA tensor operation, background preprocessing, incompatible requirement holds, unchanged package inventory on rejected requests, stale-PATH Node discovery, and isolated backend/Setup APIs and browser failure display. The API failure-display check used controlled child installer output; the package resolver checks used real dependencies. Native builds and archive validation cover both platforms. Fresh generation, full training and local Linux runtime/GPU operation remain unqualified for this installer patch.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: background-removal dependency conflicts during existing ComfyUI Python upgrades.
+- Fixed: inactive optional augmentation extras causing false compatibility warnings.
+- Fixed: AI Toolkit failing to discover Node installed after Umbra started on Windows.
+- Improved: failed upgrades restore the previous compatibility record.
+- Improved: Setup shows dependency reasons and recovery instructions.
+
 ## v0.90.8-beta - Desktop Setup Wizard And Session Repairs
 
 ### TL;DR - Setup After Updating
