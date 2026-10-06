@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { useI18n } from '@/i18n';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -290,10 +291,11 @@ type MenuAction = {
 };
 
 function FolderActivityBadge({ count }: { count: number }) {
+  const { t } = useI18n();
   if (count <= 0) return null;
   return <span
-    title={`${count.toLocaleString()} new media files since last opened`}
-    aria-label={`${count} new media files since last opened`}
+    title={t('filmstrip.newMedia', { count: count.toLocaleString() })}
+    aria-label={t('filmstrip.newMedia', { count })}
     className="inline-flex h-5 w-9 shrink-0 items-center justify-center rounded-sm border border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[10px] font-bold text-[var(--umbra-accent)] motion-safe:animate-pulse"
   >{count > 999 ? '999+' : count}</span>;
 }
@@ -453,6 +455,7 @@ export function FilmstripFolderSelector({
               aria-label="Follow latest generated folder"
               aria-pressed={followLatest}
               title={latestFolderPath || 'Follow the next generated media folder'}
+              data-i18n-skip-attributes={latestFolderPath ? 'title' : undefined}
               onClick={onOpenLatestFolder}
               className={cn(
                 'flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left',
@@ -464,7 +467,7 @@ export function FilmstripFolderSelector({
               <Sparkles size={13} className="shrink-0 text-[var(--umbra-accent)]" />
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-medium text-zinc-200">Latest</span>
-                <span className="block truncate text-[10px] text-zinc-500">{latestFolderPath || 'No generated media yet'}</span>
+                <span data-i18n-skip={latestFolderPath ? '' : undefined} className="block truncate text-[10px] text-zinc-500">{latestFolderPath || 'No generated media yet'}</span>
               </span>
               {followLatest ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Following</span> : null}
             </button>
@@ -549,8 +552,8 @@ export function FilmstripFolderSelector({
                   >
                     <Pin size={13} className="shrink-0 text-[var(--umbra-accent)]" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium text-zinc-200">{folder.label || folder.path}</span>
-                      <span className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
+                      <span data-i18n-skip className="block truncate text-xs font-medium text-zinc-200">{folder.label || folder.path}</span>
+                      <span data-i18n-skip="" className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
                     </span>
                     {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
                     <FolderActivityBadge count={folder.unreadCount || 0} />
@@ -601,8 +604,8 @@ export function FilmstripFolderSelector({
                 >
                 <History size={13} className="shrink-0 text-zinc-500" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium text-zinc-200">{folder.label || folder.path}</span>
-                  <span className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
+                  <span data-i18n-skip className="block truncate text-xs font-medium text-zinc-200">{folder.label || folder.path}</span>
+                  <span data-i18n-skip="" className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
                 </span>
                 {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
                 <FolderActivityBadge count={folder.unreadCount || 0} />
@@ -700,7 +703,7 @@ function FilmstripMenu({
       role="menu"
     >
       <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
-        <div className="umbra-context-menu-title truncate">{target?.name || 'Selection'}</div>
+        <div data-i18n-skip={target?.name ? '' : undefined} className="umbra-context-menu-title truncate">{target?.name || 'Selection'}</div>
         <div className="umbra-context-menu-subtitle mt-0.5">{count} selected</div>
       </div>
       <div className="space-y-0.5">
@@ -869,7 +872,7 @@ function FilmstripTile({
       )}
     >
       {src ? (
-        <img
+        <img data-i18n-skip=""
           data-umbra-nsfw-media={isNsfw ? '' : undefined}
           src={src}
           alt={image.name}
@@ -946,7 +949,7 @@ function FilmstripTile({
       ) : null}
 
       <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/92 via-black/55 to-transparent px-1.5 pb-1 pt-5">
-        <div className="truncate text-[10px] font-medium text-zinc-100">{image.name}</div>
+        <div data-i18n-skip="" className="truncate text-[10px] font-medium text-zinc-100">{image.name}</div>
         {isLivePreview ? (
           <div className="truncate text-[9px] font-semibold text-emerald-200">Streaming preview</div>
         ) : size ? <div className="truncate text-[9px] text-zinc-400">{size}</div> : null}

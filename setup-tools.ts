@@ -13,6 +13,7 @@ import { join, basename, dirname, relative, resolve } from 'path';
 import { existsSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, mkdirSync, readFileSync, writeFileSync, cpSync, renameSync, symlinkSync } from 'fs';
 import { spawn, spawnSync, execSync } from 'child_process';
 import { installOrdinaryNodeRequirements } from './setup/OrdinaryNodeRequirements';
+import { checkoutFetchedRepositoryRef } from './setup/RepositoryRef';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
@@ -1251,7 +1252,7 @@ function ensureRepoSourceAndBranch(dir: string, repoUrl: string, branch?: string
         if (branch) {
             execSync(`git fetch --prune origin "${branch}"`, { cwd: dir, stdio: 'inherit' });
             removeComfyModelPlaceholderCheckoutCollisions(dir);
-            execSync(`git checkout -B "${branch}" "origin/${branch}"`, { cwd: dir, stdio: 'inherit' });
+            checkoutFetchedRepositoryRef(dir, branch);
         }
         return true;
     } catch {
@@ -1495,7 +1496,7 @@ function cloneRepo(url: string, targetDir: string, branch?: string) {
             if (branch) {
                 execSync(`git fetch --depth 1 origin "${branch}"`, { cwd: targetDir, stdio: 'inherit' });
                 removeComfyModelPlaceholderCheckoutCollisions(targetDir);
-                execSync(`git checkout -B "${branch}" "origin/${branch}"`, { cwd: targetDir, stdio: 'inherit' });
+                checkoutFetchedRepositoryRef(targetDir, branch);
             } else {
                 execSync('git fetch --depth 1 origin', { cwd: targetDir, stdio: 'inherit' });
 
@@ -3008,7 +3009,7 @@ async function main() {
                 ['Check the setup log and retry ComfyUI custom-node setup.']
             );
         }
-    } else if (arg === 'comfy-nodes') {
+    } else if (arg === 'comfy-nodes' || arg === 'comfy-nodes-only') {
         const comfyDir = findToolPath(CONFIG.comfyui.search);
         if (!comfyDir) {
             log(`${c.red}X${c.reset}`, 'ComfyUI not found');
@@ -3022,7 +3023,7 @@ async function main() {
         if (!installComfyNodes(comfyDir)) {
             exitWithExistingVerifyFailure();
         }
-        if (!installUmbraUiSupportModels(comfyDir)) {
+        if (arg === 'comfy-nodes' && !installUmbraUiSupportModels(comfyDir)) {
             exitWithExistingVerifyFailure();
         }
     } else if (arg === 'comfy-h3-nodes' || arg === 'comfy-node') {

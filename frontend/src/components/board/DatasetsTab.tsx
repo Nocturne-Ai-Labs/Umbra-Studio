@@ -1,4 +1,5 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { useI18n } from '@/i18n';
 import { useState, useEffect, useMemo, useRef, type DragEvent, type MouseEvent, type KeyboardEvent } from 'react';
 import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen, Search, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, ArrowUpAZ, ArrowDownAZ, PanelRight, FolderTree, ZoomIn, MoreHorizontal } from 'lucide-react';
 import { ContextMenu } from '@/components/ui/ContextMenu';
@@ -113,6 +114,7 @@ function extractNativeDroppedImages(dataTransfer: DataTransfer): DroppedImage[] 
 }
 
 export function DatasetsTab() {
+  const { t } = useI18n();
   const { showToast } = useStore();
   const {
     datasets,
@@ -888,9 +890,9 @@ export function DatasetsTab() {
     setArchivingDataset(datasetName);
     try {
       const result = await archiveDataset(datasetName);
-      const savings = result.compressionPercent > 0 ? `, ${result.compressionPercent}% smaller` : '';
+      const savings = result.compressionPercent > 0 ? t('dataset.archiveSavings', { percent: result.compressionPercent }) : '';
       showToast(
-        `Created ${datasetName}.zip (${result.fileCount} files, ${formatArchiveBytes(result.archiveBytes)}${savings})`,
+        t('dataset.archiveCreated', { name: datasetName, count: result.fileCount, size: formatArchiveBytes(result.archiveBytes), savings }),
         'success',
       );
       if (!isUmbraRemoteClient()) await openDatasetArchivePath(result.archivePath);
@@ -908,8 +910,8 @@ export function DatasetsTab() {
     { label: 'Edit Caption', icon: <Tag size={14} />, action: () => runImageContextAction(() => { setFocusedImage(contextImage); setCaptionPaneOpen(true); }) },
     { label: flaggedForDeletion.has(contextImage.filename) ? 'Clear Deletion Flag' : 'Flag for Deletion', icon: <Flag size={14} />, action: () => runImageContextAction(() => toggleFlag(contextImage.filename)) },
     { separator: true },
-    { label: `Move Selected (${selectedImages.size})`, icon: <Move size={14} />, disabled: selectedImages.size === 0 || otherConcepts.length === 0, action: () => runImageContextAction(() => setShowMoveModal(true)) },
-    { label: `Delete Selected (${selectedImages.size})`, icon: <Trash2 size={14} />, danger: true, disabled: selectedImages.size === 0, action: () => runImageContextAction(() => { void handleDeleteSelected(); }) },
+    { label: t('dataset.moveSelected', { count: selectedImages.size }), i18nSkip: true, icon: <Move size={14} />, disabled: selectedImages.size === 0 || otherConcepts.length === 0, action: () => runImageContextAction(() => setShowMoveModal(true)) },
+    { label: t('dataset.deleteSelected', { count: selectedImages.size }), i18nSkip: true, icon: <Trash2 size={14} />, danger: true, disabled: selectedImages.size === 0, action: () => runImageContextAction(() => { void handleDeleteSelected(); }) },
   ] : [];
   const openImageContext = (image: DatasetImage, x: number, y: number) => {
     if (!selectedImages.has(image.filename)) setSelectedImages(new Set([image.filename]));

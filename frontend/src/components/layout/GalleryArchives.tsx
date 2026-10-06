@@ -68,7 +68,7 @@ export function GalleryArchiveList({ folder, job, query = '', onCount, onContext
     <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr))]">
       {visible.map(file => <a key={file.path} href={`/api/fs/archives/download?path=${encodeURIComponent(file.path)}`} download={file.name} title={`Download ${file.name}`} onContextMenu={event => onContextMenu?.(event, file.path)} className="flex min-h-16 min-w-0 items-center gap-3 rounded border border-white/10 bg-zinc-900/40 p-3 hover:border-[var(--umbra-accent)]">
         <Archive size={24} className="shrink-0 text-[var(--umbra-accent)]" />
-        <span className="min-w-0 flex-1"><span className="block break-words text-xs text-zinc-100">{file.name}</span><span className="text-[11px] text-zinc-400">{sizeLabel(file.size)}</span></span>
+        <span className="min-w-0 flex-1"><span data-i18n-skip="" className="block break-words text-xs text-zinc-100">{file.name}</span><span className="text-[11px] text-zinc-400">{sizeLabel(file.size)}</span></span>
         <Download size={15} className="shrink-0 text-zinc-400" />
       </a>)}
     </div>

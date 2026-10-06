@@ -1,41 +1,12 @@
 import { spawn } from 'child_process';
-import { existsSync, readdirSync } from 'fs';
 import * as fs from 'fs/promises';
 import { basename, dirname, extname, join } from 'path';
+import { resolveMediaExecutable } from './MediaExecutables';
 
 const VIDEO_EXTENSIONS = new Set(['.avi', '.m4v', '.mkv', '.mov', '.mp4', '.webm']);
 
-function findImageIoFfmpeg(comfyRoot: string): string {
-  const candidates: string[] = [];
-  if (process.platform === 'win32') {
-    candidates.push(join(comfyRoot, 'venv', 'Lib', 'site-packages', 'imageio_ffmpeg', 'binaries'));
-  } else {
-    const libRoot = join(comfyRoot, 'venv', 'lib');
-    if (existsSync(libRoot)) {
-      for (const entry of readdirSync(libRoot, { withFileTypes: true })) {
-        if (!entry.isDirectory() || !entry.name.startsWith('python')) continue;
-        candidates.push(join(libRoot, entry.name, 'site-packages', 'imageio_ffmpeg', 'binaries'));
-      }
-    }
-  }
-  for (const directory of candidates) {
-    if (!existsSync(directory)) continue;
-    const match = readdirSync(directory)
-      .map((name) => join(directory, name))
-      .find((path) => {
-        const name = basename(path).toLowerCase();
-        return name.startsWith('ffmpeg-')
-          && (process.platform !== 'win32' || name.endsWith('.exe'));
-      });
-    if (match) return match;
-  }
-  return '';
-}
-
 export function resolveUmbraExtendedVideoFfmpeg(comfyRoot: string): string {
-  const configured = String(process.env.FFMPEG_PATH || '').trim();
-  if (configured && existsSync(configured)) return configured;
-  return findImageIoFfmpeg(comfyRoot) || 'ffmpeg';
+  return resolveMediaExecutable('ffmpeg', { comfyRoot, runtimeRoot: dirname(dirname(comfyRoot)) }).executable;
 }
 
 function runProcess(command: string, args: string[], cwd: string, signal?: AbortSignal): Promise<void> {

@@ -223,7 +223,7 @@ function SourceBatchList({
         {items.slice(0, 150).map((item) => (
           <button key={item.id} type="button" title={item.error || item.name} onClick={() => onSelect(item.id)} className="flex min-h-8 w-full items-center gap-2 border-b border-white/[0.05] px-2.5 text-left last:border-b-0 hover:bg-white/[0.035]">
             {item.status === 'running' ? <Loader2 size={11} className="animate-spin text-cyan-300" /> : item.status === 'completed' ? <CheckCircle2 size={11} className="text-emerald-300" /> : item.status === 'failed' ? <XCircle size={11} className="text-red-300" /> : item.kind === 'video' ? <Video size={11} className="text-amber-300" /> : <ImageIcon size={11} className="text-cyan-300" />}
-            <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-400">{item.name}</span>
+            <span data-i18n-skip="" className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-400">{item.name}</span>
             <span className="text-[7px] font-black uppercase text-zinc-700">{item.status}</span>
             {!disabled ? <span onClick={(event) => { event.stopPropagation(); onRemove(item.id); }} className="text-zinc-700 hover:text-red-300"><XCircle size={11} /></span> : null}
           </button>
@@ -293,7 +293,7 @@ function CompletedOutputs({
         return (
           <div key={id} className="flex min-h-10 items-center gap-2 border-b border-white/[0.05] px-3 py-1 last:border-b-0">
             <CheckCircle2 size={13} className="shrink-0 text-emerald-300" />
-            <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500" title={result.filename}>{result.filename}</span>
+            <span data-i18n-skip="" className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-500" title={result.filename}>{result.filename}</span>
             {showOpen ? <a href={previewUrl} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300">Open</a> : null}
             <a href={downloadUrl} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/10 px-2.5 text-[9px] font-black uppercase text-zinc-300"><Download size={11} /> Save</a>
           </div>

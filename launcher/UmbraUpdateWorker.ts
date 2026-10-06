@@ -10,12 +10,15 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
+  lstatSync,
   type WriteStream,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { Readable } from 'node:stream';
+import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { crc32 } from 'node:zlib';
 import yauzl from 'yauzl';
 import {
   normalizeUmbraUpdateState,
@@ -23,6 +26,9 @@ import {
   type UmbraUpdateWorkerRequest,
 } from '../shared/appUpdate';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
+import { inspectUmbraRuntimeHealth } from '../shared/umbraRuntimeHealth';
+import { verifyBundledMediaRuntime } from '../shared/bundledMediaRuntime';
+import { verifyBundledPythonHelpers } from '../shared/bundledPythonHelpers';
 import {
   isUmbraShutdownMarkerForProcess,
   readUmbraShutdownMarker,
@@ -38,6 +44,8 @@ const UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS = 30_000;
 const UMBRA_LISTENER_STOP_TIMEOUT_MS = 8_000;
 const UMBRA_SHUTDOWN_REQUEST_TIMEOUT_MS = 3_000;
 const UMBRA_SHUTDOWN_SETTLE_MS = 3_000;
+const MAX_EXTRACTED_PACKAGE_BYTES = 16 * 1024 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES = 100_000;
 
 function log(request: UmbraUpdateWorkerRequest, message: string) {
   const line = `[${new Date().toISOString()}] ${message}`;
@@ -266,6 +274,10 @@ export function safeArchiveEntryName(value: string): string {
     || normalized.startsWith('/')
     || /^[a-z]:/i.test(normalized)
     || normalized.split('/').some((segment) => segment === '..')
+    || /[\x00-\x1f]/.test(normalized)
+    || (process.platform === 'win32' && normalized.split('/').some((segment) =>
+      /[<>:"|?*]/.test(segment) || /[. ]$/.test(segment)
+      || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment)))
   ) {
     throw new Error(`Release archive contains an unsafe path: ${value}`);
   }
@@ -279,6 +291,8 @@ async function extractZip(
 ) {
   mkdirSync(destinationRoot, { recursive: true });
   let lastStateWriteAt = 0;
+  let extractedBytes = 0;
+  let entries = 0;
   await new Promise<void>((resolveExtract, rejectExtract) => {
     yauzl.open(archivePath, { lazyEntries: true, autoClose: true }, (openError, archive) => {
       if (openError || !archive) {
@@ -308,6 +322,13 @@ async function extractZip(
       });
       const extractEntry = async (entry: yauzl.Entry) => {
         if (settled) return;
+        entries += 1;
+        extractedBytes += entry.uncompressedSize;
+        const fileType = (entry.externalFileAttributes >>> 16) & 0o170000;
+        if (entries > MAX_ARCHIVE_ENTRIES || !Number.isSafeInteger(extractedBytes) || extractedBytes > MAX_EXTRACTED_PACKAGE_BYTES)
+          throw new Error('Release archive exceeds the supported extraction size.');
+        if (fileType && fileType !== 0o100000 && fileType !== 0o040000)
+          throw new Error(`Release archive contains a non-regular entry: ${entry.fileName}`);
         const relativePath = safeArchiveEntryName(entry.fileName);
         const destinationPath = resolve(destinationRoot, ...relativePath.split('/'));
         const rel = relative(resolve(destinationRoot), destinationPath);
@@ -341,7 +362,13 @@ async function extractZip(
         });
         if (settled || !input) return;
         activeOutput = createWriteStream(destinationPath, { flags: 'wx' });
-        await pipeline(input, activeOutput);
+        let checksum = 0;
+        const verifier = new Transform({ transform(chunk, _encoding, callback) {
+          checksum = crc32(chunk, checksum);
+          callback(null, chunk);
+        } });
+        await pipeline(input, verifier, activeOutput);
+        if (checksum !== entry.crc32) throw new Error(`Release archive failed CRC verification: ${relativePath}`);
         activeInput = undefined;
         activeOutput = undefined;
         if (settled) return;
@@ -402,7 +429,10 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
       ? join(payloadRoot, 'UmbraUpdater.bat')
       : join(payloadRoot, 'umbra-updater.sh'),
   ];
-  const missing = required.filter((candidate) => !existsSync(candidate));
+  const missing = required.filter((candidate) => {
+    try { const entry = lstatSync(candidate); return !entry.isFile() || entry.isSymbolicLink(); }
+    catch { return true; }
+  });
   if (missing.length > 0) {
     throw new Error(`Release package is incomplete: ${missing.map((candidate) => basename(candidate)).join(', ')}`);
   }
@@ -411,9 +441,39 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
   if (packagedVersion !== request.targetVersion.replace(/^v/i, '')) {
     throw new Error(`Release version mismatch: expected ${request.targetVersion}, found ${packagedVersion || 'unknown'}.`);
   }
+  const mediaPolicy = join(payloadRoot, 'resources', 'app', 'defaults', 'MediaTools', 'source-build-manifest.json');
+  if (!existsSync(mediaPolicy)) throw new Error('Release package is missing its source-built media policy.');
+  verifyBundledMediaRuntime(payloadRoot, process.platform, JSON.parse(readFileSync(mediaPolicy, 'utf8')));
+  const helperPolicy = join(payloadRoot, 'resources', 'app', 'defaults', 'PythonHelpers', 'manifest.json');
+  if (existsSync(helperPolicy)) verifyBundledPythonHelpers(payloadRoot, process.platform, JSON.parse(readFileSync(helperPolicy, 'utf8')));
 }
 
 const PROTECTED_RUNTIME_ENTRIES = new Set(['user', 'tools']);
+const PERSISTENT_PYTHON_PATHS = [
+  'Runtime/Python311', 'Runtime/PythonHelpers/venv', 'Runtime/PythonHelpers/env',
+  'Runtime/PythonHelpers/.venv', 'Runtime/PythonHelpers/.helper_requirements_installed',
+];
+
+function movePersistentPython(sourceRoot: string, destinationRoot: string, restoring = false) {
+  for (const name of PERSISTENT_PYTHON_PATHS) {
+    const source = join(sourceRoot, name);
+    if (!existsSync(source)) continue;
+    for (const root of [sourceRoot, destinationRoot]) {
+      let path = root;
+      for (const part of name.split('/')) {
+        path = join(path, part);
+        if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error('Python runtime preservation refuses redirected paths.');
+      }
+    }
+    const destination = join(destinationRoot, name);
+    if (existsSync(destination)) {
+      if (restoring) continue; // The original was never moved out of the backup.
+      throw new Error(`Release package conflicts with preserved Python runtime: ${name}`);
+    }
+    mkdirSync(dirname(destination), { recursive: true });
+    renameSync(source, destination);
+  }
+}
 
 function isProtectedRuntimeEntry(name: string): boolean {
   return PROTECTED_RUNTIME_ENTRIES.has(name.trim().toLowerCase());
@@ -464,6 +524,7 @@ export function rollbackSwap(
   mkdirSync(request.runtimeRoot, { recursive: true });
   moveApplicationEntries(request.runtimeRoot, failedRoot);
   moveApplicationEntries(backupRoot, request.runtimeRoot);
+  movePersistentPython(failedRoot, request.runtimeRoot, true);
   restoreLegacyPreservedEntry(request, preservedRoot, 'User');
   restoreLegacyPreservedEntry(request, preservedRoot, 'Tools');
   if (existsSync(failedRoot)) rmSync(failedRoot, { recursive: true, force: true });
@@ -485,6 +546,7 @@ export function applyPayload(
     moveApplicationEntries(request.runtimeRoot, backupRoot);
     backupComplete = true;
     moveApplicationEntries(payloadRoot, request.runtimeRoot);
+    movePersistentPython(backupRoot, request.runtimeRoot);
     mkdirSync(join(request.runtimeRoot, 'User'), { recursive: true });
     mkdirSync(join(request.runtimeRoot, 'Tools'), { recursive: true });
     return { backupRoot, preservedRoot };
@@ -542,10 +604,20 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
   let backupRoot = '';
   let preservedRoot = '';
   try {
+    await writeState(request, { phase: 'extracting', currentItem: 'Verifying release package before closing Umbra Studio' });
+    const extractionRoot = join(request.workspaceRoot, `payload-${randomUUID()}`);
+    await extractZip(request.archivePath, extractionRoot, request);
+    const payloadRoot = findPayloadRoot(extractionRoot);
+    verifyPayload(payloadRoot, request);
+
+    const health = await inspectUmbraRuntimeHealth(request.runtimeRoot, request.port, request.bindHost);
+    if (health === 'foreign') {
+      throw new Error(`Port ${request.port} belongs to another or unverified installation. No shutdown was requested and no application files were replaced. Close the intended Umbra Studio and retry.`);
+    }
+    await writeState(request, { phase: 'stopping', currentItem: 'Closing Umbra Studio and managed tools' });
     const trackedPids = collectRequestedProcessPids(request);
-    const hasLiveTrackedProcess = trackedPids.some(isProcessAlive);
     let listenerStoppedGracefully = true;
-    if (hasLiveTrackedProcess || trackedPids.length === 0) {
+    if (health === 'owned') {
       log(request, `Requesting Umbra ${request.currentVersion} shutdown.`);
       await requestUmbraShutdown(request);
       listenerStoppedGracefully = await waitForUmbraListenerToStop(request);
@@ -562,13 +634,6 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
       currentItem: 'Allowing the previous Umbra server to finish releasing resources',
     });
     await Bun.sleep(UMBRA_SHUTDOWN_SETTLE_MS);
-    await writeState(request, { phase: 'extracting', currentItem: 'Opening release package' });
-
-    const extractionRoot = join(request.workspaceRoot, 'payload');
-    await extractZip(request.archivePath, extractionRoot, request);
-    const payloadRoot = findPayloadRoot(extractionRoot);
-    verifyPayload(payloadRoot, request);
-
     await writeState(request, { phase: 'applying', currentItem: 'Replacing application files' });
     ({ backupRoot, preservedRoot } = applyPayload(request, payloadRoot));
     await writeState(request, { phase: 'updating_nodes', currentItem: 'Updating Umbra Nodes' });

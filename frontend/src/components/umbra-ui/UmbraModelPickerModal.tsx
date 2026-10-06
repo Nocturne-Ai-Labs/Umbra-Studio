@@ -685,7 +685,7 @@ export function UmbraModelPickerModal({
                         {active ? <Check size={12} className="absolute right-2 top-2 text-cyan-200" /> : null}
                       </div>
                       <div className="p-2">
-                        <div className="truncate text-[11px] font-bold text-zinc-100">{file.name}</div>
+                        <div data-i18n-skip="" className="truncate text-[11px] font-bold text-zinc-100">{file.name}</div>
                         <div className="mt-0.5 truncate font-mono text-[9px] text-zinc-500">{file.folder || 'Root'}</div>
                         <div className="mt-1 flex min-w-0 items-center gap-1">
                           {cardPreviews.length > 1 ? (

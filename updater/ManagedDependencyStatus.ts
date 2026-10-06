@@ -3,11 +3,13 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { compareUmbraVersions } from '../shared/appUpdate';
+import { inspectBundledPythonHelpers } from '../backend/PythonHelpers';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
 import { daSiWaCoreRequirements } from '../setup/DaSiWaRequirements';
 import { ordinaryNodeRequirementsMarker } from '../setup/OrdinaryNodeRequirements';
 import { inspectManagedNodeFrontend, managedChildPath, readManagedToolRequirements, type ManagedNodeRequirement, type ManagedRuntimePackage } from '../setup/ManagedToolRequirements';
 import { inspectBackgroundRemovalCompatibility } from '../setup/BackgroundRemovalCompatibility';
+import { inspectMediaTools } from '../setup/MediaTools';
 
 export type ManagedNodeStatus = {
   name: string; minimumCommit: string; installedCommit: string;
@@ -304,5 +306,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
     },
     features,
     backgroundCompatibility: inspectBackgroundRemovalCompatibility(runtimeRoot),
+    mediaTools: inspectMediaTools(runtimeRoot),
+    pythonHelpers: inspectBundledPythonHelpers(runtimeRoot),
   };
 }

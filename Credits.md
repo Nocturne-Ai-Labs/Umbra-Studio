@@ -322,13 +322,13 @@ follow their latest upstream default branches.
 - Best-known original listing: https://civitai.com/models/150925/eyes-detection-adetailer
 - Creator / publisher: SnowyYukino
 - Model file: `Eyes.pt`
-- Verified mirror: https://huggingface.co/Kevalon/adetailerModels/blob/main/Eyes.pt
 - SHA-256: `c59bb696818ad5dfe58c54a881ffb6895c260bd42b4c34dfc97dff2203f45621`
 - License / permissions:
   - The source listing uses CivitAI model permissions rather than a standard SPDX license
-  - Automatic redistribution should remain disabled unless those source-specific terms are reviewed for the target release
+  - Umbra does not bundle or automatically download this model; download it from the original CivitAI listing under its terms
 - Usage in Umbra Studio:
   - Optional eye-detailer detection
+  - Save the downloaded `Eyes.pt` in `Tools/ComfyUI/models/ultralytics/bbox/`
 
 ### Segment Anything ViT-B
 - Project: https://github.com/facebookresearch/segment-anything
@@ -684,10 +684,27 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 
 ### FFmpeg
 - Project: https://ffmpeg.org
+- Bundled builds: Umbra builds pinned FFmpeg, x264, libvpx, libwebp, zlib and dav1d sources. Complete corresponding sources, the exact recipe, configuration, codec tests and individual licenses ship under `Runtime/FFmpeg/<platform>`. Optional repair downloads use https://github.com/BtbN/FFmpeg-Builds.
+- License: the pinned GPL build is GPL-3.0-or-later. Portable releases retain
+  its license, source/build references, and build configuration under
+  `Runtime/FFmpeg/<platform>`. Optional repair installs retain the same notices
+  under `Tools/FFmpeg`.
 - Usage in Umbra Studio:
-  - Optional system media decoder used for broad video thumbnail and metadata compatibility
+  - Bundled FFmpeg/ffprobe executables for video thumbnails, previews, metadata, and
+    extended-video exports. Setup and Updater verify existing executables or
+    install a portable pair without changing the system PATH.
 
 ## Additional Attribution
+
+### Portable CPU Python Helpers
+
+- Python runtime: https://github.com/astral-sh/python-build-standalone
+- Libraries: pandas, NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors
+  and psutil, plus their pinned dependencies from https://pypi.org.
+- Release builds create a fresh isolated distribution under
+  `Runtime/PythonHelpers/bundled/<platform>`. Python and wheel license files are
+  retained beside the installed code; `PACKAGES.json` records exact upstream
+  versions, URLs and SHA-256 values. Model weights are not included.
 
 ### transparent-background / InSPyReNet
 - Project: https://github.com/plemeri/transparent-background

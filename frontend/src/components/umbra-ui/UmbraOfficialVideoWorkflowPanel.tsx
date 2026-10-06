@@ -340,7 +340,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
           {!loading && !catalogError && items.length === 0 ? <p role="status" className="py-3 text-xs text-zinc-400">No official workflows are available. Check readiness to retry.</p> : null}
           <div className="grid min-w-0 gap-2 md:grid-cols-2" role="group" aria-label="Official video workflow">
             {items.map(item => <button key={item.id} type="button" aria-pressed={selectedId === item.id} disabled={!!busy || mediaBusy} onClick={() => { setSelectedId(item.id); setCaptured(null); setActionError(''); setStatus(''); }} className={cn('min-w-0 rounded border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-50', selectedId === item.id ? 'border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_8%,transparent)]' : 'border-white/10 bg-black/15 hover:bg-white/5')}>
-              <span className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-26' ? 'C-MMH3-26' : 'C-LTX23-50'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
+              <span data-i18n-skip="" className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-26' ? 'C-MMH3-26' : 'C-LTX23-50'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
             </button>)}
           </div>
           {selected ? <section className="space-y-3 border-b border-white/10 pb-3" aria-label="Selected official workflow">

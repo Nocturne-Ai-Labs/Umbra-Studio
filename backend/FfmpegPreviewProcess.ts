@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { resolveMediaExecutable } from './MediaExecutables';
 
 export interface PreviewProcessOptions {
   maxBytes: number;
@@ -19,9 +20,19 @@ export function runFfprobe(args: string[], options: PreviewProcessOptions): Prom
 function runMediaProcess(command: 'ffmpeg' | 'ffprobe', args: string[], options: PreviewProcessOptions): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
     options.signal?.throwIfAborted();
-    const child = (options.spawnProcess ?? spawn)(options.executable || command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-    });
+    const executable = options.executable || resolveMediaExecutable(command).executable;
+    const missingToolError = (error: Error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        error.message = `${command} is unavailable. Open Umbra Setup > Guided setup > Ready or Umbra Setup > Tools and install / repair media tools.`;
+      }
+      return error;
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = (options.spawnProcess ?? spawn)(executable, args, {
+        stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      });
+    } catch (error) { reject(missingToolError(error as Error)); return; }
     let chunks: Buffer[] = [];
     let bytes = 0;
     let detail = '';
@@ -60,6 +71,7 @@ function runMediaProcess(command: 'ffmpeg' | 'ffprobe', args: string[], options:
       detail = (detail + chunk.subarray(-16384).toString('utf8')).slice(-16384);
     });
     child.on('error', error => {
+      missingToolError(error);
       if (child.pid) stop(error); else finish(error);
     });
     child.stdout!.on('error', error => stop(error));

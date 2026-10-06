@@ -43,20 +43,17 @@ hardware, Linux packages, ports, per-feature dependencies, caption-model pack,
 and links to every managed upstream tool.
 
 See [CHANGELOG.md](CHANGELOG.md) for release highlights. Portable builds include
-an optional standalone setup utility for choosing a language and installing the
-model packs used by Data Forge and Umbra UI. Setup never blocks Umbra startup.
+**Umbra Setup**, which combines guided onboarding, managed-tool maintenance,
+model downloads, and application updates. Setup does not block normal Umbra startup.
 
-After installation, the version number at the bottom-left of Umbra is also the
-updater button. `(+x)` reports the number of newer compatible GitHub releases.
-The button hands control to a standalone updater page on local port `8214`
-before Umbra shuts down. That external service shows builds and changelogs,
-downloads the complete portable package, closes Umbra and its managed tools,
-preserves `User/` and `Tools/`, updates Umbra Nodes when needed, and restarts
-Umbra automatically. The updater can also be opened directly with
-`UmbraUpdater.bat` on Windows or `umbra-updater.sh` on Linux. Umbra itself keeps
-its normal application root and fixed port. Downloads, extraction, rollback
-backups, and updater logs stay below `User/Cache/UmbraUpdater` inside the Umbra
-Studio folder and are removed after the standalone updater exits.
+The version button at the bottom-left opens **Setup > Updates**. `(+x)` reports
+newer compatible GitHub releases. Save your work before opening it from Umbra:
+the main app and its managed tools close cleanly. Select a release, follow the
+download and installation progress, then use **Launch Umbra Studio** when the
+update finishes. Updates preserve `User/` and `Tools/`. Downloads, rollback
+backups, and logs use the root-local `User/Cache/UmbraUpdater` workspace.
+`UmbraUpdater.bat` and `umbra-updater.sh` remain compatibility shortcuts to the
+same app's Updates tab. An existing Setup session is reused.
 
 Quick summary:
 
@@ -95,7 +92,7 @@ The original files and their GPL provenance are under
 [`defaults/PowerPrompter/Official Workflows/DaSiWa`](defaults/PowerPrompter/Official%20Workflows/DaSiWa/PROVENANCE.md).
 Umbra does not substitute an adapted graph when an official workflow is held.
 
-1. Review the workflow dependency repair in Umbra Setup or the updater. It
+1. Review the workflow dependency repair in Umbra Setup > Tools. It
    uses the existing managed installer for compatible ComfyUI/frontend and node
    suites. Finish queued work and stop managed ComfyUI before repair. Conflicting
    local edits are retained and reported. Models are a separate selection/setup
@@ -177,7 +174,7 @@ install Bun separately.
 v0.22.0 is a one-time manual migration boundary for older Windows EXE builds.
 Close Umbra Studio and its managed tools, extract the new BAT package, then move
 only the old `User` and `Tools` folders into the new `Umbra Studio` folder. Do
-not copy the old `UmbraStudio.exe`. Once migrated, Umbra Updater can install
+not copy the old `UmbraStudio.exe`. Once migrated, Umbra Setup > Updates can install
 future BAT releases normally while preserving `User` and `Tools`.
 
 Linux releases start from `start-umbra.sh`. Users should not need to clone the
@@ -219,26 +216,66 @@ chmod +x umbra-setup.sh
 ./umbra-setup.sh
 ```
 
-The utility uses the bundled Bun runtime and serves a local-only page on
-`127.0.0.1:8215`. It can:
+The utility uses the bundled Bun runtime and serves one local-only Setup app
+(default port `8214`; in-app tool shortcuts can allocate a free local port).
+**Guided setup** saves your progress and follows this order:
 
-1. Save English, Japanese, Simplified Chinese, or Korean as the preferred app
-   language.
-2. Install or verify the Data Forge WD tagger and natural-language caption
-   models.
-3. Install or verify the core support models used by Umbra UI.
-4. Launch Umbra Studio after setup is complete.
+1. Choose and save English, Japanese, Simplified Chinese, Korean, or German.
+   The guided instructions change immediately to the selected language.
+2. Install managed ComfyUI, including its Python and CUDA/PyTorch environment.
+3. Install AI Toolkit if you want to train models, or skip it.
+4. Install custom nodes separately from model downloads.
+5. Review and install support models. Optional manual models show their original
+   download link and the exact destination folder.
+6. Choose one generation family, install its prerequisites, and select a compatible
+   checkpoint. Some packs include generation weights; prerequisite-only packs
+   require a separate checkpoint from Umbra's Model Manager. Additional families
+   and feature models can be installed later through **Models**.
+7. Verify installed requirements, nodes, model checksums, checkpoint integrity,
+   FFmpeg and ffprobe. If media tools are missing, use **Ready > Install / repair
+   media tools** to download and checksum-verify the portable pair.
+   This check does not generate an image. Launch ComfyUI through Umbra afterwards;
+   installation verification does not qualify GPU execution or image quality.
 
-Each installer resumes supported partial downloads and verifies the pinned
-model files. Only one model pack runs at a time so status and failures remain
-clear. The utility does not start Umbra, ComfyUI, AI Toolkit, or any migration
-worker while installation is running. Install ComfyUI before using the Umbra UI
-model action so the resources are placed in its managed model directories.
+Existing valid model files are retained, supported partial downloads resume, and
+only one installation or application update runs at a time. **Tools** retains
+ComfyUI and AI Toolkit repairs, CUDA/PyTorch updates, custom nodes, SageAttention,
+and ComfyUI version switching. **Models** retains optional Data Forge packs and
+model-family downloads. **Updates** lists newer portable releases and shows a
+progress bar, transferred bytes, and installation stages. Reopen Setup after an
+application update before performing further maintenance.
 
-Updating an existing portable installation is handled by Umbra Updater, which
-preserves the current `User/` and `Tools/` directories. The setup utility does
-not migrate files between versioned folders. Language can still be changed
-later under **Settings > General > Language**.
+The unified app preserves `User/` and `Tools/` during updates and does not migrate
+files between versioned folders. Language can also be changed later under
+**Settings > General > Language**.
+
+Windows and Linux release packages include FFmpeg and ffprobe in
+`Runtime/FFmpeg/<platform>`. Fresh installs and app updates receive the pair
+automatically; no separate FFmpeg download or system PATH setup is required.
+The GPL-3.0-or-later executables include complete corresponding source archives,
+the exact build script, individual licenses, build configuration and codec test
+evidence beside the binaries.
+
+Releases also include a portable CPU Python 3.11 helper environment with pandas,
+NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors and psutil under
+`Runtime/PythonHelpers/bundled/<platform>`. WD Tagger dependencies work without a
+system Python or ComfyUI install. **Tagger model weights are not bundled**;
+download the desired models through **Umbra Setup > Models**. PyTorch,
+Transformers, PixAI and natural-language captioning remain separate managed
+installations. Setup shows bundled library verification separately
+from model and managed-tool readiness. Existing helper venvs are preserved by
+app updates, and explicit `UMBRA_PYTHON` overrides keep priority.
+
+For video thumbnail or metadata errors, open **Umbra Setup > Tools**, then select **Install / repair media tools**.
+Umbra verifies FFmpeg and ffprobe separately. When needed, it downloads a
+checksum-pinned portable pair into `Tools/FFmpeg` (about 184 MiB on Windows,
+143 MiB on Linux). Repair tools retain their upstream license notices.
+Linux extraction requires `tar` and `xz-utils` or equivalents. Existing working
+tools are verified without a download. The repair preserves ComfyUI, user data,
+and the system PATH. Gallery also finds FFmpeg in this installation's ComfyUI
+`imageio_ffmpeg` environment. Explicit `FFMPEG_PATH` / `FFPROBE_PATH` overrides
+take priority, followed by managed tools, the release's bundled pair,
+bundled imageio FFmpeg, and PATH.
 
 ### First Run: Data Forge Caption Models
 
@@ -500,6 +537,44 @@ Actions builds use the no-bump packaging commands because the source version is
 already final.
 
 GitHub releases are built by `.github/workflows/release.yml`.
+
+### Prepare the bundled media tools
+
+Both packagers require FFmpeg/ffprobe built from the pinned sources before
+packaging. The native CI steps in
+[release.yml](.github/workflows/release.yml) install the build tools and run
+[build-media-from-source.sh](scripts/build-media-from-source.sh). Use fresh,
+empty output/work folders for each build attempt. The example paths below live
+in the ignored dependency cache; keep your application publish root separate.
+
+On Windows, install MSYS2 and open its **UCRT64** shell in the repository. Install
+these compiler/build tools, then build the media pair:
+
+```bash
+pacman -S --needed make nasm tar diffutils perl mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja
+bash scripts/build-media-from-source.sh win32 "$PWD/node_modules/.cache/umbra-media-source/windows-output" "$PWD/node_modules/.cache/umbra-media-source/windows-work"
+```
+
+Return to PowerShell in the same repository and point the packager at that
+completed source build:
+
+```powershell
+$env:UMBRA_MEDIA_SOURCE_BUILD = Join-Path $PWD 'node_modules/.cache/umbra-media-source/windows-output'
+```
+
+On Linux, use glibc 2.35 or newer. Install the native tools and build the media
+pair before invoking the Linux packager:
+
+```bash
+sudo apt-get install build-essential nasm cmake pkg-config python3 meson ninja-build
+bash scripts/build-media-from-source.sh linux "$PWD/node_modules/.cache/umbra-media-source/linux-output" "$PWD/node_modules/.cache/umbra-media-source/linux-work"
+export UMBRA_MEDIA_SOURCE_BUILD="$PWD/node_modules/.cache/umbra-media-source/linux-output"
+```
+
+The build verifies each source archive, compiles the required media libraries,
+checks native dependencies and runs codec encode/decode tests. Both portable
+packages retain complete source archives, the exact recipe, configuration and
+license notices. Neither packager copies an installed developer FFmpeg binary.
 
 Windows portable folder builds:
 

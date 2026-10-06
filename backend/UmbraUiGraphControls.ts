@@ -85,3 +85,44 @@ export function applyUmbraUiClipSkipToGraph(
   return { clipSkip, bypassedNodeIds, configuredNodeIds };
 }
 
+/** Disabled model stages must not require their model to pass ComfyUI validation. */
+export function bypassDisabledUmbraUiOutputUpscale(
+  graph: Record<string, PromptGraphNode>,
+): string[] {
+  const bypassed: string[] = [];
+  for (const [nodeId, node] of Object.entries(graph)) {
+    if (node?.class_type !== 'UmbraImageUpscale' || node.inputs?.enabled !== false) continue;
+    const image = node.inputs.image;
+    if (!isPromptGraphReference(image) || image[0] === nodeId) {
+      throw new Error(`Disabled upscale node ${nodeId} has no connected image input.`);
+    }
+    let sizeId = `${nodeId}_disabled_size`;
+    while (graph[sizeId]) sizeId += '_';
+    let needsSize = false;
+    const replace = (value: unknown): unknown => {
+      if (isPromptGraphReference(value) && value[0] === nodeId) {
+        const slot = Number(value[1]);
+        if (slot === 0) return [...image];
+        if (slot === 1 || slot === 2) {
+          needsSize = true;
+          return [sizeId, slot - 1];
+        }
+        if (slot === 3) return 'disabled';
+        throw new Error(`Disabled upscale node ${nodeId} has an unsupported output ${slot}.`);
+      }
+      if (Array.isArray(value)) return value.map(replace);
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, replace(entry)]));
+      }
+      return value;
+    };
+    const replacements = Object.entries(graph)
+      .filter(([id, consumer]) => id !== nodeId && consumer.inputs)
+      .map(([id, consumer]) => [id, replace(consumer.inputs)] as const);
+    for (const [id, inputs] of replacements) graph[id]!.inputs = inputs as Record<string, unknown>;
+    if (needsSize) graph[sizeId] = { class_type: 'GetImageSize', inputs: { image: [...image] } };
+    delete graph[nodeId];
+    bypassed.push(nodeId);
+  }
+  return bypassed;
+}

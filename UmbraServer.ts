@@ -1,6 +1,10 @@
 import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
+import { existingUpdaterUrl } from './launcher/UmbraUpdaterBootstrap';
+import { openToolsSetup } from './backend/SetupLaunchService';
+import { readToolMaintenance } from './shared/toolMaintenanceLock';
 import { createToolLineFramer, MAX_TOOL_LOGS, MAX_TOOL_JOBS } from './backend/ToolActionConsole';
 import { createActionRelay } from './shared/backendActionRelay';
+import { bundledHelperPython } from './shared/bundledPythonHelpers';
 import { addMainActionDelegation, isReturnedMainAction } from './shared/backendActionOwnership';
 import { createActionLogger } from './shared/backendActionLogger';
 import { assertVideoGenerationPolicy, normalizeVideoRoutePolicy, videoGenerationPolicyIssue, videoGraphPolicyIssue, type UmbraVideoRoutePolicy } from './shared/umbra-ui/videoRoutePolicy';
@@ -148,7 +152,7 @@ import {
   detectUmbraUiCensorRegions,
   type UmbraUiCensorTarget,
 } from './backend/UmbraUiCensorDetectorService';
-import { applyUmbraUiClipSkipToGraph } from './backend/UmbraUiGraphControls';
+import { applyUmbraUiClipSkipToGraph, bypassDisabledUmbraUiOutputUpscale } from './backend/UmbraUiGraphControls';
 import { applyLtx25PromptEnhancerInputs } from './backend/Ltx25PromptEnhancer';
 import { upsertPngTextMetadata } from './backend/PngTextMetadata';
 import { REMOTE_CONNECTIVITY_PATH, createRemoteConnectivityStatus, isHostConnectivityProbeOrigin } from './backend/remoteConnectivity';
@@ -9592,6 +9596,7 @@ function compileUmbraUiPipelineWorkflow(
   }
 
   if (workflowDescriptor.mediaType === 'image') {
+    bypassDisabledUmbraUiOutputUpscale(promptGraph);
     applyUmbraUiClipSkipToGraph(promptGraph, supportsClipSkip ? generation.clipSkip : 1);
     applyPPTiledVaeToGraph(promptGraph, generation.tiledVae);
     if (Object.values(promptGraph).some((node: any) => node?.class_type === 'Anima38BV2Loader')) {
@@ -14816,7 +14821,7 @@ interface ToolActionJob {
 }
 
 const toolActionJobs = new Map<string, ToolActionJob>();
-const toolOperations = createToolOperationAdmission();
+const toolOperations = createToolOperationAdmission(tool => readToolMaintenance(ROOT_DIR, tool));
 function toolBusy(tool: string) {
   return { success: false, error: `${tool} is busy with another tool operation.`, busy: true, activeAction: toolOperations.get(tool) };
 }
@@ -16248,6 +16253,8 @@ function getPythonCommandCandidates(): PythonCommandCandidate[] {
   // Prefer Umbra's helper venv first so Waifu dependencies are deterministic and isolated.
   const helperPython = findPythonInVenv(join(ROOT_DIR, 'Runtime', 'PythonHelpers'));
   if (helperPython) pushCandidate(helperPython);
+  const lightweightPython = bundledHelperPython(ROOT_DIR);
+  if (lightweightPython) pushCandidate(lightweightPython, ['-I', '-B']);
 
   pushBundledRuntimePython();
 
@@ -17207,7 +17214,9 @@ type StandaloneUpdaterLaunch = {
   token: string;
   origin: string;
   updaterUrl: string;
+  reuse?: boolean;
 };
+let preparingStandaloneUpdater = false;
 let pendingStandaloneUpdaterLaunch: StandaloneUpdaterLaunch | null = null;
 
 function isPortableAppUpdateAvailable(): boolean {
@@ -17217,24 +17226,41 @@ function isPortableAppUpdateAvailable(): boolean {
     && existsSync(join(SOURCE_DIR, 'launcher', 'UmbraUpdaterBootstrap.js'))
     && existsSync(join(SOURCE_DIR, 'updater', 'UmbraUpdaterApp.js'))
     && existsSync(join(SOURCE_DIR, 'updater', 'UmbraRelaunchWorker.js'))
-    && existsSync(join(SOURCE_DIR, 'updater', 'index.html'));
+    && existsSync(join(SOURCE_DIR, 'setup', 'UmbraSetupApp.js'))
+    && existsSync(join(SOURCE_DIR, 'updater', 'update-panel.html'));
 }
 
-function prepareStandaloneUpdaterLaunch(): StandaloneUpdaterLaunch {
+async function prepareStandaloneUpdaterLaunch(): Promise<StandaloneUpdaterLaunch> {
+  if (readToolMaintenance(ROOT_DIR, 'comfyui') || readToolMaintenance(ROOT_DIR, 'aitoolkit')) throw new Error('Finish the current tool maintenance before opening updates.');
+  const existing = await existingUpdaterUrl(ROOT_DIR);
+  if (existing) {
+    const url = new URL(existing); url.searchParams.set('tab', 'updates');
+    const statusUrl = new URL('/api/state', url); statusUrl.searchParams.set('token', url.searchParams.get('token') || '');
+    const statusResponse = await fetch(statusUrl, { signal: AbortSignal.timeout(2000) });
+    const setupStatus = await statusResponse.json() as { job?: { phase?: string } };
+    if (!statusResponse.ok || setupStatus.job?.phase === 'running') throw new Error('Finish the current Setup job before opening updates.');
+    return { token: url.searchParams.get('token') || '', origin: url.origin, updaterUrl: url.toString(), reuse: true };
+  }
   const token = randomBytes(24).toString('hex');
   const origin = `http://127.0.0.1:${STANDALONE_UPDATER_PORT}`;
   return {
     token,
     origin,
-    updaterUrl: `${origin}/?token=${encodeURIComponent(token)}`,
+    updaterUrl: `${origin}/?token=${encodeURIComponent(token)}&tab=updates`,
   };
 }
 
 async function launchStandaloneUpdater(launch: StandaloneUpdaterLaunch): Promise<void> {
   if (!isPortableAppUpdateAvailable()) {
     throw new Error(IS_UMBRA_DEV_MODE
-      ? 'The standalone updater is available only in a packaged portable build.'
-      : 'This build does not include the standalone Umbra updater.');
+      ? 'App updates through Umbra Setup are available only in a packaged portable build.'
+      : 'This build does not include unified Umbra Setup.');
+  }
+  if (launch.reuse) {
+    const response = await fetch(`${launch.origin}/api/health?token=${encodeURIComponent(launch.token)}`, { signal: AbortSignal.timeout(2000) });
+    const health = await response.json() as { runtimeRoot?: string };
+    if (!response.ok || health.runtimeRoot !== ROOT_DIR) throw new Error('The existing Setup session closed. Open UmbraSetup from the installation folder.');
+    return;
   }
   const bootstrapPath = join(SOURCE_DIR, 'launcher', 'UmbraUpdaterBootstrap.js');
   const updater = spawn(process.execPath, [
@@ -17255,12 +17281,13 @@ async function launchStandaloneUpdater(launch: StandaloneUpdaterLaunch): Promise
     String(PORT),
     '--app-host',
     HOST,
+    '--no-reuse',
     '--no-open',
   ], {
     cwd: ROOT_DIR,
     detached: true,
     stdio: 'ignore',
-    windowsHide: false,
+    windowsHide: true,
     env: {
       ...process.env,
       UMBRA_ROOT: ROOT_DIR,
@@ -17281,7 +17308,7 @@ async function launchStandaloneUpdater(launch: StandaloneUpdaterLaunch): Promise
     }
     await Bun.sleep(150);
   }
-  throw new Error(`The standalone updater could not bind to 127.0.0.1:${STANDALONE_UPDATER_PORT}. Close anything using that port and try again.`);
+  throw new Error(`Umbra Setup could not bind to 127.0.0.1:${STANDALONE_UPDATER_PORT}. Close anything using that port and try again.`);
 }
 
 function normalizeVersionSegment(value: string): number {
@@ -18236,6 +18263,12 @@ async function stopComfyUI() {
 }
 
 async function startAIToolkit() {
+  const claim = toolOperations.claim('aitoolkit', 'launch');
+  if (!claim) return toolBusy('aitoolkit');
+  try { return await startAIToolkitProcess(); } finally { claim.release(); }
+}
+
+async function startAIToolkitProcess() {
   try {
     if (isChildProcessAlive(aitoolkitProcess)) {
       return { success: true, message: 'AI-Toolkit is already running', running: true, healthy: await probeConfiguredAIToolkit(getBackendConfig().aitoolkit) };
@@ -35468,6 +35501,11 @@ const server = Bun.serve<UmbraSocketData>({
         } finally { if (!transferred) claim.release(); }
       }
 
+      if (path === '/api/tools/setup' && method === 'POST') {
+        if (isRemoteRequest(req, url, server)) return json({ error: 'Umbra Setup is only available from the host PC.' }, 403);
+        try { return json({ success: true, url: await openToolsSetup(ROOT_DIR, SOURCE_DIR, PORT) }); }
+        catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
       if (path === '/api/tools/actions' && method === 'POST') {
         if (isRemoteRequest(req, url, server)) {
           return json({ error: 'Tool install and update actions are only available from the host PC.' }, 403);
@@ -38379,14 +38417,15 @@ const server = Bun.serve<UmbraSocketData>({
             success: false,
             error: IS_UMBRA_DEV_MODE
               ? 'Portable self-updates are disabled in the development source.'
-              : 'This build does not include the standalone Umbra updater.',
+              : 'This build does not include unified Umbra Setup.',
           }, 400);
         }
         try {
-          if (pendingStandaloneUpdaterLaunch) {
+          if (pendingStandaloneUpdaterLaunch || preparingStandaloneUpdater) {
             return json({ success: false, error: 'The standalone updater is already starting.' }, 409);
           }
-          const launch = prepareStandaloneUpdaterLaunch();
+          preparingStandaloneUpdater = true;
+          const launch = await prepareStandaloneUpdaterLaunch();
           pendingStandaloneUpdaterLaunch = launch;
           setTimeout(() => {
             void gracefulShutdown('update');
@@ -38400,8 +38439,8 @@ const server = Bun.serve<UmbraSocketData>({
             headers: { Connection: 'close' },
           });
         } catch (error: any) {
-          return json({ success: false, error: error?.message || 'Failed to launch the standalone Umbra updater.' }, 500);
-        }
+          return json({ success: false, error: error?.message || 'Failed to launch Umbra Setup.' }, 500);
+        } finally { preparingStandaloneUpdater = false; }
       }
 
       if (path === '/api/app/updater/shutdown' && method === 'POST') {

@@ -385,7 +385,7 @@ export function BoardLightbox({ posts, initialIndex, onClose, onDownload, onAddT
                               ? 'bg-green-500/30 text-green-300 scale-105'
                               : 'umbra-chip-neutral hover:border-cyan-400/30 hover:bg-cyan-500/10 hover:text-cyan-200'}`}
                         >
-                          <span className="truncate max-w-[140px]">{tag}</span>
+                          <span data-i18n-skip="" className="truncate max-w-[140px]">{tag}</span>
                           {isAdded ? (
                             <Check size={10} className="flex-shrink-0" />
                           ) : (

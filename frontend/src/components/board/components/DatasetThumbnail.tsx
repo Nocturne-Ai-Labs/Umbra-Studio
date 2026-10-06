@@ -11,7 +11,7 @@ export function DatasetThumbnail({ image, datasetName, conceptFolder, contain = 
   const { locked } = useNsfwPrivacy();
   const protectedMedia = isProtectedDatasetImage(image);
   return <>
-    {!(locked && protectedMedia) && <img
+    {!(locked && protectedMedia) && <img data-i18n-skip=""
       src={datasetImageUrl(datasetName, conceptFolder, image)}
       alt={image.filename}
       loading="lazy"

@@ -9,6 +9,7 @@ import { ContextMenu } from './ContextMenu';
 export interface UmbraSelectOption {
   value: string;
   label: string;
+  i18nSkip?: boolean;
   description?: string;
   badge?: string | number;
   disabled?: boolean;
@@ -149,6 +150,7 @@ export function UmbraSelect({
     const selected = option.value === value;
     return {
       label: option.label,
+      i18nSkip: option.i18nSkip,
       description: option.description,
       badge: option.badge,
       disabled: option.disabled,
@@ -204,7 +206,7 @@ export function UmbraSelect({
         )}
       >
         {leadingIcon ? <span className="umbra-context-menu-icon flex h-4 w-4 shrink-0 items-center justify-center">{leadingIcon}</span> : null}
-        <span className="min-w-0 flex-1 truncate">{displayLabel}</span>
+        <span data-i18n-skip={selectedOption?.i18nSkip ? '' : undefined} className="min-w-0 flex-1 truncate">{displayLabel}</span>
         {selectedOption?.badge !== undefined ? <span className="umbra-context-menu-badge shrink-0 px-1.5 py-0.5">{selectedOption.badge}</span> : null}
         <ChevronDown size={13} className={cn('umbra-select-chevron shrink-0 transition-transform', open && 'rotate-180')} />
       </button>

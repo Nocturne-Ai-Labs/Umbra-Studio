@@ -426,7 +426,7 @@ function removeLegacyRootShortcut(linkPath) {
 }
 
 function run(command, args, label) {
-  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false });
   if (result.status !== 0) {
     throw new Error(`[webapp-publish] ${label} failed with status ${result.status ?? 1}`);
   }
@@ -481,11 +481,11 @@ if not exist "%BUN_BIN%" (
   exit /b 1
 )
 if not exist "%UPDATER_BOOTSTRAP%" (
-  echo [ERROR] Standalone updater is missing: %UPDATER_BOOTSTRAP%
+  echo [ERROR] Umbra Setup launcher is missing: %UPDATER_BOOTSTRAP%
   pause
   exit /b 1
 )
-"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%"
+"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%" --tab updates %*
 if errorlevel 1 pause
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
@@ -497,18 +497,18 @@ function writeUmbraSetupLauncher() {
 setlocal
 cd /d "%~dp0"
 set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
-set "SETUP_APP=%CD%\\resources\\app\\setup\\UmbraSetupApp.js"
+set "SETUP_APP=%CD%\\resources\\app\\launcher\\UmbraUpdaterBootstrap.js"
 if not exist "%BUN_BIN%" (
   echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
   pause
   exit /b 1
 )
 if not exist "%SETUP_APP%" (
-  echo [ERROR] Standalone setup utility is missing: %SETUP_APP%
+  echo [ERROR] Umbra Setup launcher is missing: %SETUP_APP%
   pause
   exit /b 1
 )
-"%BUN_BIN%" "%SETUP_APP%" --root "%CD%" %*
+"%BUN_BIN%" "%SETUP_APP%" --root "%CD%" --tab onboarding %*
 if errorlevel 1 pause
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
@@ -566,7 +566,11 @@ function verifyPublish() {
     'resources/app/updater/UmbraUpdaterApp.js',
     'resources/app/updater/UmbraRelaunchWorker.js',
     'resources/app/updater/index.html',
+    'resources/app/updater/update-panel.html',
+    'resources/app/updater/update-panel.css',
+    'resources/app/updater/update-panel.js',
     'resources/app/setup/UmbraSetupApp.js',
+    'resources/app/setup/onboarding.js',
     'resources/app/setup/index.html',
     'resources/app/setup/models.js',
     'resources/app/setup/python/background_compat.py',
@@ -574,6 +578,12 @@ function verifyPublish() {
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
     'Runtime/Bun/win32/bun.exe',
+    'Runtime/FFmpeg/win32/bin/ffmpeg.exe',
+    'Runtime/FFmpeg/win32/bin/ffprobe.exe',
+    'Runtime/FFmpeg/win32/LICENSE.txt',
+    'Runtime/FFmpeg/win32/installed.json',
+    'Runtime/PythonHelpers/bundled/win32/python/python.exe',
+    'Runtime/PythonHelpers/bundled/win32/installed.json',
     'User/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
     'User/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'User/PowerPrompter/Prompts/Intro to Powerprompter.ppcards.json',
@@ -617,14 +627,14 @@ function verifyPublish() {
     'utf8',
   );
   const updaterHtml = fs.readFileSync(
-    path.join(publishRoot, 'resources', 'app', 'updater', 'index.html'),
+    path.join(publishRoot, 'resources', 'app', 'updater', 'update-panel.html'),
     'utf8',
   );
   if (updaterWorker.includes('waitForHealthyRestart')) {
     throw new Error('[webapp-publish] The update worker must not own application restart.');
   }
   if (!updaterApp.includes('/api/close') || !updaterApp.includes('/api/relaunch') || !updaterHtml.includes('Launch Umbra Studio')) {
-    throw new Error('[webapp-publish] Updater launch-and-close completion flow is missing.');
+    throw new Error('[webapp-publish] Unified Setup update launch-and-close completion flow is missing.');
   }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }
@@ -711,6 +721,8 @@ function publish() {
     path.join(packagedAppDir, 'node_modules'),
   );
   copyTree(path.join(root, 'Runtime'), path.join(publishRoot, 'Runtime'));
+  run('bun', ['scripts/prepare-media-runtime.ts', '--root', publishRoot], 'bundled FFmpeg/ffprobe preparation');
+  run('bun', ['scripts/prepare-python-helpers.ts', '--root', publishRoot], 'bundled CPU Python helpers preparation');
   copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraServer.js'), path.join(packagedAppDir, 'UmbraServer.js'));
   copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraUpdateWorker.js'),

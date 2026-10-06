@@ -557,7 +557,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           </div>
           <UmbraSelectControl value={ref.name} onChange={(event) => onChange({ ...controls, refMods: controls.refMods.map((row) => row.slot === ref.slot ? { ...row, name: event.target.value } : row) })} className={`${fieldClass} mt-2`}>
             <option value="">Select a RefMod</option>
-            {refModLibrary.map((entry) => <option key={entry.name} value={entry.name}>{entry.name} ({entry.kind})</option>)}
+            {refModLibrary.map((entry) => <option data-i18n-skip="" key={entry.name} value={entry.name}>{entry.name} ({entry.kind})</option>)}
           </UmbraSelectControl>
           <label className="mt-2 block text-[10px] text-zinc-500">Strength
             <input type="number" min={0} max={1} step={0.05} value={ref.strength} onChange={(event) => onChange({ ...controls, refMods: controls.refMods.map((row) => row.slot === ref.slot ? { ...row, strength: Number(event.target.value) } : row) })} className={fieldClass} />

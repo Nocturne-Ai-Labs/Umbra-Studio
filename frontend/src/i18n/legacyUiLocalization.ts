@@ -4,6 +4,7 @@ import { GERMAN_UI_TEXT } from './germanUiCatalog';
 import { JAPANESE_UI_TEXT } from './japaneseUiCatalog';
 import { KOREAN_UI_TEXT } from './koreanUiCatalog';
 import { RECENT_UI_TEXT } from './recentUiCatalog';
+import { NUMERIC_UI_PATTERNS } from './numericUiTemplates';
 
 const ORIGINAL_TEXT = new WeakMap<Text, string>();
 const LAST_RENDERED_TEXT = new WeakMap<Text, string>();
@@ -272,6 +273,15 @@ function translateNounPhrase(language: AppLanguage, value: string): string | nul
 }
 
 function translateDynamicUi(language: AppLanguage, value: string): string | null {
+  for (const { template, slots, pattern } of NUMERIC_UI_PATTERNS) {
+    const match = value.match(pattern);
+    if (!match) continue;
+    const localized = lookupLocalized(language, template);
+    return localized ? localized.replace(/\{(\w+)\}/g, (token, slot) => {
+      const index = slots.indexOf(slot);
+      return index >= 0 ? match[index + 1] : token;
+    }) : null;
+  }
   const currentValueMatch = value.match(/^Current:\s+(.+)$/i);
   if (currentValueMatch) {
     return language === 'zh-CN'
@@ -450,7 +460,9 @@ function shouldSkipNode(node: Node): boolean {
   if (!element) return true;
   return Boolean(element.closest([
     '[data-i18n-skip]',
-    '[contenteditable="true"]',
+    '[translate="no"]',
+    '.notranslate',
+    '[contenteditable]:not([contenteditable="false"])',
     'canvas',
     'code',
     'kbd',
@@ -477,7 +489,7 @@ function localizeTextNode(node: Text, language: AppLanguage) {
 }
 
 function localizeElementAttributes(element: Element, language: AppLanguage) {
-  if (element.closest('[data-i18n-skip],[contenteditable="true"],code,kbd,pre,samp,script,style,svg')) return;
+  if (element.closest('[data-i18n-skip],[translate="no"],.notranslate,[contenteditable]:not([contenteditable="false"]),code,kbd,pre,samp,script,style,svg')) return;
   let originals = ORIGINAL_ATTRIBUTES.get(element);
   let rendered = LAST_RENDERED_ATTRIBUTES.get(element);
   if (!originals) {
@@ -490,6 +502,7 @@ function localizeElementAttributes(element: Element, language: AppLanguage) {
   }
 
   for (const attribute of LOCALIZED_ATTRIBUTES) {
+    if (element.getAttribute('data-i18n-skip-attributes')?.split(/\s+/).includes(attribute)) continue;
     const current = element.getAttribute(attribute);
     if (current === null) continue;
     const previousRendered = rendered.get(attribute);

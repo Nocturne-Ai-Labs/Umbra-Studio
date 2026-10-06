@@ -2712,7 +2712,7 @@ function GalleryFolderTile({ folder, cardSize, cardHeight, revision, dropTargete
       {cover && <NsfwPrivacyShield compact protectedMedia={protectedMedia} />}
     </div>
     <div className="shrink-0 px-0.5 pb-0.5 pt-1.5">
-      <div className="truncate text-xs leading-4 text-zinc-100">{folder.name}</div>
+      <div data-i18n-skip="" className="truncate text-xs leading-4 text-zinc-100">{folder.name}</div>
       <div className="text-[10px] leading-3 text-zinc-500">Folder</div>
     </div>
   </div>;
@@ -3004,6 +3004,7 @@ function GalleryImageTile({
                 : 'border-white/10 hover:border-white/20 hover:bg-white/[0.04]',
       )}
       style={cardStyle}
+      data-i18n-skip-attributes="title"
       title={`${file.name}\n${setLabel ? `${setLabel}\n` : ''}${metadataSnippet ? `Metadata match: ${metadataSnippet}\n` : ''}${path}`}
     >
       <div
@@ -3072,7 +3073,7 @@ function GalleryImageTile({
             ) : null}
           </div>
         ) : (
-          <img
+          <img data-i18n-skip=""
             data-umbra-nsfw-media={isNsfw ? '' : undefined}
             key={`${fileId(file)}:${src}`}
             src={loadGranted ? src : undefined}
@@ -3098,7 +3099,7 @@ function GalleryImageTile({
         {!iconOnly ? <NsfwPrivacyShield compact protectedMedia={isNsfw} /> : null}
       </div>
       <div data-umbra-gallery-tile-footer className="shrink-0 px-0.5 pb-0.5 pt-1.5">
-        <div className="truncate text-xs font-medium leading-4 text-zinc-100" title={file.name}>{file.name}</div>
+        <div data-i18n-skip="" className="truncate text-xs font-medium leading-4 text-zinc-100" title={file.name}>{file.name}</div>
         <div
           className={cn(
             'truncate text-[10px] leading-3',
@@ -3829,7 +3830,7 @@ function GalleryMediaViewer({
                 className="flex flex-none items-center justify-center"
                 style={zoom > 1 ? { width: `${zoom * 100}%`, height: `${zoom * 100}%` } : { width: '100%', height: '100%' }}
               >
-                <img
+                <img data-i18n-skip=""
                   data-umbra-nsfw-media={isNsfw ? '' : undefined}
                   key={imageSrc || stillSrc}
                   src={isGif ? imageSrc : imageSrc || stillSrc}
@@ -3935,14 +3936,14 @@ function GalleryMediaViewer({
                       />
                     </div>
                   ) : (
-                    <div className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300">{positivePrompt}</div>
+                    <div data-i18n-skip="" className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300">{positivePrompt}</div>
                   )}
                 </div>
               ) : null}
               {negativePrompt ? (
                 <div className="mt-3">
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Negative</div>
-                  <div className="custom-scrollbar max-h-56 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-400">{negativePrompt}</div>
+                  <div data-i18n-skip="" className="custom-scrollbar max-h-56 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-400">{negativePrompt}</div>
                 </div>
               ) : null}
               {workflowJsonExport ? (
@@ -3984,7 +3985,7 @@ function GalleryMediaViewer({
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Tags</div>
                 <div className="flex flex-wrap gap-1.5">
                   {file.tags.map((tag) => (
-                    <span key={tag} className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-zinc-300">{tag}</span>
+                    <span data-i18n-skip="" key={tag} className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[11px] text-zinc-300">{tag}</span>
                   ))}
                 </div>
               </div>
@@ -4325,7 +4326,7 @@ function GalleryTagModal({
                       : undefined}
                     title={`Remove ${tag}`}
                   >
-                    <span>{tag}</span>
+                    <span data-i18n-skip="">{tag}</span>
                     <X size={11} />
                   </button>
                 );
@@ -4514,8 +4515,8 @@ function GalleryDeleteWarningModal({
         <div className="max-h-56 overflow-y-auto rounded border border-white/10 bg-black/25">
           {state.folders.map((folder) => (
             <div key={folder.path} className="border-b border-white/5 px-3 py-2 last:border-b-0">
-              <div className="truncate text-xs font-semibold text-zinc-100" title={folder.name}>{folder.name}</div>
-              <div className="mt-0.5 truncate text-[11px] text-zinc-500" title={folder.path}>{folder.path}</div>
+              <div data-i18n-skip="" className="truncate text-xs font-semibold text-zinc-100" title={folder.name}>{folder.name}</div>
+              <div data-i18n-skip="" className="mt-0.5 truncate text-[11px] text-zinc-500" title={folder.path}>{folder.path}</div>
               <div className="mt-1 text-[11px] text-zinc-500">
                 {folder.mediaCount != null ? `${folder.mediaCount} known media` : 'Media count unknown'}
                 {' · '}
@@ -4758,7 +4759,7 @@ function GalleryDatasetTargetPicker({
                   >
                     {expanded ? <ChevronDown size={14} className="text-zinc-500" /> : <ChevronRight size={14} className="text-zinc-500" />}
                     <FolderOpen size={14} className="text-amber-400" />
-                    <span className="min-w-0 flex-1 truncate font-bold">{dataset.name}</span>
+                    <span data-i18n-skip="" className="min-w-0 flex-1 truncate font-bold">{dataset.name}</span>
                     <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-500">
                       {conceptCount}
                     </span>
@@ -10498,19 +10499,20 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     viewerFileFallback,
   ]);
   const contextMenuHeader = useMemo(() => {
-    if (!contextMenu) return { title: '', subtitle: '' };
+    if (!contextMenu) return { title: '', subtitle: '', titleI18nSkip: false };
     const targetPath = normalizePath(contextMenu.targetPath);
     const title = pathLeaf(targetPath) || 'Selection';
-    if (contextMenu.kind === 'folder') return { title, subtitle: 'Folder' };
-    if (contextMenu.kind === 'background') return { title, subtitle: 'Current folder' };
-    if (contextMenu.kind === 'archive') return { title, subtitle: 'ZIP archive' };
+    const titleI18nSkip = Boolean(pathLeaf(targetPath));
+    if (contextMenu.kind === 'folder') return { title, subtitle: 'Folder', titleI18nSkip };
+    if (contextMenu.kind === 'background') return { title, subtitle: 'Current folder', titleI18nSkip };
+    if (contextMenu.kind === 'archive') return { title, subtitle: 'ZIP archive', titleI18nSkip };
     if (contextMenu.kind === 'transfer') {
       const count = contextMenu.paths?.length || 0;
-      return { title, subtitle: `${count} item${count === 1 ? '' : 's'} ready to transfer` };
+      return { title, subtitle: `${count} item${count === 1 ? '' : 's'} ready to transfer`, titleI18nSkip };
     }
-    if (isLiveGenerationPreviewPath(targetPath)) return { title: 'Live Generation Preview', subtitle: 'Current generation' };
+    if (isLiveGenerationPreviewPath(targetPath)) return { title: 'Live Generation Preview', subtitle: 'Current generation', titleI18nSkip: false };
     const count = selectedPathsForContext(contextMenu).length;
-    return { title, subtitle: `${Math.max(1, count)} selected` };
+    return { title, subtitle: `${Math.max(1, count)} selected`, titleI18nSkip };
   }, [contextMenu, selectedPathsForContext]);
 
   useEffect(() => {
@@ -11030,7 +11032,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                                   className="inline-flex max-w-full items-center gap-1.5 rounded border border-zinc-800 bg-zinc-900/70 px-2 py-1 text-left text-xs text-zinc-300 hover:border-[var(--umbra-accent)] hover:text-white"
                                   title={`Search tag: ${item.tag}`}
                                 >
-                                  <span className="truncate">{item.tag}</span>
+                                  <span data-i18n-skip="" className="truncate">{item.tag}</span>
                                   <span className="shrink-0 text-[10px] text-zinc-600">{item.count}</span>
                                 </button>
                               ))}
@@ -11159,7 +11161,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                           <FolderOpen size={14} className="shrink-0 text-zinc-500" />
                           <span className="min-w-0">
                             <span className="block truncate text-xs text-zinc-200">{folder.name || pathLeaf(folder.path) || folder.path}</span>
-                            <span className="block truncate text-[11px] text-zinc-600">{folder.path}</span>
+                            <span data-i18n-skip="" className="block truncate text-[11px] text-zinc-600">{folder.path}</span>
                           </span>
                         </button>
                       ))}
@@ -11561,10 +11563,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                       >
                         <FolderOpen size={15} className="shrink-0 text-zinc-400" />
                         <span className="min-w-0">
-                          <span className="block truncate text-xs font-medium text-zinc-100">
+                          <span data-i18n-skip className="block truncate text-xs font-medium text-zinc-100">
                             {depth > 0 ? `${'-- '.repeat(depth)}${group.folder.name || pathLeaf(group.folder.path) || group.folder.path}` : group.folder.name || pathLeaf(group.folder.path) || group.folder.path}
                           </span>
-                          <span className="block truncate text-[11px] text-zinc-500">{group.folder.path}</span>
+                          <span data-i18n-skip className="block truncate text-[11px] text-zinc-500">{group.folder.path}</span>
                         </span>
                       </button>
                       <div className="flex shrink-0 items-center gap-1">
@@ -11864,6 +11866,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         onClose={() => setContextMenu(null)}
         boundarySelector="[data-umbra-react-gallery-root]"
         title={contextMenuHeader.title}
+        titleI18nSkip={contextMenuHeader.titleI18nSkip}
         subtitle={contextMenuHeader.subtitle}
       />
       <GalleryDatasetTargetPicker

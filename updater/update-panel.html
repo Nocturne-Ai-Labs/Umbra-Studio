@@ -1,0 +1,25 @@
+<section id="umbra-updates" aria-label="Umbra Studio updates">
+
+  <div class="updates-toolbar"><div><h2 id="updates-title">Umbra Studio updates</h2><p id="updates-version">Reading installed version…</p></div><button type="button" id="updates-refresh">Check for updates</button></div>
+
+  <label class="updates-channel"><input type="checkbox" id="updates-prerelease"> <span id="updates-beta">Include beta releases</span></label>
+
+  <p id="updates-message" role="status" aria-live="polite"></p>
+
+  <div id="updates-releases" aria-label="Available releases"></div>
+
+  <div id="updates-progress" hidden>
+
+    <div class="updates-progress-label"><strong id="updates-phase">Ready</strong><span id="updates-percent"></span></div>
+
+    <progress id="updates-progress-bar" max="100" value="0" aria-label="Update progress"></progress>
+
+    <div id="updates-bytes"></div><p id="updates-item"></p><p id="updates-warning"></p>
+
+  </div>
+
+  <div class="updates-actions"><button type="button" id="updates-install" disabled>Install selected update</button><button type="button" id="updates-launch" hidden>Launch Umbra Studio</button></div>
+
+  <p id="updates-notice" class="updates-notice">Save your work before installing. Umbra Studio and its managed tools close during the update. Your models and user files are preserved.</p>
+
+</section>

@@ -125,6 +125,12 @@
     .model-file { border-bottom: 1px solid var(--line); padding: 9px 0; overflow-wrap: anywhere; font-size: 12px; }
     .model-file small { display: block; color: var(--muted); margin-top: 5px; }
     .model-file a { color: #9ee8d0; }
+    .tool-maintenance-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+    .tool-maintenance-actions .button { min-height: 36px; }
+    #tools-list { max-height: none; overflow: visible; }
+    @media (max-width: 600px) { .tool-maintenance-actions .button { min-height: 44px; } }
+    [data-maintenance-tool] label { display: block; margin-top: 12px; }
+    [data-maintenance-tool] input { display: block; width: 100%; margin: 6px 0; }
     .model-license-notice { color: #eab86b !important; }
     .model-requirements { display: block; color: #eab86b; font-size: 11px; margin-top: 7px; }
     .model-license-disclaimer { margin: 12px 0 16px; border-left: 3px solid #eab86b; padding: 10px 12px; background: #17120a; color: #e8dbc0; }
@@ -146,6 +152,21 @@
       .actions, footer .button { width: 100%; }
       .actions { flex-direction: column; }
     }
+    #onboarding > ol { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; }
+    #onboarding > ol .button { min-height: 44px; }
+    #onboarding-stage { display: grid; gap: 10px; margin: 18px 0; }
+    #onboarding .tool-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+    #onboarding .model-files, #onboarding .model-families { max-height: none; }
+    #onboarding-stage h3, #onboarding-stage p { margin: 0; }
+    @media (max-width: 720px) {
+      #onboarding { display: flex; flex-direction: column; }
+      #onboarding > h2 { order: 0; }
+      #onboarding > p { order: 1; }
+      #onboarding-stage { order: 2; }
+      #onboarding > .tool-controls { order: 3; }
+      #onboarding > ol { order: 4; }
+    }
+    /* UPDATE_STYLE */
   </style>
 </head>
 <body>
@@ -153,38 +174,23 @@
     <header>
       <div>
         <div class="eyebrow">Nocturne AI Labs</div>
-        <h1>Umbra Studio Setup</h1>
+        <h1>Umbra Studio Setup &amp; Updates</h1>
       </div>
       <div id="status" class="status" data-i18n="standaloneService">Standalone service</div>
     </header>
     <main>
-      <section class="panel" aria-labelledby="setup-guide-title">
-        <h2 id="setup-guide-title" data-i18n="setupGuide">Set up Umbra Studio</h2>
-        <button id="install-all-dependencies" class="button primary" type="button" data-i18n="installAllDependencies">Install All Dependencies & Support Models</button>
-        <p data-i18n="allDependenciesHint">One click installs shared Python packages (including pandas), WD and PixAI taggers, natural-language tagging/captioning (Qwen2-VL), detailers, SAM, upscaling/interpolation, CLIP/SigLIP vision support, and managed workflow tools. Generation checkpoints and model-family downloads stay separate in Step 3. Stop managed ComfyUI before installing.</p>
-        <p id="shared-support-size" aria-live="polite">Shared support models: approximately 12.75 GiB, plus Python packages. Existing valid files are verified and kept.</p>
-        <p class="model-license-disclaimer" data-i18n="modelLicenseDisclaimer">Model licenses are separate from Umbra Studio’s license. Review the terms shown in Models before installation.</p>
-        <ol>
-          <li data-i18n="setupStep1">Step 1 — Choose and save your language below.</li>
-          <li><span data-i18n="setupStep2">Step 2 — Install shared dependencies and support models above, or use Tools and Models to repair individual features.</span> <button class="button" type="button" data-setup-tab="tools" data-i18n="openTools">Open Tools</button></li>
-          <li><span data-i18n="setupStep3">Step 3 — Separately choose the generation model family you want in Models, then add its compatible checkpoint in Model Manager where required.</span> <button class="button" type="button" data-setup-tab="models" data-i18n="openModels">Open Models</button></li>
-          <li data-i18n="setupStep4">Step 4 — Launch Umbra Studio, start ComfyUI from Umbra, and test the features you selected. After tool repairs, restart ComfyUI and use Tools runtime preflight to check registration.</li>
-        </ol>
-        <h3 data-i18n="featureSetupTitle">What to install for each feature</h3>
-        <ul>
-          <li data-i18n="featureGeneration">Image / video generation, Power Prompter and Canvas: managed ComfyUI and the workflow tools for your selected family; then its Model families pack and a compatible checkpoint in Model Manager where required.</li>
-          <li data-i18n="featureSupport">Detailers, masking and upscaling: the relevant workflow tools in Tools and the matching Pipeline support models in Models.</li>
-          <li data-i18n="featureTagging">Waifu tagging, natural-language tagging/captioning, Image Inspector and Data Forge: Python Helpers in Tools plus Data Forge Models in Models. PixAI additionally needs Install PixAI Tagger.</li>
-          <li data-i18n="featureGallery">Gallery browsing and prompt editing: no additional AI models are needed.</li>
-          <li data-i18n="featureRemote">Umbra Remote: launch Umbra, open Umbra Remote, and follow its three-step connection guide.</li>
-        </ul>
-      </section>
       <nav class="setup-tabs" role="tablist" aria-label="Setup">
         <button id="tab-general" class="button" role="tab" aria-selected="true" aria-controls="general-panel" data-i18n="languageStepTab">1. Language</button>
         <button id="tab-tools" class="button" role="tab" aria-selected="false" aria-controls="tools-panel" data-i18n="toolsStepTab">2. Tools</button>
         <button id="tab-models" class="button" role="tab" aria-selected="false" aria-controls="models-panel" data-i18n="modelsStepTab">3. Models</button>
+        <button id="tab-updates" class="button" role="tab" aria-selected="false" aria-controls="updates-panel" data-i18n="updatesTab">Updates</button>
       </nav>
+      <section id="updates-panel" class="panel" role="tabpanel" aria-labelledby="tab-updates" hidden>
+        <!-- UPDATE_PANEL -->
+      </section>
       <section id="general-panel" class="panel" role="tabpanel" aria-labelledby="tab-general">
+        <div id="onboarding"></div>
+        <div id="onboarding-language">
         <div class="section-label" data-i18n="languageLabel">Language</div>
         <h2 data-i18n="languageTitle">Choose your preferred language</h2>
         <p data-i18n="languageDescription">This preference is stored in your portable User folder and can be changed later in Umbra Studio settings.</p>
@@ -197,6 +203,7 @@
             <option value="de">Deutsch</option>
           </select>
           <button id="save-language" class="button primary" type="button" data-i18n="saveLanguage">Save Language</button>
+        </div>
         </div>
       </section>
       <section id="models-panel" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
@@ -244,6 +251,10 @@
         </div>
       </section>
       <section id="tools-panel" class="panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
+        <details><summary data-i18n="advancedBundles">Advanced feature bundles</summary>
+          <button id="install-all-dependencies" class="button" type="button" data-i18n="installAllDependencies">Install All Dependencies &amp; Support Models</button>
+          <p id="shared-support-size" aria-live="polite"></p>
+        </details>
         <div class="panel-head">
           <h2 data-i18n="managedTools">Managed tools</h2>
           <button id="tools-refresh" class="button" type="button" data-i18n="refreshTools">Refresh</button>
@@ -295,9 +306,9 @@
         featureTagging: "Waifu tagging, natural-language tagging/captioning, Image Inspector and Data Forge: Python Helpers in Tools plus Data Forge Models in Models. PixAI additionally needs Install PixAI Tagger.",
         featureGallery: "Gallery browsing and prompt editing: no additional AI models are needed.",
         featureRemote: "Umbra Remote: launch Umbra, open Umbra Remote, and follow its three-step connection guide.",
-        languageStepTab: "1. Language",
-        toolsStepTab: "2. Tools",
-        modelsStepTab: "3. Models",
+        languageStepTab: "Guided setup",
+        toolsStepTab: "Tools",
+        modelsStepTab: "Models",
         pythonHelpers: 'Python Helpers',
         pythonHelpersDescription: 'Install or repair shared Python dependencies for Waifu tagging and captioning.',
         installPythonHelpers: 'Install / Repair Python Helpers',
@@ -342,7 +353,7 @@
         setupGuide: 'Umbra Studio einrichten',
         installAllDependencies: 'Alle Abhängigkeiten installieren',
         openTools: 'Tools öffnen', openModels: 'Modelle öffnen',
-        languageStepTab: '1. Sprache', toolsStepTab: '2. Tools', modelsStepTab: '3. Modelle',
+        languageStepTab: 'Geführte Einrichtung', toolsStepTab: 'Tools', modelsStepTab: 'Modelle',
         pythonHelpers: 'Python-Hilfsprogramme',
         pythonHelpersDescription: 'Gemeinsame Python-Abhängigkeiten für Waifu-Tagging und Bildbeschreibungen installieren oder reparieren.',
         installPythonHelpers: 'Python-Hilfsprogramme installieren / reparieren',
@@ -383,6 +394,14 @@
         installingUmbraUiModels: 'Umbra-UI-Unterstützungsmodelle werden installiert',
       },
     };
+    Object.assign(SETUP_TRANSLATIONS, {
+      ja: {languageStepTab:'セットアップガイド',toolsStepTab:'ツール',modelsStepTab:'モデル',languageLabel:'言語',languageTitle:'使用する言語を選択してください',languageDescription:'言語は User フォルダーに保存され、後で設定から変更できます。',saveLanguage:'言語を保存',languageSaved:'言語を保存しました',closeSetup:'閉じる',launchUmbra:'Umbra Studio を起動',advancedBundles:'追加機能パック'},
+      'zh-CN': {languageStepTab:'引导设置',toolsStepTab:'工具',modelsStepTab:'模型',languageLabel:'语言',languageTitle:'选择您的首选语言',languageDescription:'语言保存在 User 文件夹中，可稍后在设置中更改。',saveLanguage:'保存语言',languageSaved:'语言已保存',closeSetup:'关闭',launchUmbra:'启动 Umbra Studio',advancedBundles:'扩展功能包'},
+      ko: {languageStepTab:'단계별 설정',toolsStepTab:'도구',modelsStepTab:'모델',languageLabel:'언어',languageTitle:'사용할 언어를 선택하세요',languageDescription:'언어는 User 폴더에 저장되며 나중에 설정에서 변경할 수 있습니다.',saveLanguage:'언어 저장',languageSaved:'언어 저장됨',closeSetup:'닫기',launchUmbra:'Umbra Studio 시작',advancedBundles:'추가 기능 패키지'},
+    });
+    SETUP_TRANSLATIONS.en.advancedBundles = 'Advanced feature bundles';
+    for (const [lang, title] of Object.entries({en:'Updates',ja:'更新','zh-CN':'更新',ko:'업데이트',de:'Updates'})) SETUP_TRANSLATIONS[lang].updatesTab = title;
+    SETUP_TRANSLATIONS.de.advancedBundles = 'Zusätzliche Funktionspakete';
     const token = new URLSearchParams(location.search).get('token') || '';
     const api = (path, options = {}) => fetch(path, {
       ...options,
@@ -393,7 +412,7 @@
       },
     }).then(async (response) => {
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || body.success === false) throw new Error(body.error || `Request failed (${response.status})`);
+      if (!response.ok || body.success === false) throw new Error(body.error || setupFormat('requestFailed', { status: response.status }));
       return body;
     });
     const status = document.getElementById('status');
@@ -408,13 +427,16 @@
     let currentLanguage = 'en';
     let languageDirty = false;
     let setupClosed = false;
+    let updateBusy = false;
+    let setupUiBusy = false;
 
     function tr(key) {
       return SETUP_TRANSLATIONS[currentLanguage]?.[key] || SETUP_TRANSLATIONS.en[key] || key;
     }
 
     function setSetupLanguage(value, markDirty = false) {
-      currentLanguage = value === 'de' ? 'de' : 'en';
+      const changed = currentLanguage !== value;
+      currentLanguage = ['en', 'ja', 'zh-CN', 'ko', 'de'].includes(value) ? value : 'en';
       language.value = value;
       document.documentElement.lang = currentLanguage;
       document.querySelectorAll('[data-i18n]').forEach((element) => {
@@ -422,6 +444,8 @@
         if (key) element.textContent = tr(key);
       });
       languageDirty = markDirty || languageDirty;
+      if (changed && typeof renderOnboarding === 'function') renderOnboarding();
+      document.dispatchEvent(new CustomEvent('umbra-setup-language', { detail: { language: currentLanguage } }));
     }
 
     function localizeJobStep(step) {
@@ -435,17 +459,42 @@
         'Installing Umbra UI support models': 'installingUmbraUiModels',
         'Installation complete': 'installationComplete',
         'Installation failed': 'installationFailed',
+        'Verifying installation': 'verifyRunning',
+        'Verifying generation checkpoint': 'verifyCheckpoint',
+        'Installation verified': 'installationVerified',
+        'Verification held': 'verificationHeld',
+        'FFmpeg and ffprobe verified': 'mediaVerified',
+        'Managed tool files verified': 'filesVerified',
+        'Managed tool repair failed': 'repairFailed',
+        'Restart required; runtime preflight pending': 'restartPending',
+        'Managed repair held': 'held',
       };
+      if (jobSteps[step]) return tr(jobSteps[step]);
+      const toolAction = /^(ComfyUI|AI Toolkit): (.+)$/.exec(step);
+      if (toolAction) {
+        const actionKey = { install: 'installTool', 'install core': 'installTool', update: 'updateTool', 'update pytorch': 'updateCuda', 'custom nodes': 'updateCustomNodes', 'nodes only': 'updateCustomNodes', 'h3 nodes': 'updateH3Nodes', 'install sageattention': 'repairSage', 'set comfyui version': 'switchVersion' }[toolAction[2]];
+        if (actionKey) return `${toolAction[1]}: ${tr(actionKey)}`;
+      }
+      if (/maintenance complete$/i.test(step)) return tr('maintenanceComplete');
+      if (/maintenance failed$/i.test(step)) return tr('installationFailed');
+      if (/^(Installing|Updating|Repairing|Switching) (ComfyUI|AI Toolkit)/.test(step)) return tr('maintenanceRunning');
+      if (/^(Checking|Verifying) (setup|readiness)/i.test(step)) return tr('verifyRunning');
+      if (step.startsWith('Installing ')) return setupFormat('installingTool', { tool: step.slice(11) });
+      if (step.startsWith('Preparing ')) return setupFormat('preparingTool', { tool: step.slice(10) });
       return tr(jobSteps[step] || step);
     }
 
     function setBusy(busy) {
+      setupUiBusy = busy;
+      busy = busy || updateBusy;
       installButtons.forEach((button) => { button.disabled = busy; });
       document.getElementById('install-all-dependencies').disabled = busy;
       document.getElementById('launch').disabled = busy;
       document.getElementById('close').disabled = busy;
       setModelBusy(busy);
       setToolsBusy(busy);
+      setOnboardingBusy(busy);
+      document.dispatchEvent(new CustomEvent('umbra-setup-busy', { detail: { busy: setupUiBusy } }));
     }
 
     function renderJob(job) {
@@ -460,6 +509,7 @@
       setBusy(job.phase === 'running');
       renderModelProgress(job);
       renderToolsProgress(job);
+      renderOnboardingProgress(job);
       status.textContent = job.phase === 'running' ? job.kind === 'managed-tools' || job.kind === 'python-helpers' ? localizeJobStep(job.step) : tr('installingModels') : localizeJobStep(job.step);
       status.classList.toggle('error', job.phase === 'failed');
     }
@@ -486,6 +536,7 @@
         await api('/api/language', { method: 'POST', body: JSON.stringify({ language: language.value }) });
         setSetupLanguage(language.value);
         languageDirty = false;
+        await loadOnboarding();
         status.textContent = tr('languageSaved');
         status.classList.remove('error');
       } catch (error) {
@@ -535,6 +586,9 @@
     });
 
     /* MODEL_SETUP_SCRIPT */
+    /* ONBOARDING_SCRIPT */
+    /* UPDATE_SCRIPT */
+    document.addEventListener('umbra-update-busy', event => { updateBusy = event.detail.busy; setBusy(setupUiBusy); });
     language.addEventListener('change', () => setSetupLanguage(language.value, true));
     setSetupLanguage(language.value);
     poll();

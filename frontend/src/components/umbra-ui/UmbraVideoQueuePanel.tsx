@@ -97,7 +97,7 @@ export function UmbraVideoWorkspacePreview({ job }: { job?: UmbraVideoReviewJob 
         )}
       </div>
       {job && job.outputs.length > 1 ? <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-white/10 p-2 custom-scrollbar" aria-label="Video job outputs">
-        {job.outputs.map((item) => <button key={item.id} type="button" onClick={() => setOutputId(item.id)} aria-pressed={output?.id === item.id} className={cn('max-w-52 shrink-0 truncate rounded border px-2 py-1.5 text-[10px]', output?.id === item.id ? 'border-fuchsia-300/40 text-fuchsia-100' : 'border-white/10 text-zinc-500')} title={item.name}>{item.name}</button>)}
+        {job.outputs.map((item) => <button data-i18n-skip="" key={item.id} type="button" onClick={() => setOutputId(item.id)} aria-pressed={output?.id === item.id} className={cn('max-w-52 shrink-0 truncate rounded border px-2 py-1.5 text-[10px]', output?.id === item.id ? 'border-fuchsia-300/40 text-fuchsia-100' : 'border-white/10 text-zinc-500')} title={item.name}>{item.name}</button>)}
       </div> : null}
     </section>
   );
@@ -265,7 +265,7 @@ function ReviewOutputPreview({ output, protectedMedia }: { output: UmbraVideoRev
   if (output.type === 'image') {
     return (
       <div data-umbra-queue-preview="" className="relative flex min-h-64 w-full items-center justify-center overflow-hidden bg-black p-2">
-        <img
+        <img data-i18n-skip=""
           data-umbra-nsfw-media={protectedMedia ? '' : undefined}
           src={mediaUrl(output.path)}
           alt={output.name}
@@ -278,7 +278,7 @@ function ReviewOutputPreview({ output, protectedMedia }: { output: UmbraVideoRev
   if (output.type === 'audio') {
     return <div className="flex min-h-24 items-center p-3"><audio src={mediaUrl(output.path)} controls className="w-full" /></div>;
   }
-  return <div className="flex min-h-24 items-center justify-center font-mono text-[10px] text-zinc-500">{output.name}</div>;
+  return <div data-i18n-skip="" className="flex min-h-24 items-center justify-center font-mono text-[10px] text-zinc-500">{output.name}</div>;
 }
 
 function statusTone(status: UmbraVideoReviewJob['status']) {
@@ -673,7 +673,7 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
             <p className="text-xs text-zinc-400">This is the captured native configuration. Requeue preserves its seeds, resources, and stages. Configure changes in ComfyUI and capture a new snapshot.</p>
             <p className="break-all font-mono text-[10px] text-zinc-500">{officialSelection.captureId}</p>
             <label className="block space-y-2"><span className={labelClass}>Captured native prompt</span><textarea aria-label="Recorded native prompt" readOnly value={liveSelectedJob.prompt} className={`${inputClass} min-h-24 resize-y`} /></label>
-            {liveSelectedJob.outputs.map(output => <div key={output.id} className="overflow-hidden rounded border border-white/10"><ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(liveSelectedJob.prompt) === 'nsfw'} /><p className="truncate border-t border-white/10 px-2 py-1 text-[10px] text-zinc-500">{output.name}</p></div>)}
+            {liveSelectedJob.outputs.map(output => <div key={output.id} className="overflow-hidden rounded border border-white/10"><ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(liveSelectedJob.prompt) === 'nsfw'} /><p data-i18n-skip="" className="truncate border-t border-white/10 px-2 py-1 text-[10px] text-zinc-500">{output.name}</p></div>)}
           </div>
           <footer className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-t border-white/10 p-3"><button type="button" onClick={() => useStore.getState().setActiveWorkspace('comfyui')} className="min-h-9 rounded border border-white/10 px-3 text-[11px] text-zinc-300">Open ComfyUI</button><button type="button" onClick={() => void requeueOfficial()} disabled={requeueing || !!requeueIssue} title={requeueIssue || 'Requeue the exact captured native configuration'} className="ml-auto inline-flex min-h-9 items-center gap-2 rounded border border-[var(--umbra-accent)] px-3 text-[11px] font-bold text-[var(--umbra-text)] disabled:opacity-40">{requeueing ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}Requeue captured workflow</button></footer>
         </section>
@@ -707,7 +707,7 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
                 {liveSelectedJob.outputs.length > 0 ? liveSelectedJob.outputs.map((output) => (
                   <div key={output.id} className="overflow-hidden rounded-md border border-white/10 bg-black/45">
                     <ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(liveSelectedJob.prompt) === 'nsfw'} />
-                    <div className="truncate border-t border-white/10 px-2 py-1.5 font-mono text-[9px] text-zinc-500">{output.name}</div>
+                    <div data-i18n-skip="" className="truncate border-t border-white/10 px-2 py-1.5 font-mono text-[9px] text-zinc-500">{output.name}</div>
                   </div>
                 )) : (
                   <div className="col-span-full flex aspect-video items-center justify-center border border-white/10 bg-black/35 text-zinc-700">

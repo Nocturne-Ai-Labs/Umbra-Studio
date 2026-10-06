@@ -931,7 +931,7 @@ export function UmbraExtrasWorkspace({
                 <div key={item.id} className="flex min-h-12 items-center gap-2 border border-white/10 bg-white/[0.025] px-2.5">
                   <JobStatusIcon status={item.status} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[9px] font-bold text-zinc-300">{item.name}</div>
+                    <div data-i18n-skip="" className="truncate text-[9px] font-bold text-zinc-300">{item.name}</div>
                     <div className={cn('font-mono text-[8px]', item.error ? 'break-words normal-case leading-relaxed text-red-300/80' : 'uppercase text-zinc-600')}>
                       {item.error || item.status}
                     </div>

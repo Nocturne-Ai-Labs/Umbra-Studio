@@ -49,10 +49,13 @@ try:
             raise ValueError('requirements override StringZilla wheel policy')
         return result
     parser = req_file.RequirementsFileParser(session, guarded_line)
+    # Impact Pack uses this unnamed official VCS requirement. Its upstream setup.py
+    # declares SAM-2; recognize only that exact source, without resolving metadata.
+    known_sources = {'git+https://github.com/facebookresearch/sam2': 'sam-2'}
     def inspect_reference(requirement):
         if not requirement.link or requirement.link.is_wheel:
             return
-        name = canonicalize_name(requirement.name) if requirement.name else None
+        name = canonicalize_name(requirement.name) if requirement.name else known_sources.get(requirement.link.url)
         try:
             archive_name, _ = parse_sdist_filename(urllib.parse.unquote(requirement.link.filename))
         except ValueError:
@@ -65,8 +68,8 @@ try:
                 inspect_reference(install_req_from_parsed_requirement(req_file.handle_requirement_line(line, options)))
     for editable in options.editables:
         inspect_reference(install_req_from_editable(editable))
-except BaseException:
-    print('Windows StringZilla wheel policy could not be verified. Use inspectable local requirements/constraints; remove conflicting binary-format directives and StringZilla source references. Check managed pip compatibility before retrying.', file=sys.stderr)
+except BaseException as exc:
+    print('Windows StringZilla wheel policy could not be verified: ' + str(exc) + '. Use inspectable local requirements/constraints; remove conflicting binary-format directives and StringZilla source references. Check managed pip compatibility before retrying.', file=sys.stderr)
     sys.exit(1)
 `;
 

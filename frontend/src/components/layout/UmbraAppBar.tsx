@@ -1,6 +1,7 @@
 'use client';
 
 import { comfyToolActions } from '@/lib/toolActionController';
+import { openUmbraToolsSetup } from '@/lib/openUmbraSetup';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
@@ -95,9 +96,8 @@ function runAfterBootIdle(callback: () => void, delayMs = 2500): () => void {
   };
 }
 
-type VersionManagedTool = 'comfyui';
 type NeuralHubTool = 'comfyui' | 'aitoolkit';
-type NeuralHubToolAction = 'install' | 'update' | 'custom_nodes' | 'update_pytorch' | 'install_sageattention';
+
 
 interface NeuralHubAIToolkitStatus {
   installed: boolean;
@@ -163,22 +163,6 @@ function clampPhoneComfyMenuPosition(position: PhoneComfyMenuPosition): PhoneCom
   };
 }
 
-
-interface ToolVersionOption {
-  ref: string;
-  commit: string;
-  date: string | null;
-  subject: string | null;
-}
-
-interface ToolVersionCatalogResponse {
-  available?: boolean;
-  unavailableReason?: string | null;
-  currentRef?: string;
-  currentCommit?: string;
-  versions?: ToolVersionOption[];
-  error?: string;
-}
 
 export const UmbraAppBar = () => {
   const { t } = useI18n();
@@ -249,11 +233,7 @@ export const UmbraAppBar = () => {
   React.useEffect(() => () => lifecycleControllerRef.current?.abort(), []);
   const [restartingAll, setRestartingAll] = React.useState(false);
   const [stoppingAll, setStoppingAll] = React.useState(false);
-  const [localToolActionLoading, setToolActionLoading] = React.useState<{
-    comfyui: NeuralHubToolAction | null;
-    aitoolkit: NeuralHubToolAction | null;
-  }>({ comfyui: null, aitoolkit: null });
-  const toolActionLoading = { ...localToolActionLoading, comfyui: comfyActionBusy ? comfyAction : null };
+  const toolActionLoading = { comfyui: comfyActionBusy ? comfyAction : null, aitoolkit: null };
   const [toolUpdates, setToolUpdates] = React.useState<Record<NeuralHubTool, {
     tool: boolean;
     pytorch: boolean;
@@ -261,23 +241,6 @@ export const UmbraAppBar = () => {
     comfyui: { tool: false, pytorch: false },
     aitoolkit: { tool: false, pytorch: false },
   });
-  const [toolVersions, setToolVersions] = React.useState<Record<VersionManagedTool, ToolVersionOption[]>>({
-    comfyui: [],
-  });
-  const [toolCurrentRef, setToolCurrentRef] = React.useState<Record<VersionManagedTool, string>>({
-    comfyui: '',
-  });
-  const [toolCurrentCommit, setToolCurrentCommit] = React.useState<Record<VersionManagedTool, string>>({
-    comfyui: '',
-  });
-  const [toolSelectedRef, setToolSelectedRef] = React.useState<Record<VersionManagedTool, string>>({
-    comfyui: '',
-  });
-  const [toolVersionLoading, setToolVersionLoading] = React.useState<Record<VersionManagedTool, boolean>>({
-    comfyui: false,
-  });
-  const toolVersionSwitching = React.useMemo(() => ({ comfyui: comfyActionBusy && comfyAction === 'set_comfyui_version' }), [comfyActionBusy, comfyAction]);
-
   const liveRemoteMode = typeof document === 'undefined'
     ? remoteMode
     : document.documentElement.dataset.umbraRemoteMode || remoteMode;
@@ -640,81 +603,6 @@ export const UmbraAppBar = () => {
     };
   }, [refreshAIToolkitStatus]);
 
-  const getManagedToolLabel = React.useCallback((tool: VersionManagedTool) => {
-    if (tool === 'comfyui') return 'ComfyUI';
-    return tool;
-  }, []);
-
-  const formatToolVersionDate = React.useCallback((value: string | null) => {
-    if (!value) return '';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleDateString();
-  }, []);
-
-  const loadToolVersions = React.useCallback(async (tool: VersionManagedTool, notifyOnError = false) => {
-    setToolVersionLoading((prev) => ({ ...prev, [tool]: true }));
-    try {
-      const res = await fetch(`/api/tools/${tool}/versions?limit=300`);
-      const data = await res.json() as ToolVersionCatalogResponse;
-      if (!res.ok) {
-        throw new Error(data?.error || `Failed to load ${getManagedToolLabel(tool)} versions`);
-      }
-      if (data?.available === false) {
-        setToolVersions((prev) => ({ ...prev, [tool]: [] }));
-        setToolCurrentRef((prev) => ({ ...prev, [tool]: '' }));
-        setToolCurrentCommit((prev) => ({ ...prev, [tool]: '' }));
-        setToolSelectedRef((prev) => ({ ...prev, [tool]: '' }));
-        return;
-      }
-      const versions = Array.isArray(data?.versions) ? data.versions as ToolVersionOption[] : [];
-      const currentRef = String(data?.currentRef || '').trim();
-      const currentCommit = String(data?.currentCommit || '').trim();
-      setToolVersions((prev) => ({ ...prev, [tool]: versions }));
-      setToolCurrentRef((prev) => ({ ...prev, [tool]: currentRef }));
-      setToolCurrentCommit((prev) => ({ ...prev, [tool]: currentCommit }));
-      setToolSelectedRef((prev) => {
-        const prevRef = String(prev[tool] || '').trim();
-        const nextSelected = prevRef && versions.some((entry) => entry.ref === prevRef)
-          ? prevRef
-          : (currentRef || prevRef || versions[0]?.ref || '');
-        return { ...prev, [tool]: nextSelected };
-      });
-    } catch (error) {
-      setToolVersions((prev) => ({ ...prev, [tool]: [] }));
-      setToolCurrentRef((prev) => ({ ...prev, [tool]: '' }));
-      setToolCurrentCommit((prev) => ({ ...prev, [tool]: '' }));
-      if (notifyOnError) {
-        useStore.getState().showToast(
-          error instanceof Error ? error.message : `Failed to load ${getManagedToolLabel(tool)} versions`,
-          'error'
-        );
-      }
-    } finally {
-      setToolVersionLoading((prev) => ({ ...prev, [tool]: false }));
-    }
-  }, [getManagedToolLabel]);
-
-  const handleToolVersionSwitch = React.useCallback(async (tool: VersionManagedTool) => {
-    if (isRemoteClient) {
-      useStore.getState().showToast('Tool version switching is only available from the host PC.', 'error');
-      return;
-    }
-    const targetRef = String(toolSelectedRef[tool] || '').trim();
-    if (!targetRef) return;
-    if (targetRef === String(toolCurrentRef[tool] || '').trim()) return;
-    if (toolVersionSwitching[tool]) return;
-
-    if (useStore.getState().booting.comfyui) return;
-    void comfyToolActions.start('set_comfyui_version', targetRef);
-  }, [fetchSystemStatus, getManagedToolLabel, isRemoteClient, loadToolVersions, refreshToolUpdates, toolCurrentRef, toolSelectedRef, toolVersionSwitching]);
-
-  React.useEffect(() => {
-    return runAfterBootIdle(() => {
-      void loadToolVersions('comfyui');
-    }, 3500);
-  }, [loadToolVersions]);
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -1040,60 +928,9 @@ export const UmbraAppBar = () => {
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
   }, []);
 
-  const handleToolAction = async (
-    backend: NeuralHubTool,
-    action: NeuralHubToolAction
-  ) => {
-    if (isRemoteClient) {
-      useStore.getState().showToast('Install and update actions are only available from the host PC.', 'error');
-      return;
-    }
-    if (backend === 'comfyui') {
-      if (useStore.getState().booting.comfyui) return;
-      void comfyToolActions.start(action);
-      return;
-    }
-    setToolActionLoading(prev => ({ ...prev, [backend]: action }));
-
-    try {
-      const res = await fetch('/api/tools/actions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool: backend, action })
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.actionId) {
-        throw new Error(data?.error || 'Failed to start tool action');
-      }
-
-      const actionId = data.actionId as string;
-      let done = false;
-      while (!done) {
-        await new Promise(r => setTimeout(r, 1000));
-        const statusRes = await fetch(`/api/tools/actions/${actionId}`);
-        const status = await statusRes.json();
-        if (status.status === 'completed') {
-          done = true;
-        } else if (status.status === 'failed') {
-          throw new Error(status.error || 'Tool action failed');
-        }
-      }
-
-      const actionLabel = String(action ?? '').replaceAll('_', ' ');
-      const toolLabel = 'AI-Toolkit';
-      useStore.getState().showToast(`Completed ${actionLabel} for ${toolLabel}`, 'success');
-      setToolActionLoading(prev => ({ ...prev, [backend]: null }));
-      void fetchSystemStatus({ force: true });
-      if (backend === 'aitoolkit') void refreshAIToolkitStatus();
-      void refreshToolUpdates();
-    } catch (err) {
-      useStore.getState().showToast(
-        err instanceof Error ? err.message : 'Tool action failed',
-        'error'
-      );
-    } finally {
-      setToolActionLoading(prev => ({ ...prev, [backend]: null }));
-    }
+  const handleOpenSetup = async () => {
+    try { await openUmbraToolsSetup(); }
+    catch (error) { useStore.getState().showToast(error instanceof Error ? error.message : 'Unable to open Umbra Setup.', 'error'); }
   };
 
   const handleRestartAll = async () => {
@@ -1215,54 +1052,6 @@ export const UmbraAppBar = () => {
     }
   };
 
-  const renderVersionControls = (tool: VersionManagedTool) => {
-    const versions = toolVersions[tool];
-    const currentRef = toolCurrentRef[tool];
-    const currentCommit = toolCurrentCommit[tool];
-    const selectedRef = toolSelectedRef[tool];
-    const loading = toolVersionLoading[tool];
-    const switching = toolVersionSwitching[tool];
-    const disabled = comfyActionBusy || isRemoteClient || loading || switching || !!backendLoading[tool] || !!toolActionLoading[tool];
-
-    return (
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <UmbraSelectControl
-            value={selectedRef}
-            onChange={(event) => setToolSelectedRef((prev) => ({ ...prev, [tool]: event.target.value }))}
-            disabled={disabled || versions.length === 0}
-            className="flex-1 min-w-0 rounded bg-black/35 border border-white/10 px-2 py-1 text-[9px] text-zinc-200 disabled:opacity-50"
-          >
-            <option value="">Select version...</option>
-            {versions.map((version) => (
-              <option key={`${tool}:${version.ref}:${version.commit}`} value={version.ref}>
-                {version.ref}{version.date ? ` • ${formatToolVersionDate(version.date)}` : ''}
-              </option>
-            ))}
-          </UmbraSelectControl>
-          <button
-            onClick={() => void loadToolVersions(tool, true)}
-            disabled={disabled}
-            className="text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50"
-            title="Refresh versions"
-          >
-            {loading ? '...' : '↻'}
-          </button>
-          <button
-            onClick={() => void handleToolVersionSwitch(tool)}
-            disabled={disabled || !selectedRef || selectedRef === currentRef}
-            className="text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-amber-500/10 text-amber-200 hover:bg-amber-500/20 transition-all disabled:opacity-50"
-            title="Switch to selected version"
-          >
-            {switching ? 'Switch...' : 'Switch'}
-          </button>
-        </div>
-        <div className="text-[8px] text-zinc-500 truncate" title={currentCommit ? `${currentRef} (${currentCommit})` : currentRef || ''}>
-          Current: {currentRef || 'unknown'}{currentCommit ? ` (${currentCommit})` : ''}
-        </div>
-      </div>
-    );
-  };
 
   const renderThumbnailPrivacyControls = () => (
     <div data-umbra-thumbnail-privacy-controls="" className="space-y-2">
@@ -1637,44 +1426,11 @@ export const UmbraAppBar = () => {
                         UI
                       </button>
                     </div>
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={() => handleToolAction('comfyui', 'install')}
-                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
-                        className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-white/5 hover:bg-white/10 transition-all disabled:opacity-50"
-                      >
-                        {toolActionLoading.comfyui === 'install' ? 'Installing...' : 'Install'}
-                      </button>
-                      <button
-                        onClick={() => handleToolAction('comfyui', 'update')}
-                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
-                        className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-all disabled:opacity-50"
-                      >
-                        {toolActionLoading.comfyui === 'update' ? 'Updating...' : toolUpdates.comfyui.tool ? 'Update Ready' : 'Update'}
-                      </button>
-                      <button
-                        onClick={() => handleToolAction('comfyui', 'custom_nodes')}
-                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
-                        className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
-                      >
-                        {toolActionLoading.comfyui === 'custom_nodes' ? 'Nodes...' : 'Nodes'}
-                      </button>
-                      <button
-                        onClick={() => handleToolAction('comfyui', 'update_pytorch')}
-                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
-                        className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 transition-all disabled:opacity-50"
-                      >
-                        {toolActionLoading.comfyui === 'update_pytorch' ? 'Torch...' : toolUpdates.comfyui.pytorch ? 'Torch Ready' : 'Torch'}
-                      </button>
-                      <button
-                        onClick={() => handleToolAction('comfyui', 'install_sageattention')}
-                        disabled={comfyActionBusy || isRemoteClient || !!toolActionLoading.comfyui || !!backendLoading.comfyui}
-                        className="flex-1 text-[8px] uppercase tracking-wider font-bold py-1 px-2 rounded bg-fuchsia-500/10 text-fuchsia-300 hover:bg-fuchsia-500/20 transition-all disabled:opacity-50"
-                      >
-                        {toolActionLoading.comfyui === 'install_sageattention' ? 'Sage...' : 'Sage'}
-                      </button>
-                    </div>
-                    {renderVersionControls('comfyui')}
+                    <button type="button" onClick={() => void handleOpenSetup()} disabled={isRemoteClient}
+                      className="w-full rounded bg-white/5 px-2 py-1.5 text-[9px] font-bold uppercase tracking-wider hover:bg-white/10 disabled:opacity-50">
+                      Open Umbra Setup
+                    </button>
+
                   </div>
 
                   {/* AI-Toolkit */}
@@ -1760,31 +1516,10 @@ export const UmbraAppBar = () => {
                       </button>
                     </div>
 
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={() => void handleToolAction('aitoolkit', 'install')}
-                        disabled={isRemoteClient || !aiToolkitStatus.nodeAvailable || aiToolkitStatus.running || !!toolActionLoading.aitoolkit || !!backendLoading.aitoolkit}
-                        className="flex-1 rounded bg-white/5 px-2 py-1 text-[8px] font-bold uppercase tracking-wider transition-all hover:bg-white/10 disabled:opacity-50"
-                      >
-                        {toolActionLoading.aitoolkit === 'install'
-                          ? aiToolkitStatus.installed ? 'Repairing...' : 'Installing...'
-                          : aiToolkitStatus.installed ? 'Repair' : 'Install'}
-                      </button>
-                      <button
-                        onClick={() => void handleToolAction('aitoolkit', 'update')}
-                        disabled={isRemoteClient || !aiToolkitStatus.installed || aiToolkitStatus.running || !!toolActionLoading.aitoolkit || !!backendLoading.aitoolkit}
-                        className="flex-1 rounded bg-amber-500/10 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-amber-300 transition-all hover:bg-amber-500/20 disabled:opacity-50"
-                      >
-                        {toolActionLoading.aitoolkit === 'update' ? 'Updating...' : toolUpdates.aitoolkit.tool ? 'Update Ready' : 'Update'}
-                      </button>
-                      <button
-                        onClick={() => void handleToolAction('aitoolkit', 'update_pytorch')}
-                        disabled={isRemoteClient || !aiToolkitStatus.installed || aiToolkitStatus.running || !!toolActionLoading.aitoolkit || !!backendLoading.aitoolkit}
-                        className="flex-1 rounded bg-cyan-500/10 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-cyan-300 transition-all hover:bg-cyan-500/20 disabled:opacity-50"
-                      >
-                        {toolActionLoading.aitoolkit === 'update_pytorch' ? 'Torch...' : toolUpdates.aitoolkit.pytorch ? 'Torch Ready' : 'Torch'}
-                      </button>
-                    </div>
+                    <button type="button" onClick={() => void handleOpenSetup()} disabled={isRemoteClient}
+                      className="w-full rounded bg-white/5 px-2 py-1.5 text-[9px] font-bold uppercase tracking-wider hover:bg-white/10 disabled:opacity-50">
+                      Open Umbra Setup
+                    </button>
 
                     {!aiToolkitStatus.nodeAvailable ? (
                       <div className="text-[8px] leading-4 text-amber-300/80">Node.js 20 or newer is required to install and run AI-Toolkit.</div>

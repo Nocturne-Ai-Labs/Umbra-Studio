@@ -269,7 +269,7 @@ export function UmbraLoraStackControls({
                           title={`Copy "${tag}"`}
                         >
                           {copiedToken === tag ? <Check size={9} className="shrink-0" /> : <Copy size={9} className="shrink-0" />}
-                          <span className="truncate">{tag}</span>
+                          <span data-i18n-skip="" className="truncate">{tag}</span>
                         </button>
                       ))}
                     </div>
@@ -291,7 +291,7 @@ export function UmbraLoraStackControls({
                           title={`Copy "${tag}"`}
                         >
                           {copiedToken === tag ? <Check size={9} className="shrink-0" /> : <Copy size={9} className="shrink-0" />}
-                          <span className="truncate">{tag}</span>
+                          <span data-i18n-skip="" className="truncate">{tag}</span>
                         </button>
                       ))}
                     </div>

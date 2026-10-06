@@ -9,9 +9,9 @@ if not exist "%BUN_BIN%" (
   exit /b 1
 )
 if not exist "%UPDATER_BOOTSTRAP%" (
-  echo [ERROR] Standalone updater is missing: %UPDATER_BOOTSTRAP%
+  echo [ERROR] Umbra Setup launcher is missing: %UPDATER_BOOTSTRAP%
   pause
   exit /b 1
 )
-"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%"
+"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%" --tab updates %*
 if errorlevel 1 pause

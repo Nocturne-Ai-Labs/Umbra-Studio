@@ -1,5 +1,163 @@
 # Changelog
 
+## v0.90.6-beta - Guided Setup, Localization And Bundled Helpers
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- ComfyUI and AI Toolkit install/update controls now live in **Umbra Setup >
+  Tools**, including CUDA/PyTorch, SageAttention, custom nodes and ComfyUI version
+  switching. Main-app tool panels open Setup; launch, stop and connection checks
+  remain in Umbra. Setup keeps installer progress/logs visible and blocks launches
+  while a maintenance job owns the tool.
+
+- Update Umbra Studio and reopen it. Windows and Linux release packages now
+  include FFmpeg and ffprobe. Fresh installs and app updates receive them
+  automatically, with no separate media download or PATH change.
+- CPU Python helpers also arrive with the app: pandas, NumPy, Pillow, ONNX
+  Runtime, Hugging Face Hub, safetensors and psutil. No system Python installation
+  is needed for these bundled dependencies. **Tagger model weights are not
+  included**; select the desired models in **Umbra Setup > Models**. Larger
+  PyTorch/Transformers, PixAI and natural-language captioning installations remain
+  optional managed downloads. Existing Python helper venvs are preserved.
+  Windows ONNX helpers require the Microsoft Visual C++ 2019 or newer runtime.
+- If video thumbnails or metadata still report missing tools, open
+  `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, use **Guided setup >
+  Ready > Install / repair media tools**, or select the same action under **Tools**.
+  Guided Setup checks both executables before reporting Ready. Legacy `UmbraUpdater.bat` or `./umbra-updater.sh` shortcuts open
+  the same app; switch to **Tools** for dependency repairs.
+- The optional repair downloads about **184 MiB on Windows** or **143 MiB on Linux**
+  only when the existing executables need repair; normal installs use the bundled pair.
+  Downloads are checksum verified and retain the upstream GPL-3.0-or-later
+  license notices. Linux requires `tar` and `xz-utils` or equivalents.
+- No model download, migration, ComfyUI update, or ComfyUI restart is required
+  for this repair. Existing user data, installed tools, and system PATH are
+  preserved. Explicit `FFMPEG_PATH` and `FFPROBE_PATH` overrides remain preferred;
+  review those paths if executable verification fails.
+
+- Linux packages require glibc 2.35 or newer. FFmpeg includes software AV1 decoding alongside the required image and video codecs; codec libraries are built from pinned sources while the Linux C runtime remains supplied by the host.
+- Linux custom-node prerequisites remain `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Guided Setup And Localization
+
+- Setup's Tools, Models and guided onboarding now share English, Japanese,
+  Simplified Chinese, Korean and German labels and instructions. Main-app
+  translation now preserves user prompts, tags, model/file names and preset
+  labels, including custom selection menus and file/folder context-menu headings.
+  Main-app localization now covers the audited labels, long instructions,
+  conditional controls, option descriptions and static notifications. Reviewed
+  numeric templates translate Gallery, filmstrip and queue counts; explicit
+  keys translate resource readiness and dataset actions without altering values.
+  Raw technical diagnostics remain original; audit coverage does not certify
+  every arbitrary dynamic backend message.
+
+- Setup now shows the optional Eyes detailer's original CivitAI download link
+  and destination folder. The model remains manual and excluded from packages
+  and automatic installation; credits no longer point to a mirrored weight file.
+
+- Umbra Setup and Updater now share one local app. Guided setup saves progress
+  through language first, ComfyUI, optional AI Toolkit, custom nodes, support
+  models, generation prerequisites/checkpoint and integrity verification. The
+  final check does not generate an image. Updates show transfer progress and
+  preserve existing models and user files; legacy updater shortcuts open the
+  same Updates tab. Setup/update operations cannot overlap.
+
+### Media Reliability
+
+- Gallery thumbnails, shared video previews, metadata probes, and extended-video
+  exports share media executable discovery. Discovery checks explicit overrides,
+  Umbra-managed tools, the release's bundled pair, this instance's imageio FFmpeg, and PATH.
+- Build FFmpeg 8.1.3 and its required codec libraries from checksum-pinned sources under `Runtime/FFmpeg`, including
+  the complete corresponding source archives, exact build script, configuration and license notices. App updates replace these runtime
+  files while preserving users' `Tools` and `User` directories.
+- Setup's Tools page and the unified app's Dependencies page show FFmpeg and ffprobe
+  verification separately and offer a dedicated install/repair action.
+- Repair stages and verifies both binaries, required PNG/WebP encoders, and
+  license notices before switching to the new portable tools. A failed download
+  or extraction keeps the previous tools available.
+- Let slower media repair downloads continue while receiving data. Bound header
+  and stalled-response waits separately, with a fresh retry after failure.
+- Missing executable errors point directly to the Setup and Updater repair.
+
+### Power Prompter Resources
+
+- Power Prompter now exposes the selected pipeline's text encoder, VAE and other
+  workflow resources alongside its existing model and processing controls.
+  Resource choices are saved with the card document and queue settings. The
+  catalogs refresh when ComfyUI connects and can also be refreshed manually.
+
+### Lightweight Python Dependencies
+
+- Build a fresh portable Python 3.11 CPU environment from checksum-pinned
+  upstream archives and wheels; retain package licenses and provenance.
+- Include pandas, NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors
+  and psutil. No tagger model weights, PyTorch or Transformers are bundled.
+- Use bundled dependencies for WD Tagger and the CPU ONNX censor detector,
+  while model files and heavier specialist providers remain separate.
+- Show dependency verification in Setup and Updater without claiming that
+  missing model weights or optional managed tools are installed.
+- Preserve existing `Runtime/Python311` and helper venvs during app replacement
+  and rollback. Verify bundled dependency hashes before closing the current app.
+- Require the helper inventory to cover every actual bundle file, rejecting
+  unlisted files and redirected directories. Release validation also rejects
+  model weights anywhere in the archive, including files omitted from inventories.
+
+### Updater Progress
+
+- Keep the progress bar beside the launch controls while scrolling release
+  notes and dependencies, including narrow windows.
+- Show download percentage and received/total bytes. Downloads with unknown
+  size and installation/dependency phases show ongoing activity instead of a
+  misleading completed download percentage.
+- Show **Ready to launch Umbra Studio** when the app update is complete and
+  current operations have finished. Launch remains unavailable while updating,
+  installing dependencies, or reconnecting to the updater.
+
+### Updater Reliability
+
+- Retrying a failed installation uses fresh download and extraction paths,
+  and publishes the new attempt before polling can mistake the earlier failure
+  for its result. Existing recovery copies remain available.
+- Verify ZIP paths, entry checksums, extraction limits, and required app files
+  before requesting shutdown. A malformed package leaves the current app open.
+- Verify the configured endpoint belongs to this installation before requesting
+  shutdown or launching. A different installation is left running.
+- Reuse an already-open Updater and prevent competing sessions from modifying
+  the same installation. Keep live worker workspaces during long installers.
+- Keep the Updater open until Umbra reports ready. Show startup failures with
+  a retry action, and open the app only after verifying its runtime root.
+- Clear recovered connection errors and resume status checks after launch
+  failure. Launch waits for current operation status to be available.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: one Setup app for guided onboarding, tool maintenance and updates, with language selection first.
+- Improved: audited app labels and dynamic counts in Japanese, Simplified Chinese, Korean and German, while preserving user-entered text.
+- Fixed: fresh ComfyUI setup handles pinned Git tags without looking for a
+  nonexistent remote branch with the tag's name.
+- Fixed: image generation skips disabled output-upscale stages, so they no
+  longer require an uninstalled upscale model to validate the workflow.
+- Fixed: Windows Impact Pack setup recognizes the official SAM2 source
+  requirement while retaining the StringZilla wheel-only installation policy.
+- Fixed: missing-PATH video thumbnail failures when the installation already
+  has a usable ComfyUI imageio FFmpeg.
+- Improved: portable FFmpeg and ffprobe verification and repair through Setup
+  and Updater without a ComfyUI reinstall or global PATH edits.
+- Improved: FFmpeg and ffprobe arrive with the release and through app updates.
+- Improved: portable CPU Python dependencies arrive with the release; tagger
+  models remain separate downloads and existing helper environments are kept.
+- Improved: video preview errors explain how to install or repair missing tools.
+- Fixed: update progress could disappear from view while scrolling, and
+  dependency-only installations did not show the progress bar.
+- Improved: clear download progress, installation activity, and launch readiness.
+- Fixed: failed-update retries, competing Updater sessions, and lost launch errors.
+- Improved: archive verification before shutdown and installation ownership checks.
+
 ## v0.90.5-beta - ComfyUI Launch Recovery And UI Audit Repairs
 
 ### TL;DR - Setup After Updating

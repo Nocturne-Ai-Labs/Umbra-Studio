@@ -1169,7 +1169,7 @@ export function WaifuDiffusionWorkspace({
                     <div className="flex flex-wrap gap-1.5">
                       {Object.entries(selectedItem.waifuTagger.result.rating).map(([tag, score]) => (
                         <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
-                          {tag} ({(score * 100).toFixed(1)}%)
+                          <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                         </span>
                       ))}
                     </div>
@@ -1191,7 +1191,7 @@ export function WaifuDiffusionWorkspace({
                     <div className="flex flex-wrap gap-1.5">
                       {selectedItem.waifuTagger.result.character.map(({ tag, score }) => (
                         <span key={tag} className="px-2 py-1 rounded bg-[var(--umbra-accent)]/15 border border-[var(--umbra-accent)]/25 text-[11px] text-[var(--umbra-accent)]">
-                          {tag} ({(score * 100).toFixed(1)}%)
+                          <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                         </span>
                       ))}
                     </div>
@@ -1213,7 +1213,7 @@ export function WaifuDiffusionWorkspace({
                     <div className="flex flex-wrap gap-1.5">
                       {selectedItem.waifuTagger.result.general.map(({ tag, score }) => (
                         <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
-                          {tag} ({(score * 100).toFixed(1)}%)
+                          <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                         </span>
                       ))}
                     </div>
@@ -1225,7 +1225,7 @@ export function WaifuDiffusionWorkspace({
                     <div className="flex flex-wrap gap-1.5">
                       {selectedItem.waifuTagger.result.style?.map(({ tag, score }) => (
                         <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
-                          {tag} ({(score * 100).toFixed(1)}%)
+                          <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                         </span>
                       ))}
                     </div>

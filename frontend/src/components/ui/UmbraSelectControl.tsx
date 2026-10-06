@@ -44,6 +44,7 @@ function collectOptions(children: React.ReactNode, group = ''): UmbraSelectOptio
     options.push({
       value,
       label: label || value,
+      i18nSkip: child.props['data-i18n-skip'] !== undefined || child.props.translate === 'no',
       disabled: Boolean(child.props.disabled),
       description: group && !groupHeadingUsed ? group : undefined,
     });

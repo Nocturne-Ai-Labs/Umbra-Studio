@@ -51,7 +51,7 @@ export function CaptionEditor({
 
       {/* Image info */}
       <div className="flex-shrink-0 space-y-1 border-b border-white/10 p-3">
-        <p className="text-sm text-zinc-300 truncate" title={image.filename}>
+        <p data-i18n-skip="" className="text-sm text-zinc-300 truncate" title={image.filename}>
           {image.filename}
         </p>
         {image.width && image.height && (
@@ -117,7 +117,7 @@ export function CaptionEditor({
           </div>
           <div className="custom-scrollbar flex max-h-24 flex-wrap gap-1 overflow-y-auto">
             {image.tags.slice(0, 30).map(tag => (
-              <span
+              <span data-i18n-skip=""
                 key={tag}
                 className="umbra-chip-neutral rounded px-1.5 py-0.5 text-xs"
               >

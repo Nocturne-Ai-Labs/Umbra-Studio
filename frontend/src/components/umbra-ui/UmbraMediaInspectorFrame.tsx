@@ -51,7 +51,7 @@ function InspectorPreview({ item }: { item: InspectorMedia }) {
       <span className="w-9 text-right font-mono text-[10px] text-zinc-500">{Math.round(zoom * 100)}%</span>
     </div>
     <div ref={stage} data-umbra-inspector-preview="" className="relative flex min-h-[220px] flex-1 items-center justify-center overflow-hidden bg-black/30 p-3">
-      {item.isVideo ? <video key={item.id} src={item.blobUrl} controls muted preload="metadata" className="w-full object-contain" style={{ maxHeight: mediaHeight }} onError={() => setError('The video preview could not be loaded.')} /> : <img key={item.id} src={item.blobUrl} alt={item.name} draggable={false} decoding="async" className="max-w-full cursor-grab object-contain" style={{ maxHeight: mediaHeight, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, touchAction: 'none' }}
+      {item.isVideo ? <video key={item.id} src={item.blobUrl} controls muted preload="metadata" className="w-full object-contain" style={{ maxHeight: mediaHeight }} onError={() => setError('The video preview could not be loaded.')} /> : <img data-i18n-skip="" key={item.id} src={item.blobUrl} alt={item.name} draggable={false} decoding="async" className="max-w-full cursor-grab object-contain" style={{ maxHeight: mediaHeight, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, touchAction: 'none' }}
         onError={() => setError('The image preview could not be loaded.')}
         onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, pan }; }}
         onPointerMove={event => { const current = drag.current; if (current?.id === event.pointerId) setPan({ x: current.pan.x + event.clientX - current.x, y: current.pan.y + event.clientY - current.y }); }} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish} />}
@@ -92,7 +92,7 @@ export function UmbraMediaInspectorFrame({ kind, title, remoteMode, items, selec
       <div data-umbra-inspector-strip="" className="flex min-h-[96px] gap-2 overflow-x-auto px-2 pb-2">
         {items.map(item => <button type="button" key={item.id} aria-label={`Select media: ${item.name}`} aria-pressed={item.id === selectedId} onClick={() => onSelect(item.id)} className={`w-[100px] shrink-0 overflow-hidden rounded border ${item.id === selectedId ? 'border-[var(--umbra-accent)]' : 'border-white/15 hover:border-white/30'}`} title={item.name}>
           {item.isVideo ? <video src={item.blobUrl} muted preload="metadata" className="h-12 w-full object-contain" /> : <img src={item.previewUrl || item.blobUrl} alt="" loading="lazy" decoding="async" className="h-12 w-full object-contain" />}
-          <span className="block truncate px-1 text-[10px]">{item.name}</span><span className="block truncate px-1 text-[10px] text-zinc-500">{item.status || (item.isVideo ? 'Video' : 'Image')}</span>
+          <span data-i18n-skip="" className="block truncate px-1 text-[10px]">{item.name}</span><span className="block truncate px-1 text-[10px] text-zinc-500">{item.status || (item.isVideo ? 'Video' : 'Image')}</span>
         </button>)}
       </div>
     </footer>

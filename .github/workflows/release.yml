@@ -26,10 +26,34 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: canary
+      - name: Verify release identity before packaging
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+        run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
+      - name: Install native Windows media build tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make nasm tar diffutils perl
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+      - name: Build Windows media from pinned sources
+        shell: msys2 {0}
+        run: |
+          source_root="$(cygpath -u "$GITHUB_WORKSPACE")"
+          bash scripts/build-media-from-source.sh win32 "$source_root/release/media-source-win32" "$source_root/release/media-work-win32"
       - name: Build Windows BAT portable folder
         shell: pwsh
         env:
+          UMBRA_MEDIA_SOURCE_BUILD: ${{ github.workspace }}\release\media-source-win32
           UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows-bat\Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
@@ -78,7 +102,7 @@ jobs:
           path: artifacts/*
 
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
     steps:
@@ -86,9 +110,19 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: canary
+      - name: Verify release identity before packaging
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+        run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
+      - name: Install native Linux media build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm cmake pkg-config python3 meson ninja-build
+      - name: Build Linux media from pinned sources
+        run: bash scripts/build-media-from-source.sh linux "$GITHUB_WORKSPACE/release/media-source-linux" "$GITHUB_WORKSPACE/release/media-work-linux"
       - name: Build Linux portable folder
         env:
+          UMBRA_MEDIA_SOURCE_BUILD: ${{ github.workspace }}/release/media-source-linux
           UMBRA_LINUX_PUBLISH_ROOT: ${{ github.workspace }}/release/linux/Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
@@ -120,9 +154,24 @@ jobs:
           name: umbra-studio-linux
           path: artifacts/*
 
+  validate:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: umbra-studio-*
+          merge-multiple: true
+          path: artifacts
+      - name: Validate both portable archives
+        run: python3 scripts/validate-release-archives.py artifacts
+
   release:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
-    needs: [windows, linux]
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,12 +185,11 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
         run: |
           python3 scripts/validate-release-archives.py artifacts
-          tag="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="${REQUESTED_TAG}"; fi
-          if [ -z "${tag}" ]; then echo "release_tag is required" >&2; exit 1; fi
+          node scripts/verify-release-identity.mjs
+          tag="${RELEASE_TAG}"
           version="${tag#v}"
           awk -v heading="## v${version}" '
             $0 == heading || index($0, heading " - ") == 1 { capture=1; next }
@@ -163,4 +211,7 @@ jobs:
             $0 != mobile && $0 != canvas && $0 != video { print }
           ' release-notes.md > release-notes-warnings.md
           mv release-notes-warnings.md release-notes.md
-          gh release create "${tag}" artifacts/* --repo "${GITHUB_REPOSITORY}" --notes-file release-notes.md --title "Umbra Studio ${tag}"
+          gh release create "${tag}" \
+            "artifacts/Umbra-Studio-v${version}-Windows-x64-BAT.zip" \
+            "artifacts/Umbra-Studio-v${version}-Linux-x64.zip" \
+            --verify-tag --repo "${GITHUB_REPOSITORY}" --notes-file release-notes.md --title "Umbra Studio ${tag}"

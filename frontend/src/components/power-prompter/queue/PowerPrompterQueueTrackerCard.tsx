@@ -438,7 +438,7 @@ function QueueTrackerPromptRows({
                 {itemQueuePosition}/{group.total}
               </span>
             </div>
-            <div className="truncate mt-0.5 text-[11px] text-current/90">
+            <div data-i18n-skip="" className="truncate mt-0.5 text-[11px] text-current/90">
               {item.prompt}
             </div>
           </div>

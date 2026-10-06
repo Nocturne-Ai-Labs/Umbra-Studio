@@ -41,10 +41,10 @@ export function FilmstripHoverPreview({ anchor, image, open }: { anchor: RefObje
       <div className="relative min-h-0 flex-1 bg-black">
         {failed ? <div className="flex h-full items-center justify-center gap-2 text-xs text-zinc-400"><ImageOff size={18} /> Preview unavailable</div> : video ? (
           <video key={src} src={src} autoPlay muted loop playsInline preload="metadata" className="h-full w-full object-contain" onError={() => setFailed(true)} />
-        ) : <img src={src} alt={image.name} className="h-full w-full object-contain" decoding="async" onError={() => setFailed(true)} />}
+        ) : <img data-i18n-skip="" src={src} alt={image.name} className="h-full w-full object-contain" decoding="async" onError={() => setFailed(true)} />}
       </div>
       <div className="flex h-8 shrink-0 items-center gap-2 border-t border-white/10 px-2 text-[11px] text-zinc-300">
-        <span className="min-w-0 flex-1 truncate">{image.name}</span>
+        <span data-i18n-skip="" className="min-w-0 flex-1 truncate">{image.name}</span>
         {video ? <VolumeX size={14} aria-label="Muted" /> : null}
       </div>
     </div>, document.body,

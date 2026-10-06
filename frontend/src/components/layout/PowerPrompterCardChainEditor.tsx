@@ -1,3 +1,4 @@
+import { PowerPrompterWorkflowResources } from '@/components/power-prompter/PowerPrompterWorkflowResources';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from '../../../../shared/umbra-ui/animaTextEncoderDevice';
 
@@ -9369,7 +9370,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     Swap Dimensions: {generation.swapDimensions ? 'On' : 'Off'}
                   </button>
 
-                  <div className="rounded-md border border-white/15 bg-black/25 p-2 space-y-2">
+                  <PowerPrompterWorkflowResources
+                items={selectedPipeline?.readiness?.runtime.resources.items || []}
+                values={generation.workflowResources || {}}
+                onChange={(resourceId, value) => updateGeneration({ workflowResources: { ...generation.workflowResources, [resourceId]: value } })}
+              />
+              <div className="rounded-md border border-white/15 bg-black/25 p-2 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="text-[10px] font-black uppercase tracking-widest text-cyan-200">
@@ -9864,7 +9870,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                   title={`Copy "${tag}"`}
                                 >
                                   <Copy size={9} className="shrink-0" />
-                                  {tag}
+                                  <span data-i18n-skip="">{tag}</span>
                                 </button>
                               ))}
                             </div>
@@ -11819,8 +11825,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       <p className="mt-1.5 max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded border border-white/10 bg-black/30 p-2 text-[10px] leading-4 text-zinc-300 custom-scrollbar">{wildcardUtilityHeldPreview.prompt || 'No prompt text yet.'}</p>
                       {wildcardUtilityHeldPreview.added.length > 0 || wildcardUtilityHeldPreview.removed.length > 0 ? (
                         <div className="mt-2 flex flex-wrap gap-1">
-                          {wildcardUtilityHeldPreview.added.map((tag) => <span key={`wildcard-context-added-${tag}`} className="rounded border border-emerald-300/30 bg-emerald-400/10 px-1.5 py-0.5 font-mono text-[8px] text-emerald-100">+ {tag}</span>)}
-                          {wildcardUtilityHeldPreview.removed.map((tag) => <span key={`wildcard-context-removed-${tag}`} className="rounded border border-rose-300/30 bg-rose-400/10 px-1.5 py-0.5 font-mono text-[8px] text-rose-100">- {tag}</span>)}
+                          {wildcardUtilityHeldPreview.added.map((tag) => <span key={`wildcard-context-added-${tag}`} className="rounded border border-emerald-300/30 bg-emerald-400/10 px-1.5 py-0.5 font-mono text-[8px] text-emerald-100">+ <span data-i18n-skip="">{tag}</span></span>)}
+                          {wildcardUtilityHeldPreview.removed.map((tag) => <span key={`wildcard-context-removed-${tag}`} className="rounded border border-rose-300/30 bg-rose-400/10 px-1.5 py-0.5 font-mono text-[8px] text-rose-100">- <span data-i18n-skip="">{tag}</span></span>)}
                         </div>
                       ) : null}
                     </div>
@@ -13163,7 +13169,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 title={`Copy "${tag}"`}
                               >
                                 <Copy size={9} className="shrink-0" />
-                                {tag}
+                                <span data-i18n-skip="">{tag}</span>
                               </button>
                             ))}
                           </div>

@@ -102,7 +102,7 @@ export function UmbraExtrasPresetControl({
           <span className={labelClass}>{label}</span>
           <UmbraSelectControl value={activeId} onChange={(event) => choose(event.target.value)} className={controlClass}>
             <option value="custom">Custom Settings</option>
-            {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+            {presets.map((preset) => <option data-i18n-skip="" key={preset.id} value={preset.id}>{preset.name}</option>)}
           </UmbraSelectControl>
         </label>
         <button type="button" onClick={remove} disabled={!activeId.startsWith('custom-')} title="Delete selected preset" className="mt-[19px] inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-zinc-500 hover:border-red-300/25 hover:text-red-200 disabled:opacity-25"><Trash2 size={12} /></button>

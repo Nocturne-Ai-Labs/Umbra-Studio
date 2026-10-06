@@ -1008,7 +1008,7 @@ export const PowerPrompterSidebar = React.memo(({
             ) : (
               <FileText size={14} className={currentFile === item.path ? 'opacity-100' : 'opacity-50'} />
             )}
-            <span className="truncate flex-1">
+            <span data-i18n-skip className="truncate flex-1">
               {item.isDirectory ? String(item.name ?? '') : stripPromptFileExtension(String(item.name ?? ''))}
             </span>
             {!item.isDirectory && item.modelType && (

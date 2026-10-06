@@ -1,9 +1,15 @@
 import {
   existsSync,
+  closeSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -26,7 +32,52 @@ export function isUmbraUpdaterWorkspace(runtimeRoot: string, workspaceRoot: stri
   const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
   const workspace = resolve(workspaceRoot);
   const rel = relative(cacheRoot, workspace);
-  return Boolean(rel) && !isAbsolute(rel) && !rel.startsWith('..') && !rel.includes(`..${sep}`);
+  if (!rel || isAbsolute(rel) || rel.startsWith('..') || rel.includes(`..${sep}`)) return false;
+  // Never follow a redirected cache or session while replacing or cleaning app files.
+  let current = resolve(runtimeRoot);
+  for (const part of relative(current, workspace).split(sep)) {
+    current = join(current, part);
+    try { if (lstatSync(current).isSymbolicLink()) return false; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false; }
+  }
+  return true;
+}
+
+export function acquireUmbraUpdaterLease(runtimeRoot: string, workspaceRoot: string): () => void {
+  if (!isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) throw new Error('Unsafe updater workspace.');
+  const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
+  mkdirSync(cacheRoot, { recursive: true });
+  const lockPath = join(cacheRoot, 'updater.lock');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let descriptor: number;
+    try { descriptor = openSync(lockPath, 'wx'); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const stat = lstatSync(lockPath);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Unsafe updater lock.');
+      let ownerPid = 0;
+      try { ownerPid = Number(JSON.parse(readFileSync(lockPath, 'utf8')).pid) || 0; } catch { /* An owner may still be recording its lease. */ }
+      if (ownerPid === process.pid || isProcessAlive(ownerPid) || (!ownerPid && Date.now() - stat.mtimeMs < 60_000)) {
+        throw new Error('Another Updater is already open for this installation. Use its window or close it before trying again.');
+      }
+      // Compare identity before reclaiming a dead process's lease.
+      const current = lstatSync(lockPath);
+      if (current.dev === stat.dev && current.ino === stat.ino && current.mtimeMs === stat.mtimeMs) unlinkSync(lockPath);
+      continue;
+    }
+    const owned = fstatSync(descriptor);
+    try { writeFileSync(descriptor, JSON.stringify({ pid: process.pid, workspaceRoot: resolve(workspaceRoot) })); }
+    finally { closeSync(descriptor); }
+    const release = () => {
+      try {
+        const current = lstatSync(lockPath);
+        if (current.dev === owned.dev && current.ino === owned.ino) unlinkSync(lockPath);
+      } catch { /* A completed session may already have released its lease. */ }
+    };
+    process.once('exit', release);
+    return release;
+  }
+  throw new Error('The Updater lease changed while starting. Try again.');
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -57,11 +108,13 @@ function isUmbraUpdaterProcessActive(
   kind: UmbraUpdaterProcessKind,
   pid: number,
 ): boolean {
+  if (pid === process.pid) return true;
   if (!isProcessAlive(pid)) return false;
   try {
     const heartbeatAt = Number.parseInt(readFileSync(heartbeatPath(workspaceRoot, kind), 'utf8'), 10);
-    return Number.isFinite(heartbeatAt)
-      && Date.now() - heartbeatAt <= UMBRA_UPDATER_HEARTBEAT_MAX_AGE_MS;
+    // Synchronous installers can pause heartbeats for minutes. A live recorded
+    // process must retain its workspace even when a cleanup marker is present.
+    return Number.isFinite(heartbeatAt) && heartbeatAt > 0;
   } catch {
     return false;
   }
@@ -87,7 +140,7 @@ export function hasActiveUmbraUpdaterProcess(
   excludedWorkspaceRoot = '',
 ): boolean {
   const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
-  if (!existsSync(cacheRoot)) return false;
+  if (!existsSync(cacheRoot) || !isUmbraUpdaterWorkspace(runtimeRoot, join(cacheRoot, 'session-check'))) return false;
   const excluded = excludedWorkspaceRoot ? resolve(excludedWorkspaceRoot) : '';
 
   for (const entry of readdirSync(cacheRoot, { withFileTypes: true })) {
@@ -108,7 +161,7 @@ export function cleanupInactiveUmbraUpdaterWorkspaces(
   options: { staleAfterMs?: number } = {},
 ): string[] {
   const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
-  if (!existsSync(cacheRoot)) return [];
+  if (!existsSync(cacheRoot) || !isUmbraUpdaterWorkspace(runtimeRoot, join(cacheRoot, 'session-check'))) return [];
   const staleAfterMs = Math.max(60_000, Number(options.staleAfterMs) || 24 * 60 * 60 * 1000);
   const removed: string[] = [];
 
