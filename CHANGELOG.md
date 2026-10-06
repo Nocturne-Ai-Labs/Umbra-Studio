@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.90.10-beta - Image And Prompt Transfers To Video
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**Recent updates include a massive refactor of Umbra Studio's setup flow.**
+
+- Install the app update through **Umbra Setup > Updates**, then reopen Umbra Studio. If Setup was already open, finish active installations before closing and reopening `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux.
+- No additional model downloads, custom-node updates or Python upgrades are required for this transfer fix. Existing video generation still requires its selected model and managed ComfyUI prerequisites. AI Toolkit remains optional for training.
+- From Gallery, the filmstrip or the image viewer, use **Use as First Frame** to send the image and its saved prompt to video generation. Images without prompt metadata retain the destination's current prompt. First/last frames and LTX middle-frame timelines are supported; ordinary video sources select LTX V2V.
+- Windows and Linux archives retain bundled FFmpeg/ffprobe and lightweight CPU helpers, without tagger weights. Linux requires glibc 2.35+ and the host packages in `REQUIREMENTS.md`. Updates preserve installed tools, models, outputs and datasets.
+
+### Video Transfer Repairs
+
+- The default official video editor now receives the shared media payload from Gallery, filmstrip and lightbox sends. It waits for the selected workflow to load, stages media into this installation's ComfyUI input folder, and transfers the saved prompt into the video editor.
+- First/last images select the matching H3 or LTX mode. LTX first/middle/last guidance preserves its timeline; adding H3 reference images preserves a continuation, while a new primary source exits stale continuation or retake mode.
+- Failed copies remain available for retry with a visible error. Generation is held until the transfer completes. A newer send supersedes an older unfinished request.
+- Adapted video controls also transfer H3 Director prompts, restore saved controls before applying incoming media, accept prompts stored as separate fields, and clear an old negative prompt when the incoming prompt has an empty negative.
+
+### Validation
+
+Focused checks passed 21 regression tests, 17 isolated browser scenarios and native H3/LTX workflow configuration. Browser scenarios mounted production editors with synthetic API responses and public workflow sources; they covered metadata, delayed loading, pre-mount transfers, copy retry, consecutive sends and frame placement. Native builds and archive checks cover Windows and Linux. Fresh GPU video generation, full Gallery menu interaction, actual ComfyUI capture and local Linux runtime/GPU operation were not rerun for this transfer patch.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: the default video editor ignoring images and prompts sent from Gallery, filmstrip and lightbox.
+- Fixed: adapted H3 Director dropping transferred prompts and retaining hidden old references.
+- Fixed: segment-only prompts being ignored and old negative prompts surviving a new prompt transfer.
+- Improved: correct frame slots, pending transfers during loading, visible failures and retry handling.
+- Improved: rapid consecutive sends keep the newest image and prompt together.
+
 ## v0.90.9-beta - Existing Installation And Dependency Repairs
 
 ### TL;DR - Setup After Updating
