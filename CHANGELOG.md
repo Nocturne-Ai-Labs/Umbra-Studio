@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased - Managed Tool Python Upgrades
+## v0.90.7-beta - Managed Tool Python Upgrades
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**The massive Setup flow refactor introduced in v0.90.6 continues in this release. Review Umbra Setup after updating.**
+
+- Open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Stop the tool you want to upgrade, then use **Tools > ComfyUI > Update Python 3.13** or **Tools > AI Toolkit > Update Python 3.12**. These explicit actions repair broken Microsoft Store Python references and rebuild each tool's own environment. New installations use managed Python automatically; Microsoft Store Python is unnecessary.
+- Updating Umbra alone preserves existing environments. To receive the current managed Python versions, run the appropriate Update Python action. An older AI Toolkit checkout without `manager/spec.py` must first use **Update AI Toolkit**, then **Update Python 3.12**.
+- Python runtime and environment rebuilds require internet access, several GB of downloads for CUDA/PyTorch and dependencies, and additional disk space for the retained previous environment. Back up important work first. Models, datasets, outputs, training configurations and custom-node code stay in place. Failed upgrades restore the previous environment; interrupted upgrades hold launching until recovery. Attention packages must pass compatibility checks.
+- AI Toolkit remains optional and requires host Node.js 20 or newer with npm. Setup supplies portable Git on Windows when Git is missing. Python Helpers continue using Python 3.11.
+- Linux requires glibc 2.35 or newer, `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. FFmpeg and lightweight CPU helpers remain bundled; tagger model weights remain separate downloads.
+
+### Managed Python And Dependency Repairs
 
 - New ComfyUI installations use a checksum-verified private Python 3.13 runtime,
   without requiring Microsoft Store Python. AI Toolkit uses its own managed
@@ -22,6 +40,18 @@
   App updates and rollback preserve the managed Python and Git runtimes. Future
   Python patch versions install alongside old bases so retained venv backups remain
   usable; Setup detects patch versions that need updating.
+
+### Validation
+
+Windows qualification covered broken Store-Python migrations for both tools, CUDA and SageAttention checks, dependency consistency, rollback, managed ComfyUI launch, and AI Toolkit UI/worker Python resolution. Native CI builds and validates both portable archives. Full training, fresh model generation and local Linux runtime testing remain unqualified for this Python migration.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: broken Microsoft Store interpreter references blocking ComfyUI and AI Toolkit.
+- Fixed: Windows long-path failures during CUDA/PyTorch installation.
+- Fixed: launching tools with interrupted upgrades or incompatible AI Toolkit dependencies.
+- Improved: explicit Python upgrades, patch-version detection and separate managed runtimes.
+- Improved: rollback preserves old environments and Python bases, and missing Git can be repaired through Setup.
 
 ## v0.90.6-beta - Guided Setup, Localization And Bundled Helpers
 
