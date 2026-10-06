@@ -10,6 +10,8 @@
 
 **Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
 
+**Important: This update is a massive refactor of Umbra Studio's setup flow.** Umbra Setup and Updater are now combined in one app, with language-first guided onboarding. ComfyUI and optional AI Toolkit installation/updates, CUDA/PyTorch, SageAttention, custom nodes, support models and generation prerequisites now live in Umbra Setup. **After updating, reopen Umbra Studio and review Umbra Setup before continuing.** Existing user data, installed tools and models are preserved.
+
 - ComfyUI and AI Toolkit install/update controls now live in **Umbra Setup >
   Tools**, including CUDA/PyTorch, SageAttention, custom nodes and ComfyUI version
   switching. Main-app tool panels open Setup; launch, stop and connection checks
