@@ -102,7 +102,6 @@ def validate(archive, version, platform):
         required += (['UmbraStudio.bat', 'UmbraSetup.bat', 'Runtime/Bun/win32/bun.exe']
                      if platform == 'Windows-x64-BAT' else
                      ['umbra-setup.sh', 'start-umbra.sh', 'UmbraStudio.desktop', 'Runtime/Bun/linux/bun'])
-        if media_platform == 'win32': required.extend(policy['windowsRuntimeNotices'])
         for name in required:
             if f'Umbra Studio/{name}' not in names:
                 raise ValueError(f'{archive.name}: missing {name}')
@@ -147,6 +146,7 @@ def validate(archive, version, platform):
                     'build-evidence/ffmpeg-configure-args.txt', 'build-evidence/ffmpeg-config.txt', 'build-evidence/x264-config.txt',
                     'build-evidence/vpx-config.txt', 'build-evidence/webp-config.txt', 'build-evidence/zlib-config.txt', 'build-evidence/smoke-results.json',
                     'NOTICE.txt', 'licenses/ffmpeg.txt', 'licenses/x264.txt', 'licenses/vpx.txt', 'licenses/webp.txt', 'licenses/zlib.txt', 'licenses/dav1d.txt', 'build-evidence/dav1d-config.txt']
+        if media_platform == 'win32': required.extend(policy['windowsRuntimeNotices'])
         for name in required:
             if name not in media_files: raise ValueError(f'{archive.name}: missing media source/build evidence: {name}')
             if media_platform == 'linux' and name.startswith('bin/') and not (package.getinfo(media_root + name).external_attr >> 16) & 0o111:
