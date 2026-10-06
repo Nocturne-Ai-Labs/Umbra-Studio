@@ -47,6 +47,8 @@
 - Repair stages and verifies both binaries, required PNG/WebP encoders, and
   license notices before switching to the new portable tools. A failed download
   or extraction keeps the previous tools available.
+- Let slower media repair downloads continue while receiving data. Bound header
+  and stalled-response waits separately, with a fresh retry after failure.
 - Missing executable errors point directly to the Setup and Updater repair.
 
 ### Lightweight Python Dependencies
@@ -61,6 +63,9 @@
   missing model weights or optional managed tools are installed.
 - Preserve existing `Runtime/Python311` and helper venvs during app replacement
   and rollback. Verify bundled dependency hashes before closing the current app.
+- Require the helper inventory to cover every actual bundle file, rejecting
+  unlisted files and redirected directories. Release validation also rejects
+  model weights anywhere in the archive, including files omitted from inventories.
 
 ### Updater Progress
 

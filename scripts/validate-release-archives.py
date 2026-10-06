@@ -55,11 +55,12 @@ def validate(archive, version, platform):
                 files.add(key)
             relative = '/'.join(parts[1:])
             leaf = parts[-1].casefold()
+            if leaf.endswith(('.onnx', '.pt', '.safetensors', '.ckpt')):
+                raise ValueError(f'{archive.name}: model weights are excluded: {relative}')
             if any(part.casefold() in {'.git', '.agents', '.codex', '.tmp'} for part in parts):
                 raise ValueError(f'{archive.name}: private directory: {relative}')
             if (leaf == '.env' or leaf.startswith('.env.') or leaf == 'skills.md'
-                    or re.search(r'\.(?:db|sqlite3?)(?:-(?:wal|shm|journal))?$', leaf)
-                    or leaf.endswith(('.safetensors', '.ckpt'))):
+                    or re.search(r'\.(?:db|sqlite3?)(?:-(?:wal|shm|journal))?$', leaf)):
                 raise ValueError(f'{archive.name}: private runtime file: {relative}')
             if entry.is_dir():
                 continue
@@ -153,6 +154,14 @@ def validate(archive, version, platform):
         helper_files = helpers.get('files', {})
         if not helper_files or len(helper_files) > 50000:
             raise ValueError(f'{archive.name}: invalid Python file inventory')
+        # The inventory must cover actual ZIP files, including cached bundle extras.
+        actual_helper_files = {
+            entry.filename[len(helper_root):] for entry in entries if not entry.is_dir()
+            and (entry.filename.casefold().startswith(helper_root.casefold())
+                 if media_platform == 'win32' else entry.filename.startswith(helper_root))
+        }
+        if actual_helper_files != set(helper_files) | {'installed.json'} or 'installed.json' in helper_files:
+            raise ValueError(f'{archive.name}: Python file inventory differs from actual archive files')
         for name, expected in helper_files.items():
             if (name.startswith('/') or '\\' in name or ':' in name
                     or any(part in {'', '.', '..'} for part in name.split('/'))

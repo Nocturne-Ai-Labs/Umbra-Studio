@@ -61,18 +61,37 @@ function assertLocalTree(runtimeRoot: string, target: string) {
 }
 
 export async function downloadMediaArchive(url: string, target: string, expected: { bytes: number; sha256: string },
-  log: (line: string) => void, request: typeof fetch = fetch) {
-  const response = await request(url, { signal: AbortSignal.timeout(120000) });
-  if (!response.ok || !response.body) throw new Error(`Media tool download failed (${response.status}). Retry Install / repair.`);
-  const handle = await open(target, 'wx');
-  const hash = createHash('sha256');
-  const reader = response.body.getReader();
-  let bytes = 0;
-  let lastProgress = 0;
+  log: (line: string) => void, request: typeof fetch = fetch,
+  timeouts: { headersMs?: number; idleMs?: number } = {}) {
+  const headersMs = timeouts.headersMs ?? 30_000;
+  const idleMs = timeouts.idleMs ?? 120_000;
+  if (![headersMs, idleMs].every(value => Number.isFinite(value) && value > 0)) throw new Error('Invalid media download timeout.');
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancelReader: (() => Promise<void>) | undefined;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  const armTimeout = (milliseconds: number, detail: string) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(new Error(detail)), milliseconds);
+  };
   try {
+    armTimeout(headersMs, 'Media tool download headers timed out. Retry Install / repair.');
+    const response = await request(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!response.ok || !response.body) throw new Error(`Media tool download failed (${response.status}). Retry Install / repair.`);
+    const reader = response.body.getReader();
+    cancelReader = () => reader.cancel();
+    handle = await open(target, 'wx');
+    const hash = createHash('sha256');
+    let bytes = 0;
+    let lastProgress = 0;
+    // Bound each network wait, allowing slow downloads to keep making progress.
+    armTimeout(idleMs, 'Media tool download stalled. Retry Install / repair.');
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
+      if (!chunk.value.byteLength) continue;
+      clearTimeout(timer);
       bytes += chunk.value.byteLength;
       if (bytes > expected.bytes) throw new Error('Media tool download exceeded its declared size.');
       hash.update(chunk.value);
@@ -83,9 +102,16 @@ export async function downloadMediaArchive(url: string, target: string, expected
         offset += written;
       }
       if (Date.now() - lastProgress > 1500) { log(`Downloading media tools: ${Math.round(bytes / 1024 / 1024)} / ${Math.round(expected.bytes / 1024 / 1024)} MiB`); lastProgress = Date.now(); }
+      armTimeout(idleMs, 'Media tool download stalled. Retry Install / repair.');
     }
+    clearTimeout(timer);
     if (bytes !== expected.bytes || hash.digest('hex') !== expected.sha256) throw new Error('Media tool checksum verification failed. Nothing was installed.');
-  } finally { await reader.cancel().catch(() => {}); await handle.close(); }
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+    await cancelReader?.().catch(() => {});
+    await handle?.close();
+  }
 }
 
 function runTar(args: string[]): string {
