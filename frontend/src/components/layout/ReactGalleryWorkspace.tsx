@@ -3004,6 +3004,7 @@ function GalleryImageTile({
                 : 'border-white/10 hover:border-white/20 hover:bg-white/[0.04]',
       )}
       style={cardStyle}
+      data-i18n-skip-attributes="title"
       title={`${file.name}\n${setLabel ? `${setLabel}\n` : ''}${metadataSnippet ? `Metadata match: ${metadataSnippet}\n` : ''}${path}`}
     >
       <div
@@ -10498,19 +10499,20 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     viewerFileFallback,
   ]);
   const contextMenuHeader = useMemo(() => {
-    if (!contextMenu) return { title: '', subtitle: '' };
+    if (!contextMenu) return { title: '', subtitle: '', titleI18nSkip: false };
     const targetPath = normalizePath(contextMenu.targetPath);
     const title = pathLeaf(targetPath) || 'Selection';
-    if (contextMenu.kind === 'folder') return { title, subtitle: 'Folder' };
-    if (contextMenu.kind === 'background') return { title, subtitle: 'Current folder' };
-    if (contextMenu.kind === 'archive') return { title, subtitle: 'ZIP archive' };
+    const titleI18nSkip = Boolean(pathLeaf(targetPath));
+    if (contextMenu.kind === 'folder') return { title, subtitle: 'Folder', titleI18nSkip };
+    if (contextMenu.kind === 'background') return { title, subtitle: 'Current folder', titleI18nSkip };
+    if (contextMenu.kind === 'archive') return { title, subtitle: 'ZIP archive', titleI18nSkip };
     if (contextMenu.kind === 'transfer') {
       const count = contextMenu.paths?.length || 0;
-      return { title, subtitle: `${count} item${count === 1 ? '' : 's'} ready to transfer` };
+      return { title, subtitle: `${count} item${count === 1 ? '' : 's'} ready to transfer`, titleI18nSkip };
     }
-    if (isLiveGenerationPreviewPath(targetPath)) return { title: 'Live Generation Preview', subtitle: 'Current generation' };
+    if (isLiveGenerationPreviewPath(targetPath)) return { title: 'Live Generation Preview', subtitle: 'Current generation', titleI18nSkip: false };
     const count = selectedPathsForContext(contextMenu).length;
-    return { title, subtitle: `${Math.max(1, count)} selected` };
+    return { title, subtitle: `${Math.max(1, count)} selected`, titleI18nSkip };
   }, [contextMenu, selectedPathsForContext]);
 
   useEffect(() => {
@@ -11561,10 +11563,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                       >
                         <FolderOpen size={15} className="shrink-0 text-zinc-400" />
                         <span className="min-w-0">
-                          <span className="block truncate text-xs font-medium text-zinc-100">
+                          <span data-i18n-skip className="block truncate text-xs font-medium text-zinc-100">
                             {depth > 0 ? `${'-- '.repeat(depth)}${group.folder.name || pathLeaf(group.folder.path) || group.folder.path}` : group.folder.name || pathLeaf(group.folder.path) || group.folder.path}
                           </span>
-                          <span className="block truncate text-[11px] text-zinc-500">{group.folder.path}</span>
+                          <span data-i18n-skip className="block truncate text-[11px] text-zinc-500">{group.folder.path}</span>
                         </span>
                       </button>
                       <div className="flex shrink-0 items-center gap-1">
@@ -11864,6 +11866,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         onClose={() => setContextMenu(null)}
         boundarySelector="[data-umbra-react-gallery-root]"
         title={contextMenuHeader.title}
+        titleI18nSkip={contextMenuHeader.titleI18nSkip}
         subtitle={contextMenuHeader.subtitle}
       />
       <GalleryDatasetTargetPicker

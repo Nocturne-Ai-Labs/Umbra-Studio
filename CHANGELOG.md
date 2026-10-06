@@ -5,8 +5,13 @@
 - Setup's Tools, Models and guided onboarding now share English, Japanese,
   Simplified Chinese, Korean and German labels and instructions. Main-app
   translation now preserves user prompts, tags, model/file names and preset
-  labels, including custom selection menus. Localization audits include long
-  instructions and conditional labels; full main-app coverage is still pending.
+  labels, including custom selection menus and file/folder context-menu headings.
+  Main-app localization now covers the audited labels, long instructions,
+  conditional controls, option descriptions and static notifications. Reviewed
+  numeric templates translate Gallery, filmstrip and queue counts; explicit
+  keys translate resource readiness and dataset actions without altering values.
+  Raw technical diagnostics remain original; audit coverage does not certify
+  every arbitrary dynamic backend message.
 
 - Setup now shows the optional Eyes detailer's original CivitAI download link
   and destination folder. The model remains manual and excluded from packages

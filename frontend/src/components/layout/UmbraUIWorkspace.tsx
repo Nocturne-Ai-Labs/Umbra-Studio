@@ -1,6 +1,7 @@
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { translateLegacyUiText } from '@/i18n/legacyUiLocalization';
 import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import { isSameUmbraCanvasImportHandoff } from '@/lib/umbraCanvasMediaImportGate';
@@ -520,7 +521,7 @@ function PipelineControls({
 }
 
 export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspace: (active: boolean) => React.ReactNode }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const workspaceRootRef = React.useRef<HTMLDivElement>(null);
   const [tabletPanels, toggleTabletPanel] = React.useReducer(reduceTabletPanels, INITIAL_TABLET_PANELS);
   const lastCatalogTargetRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -1488,30 +1489,31 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const primaryModelRuntimeIssue = React.useMemo(() => {
     if (!checkpointName || primaryModelItems.length <= 0) return '';
     const match = matchUmbraUiResourceCatalog(checkpointName, primaryModelItems);
-    if (match.status === 'ambiguous') return `Model basename is ambiguous: ${match.matches.join(', ')}`;
-    if (match.status === 'missing') return `Model is not installed: ${checkpointName}`;
+    if (match.status === 'ambiguous') return t('generation.ambiguousResource', { resource: translateLegacyUiText(language, 'Model'), files: match.matches.join(', ') });
+    if (match.status === 'missing') return t('generation.missingResource', { resource: translateLegacyUiText(language, 'Model'), file: checkpointName });
     return '';
-  }, [checkpointName, primaryModelItems]);
+  }, [checkpointName, primaryModelItems, language, t]);
   const workflowResourceRuntimeIssue = React.useMemo(() => {
     for (const resource of selectedWorkflowResources) {
       const value = String(workflowResourceValues[resource.id] || resource.defaultValue || '').trim().replace(/\\/g, '/');
-      if (resource.required && !value) return `Select ${resource.label}`;
+      const resourceLabel = translateLegacyUiText(language, resource.label);
+      if (resource.required && !value) return t('generation.selectResource', { resource: resourceLabel });
       if (!value) continue;
       const installed = getInstalledWorkflowResourceItems(resource, modelCatalog);
       if (installed.length > 0) {
         const match = matchUmbraUiResourceCatalog(value, installed);
-        if (match.status === 'ambiguous') return `${resource.label} basename is ambiguous: ${match.matches.join(', ')}`;
-        if (match.status === 'missing') return `${resource.label} is not installed: ${value}`;
+        if (match.status === 'ambiguous') return t('generation.ambiguousResource', { resource: resourceLabel, files: match.matches.join(', ') });
+        if (match.status === 'missing') return t('generation.missingResource', { resource: resourceLabel, file: value });
         continue;
       }
       const readinessItem = imageReadiness.runtime.resources.items.find((item) => item.id === resource.id);
       if (!readinessItem || readinessItem.value.toLowerCase() !== value.toLowerCase()) continue;
-      if (readinessItem.status === 'selection_required') return `Select ${resource.label}`;
-      if (readinessItem.status === 'ambiguous') return `${resource.label} basename is ambiguous: ${value}`;
-      if (readinessItem.status === 'missing') return `${resource.label} is not installed: ${value}`;
+      if (readinessItem.status === 'selection_required') return t('generation.selectResource', { resource: resourceLabel });
+      if (readinessItem.status === 'ambiguous') return t('generation.ambiguousResource', { resource: resourceLabel, files: value });
+      if (readinessItem.status === 'missing') return t('generation.missingResource', { resource: resourceLabel, file: value });
     }
     return '';
-  }, [imageReadiness.runtime.resources.items, modelCatalog, selectedWorkflowResources, workflowResourceValues]);
+  }, [imageReadiness.runtime.resources.items, modelCatalog, selectedWorkflowResources, workflowResourceValues, language, t]);
   const outputUpscaleRuntimeIssue = React.useMemo(() => {
     if (!outputUpscale.enabled || imageCapabilities.finalModelUpscale.support !== 'adjustable') return '';
     const value = imageCapabilities.finalModelUpscale.modelSelection
@@ -1524,10 +1526,10 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       : '';
     if (modelCatalog.upscaleModels.length <= 0) return '';
     const match = matchUmbraUiResourceCatalog(value, modelCatalog.upscaleModels);
-    if (match.status === 'ambiguous') return `Upscale model basename is ambiguous: ${match.matches.join(', ')}`;
-    if (match.status === 'missing') return `Upscale model is not installed: ${value}`;
+    if (match.status === 'ambiguous') return t('generation.ambiguousResource', { resource: translateLegacyUiText(language, 'Upscale model'), files: match.matches.join(', ') });
+    if (match.status === 'missing') return t('generation.missingResource', { resource: translateLegacyUiText(language, 'Upscale model'), file: value });
     return '';
-  }, [imageCapabilities.finalModelUpscale, modelCatalog.upscaleModels, outputUpscale]);
+  }, [imageCapabilities.finalModelUpscale, modelCatalog.upscaleModels, outputUpscale, language, t]);
   const imagePipelineRuntimeIssue = imageReadiness.runtime.nodes.status === 'missing'
     ? formatMissingUmbraUiNodes(imageReadiness.runtime.nodes.missing)
     : primaryModelRuntimeIssue
@@ -2269,7 +2271,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           : !checkpointName
             ? 'Select a model first'
             : missingWorkflowResource
-              ? `Select ${missingWorkflowResource.label}`
+              ? t('generation.selectResource', { resource: translateLegacyUiText(language, missingWorkflowResource.label) })
               : imagePipelineRuntimeIssue
                 ? imagePipelineRuntimeIssue
                 : imageOutputFolderUnavailable

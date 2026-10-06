@@ -12,6 +12,7 @@ interface ContextMenuProps {
   onClose: () => void;
   boundarySelector?: string;
   title?: string;
+  titleI18nSkip?: boolean;
   subtitle?: string;
   presentation?: 'anchored' | 'touch-sheet';
 }
@@ -109,6 +110,7 @@ function MenuPanel({
   rootStyle,
   rootRef,
   title,
+  titleI18nSkip,
   subtitle,
   presentation = 'anchored',
 }: {
@@ -121,6 +123,7 @@ function MenuPanel({
   rootStyle?: React.CSSProperties;
   rootRef?: React.RefObject<HTMLDivElement>;
   title?: string;
+  titleI18nSkip?: boolean;
   subtitle?: string;
   presentation?: 'anchored' | 'touch-sheet';
 }) {
@@ -243,7 +246,7 @@ function MenuPanel({
     >
       {depth === 0 && (title || subtitle) ? (
         <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
-          {title ? <div className="umbra-context-menu-title truncate">{title}</div> : null}
+          {title ? <div data-i18n-skip={titleI18nSkip ? '' : undefined} className="umbra-context-menu-title truncate">{title}</div> : null}
           {subtitle ? <div className="umbra-context-menu-subtitle mt-0.5 truncate">{subtitle}</div> : null}
         </div>
       ) : null}
@@ -333,6 +336,7 @@ export function ContextMenu({
   onClose,
   boundarySelector,
   title,
+  titleI18nSkip,
   subtitle,
   presentation = 'anchored',
 }: ContextMenuProps) {
@@ -427,6 +431,7 @@ export function ContextMenu({
         rootStyle={style}
         rootRef={menuRef}
         title={title}
+        titleI18nSkip={titleI18nSkip}
         subtitle={subtitle}
         presentation={presentation}
       />

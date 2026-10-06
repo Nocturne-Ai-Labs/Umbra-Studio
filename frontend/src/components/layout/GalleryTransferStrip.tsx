@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useI18n } from '@/i18n';
 import { AlertTriangle, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Loader2, RefreshCw, Undo2, X, Square } from 'lucide-react';
 import { cancelGalleryTransfer, dismissGalleryTransfer, retryGalleryTransferIndex, undoGalleryMove, useGalleryUndoMove, type GalleryTransferState } from '@/lib/galleryTransfers';
 
@@ -9,6 +10,7 @@ const phaseLabels: Record<string, string> = {
 const bytes = (value: number) => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GB` : `${(value / 1024 ** 2).toFixed(1)} MB`;
 
 export function GalleryTransferStrip({ transfer }: { transfer: GalleryTransferState | null }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(0);
   const undoMove = useGalleryUndoMove();
@@ -32,14 +34,14 @@ export function GalleryTransferStrip({ transfer }: { transfer: GalleryTransferSt
         <div className="min-w-0 flex-1">
           <div role="status" className="flex flex-wrap gap-x-2 gap-y-0.5">
             <strong>{transfer.undoOf ? 'Undo Move' : transfer.mode === 'copy' ? 'Copy' : 'Move'}: {label}</strong>
-            <span>{transfer.active ? `${transfer.completedUnits}/${transfer.totalUnits || transfer.totalPaths} processed` : `${transfer.completedPaths}/${transfer.totalPaths} successful`}</span>
+            <span data-i18n-skip>{transfer.active ? t('gallery.transferProcessed', { completed: transfer.completedUnits, total: transfer.totalUnits || transfer.totalPaths }) : t('gallery.transferSuccessful', { completed: transfer.completedPaths, total: transfer.totalPaths })}</span>
             {failed.length > 0 && <span className="text-amber-400">{failed.length} failed</span>}
           </div>
-          <div className="truncate text-zinc-400" title={transfer.currentPath || transfer.destination}>{currentName}</div>
+          <div data-i18n-skip className="truncate text-zinc-400" title={transfer.currentPath || transfer.destination}>{currentName}</div>
         </div>
         <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Transfer details" title="Transfer details" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</button>
         {transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10 disabled:opacity-40" aria-label="Cancel transfer" title="Cancel unfinished transfers; completed files stay in place" disabled={!transfer.jobId || transfer.cancelRequested || ['sidecars', 'indexing'].includes(transfer.phase)} onClick={() => void cancelGalleryTransfer()}><Square size={16} /></button>}
-        {undoMove && !transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Undo last move" title={`Undo last move (${undoMove.count} items)`} onClick={() => void undoGalleryMove()}><Undo2 size={18} /></button>}
+        {undoMove && !transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Undo last move" title={t('gallery.undoCount', { count: undoMove.count })} onClick={() => void undoGalleryMove()}><Undo2 size={18} /></button>}
         {transfer.indexPending && !transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Retry Gallery indexing" title="Retry Gallery indexing without transferring files again" onClick={() => void retryGalleryTransferIndex()}><RefreshCw size={18} /></button>}
         {!transfer.active && <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-white/10" aria-label="Dismiss transfer" title="Dismiss transfer" onClick={dismissGalleryTransfer}><X size={18} /></button>}
       </div>
@@ -52,14 +54,14 @@ export function GalleryTransferStrip({ transfer }: { transfer: GalleryTransferSt
       </div>}
       {needsAttention && <div role="alert" className="mt-1 line-clamp-2 break-words text-amber-300" title={error}>{errorSummary}</div>}
       {expanded && <div className="mt-2 max-h-40 overflow-y-auto border-t border-zinc-800 pt-2">
-        <div className="break-all text-zinc-400">Destination: {transfer.destination}</div>
-        {transfer.error && <div className="break-words text-amber-300">{transfer.error}</div>}
+        <div className="break-all text-zinc-400">Destination: <span data-i18n-skip>{transfer.destination}</span></div>
+        {transfer.error && <div data-i18n-skip className="break-words text-amber-300">{transfer.error}</div>}
         {maxPage > 0 && <div className="flex items-center gap-2">
           <button type="button" className="flex h-9 w-9 items-center justify-center disabled:opacity-30" aria-label="Previous transfer results" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button>
           <span>{currentPage + 1} / {maxPage + 1}</span>
           <button type="button" className="flex h-9 w-9 items-center justify-center disabled:opacity-30" aria-label="Next transfer results" disabled={currentPage === maxPage} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button>
         </div>}
-        {transfer.results.slice(currentPage * 25, currentPage * 25 + 25).map((result, index) => <div key={`${result.path}-${index}`} className="mt-1 break-all">{result.success ? 'Transferred' : 'Failed'}: <span data-i18n-skip="">{result.path}</span>{result.error ? ` - ${result.error}` : result.newPath ? ` -> ${result.newPath}` : ''}</div>)}
+        {transfer.results.slice(currentPage * 25, currentPage * 25 + 25).map((result, index) => <div key={`${result.path}-${index}`} className="mt-1 break-all">{result.success ? 'Transferred' : 'Failed'}: <span data-i18n-skip="">{result.path}</span><span data-i18n-skip>{result.error ? ` - ${result.error}` : result.newPath ? ` -> ${result.newPath}` : ''}</span></div>)}
       </div>}
     </aside>
   );

@@ -14,8 +14,10 @@ import {
   type AppLanguage,
 } from '@/lib/appSettings';
 import { mountLegacyUiLocalization } from './legacyUiLocalization';
+import { DYNAMIC_UI_TRANSLATIONS } from './dynamicUiTranslations';
 
 const ENGLISH_TRANSLATIONS = {
+  ...DYNAMIC_UI_TRANSLATIONS.en,
   "comfy.ready": "Ready for generation",
   "comfy.starting": "Starting ComfyUI…",
   "comfy.stopped": "Stopped",
@@ -137,6 +139,7 @@ type TranslationKey = keyof typeof ENGLISH_TRANSLATIONS;
 type TranslationDictionary = Record<TranslationKey, string>;
 
 const GERMAN_TRANSLATIONS: TranslationDictionary = {
+  ...DYNAMIC_UI_TRANSLATIONS.de,
   "comfy.ready": "Bereit zur Generierung",
   "comfy.starting": "ComfyUI wird gestartet…",
   "comfy.stopped": "Gestoppt",
@@ -255,6 +258,7 @@ const GERMAN_TRANSLATIONS: TranslationDictionary = {
 };
 
 const JAPANESE_TRANSLATIONS: TranslationDictionary = {
+  ...DYNAMIC_UI_TRANSLATIONS.ja,
   "comfy.ready": "生成の準備完了",
   "comfy.starting": "ComfyUI を起動中…",
   "comfy.stopped": "停止中",
@@ -373,6 +377,7 @@ const JAPANESE_TRANSLATIONS: TranslationDictionary = {
 };
 
 const CHINESE_TRANSLATIONS: TranslationDictionary = {
+  ...DYNAMIC_UI_TRANSLATIONS['zh-CN'],
   "comfy.ready": "已就绪，可以生成",
   "comfy.starting": "正在启动 ComfyUI…",
   "comfy.stopped": "已停止",
@@ -491,6 +496,7 @@ const CHINESE_TRANSLATIONS: TranslationDictionary = {
 };
 
 const KOREAN_TRANSLATIONS: TranslationDictionary = {
+  ...DYNAMIC_UI_TRANSLATIONS.ko,
   "comfy.ready": "생성 준비 완료",
   "comfy.starting": "ComfyUI 시작 중…",
   "comfy.stopped": "중지됨",
@@ -633,9 +639,9 @@ export function translate(
 ): string {
   const language = normalizeLanguage(languageValue);
   const template = DICTIONARIES[language][key] || ENGLISH_TRANSLATIONS[key] || key;
-  return Object.entries(variables).reduce(
-    (result, [name, value]) => result.replaceAll(`{${name}}`, String(value)),
-    template,
+  // Replace only the source template's slots; inserted user text is never parsed again.
+  return template.replace(/\{([^{}]+)\}/g, (slot, name) =>
+    Object.prototype.hasOwnProperty.call(variables, name) ? String(variables[name]) : slot,
   );
 }
 

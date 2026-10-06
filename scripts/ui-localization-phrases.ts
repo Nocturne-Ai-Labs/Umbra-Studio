@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { NUMERIC_UI_TEMPLATES } from '../frontend/src/i18n/numericUiTemplates';
 
 const skippedTags = new Set(['code', 'kbd', 'pre', 'samp', 'script', 'style', 'svg', 'textarea']);
 const uiAttributes = new Set(['alt', 'aria-label', 'placeholder', 'title', 'label', 'description', 'tooltip']);
@@ -13,7 +14,7 @@ export function isTechnicalUiLiteral(value: string): boolean {
     || /^[\w./-]+\.(?:png|jpg|jpeg|webp|gif|json|csv|safetensors|onnx|txt|ini|py|js|ts|gguf|pt|pth|bat|sh)$/i.test(value)
     || /^(?:[\w.-]+\/[\w./-]+|\d+(?:\.\d+)?\s*(?:[KMGT]i?B|px|fps)|[A-Z][\w-]*(?:\s*\|\s*[A-Z][\w-]*)+)$/i.test(value);
 }
-/** UI boundaries only: event handler arguments, input values and protected data are excluded. */
+/** Display boundaries only: event arguments, input values and protected data are excluded. */
 export function collectUiLocalizationPhrases(componentRoot: string) {
   const values = new Set<string>();
   const add = (value: string) => {
@@ -58,6 +59,12 @@ export function collectUiLocalizationPhrases(componentRoot: string) {
   };
   const visit = (node: ts.Node) => {
     if (ts.isJsxElement(node) && isProtected(node.openingElement) || ts.isJsxSelfClosingElement(node) && isProtected(node)) return;
+    if (ts.isPropertyAssignment(node) && uiAttributes.has(node.name.getText().replace(/^['"]|['"]$/g, ''))) {
+      // Option/menu descriptions often live in declared arrays instead of JSX.
+      // Only inspect their display initializer, never value/id or call arguments.
+      expressionText(node.initializer);
+      return;
+    }
     if (ts.isJsxText(node)) add(node.text);
     else if (ts.isJsxExpression(node) && node.parent && (ts.isJsxElement(node.parent) || ts.isJsxFragment(node.parent))) {
       if (node.expression) expressionText(node.expression);
@@ -75,8 +82,20 @@ export function collectUiLocalizationPhrases(componentRoot: string) {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) walk(target);
-      else if (entry.name.endsWith('.tsx')) visit(ts.createSourceFile(target, fs.readFileSync(target, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX));
+      else if (entry.name.endsWith('.tsx')) {
+        const source = ts.createSourceFile(target, fs.readFileSync(target, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+        visit(source);
+        // Toast producers are known display boundaries even inside event handlers.
+        // Arbitrary function arguments remain excluded.
+        const feedback = (node: ts.Node) => {
+          if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'showToast' && node.arguments[0]) expressionText(node.arguments[0]);
+          ts.forEachChild(node, feedback);
+        };
+        feedback(source);
+      }
     }
   };
-  walk(componentRoot); return values;
+  walk(componentRoot);
+  for (const template of NUMERIC_UI_TEMPLATES) add(template);
+  return values;
 }
