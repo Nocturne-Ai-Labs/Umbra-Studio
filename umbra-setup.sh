@@ -2,13 +2,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-SETUP_APP="$PWD/resources/app/setup/UmbraSetupApp.js"
+SETUP_APP="$PWD/resources/app/launcher/UmbraUpdaterBootstrap.js"
 if [ ! -x "$BUN_BIN" ]; then
   echo "[ERROR] Bundled Bun runtime missing: $BUN_BIN"
   exit 1
 fi
 if [ ! -f "$SETUP_APP" ]; then
-  echo "[ERROR] Standalone setup utility missing: $SETUP_APP"
+  echo "[ERROR] Umbra Setup launcher missing: $SETUP_APP"
   exit 1
 fi
-exec "$BUN_BIN" "$SETUP_APP" --root "$PWD" "$@"
+exec "$BUN_BIN" "$SETUP_APP" --root "$PWD" --tab onboarding "$@"

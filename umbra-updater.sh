@@ -8,7 +8,7 @@ if [ ! -x "$BUN_BIN" ]; then
   exit 1
 fi
 if [ ! -f "$UPDATER_BOOTSTRAP" ]; then
-  echo "[ERROR] Standalone updater missing: $UPDATER_BOOTSTRAP"
+  echo "[ERROR] Umbra Setup launcher missing: $UPDATER_BOOTSTRAP"
   exit 1
 fi
-exec "$BUN_BIN" "$UPDATER_BOOTSTRAP" --root "$PWD" "$@"
+exec "$BUN_BIN" "$UPDATER_BOOTSTRAP" --root "$PWD" --tab updates "$@"

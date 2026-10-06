@@ -12,6 +12,8 @@ export function toolMaintenanceArgs(tool: unknown, action: unknown, ref: unknown
   if (action === 'update') return [`update-${tool}`];
   if (action === 'update_pytorch') return [`update-pytorch-${tool}`];
   if (tool === 'comfyui') {
+    if (action === 'install_core') return ['managed-comfyui'];
+    if (action === 'nodes_only') return ['comfy-nodes-only'];
     if (action === 'custom_nodes') return ['comfy-nodes'];
     if (action === 'h3_nodes') return ['comfy-h3-nodes'];
     if (action === 'install_sageattention') return ['install-sageattention-comfyui'];

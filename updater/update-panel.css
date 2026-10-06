@@ -1,0 +1,15 @@
+#umbra-updates { min-width: 0; }
+#umbra-updates h2 { margin: 0; }
+#umbra-updates p { overflow-wrap: anywhere; }
+#umbra-updates button { min-height: 44px; }
+.updates-toolbar, .updates-progress-label, .updates-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.updates-channel { display: flex; align-items: center; gap: 8px; margin: 16px 0; min-height: 44px; }
+#updates-releases { display: grid; gap: 8px; margin: 16px 0; }
+#updates-releases button { text-align: left; width: 100%; white-space: normal; overflow-wrap: anywhere; padding: 12px; }
+#updates-releases button[aria-pressed="true"] { outline: 1px solid var(--accent, var(--umbra-accent, currentColor)); }
+#updates-releases small { display: block; margin-top: 6px; opacity: .7; }
+#updates-progress { padding: 12px 0; }
+#updates-progress-bar { display: block; width: 100%; height: 16px; margin: 10px 0; accent-color: var(--accent, var(--umbra-accent)); }
+#updates-warning, #updates-message[data-error="true"] { color: #ffb1aa; }
+.updates-actions { justify-content: flex-start; }
+.updates-notice { font-size: .85em; opacity: .7; line-height: 1.6; }

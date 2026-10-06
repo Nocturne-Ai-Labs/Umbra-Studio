@@ -8,13 +8,15 @@ import {
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { assertOnboardingPaths, inspectOnboarding, readOnboarding, updateOnboarding, verifyOnboardingCheckpoint, writeOnboarding } from './Onboarding';
 import { pathToFileURL } from 'node:url';
 import { invalidateManagedPythonSetupEvidence, prepareManagedDependencyInstallPolicy } from '../updater/ManagedDependencyInstallPolicy';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { MODEL_MANIFESTS, SHARED_VISION_PROFILES, sharedSupportCatalog, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { assertAIToolkitStopped, inspectToolMaintenance, toolMaintenanceArgs } from './ToolMaintenance';
-import { claimToolMaintenance, trackToolMaintenanceChild } from '../shared/toolMaintenanceLock';
+import { claimToolMaintenance, readToolMaintenance, trackToolMaintenanceChild } from '../shared/toolMaintenanceLock';
+import { createUmbraUpdateController } from '../updater/UmbraUpdaterApp';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { installMediaTools, inspectMediaTools } from './MediaTools';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
@@ -23,7 +25,7 @@ const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
 const MAX_LOG_LINES = 500;
 
-type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools' | 'media-tools' | 'python-helpers';
+type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools' | 'media-tools' | 'python-helpers' | 'readiness';
 type SetupJobState = {
   id: string;
   kind: SetupJobKind;
@@ -79,6 +81,7 @@ function readSettings(settingsPath: string): Record<string, unknown> {
 }
 
 export function saveSetupLanguage(runtimeRoot: string, languageValue: unknown): string {
+  assertOnboardingPaths(runtimeRoot);
   const language = String(languageValue || '').trim();
   if (!SUPPORTED_LANGUAGES.has(language)) throw new Error('Choose a supported Umbra Studio language.');
 
@@ -104,6 +107,7 @@ export function saveSetupLanguage(runtimeRoot: string, languageValue: unknown): 
     completedAt: new Date().toISOString(),
     migration: null,
   });
+  writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), languageSaved: true });
   return language;
 }
 
@@ -265,12 +269,31 @@ function launchUmbra(runtimeRoot: string) {
 async function main() {
   const runtimeRoot = resolve(readArg('--root', process.env.UMBRA_ROOT || process.cwd()));
   const sourceRoot = resolve(readArg('--source', join(runtimeRoot, 'resources', 'app')));
+  const sessionPath = readArg('--session');
+  const bootstrap = join(sourceRoot, 'launcher', 'UmbraUpdaterBootstrap.js');
+  // Run outside replaceable application files so the shared app survives an update.
+  if (!sessionPath && existsSync(bootstrap) && existsSync(join(sourceRoot, 'setup', 'UmbraSetupApp.js'))) {
+    const child = spawn(process.execPath, [bootstrap, '--tab', readArg('--tab', 'onboarding'), ...Bun.argv.slice(2)], { cwd: runtimeRoot, windowsHide: true, stdio: 'inherit' });
+    const code = await new Promise<number>((done, fail) => { child.once('error', fail); child.once('close', code => done(code ?? 1)); });
+    if (code) throw new Error(`Setup bootstrap exited with code ${code}.`);
+    return;
+  }
   const requestedPort = Number(readArg('--port', String(DEFAULT_SETUP_PORT)));
   const port = Number.isInteger(requestedPort) && requestedPort >= 0 && requestedPort <= 65535 ? requestedPort : DEFAULT_SETUP_PORT;
   const token = readArg('--token') || randomUUID();
-  const htmlPath = join(sourceRoot, 'setup', 'index.html');
+  if (sessionPath) {
+    const session = JSON.parse(readFileSync(sessionPath, 'utf8'));
+    if (resolve(session.runtimeRoot) !== runtimeRoot || resolve(session.sourceRoot) !== sourceRoot || session.token !== token) throw new Error('Setup and update session ownership does not match this installation.');
+  }
+  const uiSourceRoot = resolve(readArg('--ui-source', sourceRoot));
+  const htmlPath = join(uiSourceRoot, 'setup', 'index.html');
   if (!existsSync(htmlPath)) throw new Error(`Setup page is missing: ${htmlPath}`);
-  const html = readFileSync(htmlPath, 'utf8').replace('/* MODEL_SETUP_SCRIPT */', () => readFileSync(join(sourceRoot, 'setup', 'models.js'), 'utf8'));
+  const html = readFileSync(htmlPath, 'utf8')
+    .replace('/* MODEL_SETUP_SCRIPT */', () => readFileSync(join(uiSourceRoot, 'setup', 'models.js'), 'utf8'))
+    .replace('/* ONBOARDING_SCRIPT */', () => readFileSync(join(uiSourceRoot, 'setup', 'onboarding.js'), 'utf8'))
+    .replace('<!-- UPDATE_PANEL -->', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.html'), 'utf8'))
+    .replace('/* UPDATE_STYLE */', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.css'), 'utf8'))
+    .replace('/* UPDATE_SCRIPT */', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.js'), 'utf8'));
   let activeJob: SetupJobState | null = null;
   let managedRepairState = readManagedRepairState(runtimeRoot);
   const persistManagedRepair = async (state: ManagedRepairState) => { managedRepairState = state; writeJsonAtomic(managedRepairStatePath(runtimeRoot), state); };
@@ -282,7 +305,11 @@ async function main() {
     return `http://127.0.0.1:${appPort}`;
   };
   const assertDependencyIdle = () => assertManagedDependencyRepairIdle({ runtimeRoot, origin: umbraOrigin() });
-  const hasRunningInstaller = () => activeJob?.phase === 'running';
+  let updateController: Awaited<ReturnType<typeof createUmbraUpdateController>> | null = null;
+  const setupBusy = () => activeJob?.phase === 'running' || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit');
+  const hasRunningInstaller = () => activeJob?.phase === 'running' || updateController?.isBusy() === true;
+  const closeSetup = () => { updateController?.close(); server.stop(true); process.exit(0); };
+  if (sessionPath) updateController = await createUmbraUpdateController(sessionPath, { isSetupBusy: setupBusy, onClose: closeSetup });
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -293,6 +320,16 @@ async function main() {
         || request.headers.get('x-umbra-setup-token')
         || '';
       if (suppliedToken !== token) return json({ success: false, error: 'Unauthorized setup session.' }, 403);
+      if (url.pathname.startsWith('/api/updates/')) {
+        return await updateController?.fetch(request) || json({ success: false, error: 'Open the packaged Umbra Setup launcher to manage updates.' }, 503);
+      }
+      if (url.pathname !== '/api/health') {
+        try { assertOnboardingPaths(runtimeRoot); }
+        catch (error) { return json({ success: false, error: (error as Error).message }, 409); }
+      }
+      if (updateController?.needsReopen() && (request.method === 'POST' && !['/api/close', '/api/launch'].includes(url.pathname) || url.pathname === '/api/onboarding')) {
+        return json({ success: false, error: 'Close and reopen Setup after updating Umbra Studio.' }, 409);
+      }
 
       if (url.pathname === '/api/health') {
         return json({ success: true, port: server.port, runtimeRoot });
@@ -300,6 +337,39 @@ async function main() {
       if (url.pathname === '/api/models' && request.method === 'GET') {
         try { return json({ success: true, ...await modelSetupCatalog(sourceRoot, runtimeRoot) }); }
         catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
+      if (url.pathname === '/api/onboarding' && request.method === 'GET') {
+        try { return json(await inspectOnboarding(sourceRoot, runtimeRoot)); }
+        catch (error) { return json({ success: false, error: (error as Error).message }, 500); }
+      }
+      if (url.pathname === '/api/onboarding' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ success: false, error: 'Wait for the current operation to finish.' }, 409);
+        try {
+          const body = await request.json() as Record<string, unknown>;
+          if (hasRunningInstaller()) return json({ success: false, error: 'Wait for the current operation to finish.' }, 409);
+          return json({ success: true, state: updateOnboarding(sourceRoot, runtimeRoot, body) });
+        } catch (error) { return json({ success: false, error: (error as Error).message }, 400); }
+      }
+      if (url.pathname === '/api/onboarding/verify' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ success: false, error: 'Wait for the current operation to finish.' }, 409);
+        const state = readOnboarding(runtimeRoot);
+        if (!state.languageSaved || !state.profiles.length) return json({ success: false, error: 'Save your language and select a generation model family first.' }, 400);
+        const job: SetupJobState = { id: randomUUID(), kind: 'readiness', phase: 'running', step: 'Verifying installation', lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: true };
+        activeJob = job;
+        void (async () => {
+          await runModelInstall(runtimeRoot, sourceRoot, 'support', job, modelSetupSelection(sourceRoot, 'support', state.supportProfiles), true);
+          await runModelInstall(runtimeRoot, sourceRoot, 'requirements', job, modelSetupSelection(sourceRoot, 'requirements', state.profiles), true);
+          const checkpoint = await inspectOnboarding(sourceRoot, runtimeRoot);
+          job.step = 'Verifying generation checkpoint';
+          job.progress = { stage: 'checking', file: checkpoint.selectedCheckpoint };
+          writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), checkpointVerification: await verifyOnboardingCheckpoint(runtimeRoot, checkpoint.selectedCheckpoint) });
+          const result = await inspectOnboarding(sourceRoot, runtimeRoot);
+          if (result.issues.length) throw new Error(result.issues.join(' '));
+          writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), verificationFingerprint: result.fingerprint, verifiedAt: new Date().toISOString() });
+          appendOutput(job, result.qualification);
+          job.phase = 'complete'; job.step = 'Installation verified'; job.completedAt = new Date().toISOString();
+        })().catch(error => { job.phase = job.cancelRequested ? 'cancelled' : 'failed'; job.step = 'Verification held'; job.error = (error as Error).message; job.completedAt = new Date().toISOString(); appendOutput(job, job.error); });
+        return json({ success: true, accepted: true, job }, 202);
       }
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
         try {
@@ -332,16 +402,20 @@ async function main() {
           } catch (error) { release(); throw error; }
           if (hasRunningInstaller()) { release(); return json({ success: false, error: 'Finish the current installation first.' }, 409); }
           const tool = inspectToolMaintenance(runtimeRoot).find(item => item.id === body.tool)!;
-          if (body.action !== 'install' && body.action !== 'set_comfyui_version' && !tool.installed) { release(); return json({ success: false, error: `Install ${tool.name} first.` }, 400); }
+          if (!['install', 'install_core', 'set_comfyui_version'].includes(String(body.action)) && !tool.installed) { release(); return json({ success: false, error: `Install ${tool.name} first.` }, 400); }
           const job: SetupJobState = { id: randomUUID(), kind: 'managed-tools', maintenanceTool: tool.id, phase: 'running', step: `${tool.name}: ${String(body.action).replaceAll('_', ' ')}`,
             lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false };
           activeJob = job;
           // AI Toolkit has its own environment; ComfyUI's constraints must not leak into it.
           void (body.tool === 'comfyui' ? runManagedToolScript(runtimeRoot, sourceRoot, args, job)
             : runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), args, job, '', sourceRoot))
-            .then(() => {
+            .then(async () => {
               if (!job.lines.includes('UMBRA_VERIFY_OK|setup-tools')) throw new Error('Tool installer verification did not complete. Review the log.');
               if (!inspectToolMaintenance(runtimeRoot).find(item => item.id === body.tool)?.installed) throw new Error(`${tool.name} installation is missing after maintenance.`);
+              if (body.tool === 'comfyui' && ['nodes_only', 'custom_nodes', 'install'].includes(String(body.action))) {
+                const inspected = await inspectOnboarding(sourceRoot, runtimeRoot);
+                writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), nodesFingerprint: inspected.nodesFingerprint });
+              }
               appendOutput(job, 'Maintenance verified. Launch the tool from Umbra Studio to check runtime readiness.');
               job.phase = 'complete'; job.step = `${tool.name} maintenance complete`; job.completedAt = new Date().toISOString();
             }).catch(error => { job.phase = 'failed'; job.step = `${tool.name} maintenance failed`; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(release);
@@ -487,6 +561,7 @@ async function main() {
         return json({ success: true, language, job: activeJob });
       }
       if (url.pathname === '/api/language' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ success: false, error: 'Wait for the current operation to finish.' }, 409);
         try {
           const body = await request.json().catch(() => ({})) as Record<string, unknown>;
           return json({ success: true, language: saveSetupLanguage(runtimeRoot, body.language) });
@@ -544,14 +619,13 @@ async function main() {
         return json({ success: true, accepted: true, job }, 202);
       }
       if (url.pathname === '/api/launch' && request.method === 'POST') {
-        if (activeJob?.phase === 'running') {
+        if (hasRunningInstaller()) {
           return json({ success: false, error: 'Wait for the model installer to finish.' }, 409);
         }
         try {
           launchUmbra(runtimeRoot);
           setTimeout(() => {
-            server.stop(true);
-            process.exit(0);
+            closeSetup();
           }, 750);
           return json({ success: true });
         } catch (error) {
@@ -559,12 +633,11 @@ async function main() {
         }
       }
       if (url.pathname === '/api/close' && request.method === 'POST') {
-        if (activeJob?.phase === 'running') {
+        if (hasRunningInstaller()) {
           return json({ success: false, error: 'Wait for the model installer to finish.' }, 409);
         }
         setTimeout(() => {
-          server.stop(true);
-          process.exit(0);
+          closeSetup();
         }, 200);
         return json({ success: true });
       }
@@ -582,7 +655,7 @@ async function main() {
     },
   });
 
-  const setupUrl = `http://127.0.0.1:${server.port}/?token=${encodeURIComponent(token)}&tab=${['models', 'tools'].includes(readArg('--tab')) ? readArg('--tab') : 'general'}&pack=${encodeURIComponent(readArg('--pack', 'requirements'))}`;
+  const setupUrl = `http://127.0.0.1:${server.port}/?token=${encodeURIComponent(token)}&tab=${['models', 'tools', 'updates'].includes(readArg('--tab')) ? readArg('--tab') : 'general'}&pack=${encodeURIComponent(readArg('--pack', 'requirements'))}`;
   console.log(`[UmbraSetup] Ready: ${setupUrl}`);
   if (!hasArg('--no-open')) openBrowser(setupUrl);
 }

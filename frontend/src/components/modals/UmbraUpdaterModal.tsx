@@ -53,7 +53,7 @@ export function UmbraUpdaterModal({
       });
       const payload = await response.json();
       if (!response.ok || !payload?.success || !payload?.updaterUrl) {
-        throw new Error(payload?.error || 'The standalone updater could not be launched.');
+        throw new Error(payload?.error || 'Umbra Setup could not be launched.');
       }
       if (launchAttemptRef.current !== attempt) return;
       // The app releases its listener before spawning the updater so Windows
@@ -62,7 +62,7 @@ export function UmbraUpdaterModal({
       window.location.assign(String(payload.updaterUrl));
     } catch (launchError) {
       if (launchAttemptRef.current !== attempt) return;
-      setError(launchError instanceof Error ? launchError.message : 'The standalone updater could not be launched.');
+      setError(launchError instanceof Error ? launchError.message : 'Umbra Setup could not be launched.');
       setLaunching(false);
     }
   }, []);
@@ -83,16 +83,16 @@ export function UmbraUpdaterModal({
         <header className="flex min-h-14 items-center justify-between border-b border-white/10 px-4">
           <div>
             <div className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--umbra-accent)]">
-              Umbra Studio Updater
+              Umbra Setup
             </div>
-            <div className="mt-1 text-sm font-black text-white">External maintenance service</div>
+            <div className="mt-1 text-sm font-black text-white">Setup and updates</div>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={launching}
             className="inline-flex h-9 w-9 items-center justify-center border border-white/10 text-zinc-400 hover:border-red-400/35 hover:text-red-300 disabled:opacity-30"
-            title="Cancel updater launch"
+            title="Cancel Setup launch"
           >
             <X size={16} />
           </button>
@@ -110,15 +110,15 @@ export function UmbraUpdaterModal({
             <div>
               <div className="text-sm font-black text-white">
                 {launching
-                  ? 'Starting the standalone updater'
+                  ? 'Opening Umbra Setup'
                   : error
-                    ? 'Updater launch failed'
-                    : 'Open the Umbra updater?'}
+                    ? 'Setup launch failed'
+                    : 'Open Setup to update Umbra Studio?'}
               </div>
               <p className="mt-2 text-xs leading-5 text-zinc-500">
                 {launching
-                  ? 'Umbra will open a dedicated updater page on port 8214, then close itself and its managed tools cleanly.'
-                  : error || 'Umbra Studio and ComfyUI will shut down before the updater opens. Save any work in progress before continuing.'}
+                  ? 'Umbra Setup will open its Updates tab after Umbra Studio and its managed tools close cleanly.'
+                  : error || 'Umbra Studio and ComfyUI will shut down before Setup opens. Save any work in progress before continuing.'}
               </p>
               {!launching && !error ? (
                 <p className="mt-3 text-xs font-semibold leading-5 text-zinc-300">
@@ -145,7 +145,7 @@ export function UmbraUpdaterModal({
                 className="inline-flex min-h-10 items-center justify-center gap-2 border border-[var(--umbra-accent)]/55 bg-[var(--umbra-accent)]/12 px-4 font-mono text-[10px] font-black uppercase text-white hover:bg-[var(--umbra-accent)]/20"
               >
                 {error ? <RefreshCw size={14} /> : <ExternalLink size={14} />}
-                {error ? 'Retry' : 'Open Updater'}
+                {error ? 'Retry' : 'Open Setup'}
               </button>
             </>
           ) : null}

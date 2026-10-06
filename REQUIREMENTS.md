@@ -63,7 +63,7 @@ Optional host requirements:
   native libraries.
 - FFmpeg and ffprobe are bundled in portable Windows and Linux releases for
   video thumbnails and metadata; no global installation is required. Use **Umbra Setup >
-  Tools** or **Umbra Updater > Dependencies > Install / repair media tools**
+  Tools > Install / repair media tools**
   to verify or repair the portable pair. Gallery also
   detects this installation's ComfyUI imageio FFmpeg. Linux repair requires
   `tar` and `xz-utils` or equivalent archive extraction tools.
@@ -95,7 +95,7 @@ requiring a host Node installation.
 
 | Feature | Additional requirements |
 | --- | --- |
-| Gallery, Filmstrip, metadata, Local Servers | Core Umbra runtime; bundled FFmpeg/ffprobe for video thumbnails and metadata, verifiable and repairable through Setup or Updater. |
+| Gallery, Filmstrip, metadata, Local Servers | Core Umbra runtime; bundled FFmpeg/ffprobe for video thumbnails and metadata, verifiable and repairable through Setup. |
 | Umbra UI | Managed ComfyUI install, the Umbra UI core support-model pack, compatible generation models, and the required custom nodes installed by Umbra. |
 | Power Prompter | Same shared ComfyUI pipeline requirements as Umbra UI; user-created `.ppcards` files and generation models. |
 | Data Forge board search | Internet connection. Danbooru can be used anonymously within its limits; Gelbooru, Rule34, and e621 may require account/API credentials for reliable access. Credentials are stored in the user's runtime config, never in source control. |
@@ -108,7 +108,7 @@ requiring a host Node installation.
 The default official H3 C-MMH3-26 and LTX C-LTX23-50 workflows have explicit
 dependencies in `defaults/UmbraUI/tool-requirements.json`. Their reviewed baseline
 is ComfyUI 0.38.0 with frontend 1.53.6 and DaSiWa 0.4.73, plus the declared
-provider suites and frontend assets. Setup and the updater repair these through
+provider suites and frontend assets. Setup repairs these through
 the existing managed installer after a dependency-plan review. Local conflicts,
 busy runtimes and unverified shutdowns hold the repair; generation models remain
 a separate user selection/setup step.
@@ -148,7 +148,7 @@ The automatic `core` profile is approximately 566 MB and contains:
 - Real-ESRGAN x4plus for a permissively licensed general upscale default
 - RIFE 4.26 for optional frame interpolation
 
-Managed ComfyUI setup installs this profile automatically. Portable packages
+Guided Setup installs this profile in its separate support-model stage. Portable packages
 include **Umbra Setup > Models > Pipeline support** for repair or manual installation.
 
 The optional `reference` profile adds the SDXL IP-Adapter ViT-H model and its
@@ -174,6 +174,11 @@ ComfyUI custom nodes, SageAttention and ComfyUI version switching. Stop the
 corresponding tool before maintenance and follow the progress and installer log
 in Setup. Launch, stop and connection checks remain in Umbra Studio.
 
+Umbra Setup also owns application updates under **Updates**. Guided setup starts
+with language, then ComfyUI, optional AI Toolkit, nodes, support models, generation
+resources and verification. Skipping AI Toolkit does not block generation setup.
+Readiness checks verify installation and model integrity without generating an image.
+
 ## Source Development
 
 Required:
@@ -191,8 +196,8 @@ bun run dev:fullstack
 
 Umbra serves the application at `http://127.0.0.1:8212`. The managed defaults
 also use `127.0.0.1:8188` for ComfyUI, `127.0.0.1:8313` for the Gallery bridge,
-`127.0.0.1:8675` for AI Toolkit, and fixed local port `127.0.0.1:8214` while
-the standalone updater is open. These ports must be available or explicitly
+`127.0.0.1:8675` for AI Toolkit, and default local port `127.0.0.1:8214` for the unified Setup app.
+In-app maintenance shortcuts can allocate a free Setup port. These ports must be available or explicitly
 reconfigured where the corresponding tool supports it.
 
 ## Managed Tools and Upstream Links

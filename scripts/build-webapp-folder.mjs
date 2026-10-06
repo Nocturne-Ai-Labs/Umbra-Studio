@@ -481,11 +481,11 @@ if not exist "%BUN_BIN%" (
   exit /b 1
 )
 if not exist "%UPDATER_BOOTSTRAP%" (
-  echo [ERROR] Standalone updater is missing: %UPDATER_BOOTSTRAP%
+  echo [ERROR] Umbra Setup launcher is missing: %UPDATER_BOOTSTRAP%
   pause
   exit /b 1
 )
-"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%"
+"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%" --tab updates %*
 if errorlevel 1 pause
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
@@ -497,18 +497,18 @@ function writeUmbraSetupLauncher() {
 setlocal
 cd /d "%~dp0"
 set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
-set "SETUP_APP=%CD%\\resources\\app\\setup\\UmbraSetupApp.js"
+set "SETUP_APP=%CD%\\resources\\app\\launcher\\UmbraUpdaterBootstrap.js"
 if not exist "%BUN_BIN%" (
   echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
   pause
   exit /b 1
 )
 if not exist "%SETUP_APP%" (
-  echo [ERROR] Standalone setup utility is missing: %SETUP_APP%
+  echo [ERROR] Umbra Setup launcher is missing: %SETUP_APP%
   pause
   exit /b 1
 )
-"%BUN_BIN%" "%SETUP_APP%" --root "%CD%" %*
+"%BUN_BIN%" "%SETUP_APP%" --root "%CD%" --tab onboarding %*
 if errorlevel 1 pause
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
@@ -566,7 +566,11 @@ function verifyPublish() {
     'resources/app/updater/UmbraUpdaterApp.js',
     'resources/app/updater/UmbraRelaunchWorker.js',
     'resources/app/updater/index.html',
+    'resources/app/updater/update-panel.html',
+    'resources/app/updater/update-panel.css',
+    'resources/app/updater/update-panel.js',
     'resources/app/setup/UmbraSetupApp.js',
+    'resources/app/setup/onboarding.js',
     'resources/app/setup/index.html',
     'resources/app/setup/models.js',
     'resources/app/setup/python/background_compat.py',
@@ -623,14 +627,14 @@ function verifyPublish() {
     'utf8',
   );
   const updaterHtml = fs.readFileSync(
-    path.join(publishRoot, 'resources', 'app', 'updater', 'index.html'),
+    path.join(publishRoot, 'resources', 'app', 'updater', 'update-panel.html'),
     'utf8',
   );
   if (updaterWorker.includes('waitForHealthyRestart')) {
     throw new Error('[webapp-publish] The update worker must not own application restart.');
   }
   if (!updaterApp.includes('/api/close') || !updaterApp.includes('/api/relaunch') || !updaterHtml.includes('Launch Umbra Studio')) {
-    throw new Error('[webapp-publish] Updater launch-and-close completion flow is missing.');
+    throw new Error('[webapp-publish] Unified Setup update launch-and-close completion flow is missing.');
   }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }

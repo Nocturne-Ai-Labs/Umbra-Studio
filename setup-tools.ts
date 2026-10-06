@@ -3009,7 +3009,7 @@ async function main() {
                 ['Check the setup log and retry ComfyUI custom-node setup.']
             );
         }
-    } else if (arg === 'comfy-nodes') {
+    } else if (arg === 'comfy-nodes' || arg === 'comfy-nodes-only') {
         const comfyDir = findToolPath(CONFIG.comfyui.search);
         if (!comfyDir) {
             log(`${c.red}X${c.reset}`, 'ComfyUI not found');
@@ -3023,7 +3023,7 @@ async function main() {
         if (!installComfyNodes(comfyDir)) {
             exitWithExistingVerifyFailure();
         }
-        if (!installUmbraUiSupportModels(comfyDir)) {
+        if (arg === 'comfy-nodes' && !installUmbraUiSupportModels(comfyDir)) {
             exitWithExistingVerifyFailure();
         }
     } else if (arg === 'comfy-h3-nodes' || arg === 'comfy-node') {

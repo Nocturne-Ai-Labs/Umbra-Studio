@@ -309,10 +309,10 @@ if [ ! -x "$BUN_BIN" ]; then
   exit 1
 fi
 if [ ! -f "$UPDATER_BOOTSTRAP" ]; then
-  echo "[ERROR] Standalone updater missing: $UPDATER_BOOTSTRAP"
+  echo "[ERROR] Umbra Setup launcher missing: $UPDATER_BOOTSTRAP"
   exit 1
 fi
-exec "$BUN_BIN" "$UPDATER_BOOTSTRAP" --root "$PWD" "$@"
+exec "$BUN_BIN" "$UPDATER_BOOTSTRAP" --root "$PWD" --tab updates "$@"
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
   fs.chmodSync(launcherPath, 0o755);
@@ -324,16 +324,16 @@ function writeLinuxSetupLauncher() {
 set -euo pipefail
 cd "$(dirname "$0")"
 BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-SETUP_APP="$PWD/resources/app/setup/UmbraSetupApp.js"
+SETUP_APP="$PWD/resources/app/launcher/UmbraUpdaterBootstrap.js"
 if [ ! -x "$BUN_BIN" ]; then
   echo "[ERROR] Bundled Bun runtime missing: $BUN_BIN"
   exit 1
 fi
 if [ ! -f "$SETUP_APP" ]; then
-  echo "[ERROR] Standalone setup utility missing: $SETUP_APP"
+  echo "[ERROR] Umbra Setup launcher missing: $SETUP_APP"
   exit 1
 fi
-exec "$BUN_BIN" "$SETUP_APP" --root "$PWD" "$@"
+exec "$BUN_BIN" "$SETUP_APP" --root "$PWD" --tab onboarding "$@"
 `;
   fs.writeFileSync(launcherPath, script, 'utf-8');
   fs.chmodSync(launcherPath, 0o755);
@@ -411,7 +411,11 @@ function verifyPublish() {
     'resources/app/updater/UmbraUpdaterApp.js',
     'resources/app/updater/UmbraRelaunchWorker.js',
     'resources/app/updater/index.html',
+    'resources/app/updater/update-panel.html',
+    'resources/app/updater/update-panel.css',
+    'resources/app/updater/update-panel.js',
     'resources/app/setup/UmbraSetupApp.js',
+    'resources/app/setup/onboarding.js',
     'resources/app/setup/index.html',
     'resources/app/setup/models.js',
     'resources/app/setup/python/background_compat.py',
@@ -456,14 +460,14 @@ function verifyPublish() {
     'utf8',
   );
   const updaterHtml = fs.readFileSync(
-    path.join(publishRoot, 'resources', 'app', 'updater', 'index.html'),
+    path.join(publishRoot, 'resources', 'app', 'updater', 'update-panel.html'),
     'utf8',
   );
   if (updaterWorker.includes('waitForHealthyRestart')) {
     throw new Error('[linux-publish] The update worker must not own application restart.');
   }
   if (!updaterApp.includes('/api/close') || !updaterApp.includes('/api/relaunch') || !updaterHtml.includes('Launch Umbra Studio')) {
-    throw new Error('[linux-publish] Updater launch-and-close completion flow is missing.');
+    throw new Error('[linux-publish] Unified Setup update launch-and-close completion flow is missing.');
   }
   if (bundleDataForgeModels) verifyBundledDataForgeModels();
 }

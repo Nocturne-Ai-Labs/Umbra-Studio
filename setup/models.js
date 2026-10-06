@@ -47,13 +47,13 @@ const modelBytes = value => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(
 function modelError(error) { status.textContent = error.message; status.classList.add('error'); }
 
 function showSetupTab(tab) {
-  ['general', 'models', 'tools'].forEach(id => {
+  ['general', 'models', 'tools', 'updates'].forEach(id => {
     modelElement(`${id}-panel`).hidden = tab !== id;
     modelElement(`tab-${id}`).setAttribute('aria-selected', String(tab === id));
     modelElement(`tab-${id}`).tabIndex = tab === id ? 0 : -1;
   });
 }
-const setupTabs = ['general', 'tools', 'models'];
+const setupTabs = ['general', 'tools', 'models', 'updates'];
 setupTabs.forEach(tab => {
   modelElement(`tab-${tab}`).addEventListener('click', () => showSetupTab(tab));
   modelElement(`tab-${tab}`).addEventListener('keydown', event => {

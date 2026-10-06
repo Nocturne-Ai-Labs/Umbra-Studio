@@ -43,20 +43,17 @@ hardware, Linux packages, ports, per-feature dependencies, caption-model pack,
 and links to every managed upstream tool.
 
 See [CHANGELOG.md](CHANGELOG.md) for release highlights. Portable builds include
-an optional standalone setup utility for choosing a language and installing the
-model packs used by Data Forge and Umbra UI. Setup never blocks Umbra startup.
+**Umbra Setup**, which combines guided onboarding, managed-tool maintenance,
+model downloads, and application updates. Setup does not block normal Umbra startup.
 
-After installation, the version number at the bottom-left of Umbra is also the
-updater button. `(+x)` reports the number of newer compatible GitHub releases.
-The button hands control to a standalone updater page on local port `8214`
-before Umbra shuts down. That external service shows builds and changelogs,
-downloads the complete portable package, closes Umbra and its managed tools,
-preserves `User/` and `Tools/`, updates Umbra Nodes when needed, and restarts
-Umbra automatically. The updater can also be opened directly with
-`UmbraUpdater.bat` on Windows or `umbra-updater.sh` on Linux. Umbra itself keeps
-its normal application root and fixed port. Downloads, extraction, rollback
-backups, and updater logs stay below `User/Cache/UmbraUpdater` inside the Umbra
-Studio folder and are removed after the standalone updater exits.
+The version button at the bottom-left opens **Setup > Updates**. `(+x)` reports
+newer compatible GitHub releases. Save your work before opening it from Umbra:
+the main app and its managed tools close cleanly. Select a release, follow the
+download and installation progress, then use **Launch Umbra Studio** when the
+update finishes. Updates preserve `User/` and `Tools/`. Downloads, rollback
+backups, and logs use the root-local `User/Cache/UmbraUpdater` workspace.
+`UmbraUpdater.bat` and `umbra-updater.sh` remain compatibility shortcuts to the
+same app’s Updates tab. An existing Setup session is reused.
 
 Quick summary:
 
@@ -95,7 +92,7 @@ The original files and their GPL provenance are under
 [`defaults/PowerPrompter/Official Workflows/DaSiWa`](defaults/PowerPrompter/Official%20Workflows/DaSiWa/PROVENANCE.md).
 Umbra does not substitute an adapted graph when an official workflow is held.
 
-1. Review the workflow dependency repair in Umbra Setup or the updater. It
+1. Review the workflow dependency repair in Umbra Setup > Tools. It
    uses the existing managed installer for compatible ComfyUI/frontend and node
    suites. Finish queued work and stop managed ComfyUI before repair. Conflicting
    local edits are retained and reported. Models are a separate selection/setup
@@ -177,7 +174,7 @@ install Bun separately.
 v0.22.0 is a one-time manual migration boundary for older Windows EXE builds.
 Close Umbra Studio and its managed tools, extract the new BAT package, then move
 only the old `User` and `Tools` folders into the new `Umbra Studio` folder. Do
-not copy the old `UmbraStudio.exe`. Once migrated, Umbra Updater can install
+not copy the old `UmbraStudio.exe`. Once migrated, Umbra Setup > Updates can install
 future BAT releases normally while preserving `User` and `Tools`.
 
 Linux releases start from `start-umbra.sh`. Users should not need to clone the
@@ -219,26 +216,36 @@ chmod +x umbra-setup.sh
 ./umbra-setup.sh
 ```
 
-The utility uses the bundled Bun runtime and serves a local-only page on
-`127.0.0.1:8215`. It can:
+The utility uses the bundled Bun runtime and serves one local-only Setup app
+(default port `8214`; in-app tool shortcuts can allocate a free local port).
+**Guided setup** saves your progress and follows this order:
 
-1. Save English, Japanese, Simplified Chinese, or Korean as the preferred app
-   language.
-2. Install or verify the Data Forge WD tagger and natural-language caption
-   models.
-3. Install or verify the core support models used by Umbra UI.
-4. Launch Umbra Studio after setup is complete.
+1. Choose and save English, Japanese, Simplified Chinese, Korean, or German.
+   The guided instructions change immediately to the selected language.
+2. Install managed ComfyUI, including its Python and CUDA/PyTorch environment.
+3. Install AI Toolkit if you want to train models, or skip it.
+4. Install custom nodes separately from model downloads.
+5. Review and install support models. Optional manual models show their original
+   download link and the exact destination folder.
+6. Choose one generation family, install its prerequisites, and select a compatible
+   checkpoint. Some packs include generation weights; prerequisite-only packs
+   require a separate checkpoint from Umbra’s Model Manager. Additional families
+   and feature models can be installed later through **Models**.
+7. Verify installed requirements, nodes, model checksums, and checkpoint integrity.
+   This check does not generate an image. Launch ComfyUI through Umbra afterwards;
+   installation verification does not qualify GPU execution or image quality.
 
-Each installer resumes supported partial downloads and verifies the pinned
-model files. Only one model pack runs at a time so status and failures remain
-clear. The utility does not start Umbra, ComfyUI, AI Toolkit, or any migration
-worker while installation is running. Install ComfyUI before using the Umbra UI
-model action so the resources are placed in its managed model directories.
+Existing valid model files are retained, supported partial downloads resume, and
+only one installation or application update runs at a time. **Tools** retains
+ComfyUI and AI Toolkit repairs, CUDA/PyTorch updates, custom nodes, SageAttention,
+and ComfyUI version switching. **Models** retains optional Data Forge packs and
+model-family downloads. **Updates** lists newer portable releases and shows a
+progress bar, transferred bytes, and installation stages. Reopen Setup after an
+application update before performing further maintenance.
 
-Updating an existing portable installation is handled by Umbra Updater, which
-preserves the current `User/` and `Tools/` directories. The setup utility does
-not migrate files between versioned folders. Language can still be changed
-later under **Settings > General > Language**.
+The unified app preserves `User/` and `Tools/` during updates and does not migrate
+files between versioned folders. Language can also be changed later under
+**Settings > General > Language**.
 
 Windows and Linux release packages include FFmpeg and ffprobe in
 `Runtime/FFmpeg/<platform>`. Fresh installs and app updates receive the pair
@@ -252,12 +259,11 @@ NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors and psutil under
 system Python or ComfyUI install. **Tagger model weights are not bundled**;
 download the desired models through **Umbra Setup > Models**. PyTorch,
 Transformers, PixAI and natural-language captioning remain separate managed
-installations. Setup and Updater show bundled library verification separately
+installations. Setup shows bundled library verification separately
 from model and managed-tool readiness. Existing helper venvs are preserved by
 app updates, and explicit `UMBRA_PYTHON` overrides keep priority.
 
-For video thumbnail or metadata errors, open **Umbra Setup > Tools** or
-**Umbra Updater > Dependencies**, then select **Install / repair media tools**.
+For video thumbnail or metadata errors, open **Umbra Setup > Tools**, then select **Install / repair media tools**.
 Umbra verifies FFmpeg and ffprobe separately. When needed, it downloads a
 checksum-pinned portable pair into `Tools/FFmpeg` (about 184 MiB on Windows,
 143 MiB on Linux). Repair tools retain their upstream license notices.

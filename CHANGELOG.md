@@ -6,6 +6,13 @@
   and destination folder. The model remains manual and excluded from packages
   and automatic installation; credits no longer point to a mirrored weight file.
 
+- Umbra Setup and Updater now share one local app. Guided setup saves progress
+  through language first, ComfyUI, optional AI Toolkit, custom nodes, support
+  models, generation prerequisites/checkpoint and integrity verification. The
+  final check does not generate an image. Updates show transfer progress and
+  preserve existing models and user files; legacy updater shortcuts open the
+  same Updates tab. Setup/update operations cannot overlap.
+
 ### TL;DR - Setup After Updating
 
 - ComfyUI and AI Toolkit install/update controls now live in **Umbra Setup >
@@ -32,9 +39,8 @@
   Windows ONNX helpers require the Microsoft Visual C++ 2019 or newer runtime.
 - If video thumbnails or metadata still report missing tools, open
   `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, select **Tools**,
-  then **Install / repair media tools**. The same action is available under
-  **Umbra Updater > Dependencies** using `UmbraUpdater.bat` or
-  `./umbra-updater.sh`.
+  then **Install / repair media tools**. Legacy `UmbraUpdater.bat` or `./umbra-updater.sh` shortcuts open
+  the same app; switch to **Tools** for dependency repairs.
 - The optional repair downloads about **184 MiB on Windows** or **143 MiB on Linux**
   only when the existing executables need repair; normal installs use the bundled pair.
   Downloads are checksum verified and retain the upstream GPL-3.0-or-later
