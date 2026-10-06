@@ -206,13 +206,26 @@ it automatically. Attention packages without compatible wheels hold the upgrade
 instead of silently removing them. Launch ComfyUI from Umbra after maintenance
 to verify custom-node registration and your workflows.
 
+When installed nodes declare both transparent-background and AlbumentationsX,
+the rebuild prepares Umbra's reviewed background-removal packages first and
+holds their versions, including Torch/CUDA, through custom-node installation.
+An incompatible explicit node requirement stops the upgrade and restores the
+previous environment. Setup shows the failure reason and recovery instructions;
+review the named node's dependency error before retrying. Inactive optional
+package extras do not count as required background-removal dependencies.
+
 For AI Toolkit, **Setup > Advanced > Tools > Update Python 3.12** rebuilds its managed
 training environment with upstream runtime pins and verifies a CUDA training
 step when an NVIDIA GPU is detected. Datasets, configurations and checkpoints remain in place; its previous
-venv is retained under `Tools/AI-Toolkit/.umbra-python-backups`. The current
+venv is retained under `Tools/AI-Toolkit/.umbra-python-backups`.
 For older AI Toolkit checkouts, update the toolkit before upgrading Python.
-AI Toolkit runtime specification recommends Python 3.12:
+The AI Toolkit runtime specification recommends Python 3.12:
 https://github.com/ostris/ai-toolkit/blob/main/manager/spec.py
+
+AI Toolkit's web UI also needs host Node.js 20+ with npm. On Windows, installing
+Node while Umbra is open is supported: retry the install or launch action and
+Umbra checks the current registered system PATH. It uses the verified Node/npm
+installation without changing your system PATH or requiring an Umbra restart.
 
 ### Standalone Setup
 

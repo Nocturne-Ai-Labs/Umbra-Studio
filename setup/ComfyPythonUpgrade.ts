@@ -7,6 +7,7 @@ type Receipt = {
   version: 1; id: string; phase: 'prepared' | 'rebuilding' | 'rolling-back' | 'complete' | 'rolled-back';
   environment: string; hadEnvironment: boolean; previousPython: string; startedAt: string;
   markers: { path: string; content: string | null }[]; error?: string; previousIdentity?: string;
+  backgroundEvidence?: string | null;
 };
 
 // The new venv is created at its final path: pip launchers contain absolute paths.
@@ -37,6 +38,7 @@ async function runUpgrade(root: string, markerPaths: string[], hooks: {
   const comfy = ownedPath(root, 'Tools', tool);
   if (!existsSync(join(comfy, tool === 'ComfyUI' ? 'main.py' : 'run.py'))) throw new Error(`Install ${tool} before upgrading its Python.`);
   const receiptPath = ownedPath(root, 'Tools', tool, '.umbra-python-upgrade.json');
+  const backgroundEvidencePath = ownedPath(root, 'User/Config/background-removal-compatibility.json');
   const identity = (path: string) => { const stat = statSync(path); return `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`; };
   const validMarker = (path: string) => path === '.torch_installed' || path === '.requirements_installed' || tool === 'ComfyUI' && /^custom_nodes\/[^/\\]+\/\.umbra-requirements-installed$/.test(path);
   for (const path of markerPaths) { if (!validMarker(path)) throw new Error('Unsupported Python setup marker.'); ownedPath(comfy, path); }
@@ -51,6 +53,7 @@ async function runUpgrade(root: string, markerPaths: string[], hooks: {
         || (marker.content !== null && typeof marker.content !== 'string')) throw new Error('Unverified Python upgrade marker.');
       ownedPath(comfy, marker.path);
     }
+    if (receipt.backgroundEvidence !== undefined && receipt.backgroundEvidence !== null && typeof receipt.backgroundEvidence !== 'string') throw new Error('Unverified background compatibility backup.');
     const backup = ownedPath(root, 'Tools', tool, '.umbra-python-backups', receipt.id);
     const environment = ownedPath(root, 'Tools', tool, receipt.environment);
     const old = ownedPath(root, 'Tools', tool, '.umbra-python-backups', receipt.id, 'previous');
@@ -71,6 +74,10 @@ async function runUpgrade(root: string, markerPaths: string[], hooks: {
       if (marker.content === null) { if (existsSync(path)) unlinkSync(path); }
       else writeFileSync(path, marker.content);
     }
+    if (tool === 'ComfyUI' && receipt.backgroundEvidence !== undefined) {
+      if (receipt.backgroundEvidence === null) { if (existsSync(backgroundEvidencePath)) unlinkSync(backgroundEvidencePath); }
+      else { mkdirSync(join(root, 'User/Config'), { recursive: true }); writeFileSync(backgroundEvidencePath, receipt.backgroundEvidence); }
+    }
     receipt.phase = 'rolled-back'; persist(receipt);
     hooks.log('Python upgrade rolled back. Previous environment and setup markers restored; diagnostic backup retained.');
   };
@@ -86,6 +93,7 @@ async function runUpgrade(root: string, markerPaths: string[], hooks: {
   const receipt: Receipt = { version: 1, id: randomUUID(), phase: 'prepared', environment: inspected.environment,
     hadEnvironment: existsSync(environment), previousIdentity: existsSync(environment) ? identity(environment) : undefined,
     previousPython: inspected.version || 'unavailable', startedAt: new Date().toISOString(),
+    ...(tool === 'ComfyUI' ? { backgroundEvidence: existsSync(backgroundEvidencePath) ? readFileSync(backgroundEvidencePath, 'utf8') : null } : {}),
     markers: [...new Set(markerPaths)].map(path => ({ path, content: existsSync(ownedPath(comfy, path)) ? readFileSync(ownedPath(comfy, path), 'utf8') : null })) };
   const backup = ownedPath(root, 'Tools', tool, '.umbra-python-backups', receipt.id);
   mkdirSync(backup, { recursive: true }); persist(receipt);

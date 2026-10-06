@@ -60,7 +60,9 @@ Required:
 
 Optional host requirements:
 
-- Node.js 20 or newer for the current upstream AI Toolkit web UI build.
+- Node.js 20 or newer with npm for the current upstream AI Toolkit web UI build.
+  On Windows, Setup and launch rediscover newly installed Node from the current
+  registered PATH; retry the action without restarting Umbra.
 - Tailscale for Umbra Remote. Published builds expose remote access through the
   user's own private tailnet; Umbra does not ship a shared account or tunnel.
 - Microsoft Visual C++ 2019 or newer runtime on Windows for CPU ONNX Runtime's

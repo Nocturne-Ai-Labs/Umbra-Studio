@@ -1,4 +1,6 @@
 import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
+import { resolveHostNodeRuntime, type HostNodeRuntime } from './shared/hostNodeRuntime';
+import { parseInstallerFailure } from './shared/installerFailure';
 import { inspectAIToolkitPython } from './setup/ComfyPythonRuntime';
 import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
 import { existingUpdaterUrl } from './launcher/UmbraUpdaterBootstrap';
@@ -14414,7 +14416,7 @@ interface ComfyLaunchCapability {
 
 let comfyLaunchCapabilityCache: ComfyLaunchCapability | null = null;
 let comfySageAvailabilityCache: { key: string; available: boolean; checkedAt: number } | null = null;
-let aitoolkitNodeCapabilityCache: { available: boolean; version: string; major: number; checkedAt: number } | null = null;
+let aitoolkitNodeCapabilityCache: (HostNodeRuntime & { checkedAt: number }) | null = null;
 
 const IS_WINDOWS = process.platform === 'win32';
 const TOOLS_DIR = join(ROOT_DIR, 'Tools');
@@ -14828,7 +14830,6 @@ function toolBusy(tool: string) {
   return { success: false, error: `${tool} is busy with another tool operation.`, busy: true, activeAction: toolOperations.get(tool) };
 }
 
-const VERIFY_FAIL_MARKER = 'UMBRA_VERIFY_FAIL|';
 
 function isChildProcessAlive(proc: ChildProcess | null): boolean {
   if (!proc) return false;
@@ -15771,16 +15772,7 @@ function stripAnsi(text: string): string {
 }
 
 function parseVerifyFailure(line: string): ToolActionJob['verifyFailure'] | null {
-  const clean = stripAnsi(line).trim();
-  if (!clean.startsWith(VERIFY_FAIL_MARKER)) return null;
-  const payload = clean.slice(VERIFY_FAIL_MARKER.length);
-  try {
-    const parsed = JSON.parse(payload) as ToolActionJob['verifyFailure'];
-    if (!parsed?.code || !parsed?.title) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+  return parseInstallerFailure(line);
 }
 
 function createToolAction(action: string, args: string[], tool?: 'comfyui' | 'aitoolkit', claim?: ToolOperationClaim) {
@@ -16121,27 +16113,12 @@ function hasShellCommand(command: string): boolean {
 
 function getAIToolkitNodeCapability() {
   const now = Date.now();
-  if (aitoolkitNodeCapabilityCache && now - aitoolkitNodeCapabilityCache.checkedAt < 60_000) {
+  if (aitoolkitNodeCapabilityCache?.available && now - aitoolkitNodeCapabilityCache.checkedAt < 60_000) {
     return aitoolkitNodeCapabilityCache;
   }
 
-  let version = '';
-  let major = 0;
-  if (hasShellCommand('node') && hasShellCommand('npm')) {
-    try {
-      const result = spawnSync('node', ['--version'], { encoding: 'utf-8', shell: true, windowsHide: true });
-      version = String(result.stdout || result.stderr || '').trim();
-      major = Number(version.match(/v?(\d+)/i)?.[1] || 0);
-    } catch {
-      version = '';
-      major = 0;
-    }
-  }
-
   aitoolkitNodeCapabilityCache = {
-    available: major >= 20,
-    version,
-    major,
+    ...resolveHostNodeRuntime(),
     checkedAt: now,
   };
   return aitoolkitNodeCapabilityCache;
@@ -18327,7 +18304,7 @@ async function startAIToolkitProcess() {
     if (!python.healthy || python.upgradeAvailable || python.multipleEnvironments || !aiToolkitRequirementsVerified(toolRoot)) return { success: false, error: 'AI Toolkit Python is missing, outdated or unverified. Use Update Python 3.12 or Repair Install in Umbra Setup before launching.' };
     const venvBin = IS_WINDOWS ? join(toolRoot, 'venv', 'Scripts') : join(toolRoot, 'venv', 'bin');
     const localNodeBin = join(config.cwd, 'node_modules', '.bin');
-    const inheritedPath = String(process.env.PATH || process.env.Path || '');
+    const inheritedPath = String(nodeCapability.env.PATH || '');
     const pathSeparator = IS_WINDOWS ? ';' : ':';
 
     console.log('\x1b[32m[AI-Toolkit]\x1b[0m Starting...');
@@ -18340,12 +18317,12 @@ async function startAIToolkitProcess() {
     });
     appendBackendStreamLog('aitoolkit', 'lifecycle', `Starting: ${config.executable} ${config.args.join(' ')}`);
 
-    const spawnedProcess = spawn(config.executable, config.args, {
+    const spawnedProcess = spawn(nodeCapability.executable, config.args, {
       cwd: config.cwd,
       shell: false,
       windowsHide: true,
       env: {
-        ...process.env,
+        ...nodeCapability.env,
         PORT: String(config.port),
         HOSTNAME: config.launchHost,
         VIRTUAL_ENV: join(toolRoot, 'venv'),
