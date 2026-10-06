@@ -23,7 +23,7 @@ function runMediaProcess(command: 'ffmpeg' | 'ffprobe', args: string[], options:
     const executable = options.executable || resolveMediaExecutable(command).executable;
     const missingToolError = (error: Error) => {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        error.message = `${command} is unavailable. Open Umbra Setup > Tools or Umbra Updater > Dependencies and install / repair media tools.`;
+        error.message = `${command} is unavailable. Open Umbra Setup > Guided setup > Ready or Umbra Setup > Tools and install / repair media tools.`;
       }
       return error;
     };

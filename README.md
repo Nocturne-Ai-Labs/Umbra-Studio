@@ -53,7 +53,7 @@ download and installation progress, then use **Launch Umbra Studio** when the
 update finishes. Updates preserve `User/` and `Tools/`. Downloads, rollback
 backups, and logs use the root-local `User/Cache/UmbraUpdater` workspace.
 `UmbraUpdater.bat` and `umbra-updater.sh` remain compatibility shortcuts to the
-same appâ€™s Updates tab. An existing Setup session is reused.
+same app's Updates tab. An existing Setup session is reused.
 
 Quick summary:
 
@@ -229,9 +229,11 @@ The utility uses the bundled Bun runtime and serves one local-only Setup app
    download link and the exact destination folder.
 6. Choose one generation family, install its prerequisites, and select a compatible
    checkpoint. Some packs include generation weights; prerequisite-only packs
-   require a separate checkpoint from Umbraâ€™s Model Manager. Additional families
+   require a separate checkpoint from Umbra's Model Manager. Additional families
    and feature models can be installed later through **Models**.
-7. Verify installed requirements, nodes, model checksums, and checkpoint integrity.
+7. Verify installed requirements, nodes, model checksums, checkpoint integrity,
+   FFmpeg and ffprobe. If media tools are missing, use **Ready > Install / repair
+   media tools** to download and checksum-verify the portable pair.
    This check does not generate an image. Launch ComfyUI through Umbra afterwards;
    installation verification does not qualify GPU execution or image quality.
 
