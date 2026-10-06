@@ -199,15 +199,17 @@ export async function inspectOnboarding(source: string, root: string) {
   const generationComplete = state.profiles.length === 1 && generationProfiles.has(state.profiles[0]) && generation.complete && !!checkpoint && validCheckpoint(root, checkpoint);
   const trainingComplete = state.training === 'skip' || state.training === 'install' && existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py'))
     && existsSync(join(root, 'Tools', 'AI-Toolkit', 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'));
-  const fingerprint = createHash('sha256').update(JSON.stringify({ state: { languageSaved: state.languageSaved, training: state.training, profiles: state.profiles, supportProfiles: state.supportProfiles, checkpoint },
+  const media = dependencies.mediaTools;
+  const fingerprint = createHash('sha256').update(JSON.stringify({ media: media.tools.map(tool => ({ tool: tool.tool, source: tool.source, ready: tool.ready, version: tool.version })), state: { languageSaved: state.languageSaved, training: state.training, profiles: state.profiles, supportProfiles: state.supportProfiles, checkpoint },
     core: [core.installedCommit, core.version, core.frontendVersion, core.pythonDependencies.verified], nodesFingerprint, support, generation, checkpointIdentity: checkpoint && identity(join(root, 'Tools', 'ComfyUI', 'models', checkpoint)), checkpointVerification: state.checkpointVerification })).digest('hex');
   const checks = [state.languageSaved, comfyComplete, trainingComplete, nodesComplete, support.complete, generationComplete];
-  const ready = checks.every(Boolean) && checkpointIntegrity && state.verificationFingerprint === fingerprint;
+  const ready = checks.every(Boolean) && media.ready && checkpointIntegrity && state.verificationFingerprint === fingerprint;
   const details = ['Save your preferred language.', 'Install and verify managed ComfyUI and its Python environment.', 'Install AI Toolkit for training, or skip it.', 'Install and verify custom nodes.', 'Install or verify selected support models.', 'Select a model family and a compatible generation checkpoint.', 'Verify the selected installation.'];
   const stages = ['language', 'comfyui', 'training', 'nodes', 'support', 'generation', 'ready'].map((id, index) => ({ id, complete: index === 6 ? ready : checks[index], detail: details[index] }));
   const issues = stages.slice(0, 6).filter(stage => !stage.complete).map(stage => stage.detail);
   if (state.profiles.length && !checkpoint) issues.push('Add a compatible generation checkpoint in Umbra Model Manager; prerequisites alone do not include one.');
   const issueCodes = stages.slice(0, 6).filter(stage => !stage.complete).map(stage => stage.id);
-  return { success: true, state, stages, issueCodes, selectedCheckpoint: checkpoint, checkpointIntegrity, catalog: { ...catalog, checkpoints, generationProfiles: [...generationProfiles] }, ready, issues, fingerprint, nodesFingerprint,
+  if (!media.ready) { issueCodes.push('media'); issues.push('Install or repair FFmpeg and ffprobe.'); }
+  return { success: true, state, stages, issueCodes, media, selectedCheckpoint: checkpoint, checkpointIntegrity, catalog: { ...catalog, checkpoints, generationProfiles: [...generationProfiles] }, ready, issues, fingerprint, nodesFingerprint,
     qualification: 'Installation files and model integrity verified. Launch managed ComfyUI from Umbra; GPU execution and image quality have not been tested.' };
 }

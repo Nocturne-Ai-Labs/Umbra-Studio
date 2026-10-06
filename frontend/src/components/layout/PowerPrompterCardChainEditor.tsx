@@ -1,3 +1,4 @@
+import { PowerPrompterWorkflowResources } from '@/components/power-prompter/PowerPrompterWorkflowResources';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from '../../../../shared/umbra-ui/animaTextEncoderDevice';
 
@@ -9369,7 +9370,12 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     Swap Dimensions: {generation.swapDimensions ? 'On' : 'Off'}
                   </button>
 
-                  <div className="rounded-md border border-white/15 bg-black/25 p-2 space-y-2">
+                  <PowerPrompterWorkflowResources
+                items={selectedPipeline?.readiness?.runtime.resources.items || []}
+                values={generation.workflowResources || {}}
+                onChange={(resourceId, value) => updateGeneration({ workflowResources: { ...generation.workflowResources, [resourceId]: value } })}
+              />
+              <div className="rounded-md border border-white/15 bg-black/25 p-2 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="text-[10px] font-black uppercase tracking-widest text-cyan-200">

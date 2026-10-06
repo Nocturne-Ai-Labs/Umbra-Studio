@@ -27,8 +27,9 @@
   optional managed downloads. Existing Python helper venvs are preserved.
   Windows ONNX helpers require the Microsoft Visual C++ 2019 or newer runtime.
 - If video thumbnails or metadata still report missing tools, open
-  `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, select **Tools**,
-  then **Install / repair media tools**. Legacy `UmbraUpdater.bat` or `./umbra-updater.sh` shortcuts open
+  `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, use **Guided setup >
+  Ready > Install / repair media tools**, or select the same action under **Tools**.
+  Guided Setup checks both executables before reporting Ready. Legacy `UmbraUpdater.bat` or `./umbra-updater.sh` shortcuts open
   the same app; switch to **Tools** for dependency repairs.
 - The optional repair downloads about **184 MiB on Windows** or **143 MiB on Linux**
   only when the existing executables need repair; normal installs use the bundled pair.
@@ -82,6 +83,13 @@
 - Let slower media repair downloads continue while receiving data. Bound header
   and stalled-response waits separately, with a fresh retry after failure.
 - Missing executable errors point directly to the Setup and Updater repair.
+
+### Power Prompter Resources
+
+- Power Prompter now exposes the selected pipeline's text encoder, VAE and other
+  workflow resources alongside its existing model and processing controls.
+  Resource choices are saved with the card document and queue settings. The
+  catalogs refresh when ComfyUI connects and can also be refreshed manually.
 
 ### Lightweight Python Dependencies
 

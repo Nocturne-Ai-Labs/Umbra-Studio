@@ -7,6 +7,13 @@ const ONBOARDING_COPY = {
   de: ['Geführte Einrichtung', 'Umbra Studio Schritt für Schritt einrichten. Der Fortschritt wird gespeichert; abgeschlossene Schritte können erneut geprüft werden.', 'Sprache', 'ComfyUI', 'Training (optional)', 'Zusatz-Nodes', 'Hilfsmodelle', 'Generierungsmodelle', 'Bereit', 'Zuerst die Sprache auswählen und speichern.', 'Die Generierungs-Engine und ihre verwaltete Python-Umgebung installieren.', 'AI Toolkit wird nur zum Trainieren von Modellen benötigt und kann später installiert werden.', 'Die Nodes für Umbra-Workflows installieren.', 'Hilfsmodelle für die gewünschten Workflows auswählen.', 'Modellfamilie auswählen und Dateien sowie Lizenzen prüfen. Manche Familien benötigen einen zusätzlichen Checkpoint.', 'Installierte Dateien und Nodes prüfen. Dabei wird kein Bild generiert.', 'Zurück', 'Weiter', 'ComfyUI installieren', 'AI Toolkit installieren', 'Training überspringen', 'Zusatz-Nodes installieren', 'Ausgewählte Dateien installieren', 'Installierte Dateien prüfen', 'Bereitschaft prüfen', 'Umbra Studio öffnen', 'Abgeschlossen', 'Ausstehend', 'In Arbeit…', 'Ausgewählter Download', 'Hugging-Face-Token (optional, nur diese Sitzung)', 'Vor dem Download die Lizenzen zugangsbeschränkter Modelle auf Hugging Face akzeptieren.', 'Manueller Download', '{file} im Ordner {folder} innerhalb des Umbra-Studio-Ordners ablegen. Setup lädt dieses Modell nicht herunter.', 'Vor dem Download jede Modelllizenz prüfen; Umbras Lizenz gewährt keine Nutzungsrechte an Modellen.', 'Umbra ist für die gewählte Konfiguration bereit.', 'Diese Punkte müssen noch erledigt werden:', 'Status aktualisieren', 'Optionale Modelle können später unter Models ergänzt werden.', 'Vor dem Fortfahren den aktuellen Schritt prüfen.'],
 };
 const onboardingIds = ['language', 'comfyui', 'training', 'nodes', 'support', 'generation', 'ready'];
+const onboardingMediaCopy = {
+  en: ['Media tools', 'FFmpeg and ffprobe are ready.', 'FFmpeg or ffprobe is unavailable. Install the verified portable tools to finish setup.', 'Install / repair media tools', 'The download is verified against its published checksum before installation.'],
+  ja: ['メディアツール', 'FFmpeg と ffprobe の準備が完了しました。', 'FFmpeg または ffprobe が利用できません。検証済みのポータブルツールをインストールして設定を完了してください。', 'メディアツールをインストール／修復', 'インストール前に公開チェックサムでダウンロードを検証します。'],
+  'zh-CN': ['媒体工具', 'FFmpeg 和 ffprobe 已就绪。', 'FFmpeg 或 ffprobe 不可用。请安装经过验证的便携工具以完成设置。', '安装／修复媒体工具', '安装前会根据公布的校验和验证下载文件。'],
+  ko: ['미디어 도구', 'FFmpeg 및 ffprobe가 준비되었습니다.', 'FFmpeg 또는 ffprobe를 사용할 수 없습니다. 검증된 휴대용 도구를 설치하여 설정을 완료하세요.', '미디어 도구 설치 / 복구', '설치 전에 공개된 체크섬으로 다운로드를 검증합니다.'],
+  de: ['Medientools', 'FFmpeg und ffprobe sind bereit.', 'FFmpeg oder ffprobe ist nicht verfügbar. Die geprüften portablen Tools installieren, um die Einrichtung abzuschließen.', 'Medientools installieren / reparieren', 'Der Download wird vor der Installation anhand der veröffentlichten Prüfsumme geprüft.'],
+};
 for (const [locale, text] of Object.entries({ en: 'Installation verified. Launch managed ComfyUI from Umbra Studio.', ja: 'インストールを検証しました。Umbra Studio から管理対象の ComfyUI を起動してください。', 'zh-CN': '安装已验证。请从 Umbra Studio 启动托管的 ComfyUI。', ko: '설치가 검증되었습니다. Umbra Studio에서 관리되는 ComfyUI를 실행하세요.', de: 'Installation geprüft. Das verwaltete ComfyUI über Umbra Studio starten.' })) ONBOARDING_COPY[locale][35] = text;
 const onboardingDownloadCopy = {
   en: 'Download or import a compatible generation checkpoint in Umbra Studio’s Model Manager, then reopen Setup. Checkpoint folder: Tools/ComfyUI/models/checkpoints/. Separate diffusion models: Tools/ComfyUI/models/diffusion_models/.',
@@ -153,11 +160,17 @@ function renderOnboarding() {
   if (stage === 3) content.append(onboardingButton(onboardingText(21), () => runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'nodes_only' })));
   if (stage === 4 || stage === 5) onboardingPackSelection(stage === 4 ? 'support' : 'requirements', content);
   if (stage === 6) {
+    const media = onboardingData.media;
+    const mediaCopy = onboardingMediaCopy[document.getElementById('language')?.value] || onboardingMediaCopy.en;
+    content.append(onboardingElement('h4', mediaCopy[0]), onboardingElement('p', mediaCopy[media?.ready ? 1 : 2]));
+    for (const tool of media?.tools || []) content.append(onboardingElement('p', `${tool.tool}: ${tool.ready ? tool.version : onboardingText(27)}`));
+    if (!media?.ready && media?.supported) content.append(onboardingElement('p', `${setupFormat('repairDownload', { size: Math.round(media.downloadBytes / 1024 / 1024) })} (${media.license}). ${mediaCopy[4]}`), onboardingButton(mediaCopy[3], () => runOnboardingJob('/api/dependencies/action', { kind: 'media', target: 'FFmpeg' })));
     content.append(onboardingButton(onboardingText(24), () => runOnboardingJob('/api/onboarding/verify', {})));
     if (onboardingData.ready) content.append(onboardingElement('p', onboardingText(35)), onboardingButton(onboardingText(25), () => document.getElementById('launch').click()));
     else if (onboardingData.issues?.length) {
       const issues = onboardingElement('ul');
       onboardingData.stages.slice(0, 6).forEach((entry, index) => { if (!entry.complete) issues.append(onboardingElement('li', onboardingText(index + 9))); });
+      if (onboardingData.issueCodes?.includes('media')) issues.append(onboardingElement('li', mediaCopy[2]));
       content.append(onboardingElement('p', onboardingText(36)), issues);
     }
   }
