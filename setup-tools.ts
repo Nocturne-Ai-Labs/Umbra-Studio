@@ -26,6 +26,13 @@ import { inspectBackgroundRemovalCompatibility, repairBackgroundRemovalCompatibi
 import { assertManagedDependencyRepairIdle } from './updater/ManagedDependencyRepair';
 import { prepareManagedDependencyInstallPolicy } from './updater/ManagedDependencyInstallPolicy';
 import { pathToFileURL } from 'node:url';
+import { toNamespacedPath } from 'node:path';
+import { comfyPackageRoots, ensureComfyPython, ensureAIToolkitPython, ensureSetupGit, inspectAIToolkitPython, inspectComfyPython, ownedPath } from './setup/ComfyPythonRuntime';
+import { upgradeComfyPython } from './setup/ComfyPythonUpgrade';
+import { joinToolMaintenance } from './shared/toolMaintenanceLock';
+import { assertAIToolkitStopped } from './setup/ToolMaintenance';
+import { installAIToolkitPythonDependencies, verifyAIToolkitPython } from './setup/AIToolkitPython';
+import { restoreComfyAttention } from './setup/ComfyAttentionUpgrade';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
 const MANAGED_SOURCE_ROOT = process.env.UMBRA_SOURCE_ROOT || import.meta.dir;
@@ -242,6 +249,8 @@ function runPlatformPreflight(): boolean {
 // ============================================
 
 let PYTHON_CMD = '';
+let COMFY_PYTHON = '';
+let AITOOLKIT_PYTHON = '';
 let PYTHON_VERSION = '';
 let PYTHON_DETECTED_VERSIONS = '';
 let GPU_NAME = '';
@@ -289,80 +298,16 @@ function getPyTorchIndexCandidates(): string[] {
     ];
 }
 
-function upgradePyTorchPackages(runPipCommand: (pipArguments: string) => boolean): boolean {
-    const packages = 'torch torchvision torchaudio';
+function upgradePyTorchPackages(python: string, workingDirectory: string): boolean {
     for (const indexUrl of getPyTorchIndexCandidates()) {
         log('->', `Trying PyTorch wheel index: ${indexUrl}`);
-        const installArguments = `install --upgrade ${packages} --index-url ${indexUrl}`;
-        if (runPipCommand(installArguments)) {
+        // Invoke directly: cmd.exe cannot launch Windows extended paths, while
+        // Python needs them for PyTorch's deeply nested license files.
+        const result = spawnSync(IS_WINDOWS ? toNamespacedPath(python) : python, ['-m', 'pip', 'install', '--upgrade', 'torch', 'torchvision', 'torchaudio', '--index-url', indexUrl], { cwd: workingDirectory, stdio: 'inherit', windowsHide: true });
+        if (result.status === 0) {
             return true;
         }
     }
-    return false;
-}
-
-function restoreAIToolkitCudaPyTorch(
-    runInVenv: (command: string) => boolean,
-    venvPython: string,
-    torchMarker: string
-): boolean {
-    if (!GPU_NAME || checkPyTorchCuda(venvPython)) {
-        const torchInfo = getInstalledTorchInfo(venvPython);
-        if (torchInfo) {
-            try {
-                writeFileSync(torchMarker, `${torchInfo.version}|${torchInfo.cuda}`, 'utf-8');
-            } catch { }
-        }
-        return true;
-    }
-
-    let torchVersion = '';
-    let torchvisionVersion = '';
-    try {
-        const result = spawnSync(venvPython, [
-            '-c',
-            "import importlib.metadata as m; print(m.version('torch').split('+')[0]); print(m.version('torchvision').split('+')[0])"
-        ], {
-            encoding: 'utf-8',
-            shell: false,
-            timeout: 30000
-        });
-        if (result.status === 0) {
-            const versions = String(result.stdout || '').split('\n').map((line) => line.trim()).filter(Boolean);
-            torchVersion = versions[0] || '';
-            torchvisionVersion = versions[1] || '';
-        }
-    } catch { }
-
-    if (!torchVersion || !torchvisionVersion) {
-        return false;
-    }
-
-    try {
-        rmSync(torchMarker, { force: true });
-    } catch { }
-
-    for (const indexUrl of getPyTorchIndexCandidates().filter((url) => !url.endsWith('/cpu'))) {
-        const cudaTag = indexUrl.split('/').pop() || '';
-        log('->', `Restoring AI-Toolkit CUDA wheels from ${cudaTag} without changing its pinned Torch versions...`);
-        const installCommand = [
-            '-m pip install --upgrade --force-reinstall --no-deps',
-            `"torch==${torchVersion}+${cudaTag}"`,
-            `"torchvision==${torchvisionVersion}+${cudaTag}"`,
-            `--index-url ${indexUrl}`
-        ].join(' ');
-        if (!runInVenv(installCommand) || !checkPyTorchCuda(venvPython)) continue;
-
-        const torchInfo = getInstalledTorchInfo(venvPython);
-        if (torchInfo) {
-            try {
-                writeFileSync(torchMarker, `${torchInfo.version}|${torchInfo.cuda}`, 'utf-8');
-            } catch { }
-            log(`${c.green}OK${c.reset}`, `AI-Toolkit CUDA runtime ready: torch ${torchInfo.version} (CUDA ${torchInfo.cuda})`);
-        }
-        return true;
-    }
-
     return false;
 }
 
@@ -887,6 +832,11 @@ function ensureVenvPip(venvPython: string, workingDirectory: string, label: stri
     // A partially-created venv can have python.exe but not pip. Re-run venv's
     // upgrade step using Umbra's selected runtime without deleting user files.
     const venvRoot = dirname(dirname(venvPython));
+    if (resolve(workingDirectory) === resolve(join(TOOLS_DIR, 'ComfyUI'))) {
+        return failWithVerify('comfy-python-rebuild-required', 'ComfyUI Python is broken. Use Update Python 3.13 in Umbra Setup.',
+            [`Virtual environment: ${venvRoot}`], ['The managed upgrade retains the old environment and rebuilds its dependencies.']);
+    }
+    if (resolve(workingDirectory) === resolve(join(TOOLS_DIR, 'AI-Toolkit'))) return failWithVerify('aitoolkit-python-rebuild-required', 'AI Toolkit Python is broken. Use Update Python 3.12 in Umbra Setup.', [], ['The managed upgrade rebuilds its dependencies and retains the previous environment.']);
     log('->', `Refreshing the ${label} virtual environment...`);
     if (runCmd(`${PYTHON_CMD} -m venv --upgrade "${venvRoot}"`, workingDirectory) && hasVenvPip(venvPython)) {
         log('OK', `${label} virtual environment repaired.`);
@@ -1539,13 +1489,14 @@ function setupPythonEnv(dir: string, toolId: string) {
     // 1. Create Venv
     if (!getVenvPython(dir)) {
         log('->', 'Creating venv...');
-        if (!runCmd(`${PYTHON_CMD} -m venv venv`, dir)) {
+        const pythonCommand = toolId === 'comfyui' ? `"${COMFY_PYTHON}"` : toolId === 'aitoolkit' ? `"${AITOOLKIT_PYTHON}"` : PYTHON_CMD;
+        if (!runCmd(`${pythonCommand} -m venv venv`, dir)) {
             log(`${c.red}X${c.reset}`, 'Failed to create venv');
             return failWithVerify(
                 'venv-create-failed',
                 'Failed to create tool virtual environment.',
                 [`Tool path: ${dir}`, `Python command: ${PYTHON_CMD}`],
-                ['Ensure Runtime/Python311 is healthy, then retry install.']
+                [`Ensure Runtime/${toolId === 'comfyui' ? 'Python313' : toolId === 'aitoolkit' ? 'Python312' : 'Python311'} is healthy, then retry install.`]
             );
         }
     }
@@ -1562,6 +1513,12 @@ function setupPythonEnv(dir: string, toolId: string) {
 
     if (!ensureVenvPip(py, dir, CONFIG[toolId]?.name || toolId)) {
         return false;
+    }
+
+    if (toolId === 'aitoolkit') {
+        const inspected = inspectAIToolkitPython(dir);
+        if (!inspected.healthy || inspected.upgradeAvailable) return failWithVerify('aitoolkit-python-upgrade-required', 'Use Update Python 3.12 in Umbra Setup before updating AI Toolkit dependencies.', [], ['The upgrade keeps the previous environment for rollback.']);
+        return installAIToolkitPythonDependencies(dir, py, GPU_NAME, (line) => log('->', line));
     }
 
     // Do not activate a hard-coded venv path. Managed tools can use venv, env,
@@ -1582,7 +1539,7 @@ function setupPythonEnv(dir: string, toolId: string) {
         runInVenv('-m pip install --upgrade pip');
 
         // Install newest available torch/vision/audio with CUDA-first fallback.
-        if (!upgradePyTorchPackages((pipArguments) => runInVenv(`-m pip ${pipArguments}`))) {
+        if (!upgradePyTorchPackages(py, dir)) {
             log(`${c.red}X${c.reset}`, 'PyTorch install failed');
             return failWithVerify(
                 'pytorch-install-failed',
@@ -1641,16 +1598,6 @@ function setupPythonEnv(dir: string, toolId: string) {
             } catch { }
         }
     }
-
-    if (toolId === 'aitoolkit' && !restoreAIToolkitCudaPyTorch(runInVenv, py, torchMarker)) {
-        return failWithVerify(
-            'aitoolkit-cuda-restore-failed',
-            'AI-Toolkit requirements replaced its CUDA-enabled PyTorch runtime.',
-            [`Tool path: ${dir}`, `GPU: ${GPU_NAME || 'not detected'}`],
-            ['Retry installation with internet access so Umbra can restore compatible CUDA wheels.']
-        );
-    }
-
 
     return true;
 }
@@ -1978,7 +1925,7 @@ function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeNa
 
     const markerPath = join(nodePath, '.umbra-requirements-installed');
     if (nodeName === 'ComfyUI-DaSiWa-Nodes') {
-        return installDaSiWaRequirements(py, requirementsPath, markerPath);
+        return installDaSiWaRequirements(py, requirementsPath, markerPath, forceRequirements);
     }
     return installOrdinaryNodeRequirements(py, comfyDir, requirementsPath, markerPath, nodeName,
         (message) => log('->', message), process.platform, forceRequirements);
@@ -2641,8 +2588,12 @@ function updatePyTorchForTool(key: keyof typeof CONFIG) {
         exitWithExistingVerifyFailure();
     }
 
+    if (key === 'aitoolkit') {
+        if (!setupPythonEnv(toolDir, cfg.id)) exitWithExistingVerifyFailure();
+        return;
+    }
     log('->', `Updating ${cfg.name} to latest available PyTorch...`);
-    if (!upgradePyTorchPackages((pipArguments) => runCmd(`"${py}" -m pip ${pipArguments}`, toolDir))) {
+    if (!upgradePyTorchPackages(py, toolDir)) {
         log(`${c.red}X${c.reset}`, 'PyTorch update failed');
         exitWithVerifyFailure(
             'pytorch-update-failed',
@@ -2782,7 +2733,7 @@ function installSageAttentionForComfyUI() {
             [`Tool path: ${toolDir}`, verifyOutput || 'No verification output captured.'],
             [
                 'Re-run install SageAttention action to retry latest upstream source build.',
-                'Confirm Python 3.11, CUDA-compatible torch, and triton runtime are available in ComfyUI venv.'
+                'Confirm the managed ComfyUI Python, CUDA-compatible torch, and triton runtime are available in ComfyUI venv.'
             ]
         );
     }
@@ -2933,7 +2884,7 @@ function installSageAttentionForComfyUIEnhanced() {
             [`Tool path: ${toolDir}`, verifyOutput || 'No verification output captured.'],
             [
                 'Re-run install SageAttention action to retry latest upstream source build.',
-                'Confirm Python 3.11, CUDA-compatible torch, and triton runtime are available in ComfyUI venv.'
+                'Confirm the managed ComfyUI Python, CUDA-compatible torch, and triton runtime are available in ComfyUI venv.'
             ]
         );
     }
@@ -2953,17 +2904,19 @@ async function main() {
         'umbra-nodes'
     ]);
 
+    await ensureSetupGit(ROOT_DIR, (line) => log('->', line));
     if (!runPlatformPreflight()) {
         exitWithExistingVerifyFailure();
     }
 
-    if (!arg || !pythonNotRequiredActions.has(arg)) {
+    const needsComfyBase = !arg || arg === 'all' || arg === 'comfyui' || Boolean(arg?.includes('comfy'));
+    if (needsComfyBase) COMFY_PYTHON = await ensureComfyPython(ROOT_DIR, (line) => log('->', line));
+    if (arg === 'aitoolkit' || Boolean(arg?.includes('aitoolkit'))) AITOOLKIT_PYTHON = await ensureAIToolkitPython(ROOT_DIR, (line) => log('->', line));
+    if (arg === 'all' || arg === 'python-helpers' || arg === 'waifu-tagger') {
         if (!findPython311Runtime()) {
             exitWithExistingVerifyFailure();
         }
         log(`${c.green}OK${c.reset}`, `Using Python 3.11 (${PYTHON_VERSION}): ${PYTHON_CMD}`);
-    } else {
-        log('->', 'Python runtime bootstrap skipped for desktop-only action');
     }
 
     if (!arg || !pythonNotRequiredActions.has(arg)) {
@@ -3061,12 +3014,16 @@ async function main() {
         if (!installUmbraUiSupportModels(comfyDir)) {
             exitWithExistingVerifyFailure();
         }
+    } else if (arg === 'update-python-comfyui') {
+        await migrateComfyPython();
     } else if (arg === 'update-comfyui') {
         await updateTool('comfyui');
     } else if (arg === 'background-compatibility') {
         await repairBackgroundPackages();
     } else if (arg === 'managed-comfyui') {
         await repairManagedComfyCore();
+    } else if (arg === 'update-python-aitoolkit') {
+        await migrateAIToolkitPython();
     } else if (arg === 'update-aitoolkit') {
         await updateTool('aitoolkit');
     } else if (arg === 'set-comfyui-version' || arg === 'downgrade-comfyui') {
@@ -3084,12 +3041,80 @@ async function main() {
         await runRequiredTool('comfyui');
     }
 
-    if (arg !== 'background-compatibility' && (!arg || arg.includes('comfy') || arg === 'umbra-nodes')) {
+    if (arg !== 'background-compatibility' && arg !== 'update-python-comfyui' && (!arg || arg.includes('comfy') || arg === 'umbra-nodes')) {
         await repairBackgroundPackages();
     }
     if (VERIFY_FAILURE) exitWithExistingVerifyFailure();
     console.log('UMBRA_VERIFY_OK|setup-tools');
     console.log(`\n${c.green}All operations complete!${c.reset}\n`);
+}
+
+async function migrateComfyPython(): Promise<void> {
+    const release = joinToolMaintenance(ROOT_DIR, 'comfyui');
+    try { await rebuildComfyPython(); } finally { release(); }
+}
+
+async function rebuildComfyPython(): Promise<void> {
+    if (process.env.PIP_CONSTRAINT?.trim()) throw new Error('Python migration requires a fresh dependency resolution. Review custom PIP_CONSTRAINT before retrying.');
+    const comfy = ownedPath(ROOT_DIR, 'Tools', 'ComfyUI');
+    const current = inspectComfyPython(comfy);
+    if (current.environment !== 'venv') throw new Error('Python upgrade requires the managed ComfyUI venv. Alternate environments were preserved.');
+    const settingsFile = join(ROOT_DIR, 'User', 'Config', 'settings.json');
+    const settings = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, 'utf8')) : {};
+    const port = Number(process.env.UMBRA_PORT || settings.servers?.umbra?.port || 8212);
+    const assertIdle = () => assertManagedDependencyRepairIdle({ runtimeRoot: ROOT_DIR, origin: `http://127.0.0.1:${port}` });
+    await assertIdle();
+    const nodesRoot = ownedPath(ROOT_DIR, 'Tools', 'ComfyUI', 'custom_nodes');
+    const nodeEntries = existsSync(nodesRoot) ? readdirSync(nodesRoot, { withFileTypes: true }) : [];
+    if (nodeEntries.some(entry => entry.isSymbolicLink() && !entry.name.endsWith('.disabled'))) throw new Error('Linked custom nodes require review before Python migration. Their files were preserved.');
+    const nodes = nodeEntries
+        .filter(entry => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== '__pycache__' && !entry.name.endsWith('.disabled'))
+        .map(entry => ({ name: entry.name, path: ownedPath(ROOT_DIR, 'Tools', 'ComfyUI', 'custom_nodes', entry.name) }));
+    // Read only known optional accelerators; never replay arbitrary pip freeze/VCS URLs.
+    const packages = comfyPackageRoots(ROOT_DIR);
+    const optionalProbe = spawnSync(COMFY_PYTHON, ['-I', '-c', "import importlib.metadata as m,json,sys; names=('sageattention','triton','triton-windows','xformers','flash-attn'); print(json.dumps([[d.metadata['Name'],d.version] for d in m.distributions(path=sys.argv[1:]) if d.metadata['Name'].lower().replace('_','-') in names]))", ...packages],
+        { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+    if (optionalProbe.status !== 0) throw new Error('Existing attention packages could not be inspected; upgrade held.');
+    const optional: Record<string, string> = {};
+    for (const [rawName, version] of JSON.parse(optionalProbe.stdout) as [string, string][]) {
+        const name = rawName.toLowerCase().replace(/[_\.]/g, '-');
+        if (optional[name] && optional[name] !== version) throw new Error(`Multiple ${name} versions require review before migration.`);
+        optional[name] = version;
+    }
+    const markers = ['.torch_installed', '.requirements_installed', ...nodes.map(node => `custom_nodes/${node.name}/.umbra-requirements-installed`)];
+    await upgradeComfyPython(ROOT_DIR, markers, {
+        assertIdle, log: (line) => log('->', line),
+        rebuild: async (environment) => {
+            const create = spawnSync(COMFY_PYTHON, ['-m', 'venv', environment], { stdio: 'inherit', windowsHide: true });
+            if (create.status !== 0) throw new Error('Python 3.13 virtual environment creation failed.');
+            if (!setupPythonEnv(comfy, 'comfyui') || !refreshComfyPinnedPackages(comfy)) throw new Error('ComfyUI Python dependencies failed to install.');
+            for (const node of nodes) {
+                log('->', `Reinstalling Python requirements: ${node.name}`);
+                if (!installComfyNodeRequirements(comfy, node.path, node.name, true)) throw new Error(`Python 3.13 requirements failed for ${node.name}.`);
+            }
+            const python = getVenvPython(comfy)!;
+            for (const [name, version] of Object.entries(optional).sort(([a], [b]) => Number(a === 'sageattention') - Number(b === 'sageattention'))) {
+                if (!/^[A-Za-z0-9_.-]+$/.test(name) || !/^[0-9][A-Za-z0-9.!+_-]*$/.test(version)) throw new Error('Unverified attention dependency version.');
+                await restoreComfyAttention(ROOT_DIR, python, name, version, (line) => log('->', line));
+            }
+            await repairBackgroundPackages();
+        },
+        verify: async () => {
+            const python = getVenvPython(comfy)!;
+            const script = "import sys,ssl,torch,torchvision,torchaudio,comfy.utils; assert sys.version_info[:2]==(3,13); print('PYTHON='+sys.version.split()[0]); print('TORCH='+torch.__version__); print('CUDA='+str(torch.version.cuda)); "
+                + (GPU_NAME && /nvidia/i.test(GPU_NAME) ? "assert torch.cuda.is_available(), 'CUDA unavailable'; x=torch.ones(1,device='cuda'); assert float((x+x).cpu()[0])==2; " : '')
+                + Object.keys(optional).map(name => `__import__(${JSON.stringify(name.replace('triton-windows', 'triton').replace('flash-attn', 'flash_attn'))}); `).join('');
+            const verify = spawnSync(python, ['-c', script], { cwd: comfy, stdio: 'inherit', windowsHide: true, timeout: 90_000 });
+            if (verify.status !== 0) throw new Error('Python 3.13 / ComfyUI / CUDA / attention verification failed.');
+            if (optional.sageattention) {
+                const sage = spawnSync(python, ['-c', "import torch; from sageattention import sageattn; q=torch.randn(1,4,32,64,device='cuda',dtype=torch.float16); y=sageattn(q,q,q); torch.cuda.synchronize(); assert y.shape==q.shape and torch.isfinite(y).all(); print('SAGE_CUDA_OK')"],
+                    { cwd: comfy, stdio: 'inherit', windowsHide: true, timeout: 120_000 });
+                if (sage.status !== 0) throw new Error('SageAttention CUDA kernel verification failed.');
+            }
+            const check = spawnSync(python, ['-m', 'pip', 'check'], { cwd: comfy, stdio: 'inherit', windowsHide: true, timeout: 30_000 });
+            if (check.status !== 0) throw new Error('Python 3.13 dependency consistency verification failed.');
+        },
+    });
 }
 
 async function repairBackgroundPackages(): Promise<void> {
@@ -3128,3 +3153,21 @@ main().catch((err) => {
     printVerifyFailureSummary();
     process.exit(1);
 });
+
+async function migrateAIToolkitPython(): Promise<void> {
+    const release = joinToolMaintenance(ROOT_DIR, 'aitoolkit');
+    try {
+        if (process.env.PIP_CONSTRAINT?.trim()) throw new Error('Python migration requires a fresh dependency resolution; review PIP_CONSTRAINT.');
+        const tool = ownedPath(ROOT_DIR, 'Tools', 'AI-Toolkit');
+        const current = inspectAIToolkitPython(tool);
+        if (current.environment !== 'venv') throw new Error('AI Toolkit migration requires the managed venv; alternate environments were preserved.');
+        await upgradeComfyPython(ROOT_DIR, ['.torch_installed', '.requirements_installed'], {
+            assertIdle: () => assertAIToolkitStopped(ROOT_DIR), log: (line) => log('->', line),
+            rebuild: async environment => {
+                const create = spawnSync(AITOOLKIT_PYTHON, ['-m', 'venv', environment], { stdio: 'inherit', windowsHide: true });
+                if (create.status !== 0 || !setupPythonEnv(tool, 'aitoolkit')) throw new Error('AI Toolkit Python 3.12 dependency rebuild failed.');
+            },
+            verify: async () => { verifyAIToolkitPython(tool, getVenvPython(tool)!, GPU_NAME, (line) => log('->', line)); },
+        }, 'AI-Toolkit');
+    } finally { release(); }
+}

@@ -1,7 +1,9 @@
+import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
+import { inspectAIToolkitPython } from './setup/ComfyPythonRuntime';
 import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
 import { existingUpdaterUrl } from './launcher/UmbraUpdaterBootstrap';
 import { openToolsSetup } from './backend/SetupLaunchService';
-import { readToolMaintenance } from './shared/toolMaintenanceLock';
+import { comfyPythonUpgradePending, toolPythonUpgradePending, readToolMaintenance } from './shared/toolMaintenanceLock';
 import { createToolLineFramer, MAX_TOOL_LOGS, MAX_TOOL_JOBS } from './backend/ToolActionConsole';
 import { createActionRelay } from './shared/backendActionRelay';
 import { bundledHelperPython } from './shared/bundledPythonHelpers';
@@ -17938,6 +17940,7 @@ const comfyStartup = createComfyStartup(startComfyUIProcess);
 const startComfyUI = () => comfyStartup.start();
 
 async function startComfyUIProcess() {
+  if (comfyPythonUpgradePending(ROOT_DIR)) return { success: false, error: 'ComfyUI Python upgrade was interrupted. Run Update Python 3.13 in Umbra Setup to recover the previous environment before launching.' };
   const claim = toolOperations.claim('comfyui', 'launch');
   if (!claim) return toolBusy('comfyui');
   try {
@@ -18269,6 +18272,7 @@ async function startAIToolkit() {
 }
 
 async function startAIToolkitProcess() {
+  if (toolPythonUpgradePending(ROOT_DIR, 'aitoolkit')) return { success: false, error: 'AI Toolkit Python upgrade was interrupted. Use Update Python 3.12 in Umbra Setup to recover before launching.' };
   try {
     if (isChildProcessAlive(aitoolkitProcess)) {
       return { success: true, message: 'AI-Toolkit is already running', running: true, healthy: await probeConfiguredAIToolkit(getBackendConfig().aitoolkit) };
@@ -18289,7 +18293,7 @@ async function startAIToolkitProcess() {
     if (!config.detected || !config.cwd || !existsSync(join(config.cwd, 'package.json'))) {
       return {
         success: false,
-        error: 'AI-Toolkit is missing or incomplete. Install or repair it from the Data Forge AI-Toolkit tab.'
+        error: 'AI-Toolkit is missing or incomplete. Install or repair it from Umbra Setup.'
       };
     }
 
@@ -18312,13 +18316,15 @@ async function startAIToolkitProcess() {
       return { success: false, error: `AI-Toolkit requires Node.js 20 or newer. Detected: ${nodeCapability.version || 'not installed'}.` };
     }
     if (!existsSync(join(config.cwd, 'node_modules'))) {
-      return { success: false, error: 'AI-Toolkit UI dependencies are not installed. Run Repair Install from the Data Forge tab.' };
+      return { success: false, error: 'AI-Toolkit UI dependencies are not installed. Run Repair Install in Umbra Setup.' };
     }
     if (!existsSync(join(config.cwd, '.next', 'BUILD_ID')) || !existsSync(join(config.cwd, 'dist', 'cron', 'worker.js'))) {
-      return { success: false, error: 'AI-Toolkit production assets are missing. Run Repair Install from the Data Forge tab.' };
+      return { success: false, error: 'AI-Toolkit production assets are missing. Run Repair Install in Umbra Setup.' };
     }
 
     const toolRoot = dirname(config.cwd);
+    const python = inspectAIToolkitPython(toolRoot);
+    if (!python.healthy || python.upgradeAvailable || python.multipleEnvironments || !aiToolkitRequirementsVerified(toolRoot)) return { success: false, error: 'AI Toolkit Python is missing, outdated or unverified. Use Update Python 3.12 or Repair Install in Umbra Setup before launching.' };
     const venvBin = IS_WINDOWS ? join(toolRoot, 'venv', 'Scripts') : join(toolRoot, 'venv', 'bin');
     const localNodeBin = join(config.cwd, 'node_modules', '.bin');
     const inheritedPath = String(process.env.PATH || process.env.Path || '');

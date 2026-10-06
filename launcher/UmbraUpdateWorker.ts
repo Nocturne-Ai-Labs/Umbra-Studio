@@ -450,7 +450,7 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
 
 const PROTECTED_RUNTIME_ENTRIES = new Set(['user', 'tools']);
 const PERSISTENT_PYTHON_PATHS = [
-  'Runtime/Python311', 'Runtime/PythonHelpers/venv', 'Runtime/PythonHelpers/env',
+  'Runtime/Python311', 'Runtime/Python312', 'Runtime/Python313', 'Runtime/Git', 'Runtime/PythonHelpers/venv', 'Runtime/PythonHelpers/env',
   'Runtime/PythonHelpers/.venv', 'Runtime/PythonHelpers/.helper_requirements_installed',
 ];
 

@@ -9,11 +9,11 @@ export function daSiWaCoreRequirements(requirements: string): string {
   return requirements.split(/\r?\n/).filter((line) => !GGUF_REQUIREMENT.test(line)).join('\n');
 }
 
-export function installDaSiWaRequirements(python: string, requirementsPath: string, markerPath: string): boolean {
+export function installDaSiWaRequirements(python: string, requirementsPath: string, markerPath: string, forceRequirements = false): boolean {
   // Prompt Forge uses Transformers. Keep the optional GGUF runtime out of setup.
   const requirements = daSiWaCoreRequirements(readFileSync(requirementsPath, 'utf-8'));
   const hash = Bun.hash(requirements).toString();
-  try { if (readFileSync(markerPath, 'utf-8').trim() === hash) return true; }
+  try { if (!forceRequirements && readFileSync(markerPath, 'utf-8').trim() === hash) return true; }
   catch { /* Install or refresh the core dependencies. */ }
 
   const tempDir = mkdtempSync(join(tmpdir(), 'umbra-dasiwa-'));

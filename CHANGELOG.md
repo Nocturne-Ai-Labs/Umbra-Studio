@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased - Managed Tool Python Upgrades
+
+- New ComfyUI installations use a checksum-verified private Python 3.13 runtime,
+  without requiring Microsoft Store Python. AI Toolkit uses its own managed
+  Python 3.12 runtime, matching upstream guidance. Python Helpers retain 3.11.
+- **Setup > Tools > Update Python 3.13** rebuilds existing or broken ComfyUI
+  environments, reinstalls installed custom-node requirements, and checks CUDA,
+  attention packages and dependency consistency. Failed upgrades restore the
+  previous environment; interrupted upgrades hold launching until recovery.
+  Models, outputs and custom-node code stay in place, with the previous
+  environment retained for rollback. Guided Setup also exposes the upgrade.
+- **Setup > Tools > Update Python 3.12** rebuilds AI Toolkit's Python separately,
+  preserving datasets, training configurations and checkpoints. Failed migrations
+  restore the previous environment. Installer and PyTorch updates use the toolkit's
+  own runtime pins and protect CUDA while resolving training dependencies.
+- Compatible SageAttention 2.2 Windows installations use verified stable-ABI
+  wheels matching the CUDA major version. Existing Triton and other supported
+  attention packages must pass verification before the upgrade completes.
+- Setup downloads checksum-verified portable Git on Windows when Git is missing.
+  App updates and rollback preserve the managed Python and Git runtimes. Future
+  Python patch versions install alongside old bases so retained venv backups remain
+  usable; Setup detects patch versions that need updating.
+
 ## v0.90.6-beta - Guided Setup, Localization And Bundled Helpers
 
 ### TL;DR - Setup After Updating

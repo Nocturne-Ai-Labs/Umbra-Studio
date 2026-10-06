@@ -10,6 +10,7 @@ import { ordinaryNodeRequirementsMarker } from '../setup/OrdinaryNodeRequirement
 import { inspectManagedNodeFrontend, managedChildPath, readManagedToolRequirements, type ManagedNodeRequirement, type ManagedRuntimePackage } from '../setup/ManagedToolRequirements';
 import { inspectBackgroundRemovalCompatibility } from '../setup/BackgroundRemovalCompatibility';
 import { inspectMediaTools } from '../setup/MediaTools';
+import { managedGitForTool } from '../setup/ComfyPythonRuntime';
 
 export type ManagedNodeStatus = {
   name: string; minimumCommit: string; installedCommit: string;
@@ -72,7 +73,7 @@ function probeManagedGit(root: string, args: string[], probes?: Map<string, Mana
   const key = JSON.stringify([root, args]);
   const prior = probes?.get(key);
   if (prior) return prior;
-  const probe = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+  const probe = spawnSync(managedGitForTool(root), ['-C', root, ...args], { encoding: 'utf8', windowsHide: true, timeout: 5_000 });
   probes?.set(key, probe);
   return probe;
 }
