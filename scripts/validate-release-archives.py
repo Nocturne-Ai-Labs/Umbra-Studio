@@ -115,6 +115,58 @@ def validate(archive, version, platform):
         manifest = json.loads(package.read('Umbra Studio/resources/app/package.json'))
         if manifest['version'] != version:
             raise ValueError(f'{archive.name}: version mismatch')
+        policy_path = Path(__file__).resolve().parent.parent / 'defaults/MediaTools/manifest.json'
+        policy = json.loads(policy_path.read_text(encoding='utf-8'))
+        packaged_policy = json.loads(package.read('Umbra Studio/resources/app/defaults/MediaTools/manifest.json'))
+        if packaged_policy != policy:
+            raise ValueError(f'{archive.name}: media policy differs from release source')
+        media_platform = 'win32' if platform == 'Windows-x64-BAT' else 'linux'
+        media_root = f'Umbra Studio/Runtime/FFmpeg/{media_platform}/'
+        installed = json.loads(package.read(media_root + 'installed.json'))
+        pin = policy['packages'][media_platform]
+        if (installed.get('version') != policy['version'] or installed.get('release') != policy['release']
+                or installed.get('license') != policy['license'] or installed.get('binDirectory') != 'bin'
+                or installed.get('archiveSha256') != pin['sha256'] or installed.get('archiveBytes') != pin['bytes']):
+            raise ValueError(f'{archive.name}: invalid bundled FFmpeg provenance')
+        suffix = '.exe' if media_platform == 'win32' else ''
+        for name in [f'bin/ffmpeg{suffix}', f'bin/ffprobe{suffix}', 'LICENSE.txt']:
+            expected = installed.get('files', {}).get(name, {})
+            member = package.getinfo(media_root + name)
+            if member.file_size != expected.get('bytes') or digest(member.filename).hex() != expected.get('sha256'):
+                raise ValueError(f'{archive.name}: bundled media checksum mismatch: {name}')
+            if media_platform == 'linux' and name.startswith('bin/') and not (member.external_attr >> 16) & 0o111:
+                raise ValueError(f'{archive.name}: media executable permission missing: {name}')
+        for name in ['SOURCE.json', 'BUILD-CONFIG.txt']:
+            if media_root + name not in names:
+                raise ValueError(f'{archive.name}: missing media notice: {name}')
+        helper_policy = json.loads((policy_path.parent.parent / 'PythonHelpers/manifest.json').read_text(encoding='utf-8'))
+        if json.loads(package.read('Umbra Studio/resources/app/defaults/PythonHelpers/manifest.json')) != helper_policy:
+            raise ValueError(f'{archive.name}: Python helper policy differs from release source')
+        helper_root = f'Umbra Studio/Runtime/PythonHelpers/bundled/{media_platform}/'
+        helpers = json.loads(package.read(helper_root + 'installed.json'))
+        policy_hash = hashlib.sha256(json.dumps(helper_policy, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+        if (helpers.get('schemaVersion') != 1 or helpers.get('policySha256') != policy_hash
+                or helpers.get('pythonVersion') != helper_policy['pythonVersion']
+                or helpers.get('pythonArchiveSha256') != helper_policy['platforms'][media_platform]['python']['sha256']
+                or helper_policy.get('modelsIncluded') is not False):
+            raise ValueError(f'{archive.name}: invalid bundled Python provenance')
+        helper_files = helpers.get('files', {})
+        if not helper_files or len(helper_files) > 50000:
+            raise ValueError(f'{archive.name}: invalid Python file inventory')
+        for name, expected in helper_files.items():
+            if (name.startswith('/') or '\\' in name or ':' in name
+                    or any(part in {'', '.', '..'} for part in name.split('/'))
+                    or name.startswith('models/') or re.search(r'\.(?:onnx|safetensors|ckpt|pt)$', name, re.I)):
+                raise ValueError(f'{archive.name}: unsafe Python dependency file: {name}')
+            member = package.getinfo(helper_root + name)
+            if member.file_size != expected.get('bytes') or digest(member.filename).hex() != expected.get('sha256'):
+                raise ValueError(f'{archive.name}: Python dependency checksum mismatch: {name}')
+        interpreter = 'python/python.exe' if media_platform == 'win32' else 'python/bin/python3.11'
+        for name in [interpreter, 'PACKAGES.json']:
+            if name not in helper_files:
+                raise ValueError(f'{archive.name}: missing Python bundle file: {name}')
+        if media_platform == 'linux' and not (package.getinfo(helper_root + interpreter).external_attr >> 16) & 0o111:
+            raise ValueError(f'{archive.name}: bundled Python executable permission missing')
         if package.testzip() is not None:
             raise ValueError(f'{archive.name}: corrupt archive member')
         print(f'PASS {archive.name}: {len(entries)} entries, version {version}, CRC and privacy checks')

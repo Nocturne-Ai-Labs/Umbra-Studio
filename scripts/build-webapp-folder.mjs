@@ -426,7 +426,7 @@ function removeLegacyRootShortcut(linkPath) {
 }
 
 function run(command, args, label) {
-  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false });
   if (result.status !== 0) {
     throw new Error(`[webapp-publish] ${label} failed with status ${result.status ?? 1}`);
   }
@@ -574,6 +574,12 @@ function verifyPublish() {
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
     'Runtime/Bun/win32/bun.exe',
+    'Runtime/FFmpeg/win32/bin/ffmpeg.exe',
+    'Runtime/FFmpeg/win32/bin/ffprobe.exe',
+    'Runtime/FFmpeg/win32/LICENSE.txt',
+    'Runtime/FFmpeg/win32/installed.json',
+    'Runtime/PythonHelpers/bundled/win32/python/python.exe',
+    'Runtime/PythonHelpers/bundled/win32/installed.json',
     'User/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
     'User/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'User/PowerPrompter/Prompts/Intro to Powerprompter.ppcards.json',
@@ -711,6 +717,8 @@ function publish() {
     path.join(packagedAppDir, 'node_modules'),
   );
   copyTree(path.join(root, 'Runtime'), path.join(publishRoot, 'Runtime'));
+  run('bun', ['scripts/prepare-media-runtime.ts', '--root', publishRoot], 'bundled FFmpeg/ffprobe preparation');
+  run('bun', ['scripts/prepare-python-helpers.ts', '--root', publishRoot], 'bundled CPU Python helpers preparation');
   copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraServer.js'), path.join(packagedAppDir, 'UmbraServer.js'));
   copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraUpdateWorker.js'),

@@ -26,6 +26,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: canary
+      - name: Verify release identity before packaging
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+        run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
       - name: Build Windows BAT portable folder
         shell: pwsh
@@ -86,6 +91,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: canary
+      - name: Verify release identity before packaging
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+        run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
       - name: Build Linux portable folder
         env:
@@ -120,9 +130,24 @@ jobs:
           name: umbra-studio-linux
           path: artifacts/*
 
+  validate:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: umbra-studio-*
+          merge-multiple: true
+          path: artifacts
+      - name: Validate both portable archives
+        run: python3 scripts/validate-release-archives.py artifacts
+
   release:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
-    needs: [windows, linux]
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,12 +161,11 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
         run: |
           python3 scripts/validate-release-archives.py artifacts
-          tag="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="${REQUESTED_TAG}"; fi
-          if [ -z "${tag}" ]; then echo "release_tag is required" >&2; exit 1; fi
+          node scripts/verify-release-identity.mjs
+          tag="${RELEASE_TAG}"
           version="${tag#v}"
           awk -v heading="## v${version}" '
             $0 == heading || index($0, heading " - ") == 1 { capture=1; next }
@@ -163,4 +187,7 @@ jobs:
             $0 != mobile && $0 != canvas && $0 != video { print }
           ' release-notes.md > release-notes-warnings.md
           mv release-notes-warnings.md release-notes.md
-          gh release create "${tag}" artifacts/* --repo "${GITHUB_REPOSITORY}" --notes-file release-notes.md --title "Umbra Studio ${tag}"
+          gh release create "${tag}" \
+            "artifacts/Umbra-Studio-v${version}-Windows-x64-BAT.zip" \
+            "artifacts/Umbra-Studio-v${version}-Linux-x64.zip" \
+            --verify-tag --repo "${GITHUB_REPOSITORY}" --notes-file release-notes.md --title "Umbra Studio ${tag}"

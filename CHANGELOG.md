@@ -1,5 +1,110 @@
 # Changelog
 
+## v0.90.6-beta - Bundled Media And Python Helpers, Updater Reliability
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update Umbra Studio and reopen it. Windows and Linux release packages now
+  include FFmpeg and ffprobe. Fresh installs and app updates receive them
+  automatically, with no separate media download or PATH change.
+- CPU Python helpers also arrive with the app: pandas, NumPy, Pillow, ONNX
+  Runtime, Hugging Face Hub, safetensors and psutil. No system Python installation
+  is needed for these bundled dependencies. **Tagger model weights are not
+  included**; select the desired models in **Umbra Setup > Models**. Larger
+  PyTorch/Transformers, PixAI and natural-language captioning installations remain
+  optional managed downloads. Existing Python helper venvs are preserved.
+  Windows ONNX helpers require the Microsoft Visual C++ 2019 or newer runtime.
+- If video thumbnails or metadata still report missing tools, open
+  `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, select **Tools**,
+  then **Install / repair media tools**. The same action is available under
+  **Umbra Updater > Dependencies** using `UmbraUpdater.bat` or
+  `./umbra-updater.sh`.
+- The optional repair downloads about **184 MiB on Windows** or **143 MiB on Linux**
+  only when the existing executables need repair; normal installs use the bundled pair.
+  Downloads are checksum verified and retain the upstream GPL-3.0-or-later
+  license notices. Linux requires `tar` and `xz-utils` or equivalents.
+- No model download, migration, ComfyUI update, or ComfyUI restart is required
+  for this repair. Existing user data, installed tools, and system PATH are
+  preserved. Explicit `FFMPEG_PATH` and `FFPROBE_PATH` overrides remain preferred;
+  review those paths if executable verification fails.
+
+### Media Reliability
+
+- Gallery thumbnails, shared video previews, metadata probes, and extended-video
+  exports share media executable discovery. Discovery checks explicit overrides,
+  Umbra-managed tools, the release's bundled pair, this instance's imageio FFmpeg, and PATH.
+- Package the checksum-pinned FFmpeg 8.1.3 build under `Runtime/FFmpeg`, including
+  license notices and source/build references. App updates replace these runtime
+  files while preserving users' `Tools` and `User` directories.
+- Setup's Tools page and Updater's Dependencies page show FFmpeg and ffprobe
+  verification separately and offer a dedicated install/repair action.
+- Repair stages and verifies both binaries, required PNG/WebP encoders, and
+  license notices before switching to the new portable tools. A failed download
+  or extraction keeps the previous tools available.
+- Missing executable errors point directly to the Setup and Updater repair.
+
+### Lightweight Python Dependencies
+
+- Build a fresh portable Python 3.11 CPU environment from checksum-pinned
+  upstream archives and wheels; retain package licenses and provenance.
+- Include pandas, NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors
+  and psutil. No tagger model weights, PyTorch or Transformers are bundled.
+- Use bundled dependencies for WD Tagger and the CPU ONNX censor detector,
+  while model files and heavier specialist providers remain separate.
+- Show dependency verification in Setup and Updater without claiming that
+  missing model weights or optional managed tools are installed.
+- Preserve existing `Runtime/Python311` and helper venvs during app replacement
+  and rollback. Verify bundled dependency hashes before closing the current app.
+
+### Updater Progress
+
+- Keep the progress bar beside the launch controls while scrolling release
+  notes and dependencies, including narrow windows.
+- Show download percentage and received/total bytes. Downloads with unknown
+  size and installation/dependency phases show ongoing activity instead of a
+  misleading completed download percentage.
+- Show **Ready to launch Umbra Studio** when the app update is complete and
+  current operations have finished. Launch remains unavailable while updating,
+  installing dependencies, or reconnecting to the updater.
+
+### Updater Reliability
+
+- Retrying a failed installation uses fresh download and extraction paths,
+  and publishes the new attempt before polling can mistake the earlier failure
+  for its result. Existing recovery copies remain available.
+- Verify ZIP paths, entry checksums, extraction limits, and required app files
+  before requesting shutdown. A malformed package leaves the current app open.
+- Verify the configured endpoint belongs to this installation before requesting
+  shutdown or launching. A different installation is left running.
+- Reuse an already-open Updater and prevent competing sessions from modifying
+  the same installation. Keep live worker workspaces during long installers.
+- Keep the Updater open until Umbra reports ready. Show startup failures with
+  a retry action, and open the app only after verifying its runtime root.
+- Clear recovered connection errors and resume status checks after launch
+  failure. Launch waits for current operation status to be available.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: missing-PATH video thumbnail failures when the installation already
+  has a usable ComfyUI imageio FFmpeg.
+- Improved: portable FFmpeg and ffprobe verification and repair through Setup
+  and Updater without a ComfyUI reinstall or global PATH edits.
+- Improved: FFmpeg and ffprobe arrive with the release and through app updates.
+- Improved: portable CPU Python dependencies arrive with the release; tagger
+  models remain separate downloads and existing helper environments are kept.
+- Improved: video preview errors explain how to install or repair missing tools.
+- Fixed: update progress could disappear from view while scrolling, and
+  dependency-only installations did not show the progress bar.
+- Improved: clear download progress, installation activity, and launch readiness.
+- Fixed: failed-update retries, competing Updater sessions, and lost launch errors.
+- Improved: archive verification before shutdown and installation ownership checks.
+
 ## v0.90.5-beta - ComfyUI Launch Recovery And UI Audit Repairs
 
 ### TL;DR - Setup After Updating

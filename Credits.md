@@ -684,10 +684,27 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 
 ### FFmpeg
 - Project: https://ffmpeg.org
+- Portable builds: https://github.com/BtbN/FFmpeg-Builds
+- License: the pinned GPL build is GPL-3.0-or-later. Portable releases retain
+  its license, source/build references, and build configuration under
+  `Runtime/FFmpeg/<platform>`. Optional repair installs retain the same notices
+  under `Tools/FFmpeg`.
 - Usage in Umbra Studio:
-  - Optional system media decoder used for broad video thumbnail and metadata compatibility
+  - Bundled FFmpeg/ffprobe executables for video thumbnails, previews, metadata, and
+    extended-video exports. Setup and Updater verify existing executables or
+    install a portable pair without changing the system PATH.
 
 ## Additional Attribution
+
+### Portable CPU Python Helpers
+
+- Python runtime: https://github.com/astral-sh/python-build-standalone
+- Libraries: pandas, NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors
+  and psutil, plus their pinned dependencies from https://pypi.org.
+- Release builds create a fresh isolated distribution under
+  `Runtime/PythonHelpers/bundled/<platform>`. Python and wheel license files are
+  retained beside the installed code; `PACKAGES.json` records exact upstream
+  versions, URLs and SHA-256 values. Model weights are not included.
 
 ### transparent-background / InSPyReNet
 - Project: https://github.com/plemeri/transparent-background

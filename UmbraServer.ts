@@ -1,6 +1,7 @@
 import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
 import { createToolLineFramer, MAX_TOOL_LOGS, MAX_TOOL_JOBS } from './backend/ToolActionConsole';
 import { createActionRelay } from './shared/backendActionRelay';
+import { bundledHelperPython } from './shared/bundledPythonHelpers';
 import { addMainActionDelegation, isReturnedMainAction } from './shared/backendActionOwnership';
 import { createActionLogger } from './shared/backendActionLogger';
 import { assertVideoGenerationPolicy, normalizeVideoRoutePolicy, videoGenerationPolicyIssue, videoGraphPolicyIssue, type UmbraVideoRoutePolicy } from './shared/umbra-ui/videoRoutePolicy';
@@ -16248,6 +16249,8 @@ function getPythonCommandCandidates(): PythonCommandCandidate[] {
   // Prefer Umbra's helper venv first so Waifu dependencies are deterministic and isolated.
   const helperPython = findPythonInVenv(join(ROOT_DIR, 'Runtime', 'PythonHelpers'));
   if (helperPython) pushCandidate(helperPython);
+  const lightweightPython = bundledHelperPython(ROOT_DIR);
+  if (lightweightPython) pushCandidate(lightweightPython, ['-I', '-B']);
 
   pushBundledRuntimePython();
 

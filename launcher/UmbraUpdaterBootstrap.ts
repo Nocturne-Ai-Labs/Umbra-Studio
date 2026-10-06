@@ -3,14 +3,18 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readFileSync,
+  readdirSync,
   writeFileSync,
 } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import {
   cleanupInactiveUmbraUpdaterWorkspaces,
   resolveUmbraUpdaterCacheRoot,
+  isUmbraUpdaterWorkspace,
+  requestUmbraUpdaterWorkspaceCleanup,
 } from '../shared/umbraUpdaterWorkspace';
 
 const DEFAULT_UPDATER_PORT = 8214;
@@ -34,20 +38,50 @@ function copyRequired(source: string, destination: string) {
   copyFileSync(source, destination);
 }
 
-async function waitUntilReady(origin: string, token: string): Promise<void> {
+export async function waitUntilReady(origin: string, token: string, child?: ChildProcess, timeoutMs = READY_TIMEOUT_MS): Promise<void> {
   const startedAt = Date.now();
-  while (Date.now() - startedAt < READY_TIMEOUT_MS) {
-    try {
-      const response = await fetch(`${origin}/api/health?token=${encodeURIComponent(token)}`, {
-        cache: 'no-store',
-      });
-      if (response.ok) return;
-    } catch {
-      // The standalone updater is still starting.
+  let launchError: Error | null = null;
+  const onError = (error: Error) => { launchError = error; };
+  child?.on('error', onError);
+  try {
+    while (Date.now() - startedAt < timeoutMs) {
+      if (launchError) throw launchError;
+      if (child && (child.exitCode !== null || child.signalCode !== null)) throw new Error('The standalone updater exited before it became ready. Another Updater may already be open; review its startup log.');
+      try {
+        const response = await fetch(`${origin}/api/health?token=${encodeURIComponent(token)}`, {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(Math.max(1, Math.min(1_000, timeoutMs - (Date.now() - startedAt)))),
+        });
+        const status = await response.json().catch(() => null) as { success?: boolean } | null;
+        if (response.ok && status?.success === true) return;
+      } catch {
+        // The standalone updater is still starting.
+      }
+      await Bun.sleep(150);
     }
-    await Bun.sleep(150);
+    throw new Error(`The standalone updater did not start on ${origin}.`);
+  } finally { child?.off('error', onError); }
+}
+
+async function existingUpdaterUrl(runtimeRoot: string): Promise<string> {
+  const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
+  if (!existsSync(cacheRoot) || !isUmbraUpdaterWorkspace(runtimeRoot, join(cacheRoot, 'session-check'))) return '';
+  for (const entry of readdirSync(cacheRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^session-[a-z0-9._-]+$/i.test(entry.name)) continue;
+    const workspaceRoot = join(cacheRoot, entry.name);
+    if (!isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) continue;
+    try {
+      const session = JSON.parse(readFileSync(join(workspaceRoot, 'session.json'), 'utf8'));
+      if (resolve(session.runtimeRoot) !== runtimeRoot || !Number.isInteger(session.updaterPid) || session.updaterPid <= 0) continue;
+      process.kill(session.updaterPid, 0);
+      if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535 || !session.token) continue;
+      const origin = `http://127.0.0.1:${session.port}`;
+      const response = await fetch(`${origin}/api/health?token=${encodeURIComponent(session.token)}`, { signal: AbortSignal.timeout(750) });
+      const status = await response.json() as { success?: boolean };
+      if (response.ok && status.success === true) return `${origin}/?token=${encodeURIComponent(session.token)}`;
+    } catch { /* An abandoned session cannot supply a reusable window. */ }
   }
-  throw new Error(`The standalone updater did not start on ${origin}.`);
+  return '';
 }
 
 function openBrowser(url: string) {
@@ -74,12 +108,19 @@ async function main() {
   const launcherPid = Math.max(0, Number.parseInt(readArg('--launcher-pid', '0'), 10) || 0);
   const appPort = Math.max(1, Number.parseInt(readArg('--app-port', '8212'), 10) || 8212);
   const appHost = readArg('--app-host', '127.0.0.1');
+  const existing = await existingUpdaterUrl(runtimeRoot);
+  if (existing) {
+    console.log(`UMBRA_UPDATER_URL=${existing}`);
+    if (!hasArg('--no-open')) openBrowser(existing);
+    return;
+  }
   cleanupInactiveUmbraUpdaterWorkspaces(runtimeRoot, {
     staleAfterMs: ABANDONED_WORKSPACE_AGE_MS,
   });
   const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
-  mkdirSync(cacheRoot, { recursive: true });
   const workspaceRoot = join(cacheRoot, `session-${Date.now()}-${randomUUID()}`);
+  if (!isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) throw new Error('The Updater cache path contains a redirected directory.');
+  mkdirSync(cacheRoot, { recursive: true });
   mkdirSync(workspaceRoot, { recursive: false });
 
   const bunName = process.platform === 'win32' ? 'bun.exe' : 'bun';
@@ -119,17 +160,21 @@ async function main() {
     cwd: workspaceRoot,
     detached: true,
     stdio: 'ignore',
-    windowsHide: false,
+    windowsHide: true,
     env: {
       ...process.env,
       UMBRA_ROOT: runtimeRoot,
     },
   });
   if (!child.pid) throw new Error('The standalone updater process did not start.');
-  child.unref();
-
   const origin = `http://127.0.0.1:${port}`;
-  await waitUntilReady(origin, token);
+  try { await waitUntilReady(origin, token, child); }
+  catch (error) {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    requestUmbraUpdaterWorkspaceCleanup(workspaceRoot);
+    throw error;
+  }
+  child.unref();
   const updaterUrl = `${origin}/?token=${encodeURIComponent(token)}`;
   console.log(`UMBRA_UPDATER_URL=${updaterUrl}`);
   if (!hasArg('--no-open')) openBrowser(updaterUrl);

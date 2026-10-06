@@ -59,12 +59,22 @@ Optional host requirements:
 - Node.js 20 or newer for the current upstream AI Toolkit web UI build.
 - Tailscale for Umbra Remote. Published builds expose remote access through the
   user's own private tailnet; Umbra does not ship a shared account or tunnel.
-- FFmpeg available on `PATH` for the widest video thumbnail and media handling
-  compatibility when an installed generation tool does not provide it.
+- Microsoft Visual C++ 2019 or newer runtime on Windows for CPU ONNX Runtime's
+  native libraries.
+- FFmpeg and ffprobe are bundled in portable Windows and Linux releases for
+  video thumbnails and metadata; no global installation is required. Use **Umbra Setup >
+  Tools** or **Umbra Updater > Dependencies > Install / repair media tools**
+  to verify or repair the portable pair. Gallery also
+  detects this installation's ComfyUI imageio FFmpeg. Linux repair requires
+  `tar` and `xz-utils` or equivalent archive extraction tools.
 
 The portable installer can bootstrap managed Python 3.11 runtimes and isolated
 virtual environments. ComfyUI and AI Toolkit use their own tool-local virtual
 environments; Data Forge Python helpers use `Runtime/PythonHelpers/venv`.
+Portable releases additionally include `Runtime/PythonHelpers/bundled/<platform>`
+with a CPU Python runtime and pinned pandas, NumPy, Pillow, ONNX Runtime,
+Hugging Face Hub, safetensors and psutil. WD Tagger model weights are separate
+downloads. GPU/PyTorch helpers continue using managed tool/helper environments.
 
 ## Linux Host Packages
 
@@ -85,7 +95,7 @@ requiring a host Node installation.
 
 | Feature | Additional requirements |
 | --- | --- |
-| Gallery, Filmstrip, metadata, Local Servers | Core Umbra runtime; FFmpeg recommended for broad video thumbnail support. |
+| Gallery, Filmstrip, metadata, Local Servers | Core Umbra runtime; bundled FFmpeg/ffprobe for video thumbnails and metadata, verifiable and repairable through Setup or Updater. |
 | Umbra UI | Managed ComfyUI install, the Umbra UI core support-model pack, compatible generation models, and the required custom nodes installed by Umbra. |
 | Power Prompter | Same shared ComfyUI pipeline requirements as Umbra UI; user-created `.ppcards` files and generation models. |
 | Data Forge board search | Internet connection. Danbooru can be used anonymously within its limits; Gelbooru, Rule34, and e621 may require account/API credentials for reliable access. Credentials are stored in the user's runtime config, never in source control. |

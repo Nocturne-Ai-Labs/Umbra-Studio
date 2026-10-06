@@ -14,13 +14,14 @@ import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { MODEL_MANIFESTS, SHARED_VISION_PROFILES, sharedSupportCatalog, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from '../shared/appUpdate';
+import { installMediaTools, inspectMediaTools } from './MediaTools';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
 
 const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
 const MAX_LOG_LINES = 500;
 
-type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools' | 'python-helpers';
+type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools' | 'media-tools' | 'python-helpers';
 type SetupJobState = {
   id: string;
   kind: SetupJobKind;
@@ -306,20 +307,27 @@ async function main() {
         try {
           const target = String(body.target || '');
           const kind = String(body.kind || '');
+          const media = kind === 'media' && target === 'FFmpeg';
           const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
-          const args = kind === 'comfyui' && target === 'ComfyUI' ? ['managed-comfyui']
+          const args = media ? ['media-tools'] : kind === 'comfyui' && target === 'ComfyUI' ? ['managed-comfyui']
             : kind === 'node' && status.features.some((feature) => feature.customNodes.some((node) => node.name === target)) ? ['comfy-node', target]
             : null;
           if (!args) return json({ success: false, error: 'Choose a dependency declared by this Umbra Studio build.' }, 400);
-          await assertDependencyIdle();
+          if (!media) await assertDependencyIdle();
           if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
           const job: SetupJobState = {
-            id: randomUUID(), kind: 'managed-tools', phase: 'running', step: `Installing ${target}`,
+            id: randomUUID(), kind: media ? 'media-tools' : 'managed-tools', phase: 'running', step: `Installing ${target}`,
             lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false,
           };
           activeJob = job;
-          void runManagedToolScript(runtimeRoot, sourceRoot, args, job)
+          void (media ? installMediaTools(runtimeRoot, (line) => appendOutput(job, line))
+            : runManagedToolScript(runtimeRoot, sourceRoot, args, job))
             .then(() => {
+              if (media) {
+                if (!inspectMediaTools(runtimeRoot).ready) throw new Error('Media tools could not be verified. Review configured FFmpeg/ffprobe paths and retry.');
+                job.phase = 'complete'; job.step = 'FFmpeg and ffprobe verified'; job.completedAt = new Date().toISOString();
+                return;
+              }
               if (!job.lines.some((line) => line === 'UMBRA_VERIFY_OK|setup-tools')) throw new Error('Managed tool installation did not complete verification. Review the log.');
               const verified = inspectManagedDependencies(sourceRoot, runtimeRoot);
               const requirements = kind === 'node' ? verified.features.flatMap((feature) => feature.customNodes.filter((node) => node.name === target)) : [];

@@ -398,10 +398,11 @@
         margin: 8px 0;
       }
       .progress-panel {
-        padding: 14px 16px;
+        grid-column: 1 / -1;
+        min-width: 0;
+        padding: 10px 12px;
         border-left: 3px solid var(--accent);
         background: #19151a;
-        margin-top: 18px;
       }
       .progress-head {
         display: flex;
@@ -409,10 +410,23 @@
         gap: 12px;
         font-size: 12px;
         font-weight: 600;
+        flex-wrap: wrap;
+      }
+      #progress-text {
+        font-variant-numeric: tabular-nums;
+      }
+      .progress-panel[data-state="complete"] {
+        border-color: var(--good);
+      }
+      .progress-panel[data-state="complete"] .fill {
+        background: var(--good);
+      }
+      .progress-panel[data-state="failed"] {
+        border-color: var(--danger);
       }
       .track {
-        height: 5px;
-        margin-top: 12px;
+        height: 7px;
+        margin-top: 9px;
         background: #34313a;
         overflow: hidden;
         border-radius: 2px;
@@ -423,16 +437,38 @@
         background: var(--accent);
         transition: width 0.2s linear;
       }
+      .track[data-indeterminate="true"] .fill {
+        width: 25% !important;
+        animation: update-progress 1.8s ease-in-out infinite;
+      }
+      @keyframes update-progress {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(400%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .track[data-indeterminate="true"] .fill {
+          animation: none;
+        }
+        .fill { transition: none; }
+      }
       .progress-item {
         margin-top: 7px;
         font-size: 11px;
         color: var(--muted);
-        overflow-wrap: anywhere;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .progress-item:empty { display: none; }
+      .progress-panel .message {
+        max-height: 84px;
+        overflow: auto;
       }
       footer {
         position: sticky;
         bottom: 0;
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
@@ -518,7 +554,7 @@
         }
         footer {
           align-items: start;
-          flex-direction: column;
+          grid-template-columns: minmax(0, 1fr);
         }
         .actions {
           width: 100%;
@@ -576,9 +612,6 @@
         }
         .actions .button {
           flex: 1 1 140px;
-        }
-        footer {
-          position: static;
         }
         .notes {
           max-height: 260px;
@@ -720,19 +753,6 @@ SOFTWARE.
                 ><strong id="target-version">Not selected</strong>
               </div>
             </div>
-            <div
-              id="progress-panel"
-              class="progress-panel"
-              role="status"
-              hidden
-            >
-              <div class="progress-head">
-                <span id="phase">Ready</span><span id="progress-text"></span>
-              </div>
-              <div id="current-item" class="progress-item"></div>
-              <div class="track"><div id="fill" class="fill"></div></div>
-              <div id="state-message" class="message"></div>
-            </div>
             <section class="notes-section" aria-label="Patch notes">
               <h3>Patch notes</h3>
               <pre id="notes" class="notes">No release selected.</pre>
@@ -808,6 +828,16 @@ SOFTWARE.
         </div>
       </main>
       <footer>
+        <div id="progress-panel" class="progress-panel" role="status" hidden>
+          <div class="progress-head">
+            <span id="phase">Ready</span><span id="progress-text"></span>
+          </div>
+          <div id="current-item" class="progress-item"></div>
+          <div id="progress-bar" class="track" role="progressbar" aria-label="Update progress" aria-valuemin="0" aria-valuemax="100">
+            <div id="fill" class="fill"></div>
+          </div>
+          <div id="state-message" class="message"></div>
+        </div>
         <div id="hint" class="hint" role="status">
           User files and models are preserved.
         </div>
@@ -872,6 +902,7 @@ SOFTWARE.
         return payload;
       };
       const activePhases = new Set([
+        "checking",
         "downloading",
         "staged",
         "stopping",
@@ -881,6 +912,7 @@ SOFTWARE.
         "restarting",
       ]);
       const phaseNames = {
+        checking: "Checking update",
         downloading: "Downloading release",
         staged: "Verifying package",
         stopping: "Stopping Umbra Studio",
@@ -903,7 +935,9 @@ SOFTWARE.
         localOperation = false,
         terminal = false;
       let appError = "",
+        stateError = "",
         dependencyError = "",
+        dependencyFetchError = "",
         reviewedTarget = "",
         postUpdateTarget = "";
       const intentKey = `umbra-updater-combined:${token}`;
@@ -1002,6 +1036,7 @@ SOFTWARE.
             ["idle", "complete"].includes(latestState.phase) &&
             !busy() &&
             !dependencyLoading &&
+            !stateError &&
             dependenciesFresh &&
             dependencyStatus,
         );
@@ -1023,7 +1058,7 @@ SOFTWARE.
       }
       function updateActions() {
         // App replacement can repair broken dependency metadata; only dependency operations require that status.
-        const locked = busy() || !latestState;
+        const locked = busy() || !latestState || Boolean(stateError);
         $("update").disabled = locked || !isNewer();
         $("app-only").disabled = locked || !isNewer();
         $("update").hidden = Boolean(
@@ -1031,7 +1066,7 @@ SOFTWARE.
         );
         $("app-only").hidden = $("update").hidden;
         $("launch-umbra").hidden = latestState?.phase !== "complete";
-        $("launch-umbra").disabled = locked;
+        $("launch-umbra").disabled = locked || dependencyLoading || !dependenciesFresh;
         $("close-updater").disabled = busy();
         $("refresh").disabled = busy() || dependencyLoading;
         $("repair-all").disabled = !canManage() || !planForAll();
@@ -1039,8 +1074,11 @@ SOFTWARE.
         $("close-models").disabled = terminal || localOperation || appActive();
         for (const button of $("model-list").querySelectorAll("button"))
           button.disabled = !canManage();
+        for (const button of document.querySelectorAll("button[data-media-tools]"))
+          button.disabled = !canManage();
         for (const button of $("release-list").querySelectorAll("button"))
           button.disabled = locked;
+        refreshProgress();
       }
       function showVersions() {
         $("status-pill").textContent = summary
@@ -1130,32 +1168,71 @@ SOFTWARE.
       }
       function refreshProgress() {
         const state = latestState;
-        if (!state) return;
-        $("progress-panel").hidden =
-          !appActive() &&
-          !appError &&
-          !["complete", "failed"].includes(state.phase);
-        $("phase").textContent = phaseNames[state.phase] || "Ready";
-        $("current-item").textContent = state.currentItem || "";
-        $("fill").style.width =
-          `${state.phase === "complete" ? 100 : state.totalBytes > 0 ? Math.max(0, Math.min(100, (state.processedBytes / state.totalBytes) * 100)) : 0}%`;
-        $("progress-text").textContent =
-          state.phase === "downloading"
-            ? `${formatBytes(state.processedBytes)} / ${formatBytes(state.totalBytes)}`
-            : "";
+        const working = appActive() || dependenciesActive() || localOperation || terminal || dependencyLoading;
+        const complete = state?.phase === "complete" && !working && !stateError && dependenciesFresh;
+        const failure = state?.phase === "failed" || stateError || appError || dependencyFetchError;
+        $("progress-panel").hidden = !working && !complete && !failure;
+        $("progress-panel").dataset.state = failure ? "failed" : complete ? "complete" : "working";
+        let phase = phaseNames[state?.phase] || "Ready";
+        let item = state?.currentItem || "";
+        let text = "";
+        let value = null;
+        let hint = "User files and models are preserved.";
+        if (stateError) {
+          phase = "Reconnecting to updater";
+          hint = "Wait for the updater connection before launching Umbra Studio.";
+        } else if (appActive()) {
+          hint = "Wait for installation to finish before launching Umbra Studio.";
+          if (state.phase === "downloading") {
+            if (state.totalBytes > 0) {
+              value = Math.max(0, Math.min(100, (state.processedBytes / state.totalBytes) * 100));
+              text = `${Math.floor(value)}% · ${formatBytes(state.processedBytes)} / ${formatBytes(state.totalBytes)}`;
+            } else text = `${formatBytes(state.processedBytes)} downloaded`;
+          } else text = "Working…";
+        } else if (dependenciesActive()) {
+          const action = dependencyStatus.action;
+          const lines = action?.lines?.length ? action.lines : dependencyStatus.repairState?.lines || [];
+          phase = dependencyStatus.modelSetupRunning ? "Model installer is open"
+            : action?.kind === "media" ? `Installing ${action.target}` : "Updating dependencies";
+          item = dependencyStatus.modelSetupRunning ? "Finish or cancel downloads in Umbra Setup."
+            : lines.at(-1) || action?.target || "Installing managed tools";
+          text = "Working…";
+          hint = "Wait for dependency installation to finish before launching Umbra Studio.";
+        } else if (terminal || localOperation) {
+          phase = terminal ? "Finishing request" : "Starting operation";
+          text = "Working…";
+          hint = "Please wait…";
+        } else if (complete) {
+          value = 100;
+          text = "Installed";
+          hint = "Ready to launch Umbra Studio.";
+          if (dependencyStatus?.action?.phase === "failed" || dependencyStatus?.repairState?.phase === "failed")
+            hint += " Dependency repair needs attention.";
+        } else if (state?.phase === "failed") {
+          hint = "Update failed. Review the error before trying again.";
+        }
+        if (state?.phase === "complete" && !dependenciesFresh)
+          hint = dependencyFetchError || "Checking dependency status before launching Umbra Studio.";
+        if (appError && !appActive() && !dependenciesActive() && !localOperation && !terminal) hint = appError;
+        $("hint").textContent = hint;
+        $("phase").textContent = phase;
+        $("current-item").textContent = item;
+        $("current-item").title = item;
+        $("progress-text").textContent = text;
+        const bar = $("progress-bar");
+        bar.dataset.indeterminate = String(value === null && Boolean(working || stateError));
+        bar.setAttribute("aria-label", state?.phase === "downloading" ? "Release download" : "Update progress");
+        bar.setAttribute("aria-valuetext", [phase, text].filter(Boolean).join(". "));
+        if (value === null) bar.removeAttribute("aria-valuenow");
+        else bar.setAttribute("aria-valuenow", String(Math.floor(value)));
+        $("fill").style.width = `${value ?? 0}%`;
         message(
           "state-message",
-          state.error ||
+          state?.error ||
+            stateError ||
             appError ||
-            [
-              state.warning,
-              state.phase === "complete"
-                ? "Application installed. Managed tools and model availability are shown below."
-                : "",
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          state.error || appError ? "error" : state.warning ? "warning" : "",
+            state?.warning || "",
+          state?.error || stateError || appError ? "error" : state?.warning ? "warning" : "",
         );
       }
       async function pollState() {
@@ -1163,6 +1240,7 @@ SOFTWARE.
         try {
           const previousPhase = latestState?.phase;
           latestState = (await api("/api/state")).state;
+          stateError = "";
           if (
             latestState.phase === "complete" &&
             summary &&
@@ -1183,6 +1261,7 @@ SOFTWARE.
           }
           if (appActive()) stateTimer = setTimeout(pollState, 700);
         } catch (error) {
+          stateError = error.message;
           $("progress-panel").hidden = false;
           message("state-message", error.message, "error");
           stateTimer = setTimeout(pollState, 3000);
@@ -1208,6 +1287,7 @@ SOFTWARE.
         );
         row.append(label, installedCell, requiredCell, statusCell);
         $("dependency-list").append(row);
+        return row;
       }
       function renderDependencies() {
         const status = dependencyStatus,
@@ -1229,6 +1309,37 @@ SOFTWARE.
             highest("minimumFrontendVersion") ||
             status.comfyui.minimumFrontendRequired;
         let attention = 0;
+        const media = status.mediaTools;
+        const helpers = status.pythonHelpers;
+        if (helpers) {
+          if (!helpers.ready) attention++;
+          componentRow("CPU Python helpers", `Python ${helpers.pythonVersion}`,
+            helpers.packages.map(item => `${item.name} ${item.version}`).join(" / "),
+            { label: helpers.ready ? "Verified" : "Unavailable", good: helpers.ready }, helpers.detail);
+        }
+        if (media) {
+          if (!media.ready) attention++;
+          const row = componentRow("FFmpeg / ffprobe", media.tools.map(tool => `${tool.tool} ${tool.version || "unavailable"}`).join(" / "),
+            "Executable verification", { label: media.ready ? "Verified" : "Repair needed", good: media.ready }, media.detail);
+          if (media.supported) {
+            const button = element("button", media.ready ? "Verify media tools" : "Install / repair media tools", "button");
+            button.type = "button";
+            button.dataset.mediaTools = "true";
+            button.disabled = busy() || !canManage();
+            button.addEventListener("click", async () => {
+              if (!canManage()) return;
+              if (!media.ready && !await reviewDialog("Install media tools", [element("p", `Download ${Math.round(media.downloadBytes / 1024 / 1024)} MiB of portable FFmpeg and ffprobe (${media.license}). Existing tools and the system PATH are preserved.`)], "Install / repair")) return;
+              localOperation = true;
+              updateActions();
+              try {
+                await api("/api/dependencies/action", { method: "POST", body: JSON.stringify({ kind: "media", target: "FFmpeg" }) });
+                await loadDependencies();
+              } catch (error) { dependencyError = error.message; message("dependency-message", error.message, "error"); }
+              finally { localOperation = false; updateActions(); }
+            });
+            row.lastElementChild.append(button);
+          }
+        }
         for (const [name, installed, required] of [
           ["ComfyUI", status.comfyui.version, coreRequired],
           [
@@ -1378,11 +1489,12 @@ SOFTWARE.
           actionText = status.action.error || "Dependency installation failed.";
           actionKind = "error";
         } else if (status.action?.phase === "complete")
-          actionText = `${status.action.target} files verified. Runtime verification is still required.`;
+          actionText = status.action.kind === "media" ? "FFmpeg and ffprobe executables verified."
+            : `${status.action.target} files verified. Runtime verification is still required.`;
         message(
           "dependency-message",
-          dependencyError || actionText,
-          dependencyError ? "error" : actionKind,
+          dependencyFetchError || dependencyError || actionText,
+          dependencyFetchError || dependencyError ? "error" : actionKind,
         );
         const lines = status.action?.lines?.length
           ? status.action.lines
@@ -1442,10 +1554,11 @@ SOFTWARE.
         try {
           dependencyStatus = await api("/api/dependencies");
           dependenciesFresh = true;
+          dependencyFetchError = "";
           renderDependencies();
         } catch (error) {
           dependenciesFresh = false;
-          dependencyError = error.message;
+          dependencyFetchError = error.message;
           message("dependency-message", error.message, "error");
           $("dependency-count").textContent = "Unavailable";
           $("dependency-summary").textContent = "The installed build's dependency requirements could not be verified.";
@@ -1697,6 +1810,7 @@ SOFTWARE.
           const state = await api("/api/relaunch-state");
           if (state.phase === "failed") {
             terminal = false;
+            appError = state.error || "Umbra Studio could not start.";
             $("hint").textContent = "Umbra Studio could not start. Review the error and retry launching.";
             message(
               "state-message",
@@ -1704,16 +1818,29 @@ SOFTWARE.
               "error",
             );
             updateActions();
+            void Promise.all([pollState(), loadDependencies()]);
+            return;
+          }
+          if (state.phase === "ready") {
+            const origin = new URL(state.origin);
+            if (origin.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(origin.hostname))
+              throw new Error("Umbra Studio returned an invalid local launch URL.");
+            $("hint").textContent = "Umbra Studio is ready. Opening it...";
+            await api("/api/close", { method: "POST", body: "{}" });
+            window.location.replace(origin.href);
             return;
           }
           setTimeout(pollRelaunch, 500);
-        } catch {
-          $("hint").textContent =
-            "Updater closed. The launch worker was dispatched; check Umbra Studio for startup status.";
+        } catch (error) {
+          terminal = false;
+          appError = `Launch status unavailable: ${error.message}`;
+          updateActions();
+          void Promise.all([pollState(), loadDependencies()]);
         }
       }
       async function finish(action) {
         if (busy()) return;
+        appError = "";
         terminal = true;
         clearTimeout(stateTimer);
         clearTimeout(dependencyTimer);
@@ -1727,11 +1854,13 @@ SOFTWARE.
           if (action === "relaunch") void pollRelaunch();
         } catch (error) {
           terminal = false;
+          appError = error.message;
           if (action === "relaunch")
             $("hint").textContent = "Umbra Studio could not start. Review the error and retry launching.";
           $("progress-panel").hidden = false;
           message("state-message", error.message, "error");
           updateActions();
+          void Promise.all([pollState(), loadDependencies()]);
         }
       }
       $("refresh").addEventListener("click", async () => {
@@ -1759,9 +1888,7 @@ SOFTWARE.
         $("review-dialog").close("confirm"),
       );
       void (async () => {
-        await loadReleases();
-        await pollState();
-        await loadDependencies();
+        await Promise.all([loadReleases(), pollState(), loadDependencies()]);
       })();
     </script>
   </body>

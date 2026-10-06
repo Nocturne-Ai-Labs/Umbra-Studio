@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { existsSync } from 'fs';
 import * as fs from 'fs/promises';
 import { join } from 'path';
+import { bundledHelperPython } from '../shared/bundledPythonHelpers';
 
 export type UmbraUiCensorTarget = 'maleGenitals' | 'femaleGenitals';
 
@@ -117,6 +118,8 @@ async function ensureDetectorModel(rootDir: string): Promise<string> {
 }
 
 function resolvePython(rootDir: string, specialist: boolean): string {
+  const helpers = specialist ? '' : bundledHelperPython(rootDir);
+  if (helpers) return helpers;
   const managedComfyRoot = join(rootDir, 'Tools', 'ComfyUI');
   const candidates = process.platform === 'win32'
     ? [
@@ -153,7 +156,8 @@ async function runDetector(rootDir: string, sourceDir: string, modelPath: string
   const [encoder, decoder] = await ensureSegmentationModels(rootDir);
   const labels = Object.entries(LABEL_TARGETS).filter(([, target]) => targets.has(target)).map(([label]) => label);
   return new Promise((resolve, reject) => {
-    const child = spawn(python, [script, '--model', modelPath, '--image', sourcePath, '--threshold', String(threshold),
+    const isolatedArgs = python === bundledHelperPython(rootDir) ? ['-E', '-s', '-B'] : [];
+    const child = spawn(python, [...isolatedArgs, script, '--model', modelPath, '--image', sourcePath, '--threshold', String(threshold),
       '--segment-encoder', encoder, '--segment-decoder', decoder, '--padding', String(padding), '--targets', labels.join(','),
       ...(reviewThreshold === undefined ? [] : ['--review-threshold', String(reviewThreshold)]),
       ...(specialist ? ['--specialist-model', specialistPath] : [])], {

@@ -240,6 +240,34 @@ preserves the current `User/` and `Tools/` directories. The setup utility does
 not migrate files between versioned folders. Language can still be changed
 later under **Settings > General > Language**.
 
+Windows and Linux release packages include FFmpeg and ffprobe in
+`Runtime/FFmpeg/<platform>`. Fresh installs and app updates receive the pair
+automatically; no separate FFmpeg download or system PATH setup is required.
+The pinned GPL-3.0-or-later executables retain license, source/build references,
+and build configuration beside the binaries.
+
+Releases also include a portable CPU Python 3.11 helper environment with pandas,
+NumPy, Pillow, ONNX Runtime, Hugging Face Hub, safetensors and psutil under
+`Runtime/PythonHelpers/bundled/<platform>`. WD Tagger dependencies work without a
+system Python or ComfyUI install. **Tagger model weights are not bundled**;
+download the desired models through **Umbra Setup > Models**. PyTorch,
+Transformers, PixAI and natural-language captioning remain separate managed
+installations. Setup and Updater show bundled library verification separately
+from model and managed-tool readiness. Existing helper venvs are preserved by
+app updates, and explicit `UMBRA_PYTHON` overrides keep priority.
+
+For video thumbnail or metadata errors, open **Umbra Setup > Tools** or
+**Umbra Updater > Dependencies**, then select **Install / repair media tools**.
+Umbra verifies FFmpeg and ffprobe separately. When needed, it downloads a
+checksum-pinned portable pair into `Tools/FFmpeg` (about 184 MiB on Windows,
+143 MiB on Linux). Repair tools retain their upstream license notices.
+Linux extraction requires `tar` and `xz-utils` or equivalents. Existing working
+tools are verified without a download. The repair preserves ComfyUI, user data,
+and the system PATH. Gallery also finds FFmpeg in this installation's ComfyUI
+`imageio_ffmpeg` environment. Explicit `FFMPEG_PATH` / `FFPROBE_PATH` overrides
+take priority, followed by managed tools, the release's bundled pair,
+bundled imageio FFmpeg, and PATH.
+
 ### First Run: Data Forge Caption Models
 
 Data Forge uses a separate caption-model pack of more than 6 GB. Full portable

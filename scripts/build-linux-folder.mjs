@@ -419,6 +419,12 @@ function verifyPublish() {
     'resources/app/shared/onboarding/firstRun.ts',
     'resources/app/node_modules',
     'Runtime/Bun/linux/bun',
+    'Runtime/FFmpeg/linux/bin/ffmpeg',
+    'Runtime/FFmpeg/linux/bin/ffprobe',
+    'Runtime/FFmpeg/linux/LICENSE.txt',
+    'Runtime/FFmpeg/linux/installed.json',
+    'Runtime/PythonHelpers/bundled/linux/python/bin/python3.11',
+    'Runtime/PythonHelpers/bundled/linux/installed.json',
     'User/PowerPrompter/API Workflows/[Umbra UI] Stable Diffusion Image Pipeline.json',
     'User/PowerPrompter/Prompts/Anime Girls Starter.ppcards.json',
     'User/PowerPrompter/Prompts/Intro to Powerprompter.ppcards.json',
@@ -534,6 +540,8 @@ function publish() {
     path.join(packagedAppDir, 'node_modules'),
   );
   copyTree(path.join(root, 'Runtime', 'Bun', 'linux'), path.join(publishRoot, 'Runtime', 'Bun', 'linux'));
+  run('bun', ['scripts/prepare-media-runtime.ts', '--root', publishRoot], 'bundled FFmpeg/ffprobe preparation');
+  run('bun', ['scripts/prepare-python-helpers.ts', '--root', publishRoot], 'bundled CPU Python helpers preparation');
   copyExplicitFile(path.join(root, 'dist-webapp', 'UmbraServer.js'), path.join(packagedAppDir, 'UmbraServer.js'));
   copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraUpdateWorker.js'),

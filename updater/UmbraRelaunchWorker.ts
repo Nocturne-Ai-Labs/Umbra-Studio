@@ -2,10 +2,11 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { dirname, join, resolve, sep } from 'node:path';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
+import { inspectUmbraRuntimeHealth } from '../shared/umbraRuntimeHealth';
+import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 import {
   isUmbraUpdaterWorkspace,
   markUmbraUpdaterProcessHeartbeat,
-  requestUmbraUpdaterWorkspaceCleanup,
 } from '../shared/umbraUpdaterWorkspace';
 
 type UmbraRelaunchRequest = {
@@ -24,8 +25,6 @@ type UmbraLaunchHandle = {
   child?: ChildProcess;
 };
 
-const UPDATER_EXIT_TIMEOUT_MS = 30_000;
-const UPDATER_EXIT_SETTLE_MS = 5_000;
 const LAUNCH_READY_TIMEOUT_MS = 30_000;
 const LAUNCH_ATTEMPTS = 3;
 
@@ -64,17 +63,6 @@ function log(request: UmbraRelaunchRequest, message: string) {
   }
 }
 
-async function waitForUpdaterExit(request: UmbraRelaunchRequest) {
-  const deadline = Date.now() + UPDATER_EXIT_TIMEOUT_MS;
-  while (isProcessAlive(request.updaterPid)) {
-    if (Date.now() >= deadline) {
-      throw new Error(`Updater PID ${request.updaterPid} did not exit before relaunch.`);
-    }
-    await Bun.sleep(100);
-  }
-  await Bun.sleep(UPDATER_EXIT_SETTLE_MS);
-}
-
 function quotePowerShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -90,7 +78,7 @@ function launchWindowsUmbraStudio(
     "$ErrorActionPreference = 'Stop'",
     `$process = Start-Process -FilePath ${quotePowerShellLiteral(command)} `
       + `-ArgumentList @(${launchArgs}) `
-      + `-WorkingDirectory ${quotePowerShellLiteral(runtimeRoot)} -PassThru`,
+      + `-WorkingDirectory ${quotePowerShellLiteral(runtimeRoot)} -WindowStyle Hidden -PassThru`,
     '[Console]::Out.Write($process.Id)',
   ].join('; ');
   const result = spawnSync('powershell.exe', [
@@ -218,6 +206,9 @@ async function waitForLaunchReady(
 async function launchWithRetry(request: UmbraRelaunchRequest): Promise<number> {
   let lastFailure = '';
   for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt += 1) {
+    const health = await inspectUmbraRuntimeHealth(request.runtimeRoot, request.appPort, request.appHost);
+    if (health === 'owned') return 0;
+    if (health === 'foreign') throw new Error(`Port ${request.appPort} is occupied by another or unverified installation. Close it or select the intended app port before launching.`);
     const handle = launchUmbraStudio(request);
     const result = await waitForLaunchReady(request, handle);
     if (result.ready) {
@@ -255,14 +246,19 @@ async function main() {
     }
   }, 1_000);
   heartbeat.unref();
-
-  log(request, `Waiting for updater PID ${request.updaterPid} to exit.`);
-  await waitForUpdaterExit(request);
+  const statePath = join(request.workspaceRoot, 'relaunch-state.json');
+  await writeUpdateJsonAtomic(statePath, { phase: 'starting', error: '' });
   try {
     const launcherPid = await launchWithRetry(request);
     log(request, `Started stable Umbra Studio launcher PID ${launcherPid}.`);
+    await writeUpdateJsonAtomic(statePath, { phase: 'ready', error: '', launcherPid });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(request, `Launch failed: ${message}`);
+    await writeUpdateJsonAtomic(statePath, { phase: 'failed', error: message });
+    throw error;
   } finally {
-    requestUmbraUpdaterWorkspaceCleanup(request.workspaceRoot);
+    clearInterval(heartbeat);
   }
 }
 

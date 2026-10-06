@@ -270,6 +270,15 @@ async function loadManagedTools() {
   modelElement('shared-support-size').textContent = `Shared support models: ${(dependencies.sharedSupport.bytes / 1024 ** 3).toFixed(2)} GiB, plus Python packages. Existing valid files are verified and kept.`;
   modelElement('tools-list').replaceChildren();
   modelElement('tools-summary').textContent = tr(dependencies.features.length ? 'toolsHint' : 'noManagedTools');
+  const media = dependencies.mediaTools;
+  const helpers = dependencies.pythonHelpers;
+  if (helpers) {
+    toolsRow('CPU Python helpers', `${helpers.ready ? 'Verified' : 'Unavailable'} | Python ${helpers.pythonVersion} | ${helpers.packages.map(item => `${item.name} ${item.version}`).join(', ')}. ${helpers.detail}`);
+  }
+  if (media) {
+    toolsRow('FFmpeg / ffprobe', `${media.tools.map(tool => `${tool.tool}: ${tool.ready ? tool.version : 'Missing or unavailable'}`).join(' | ')}. ${media.detail} Repair download: ${Math.round(media.downloadBytes / 1024 / 1024)} MiB (${media.license}).`,
+      media.supported ? 'media' : '', 'FFmpeg', null, media.ready ? 'Verify media tools' : 'Install / repair media tools');
+  }
   const core = dependencies.comfyui;
   const isOutdated = (version, minimum) => {
     if (!minimum) return false;
@@ -319,8 +328,8 @@ async function loadManagedTools() {
   setToolsBusy(toolsBusy);
 }
 function renderToolsProgress(job) {
-  if (job.kind !== 'managed-tools') return;
-  modelElement('tools-message').textContent = job.error || (job.phase === 'complete'
+  if (!['managed-tools', 'media-tools'].includes(job.kind)) return;
+  modelElement('tools-message').textContent = job.error || (job.phase === 'complete' && job.kind === 'managed-tools'
     ? 'Managed files verified. Restart managed ComfyUI and refresh its frontend; runtime registration remains to be checked.' : job.step);
   if (job.phase !== 'running' && completedToolsJob !== job.id) {
     completedToolsJob = job.id; void loadManagedTools().catch(modelError);

@@ -2,6 +2,7 @@ import { writeUpdateJsonAtomic as writeJsonAtomic } from '../shared/updateStateF
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
 } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -10,6 +11,7 @@ import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { inspectManagedDependencies } from './ManagedDependencyStatus';
+import { installMediaTools, inspectMediaTools } from '../setup/MediaTools';
 import { invalidateManagedPythonSetupEvidence, prepareManagedDependencyInstallPolicy } from './ManagedDependencyInstallPolicy';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from './ManagedDependencyRepair';
 import { AppUpdateService, compareUmbraVersions, readUmbraAppVersion } from '../backend/AppUpdateService';
@@ -24,6 +26,7 @@ import {
 } from '../shared/appUpdate';
 import {
   hasActiveUmbraUpdaterProcess,
+  acquireUmbraUpdaterLease,
   isUmbraUpdaterWorkspace,
   markUmbraUpdaterProcessHeartbeat,
   requestUmbraUpdaterWorkspaceCleanup,
@@ -65,7 +68,7 @@ function json(value: unknown, status = 200): Response {
 
 type DependencyAction = {
   id: string;
-  kind: 'comfyui' | 'node' | 'package' | 'workflow';
+  kind: 'comfyui' | 'node' | 'package' | 'workflow' | 'media';
   target: string;
   phase: 'running' | 'complete' | 'failed';
   lines: string[];
@@ -121,15 +124,24 @@ async function startExternalRelaunch(session: UpdaterSession, sessionPath: strin
       UMBRA_ROOT: resolve(session.runtimeRoot),
     },
   });
-  child.once('error', (error) => {
-    console.error('[UmbraUpdaterApp] Relaunch worker failed:', error);
+  const completion = new Promise<number>((resolveExit) => {
+    child.once('exit', (code) => resolveExit(code ?? 1));
+    child.once('error', () => resolveExit(1));
   });
   if (!child.pid) throw new Error('The external Umbra Studio relaunch worker did not start.');
   session.relaunchPid = child.pid;
   try { await writeJsonAtomic(sessionPath, session); }
   catch { console.warn('[UmbraUpdaterApp] Relaunch started, but its session record could not be refreshed.'); }
   child.unref();
-  return child.pid;
+  return { child, completion };
+}
+
+function readRelaunchState(session: UpdaterSession): { phase: 'starting' | 'ready' | 'failed'; error: string } {
+  try {
+    const state = JSON.parse(readFileSync(join(session.workspaceRoot, 'relaunch-state.json'), 'utf8'));
+    if (['starting', 'ready', 'failed'].includes(state.phase)) return { phase: state.phase, error: String(state.error || '') };
+  } catch { /* The worker has not published its startup status yet. */ }
+  return { phase: 'starting', error: '' };
 }
 
 function isAuthorized(request: Request, url: URL, session: UpdaterSession): boolean {
@@ -227,14 +239,16 @@ async function runWorker(
   try { await writeJsonAtomic(join(session.workspaceRoot, 'session.json'), session); }
   catch { appendWorkerOutput('Update worker started, but its session record could not be refreshed.\n'); }
   const code = await completion;
-  if (code !== 0 && readState(service, session).phase !== 'failed') {
+  const state = readState(service, session);
+  if (state.phase === 'failed') throw new Error(state.error || 'The external update worker failed.');
+  if (code !== 0) {
     throw new Error(`The external update worker exited with code ${code}.`);
   }
+  if (state.phase !== 'complete') throw new Error('The external update worker exited before confirming installation. Review the update log and retry.');
 }
 
-async function runUpdate(service: AppUpdateService, session: UpdaterSession, release: UmbraReleaseBuild) {
-  const startedAt = new Date().toISOString();
-  let state = await writeState(service, session, {
+async function initializeUpdate(service: AppUpdateService, session: UpdaterSession, release: UmbraReleaseBuild) {
+  return writeState(service, session, {
     phase: 'downloading',
     currentVersion: service.currentVersion,
     targetVersion: release.version,
@@ -243,17 +257,24 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
     totalBytes: release.packageBytes,
     processedBytes: 0,
     currentItem: release.packageName,
-    startedAt,
+    startedAt: new Date().toISOString(),
     completedAt: null,
     nodeUpdate: 'pending',
     warning: '',
     error: '',
   });
+}
+
+async function runUpdate(service: AppUpdateService, session: UpdaterSession, release: UmbraReleaseBuild, initialState: UmbraUpdateState) {
+  let state = initialState;
   try {
+    // Retries retain earlier logs/recovery copies and never reuse a completed ZIP.
+    const downloadRoot = join(session.workspaceRoot, `download-${randomUUID()}`);
+    mkdirSync(downloadRoot, { recursive: false });
     let lastProgressAt = 0;
     const downloaded = await service.downloadRelease(
       release,
-      session.workspaceRoot,
+      downloadRoot,
       async (processedBytes, totalBytes) => {
         const now = Date.now();
         if (now - lastProgressAt < 150 && processedBytes < totalBytes) return;
@@ -276,7 +297,6 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
     await runWorker(service, session, release, downloaded.archivePath);
   } catch (error) {
     await writeState(service, session, {
-      ...state,
       phase: 'failed',
       completedAt: new Date().toISOString(),
       currentItem: '',
@@ -287,6 +307,11 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
 }
 
 async function runDependencyAction(session: UpdaterSession, action: DependencyAction, args: string[]): Promise<void> {
+  if (action.kind === 'media') {
+    await installMediaTools(session.runtimeRoot, (line) => { action.lines.push(line); action.lines = action.lines.slice(-80); });
+    if (!inspectMediaTools(session.runtimeRoot).ready) throw new Error('Media tools could not be verified. Review configured FFmpeg/ffprobe paths and retry.');
+    return;
+  }
   const bunPath = bundledBun(session);
   const scriptPath = join(session.sourceRoot, 'setup-tools.ts');
   if (!existsSync(bunPath) || !existsSync(scriptPath)) throw new Error('Managed setup tools are missing from this installation.');
@@ -382,6 +407,10 @@ async function main() {
   ) {
     throw new Error('The updater session failed path safety validation.');
   }
+  if (hasActiveUmbraUpdaterProcess(session.runtimeRoot)) {
+    throw new Error('Another Updater operation is active for this installation.');
+  }
+  acquireUmbraUpdaterLease(session.runtimeRoot, session.workspaceRoot);
   session.updaterPid = process.pid;
   await writeJsonAtomic(sessionPath, session);
   markUmbraUpdaterProcessHeartbeat(session.workspaceRoot, 'updater');
@@ -433,7 +462,7 @@ async function main() {
   const persistManagedRepair = async (state: ManagedRepairState) => { managedRepairState = state; await writeJsonAtomic(managedRepairStatePath(session.runtimeRoot), state); };
   const assertDependencyIdle = () => assertManagedDependencyRepairIdle({ runtimeRoot: session.runtimeRoot, origin: localUmbraOrigin(session), serverPid: session.serverPid });
   let modelSetup: { url: string; child: ReturnType<typeof spawn> } | null = null;
-  const modelSetupRunning = () => Boolean(modelSetup?.child.exitCode === null && modelSetup.child.signalCode === null && !modelSetup.child.killed);
+  const modelSetupRunning = () => Boolean(modelSetup?.child.exitCode === null && modelSetup.child.signalCode === null);
   let admittingOperation = false;
   let relaunchState: { phase: 'idle' | 'starting' | 'ready' | 'failed'; error: string } = {
     phase: 'idle',
@@ -548,14 +577,16 @@ async function main() {
           const target = String(body.target || '');
           const status = inspectManagedDependencies(session.sourceRoot, session.runtimeRoot);
           let args: string[];
-          if (kind === 'comfyui' && target === 'ComfyUI') {
+          if (kind === 'media' && target === 'FFmpeg') {
+            args = ['media-tools'];
+          } else if (kind === 'comfyui' && target === 'ComfyUI') {
             args = ['managed-comfyui'];
           } else if (kind === 'node' && status.features.some((feature) => feature.customNodes.some((node) => node.name === target))) {
             args = ['comfy-node', target];
           } else {
             return json({ success: false, error: 'This managed dependency is not declared by the installed Umbra Studio build.' }, 400);
           }
-          await assertDependencyIdle();
+          if (kind !== 'media') await assertDependencyIdle();
           const action: DependencyAction = { id: randomUUID(), kind, target, phase: 'running', lines: [], error: '' };
           dependencyAction = action;
           activeDependency = runDependencyAction(session, action, args)
@@ -625,7 +656,10 @@ async function main() {
           if (compareUmbraVersions(release.version, currentVersion) <= 0) {
             return json({ success: false, error: 'Select a release newer than the installed version.' }, 400);
           }
-          activeUpdate = runUpdate(service, session, release)
+          // Publish the new attempt before acknowledging it, so polling never
+          // mistakes the preceding failed/complete state for this attempt.
+          const initialState = await initializeUpdate(service, session, release);
+          activeUpdate = runUpdate(service, session, release, initialState)
             .catch((error) => console.error('[UmbraUpdaterApp] Update failed:', error))
             .finally(() => {
               activeUpdate = null;
@@ -645,7 +679,18 @@ async function main() {
         relaunchState = { phase: 'starting', error: '' };
         admittingOperation = true;
         try {
-          await startExternalRelaunch(session, sessionPath);
+          await writeJsonAtomic(join(session.workspaceRoot, 'relaunch-state.json'), relaunchState);
+          const launched = await startExternalRelaunch(session, sessionPath);
+          activeRelaunch = (async () => {
+            const timeout = setTimeout(() => launched.child.kill(), 150_000);
+            try {
+              const code = await launched.completion;
+              relaunchState = readRelaunchState(session);
+              if (code !== 0 || relaunchState.phase !== 'ready') {
+                relaunchState = { phase: 'failed', error: relaunchState.error || 'Umbra Studio did not report ready. Review User/Logs/updater-relaunch.log and retry launching.' };
+              }
+            } finally { clearTimeout(timeout); }
+          })().finally(() => { activeRelaunch = null; });
         } catch (error) {
           relaunchState = {
             phase: 'failed',
@@ -653,18 +698,10 @@ async function main() {
           };
           return json({ success: false, error: relaunchState.error }, 500);
         } finally { admittingOperation = false; }
-        activeRelaunch = (async () => {
-          await Bun.sleep(350);
-          try {
-            await server.stop(true);
-          } finally {
-            process.exit(0);
-          }
-        })();
         return json({ success: true, accepted: true, origin: localUmbraOrigin(session) }, 202);
       }
       if (url.pathname === '/api/relaunch-state' && request.method === 'GET') {
-        return json({ success: true, ...relaunchState });
+        return json({ success: true, ...relaunchState, origin: localUmbraOrigin(session) });
       }
       if (url.pathname === '/api/close' && request.method === 'POST') {
         if (activeUpdate || activeRelaunch || activeDependency || admittingOperation || modelSetupRunning()) return json({ success: false, error: 'Wait for the current operation or model setup to finish before closing the updater.' }, 409);
