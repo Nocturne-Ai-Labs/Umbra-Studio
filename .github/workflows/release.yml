@@ -38,7 +38,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            make nasm tar
+            make nasm tar diffutils perl
             mingw-w64-ucrt-x86_64-meson
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-gcc

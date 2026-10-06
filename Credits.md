@@ -684,7 +684,7 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
 
 ### FFmpeg
 - Project: https://ffmpeg.org
-- Bundled builds: Umbra builds pinned FFmpeg, x264, libvpx, libwebp and zlib sources. Complete corresponding sources, the exact recipe, configuration, codec tests and individual licenses ship under `Runtime/FFmpeg/<platform>`. Optional repair downloads use https://github.com/BtbN/FFmpeg-Builds.
+- Bundled builds: Umbra builds pinned FFmpeg, x264, libvpx, libwebp, zlib and dav1d sources. Complete corresponding sources, the exact recipe, configuration, codec tests and individual licenses ship under `Runtime/FFmpeg/<platform>`. Optional repair downloads use https://github.com/BtbN/FFmpeg-Builds.
 - License: the pinned GPL build is GPL-3.0-or-later. Portable releases retain
   its license, source/build references, and build configuration under
   `Runtime/FFmpeg/<platform>`. Optional repair installs retain the same notices

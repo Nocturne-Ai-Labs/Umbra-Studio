@@ -39,6 +39,7 @@
   preserved. Explicit `FFMPEG_PATH` and `FFPROBE_PATH` overrides remain preferred;
   review those paths if executable verification fails.
 
+- Linux packages require glibc 2.35 or newer. FFmpeg includes software AV1 decoding alongside the required image and video codecs; codec libraries are built from pinned sources while the Linux C runtime remains supplied by the host.
 - Linux custom-node prerequisites remain `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
 
 ### Guided Setup And Localization
