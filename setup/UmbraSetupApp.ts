@@ -17,6 +17,7 @@ import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { assertAIToolkitStopped, inspectToolMaintenance, toolMaintenanceArgs } from './ToolMaintenance';
 import { claimToolMaintenance, readToolMaintenance, trackToolMaintenanceChild } from '../shared/toolMaintenanceLock';
 import { createUmbraUpdateController } from '../updater/UmbraUpdaterApp';
+import { setupSourceFingerprint } from '../launcher/UmbraUpdaterBootstrap';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { installMediaTools, inspectMediaTools } from './MediaTools';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
@@ -292,6 +293,7 @@ async function main() {
     if (resolve(session.runtimeRoot) !== runtimeRoot || resolve(session.sourceRoot) !== sourceRoot || session.token !== token) throw new Error('Setup and update session ownership does not match this installation.');
   }
   const uiSourceRoot = resolve(readArg('--ui-source', sourceRoot));
+  const sourceFingerprint = sessionPath ? JSON.parse(readFileSync(sessionPath, 'utf8')).sourceFingerprint : '';
   const htmlPath = join(uiSourceRoot, 'setup', 'index.html');
   if (!existsSync(htmlPath)) throw new Error(`Setup page is missing: ${htmlPath}`);
   const html = readFileSync(htmlPath, 'utf8')
@@ -338,7 +340,9 @@ async function main() {
       }
 
       if (url.pathname === '/api/health') {
-        return json({ success: true, port: server.port, runtimeRoot });
+        let needsReopen = updateController?.needsReopen() || false;
+        try { if (sourceFingerprint) needsReopen ||= sourceFingerprint !== setupSourceFingerprint(sourceRoot); } catch { needsReopen = true; }
+        return json({ success: true, port: server.port, runtimeRoot, sourceFingerprint, needsReopen });
       }
       if (url.pathname === '/api/models' && request.method === 'GET') {
         try { return json({ success: true, ...await modelSetupCatalog(sourceRoot, runtimeRoot) }); }

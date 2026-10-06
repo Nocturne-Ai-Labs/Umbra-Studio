@@ -4,6 +4,9 @@
 export type RecentUiLanguage = 'ja' | 'zh-CN' | 'ko' | 'de';
 
 const JAPANESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
+  ["opening the updates tab in umbra setup.", "Umbra Setup の更新タブを開いています。"],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup は別のタブで開きます。更新をインストールする前に作業内容を保存してください。"],
+
   ["- review only", "- レビューのみ"],
   ["- searching...", "- 検索中..."],
   ["- set", "- セット"],
@@ -3126,6 +3129,9 @@ const JAPANESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
 ];
 
 const CHINESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
+  ["opening the updates tab in umbra setup.", "正在打开 Umbra Setup 的更新选项卡。"],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup 会在单独的选项卡中打开。安装更新前请保存工作。"],
+
   ["- review only", "- 仅审阅"],
   ["- searching...", "- 正在搜索..."],
   ["- set", "- 设置"],
@@ -5952,6 +5958,9 @@ const CHINESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
 ];
 
 const KOREAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
+  ["opening the updates tab in umbra setup.", "Umbra Setup의 업데이트 탭을 여는 중입니다."],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup은 별도 탭에서 열립니다. 업데이트를 설치하기 전에 작업을 저장하세요."],
+
   ["- review only", "- 검토만"],
   ["- searching...", "- 검색 중..."],
   ["- set", "- 설정"],
@@ -8784,6 +8793,9 @@ const KOREAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
 ];
 
 const GERMAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
+  ["opening the updates tab in umbra setup.", "Die Registerkarte Updates in Umbra Setup wird geöffnet."],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup wird in einem separaten Tab geöffnet. Speichern Sie Ihre Arbeit vor der Installation eines Updates."],
+
   ["- review only", "- Nur prüfen"],
   ["- searching...", "- Suche läuft..."],
   ["- shuffle", "- Mischen"],

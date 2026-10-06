@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import {
@@ -67,23 +67,52 @@ export async function waitUntilReady(origin: string, token: string, child?: Chil
   } finally { child?.off('error', onError); }
 }
 
-export async function existingUpdaterUrl(runtimeRoot: string): Promise<string> {
+// Compare the running snapshot, rather than the package version: same-version
+// repairs and legacy cached sessions must not be reused after files change.
+export function setupSourceFingerprint(sourceRoot: string): string {
+  const hash = createHash('sha256');
+  for (const file of ['setup/UmbraSetupApp.js', 'setup/index.html', 'setup/models.js', 'setup/onboarding.js',
+    'launcher/UmbraUpdateWorker.js', 'updater/UmbraRelaunchWorker.js',
+    'updater/update-panel.html', 'updater/update-panel.css', 'updater/update-panel.js']) {
+    hash.update(file + '\0'); hash.update(readFileSync(join(sourceRoot, file))); hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+export async function existingUpdaterUrl(runtimeRoot: string, sourceRoot = join(runtimeRoot, 'resources', 'app')): Promise<string> {
   const cacheRoot = resolveUmbraUpdaterCacheRoot(runtimeRoot);
   if (!existsSync(cacheRoot) || !isUmbraUpdaterWorkspace(runtimeRoot, join(cacheRoot, 'session-check'))) return '';
+  const fingerprint = setupSourceFingerprint(sourceRoot);
   for (const entry of readdirSync(cacheRoot, { withFileTypes: true })) {
     if (!entry.isDirectory() || !/^session-[a-z0-9._-]+$/i.test(entry.name)) continue;
     const workspaceRoot = join(cacheRoot, entry.name);
     if (!isUmbraUpdaterWorkspace(runtimeRoot, workspaceRoot)) continue;
+    let session: any;
+    let status: { success?: boolean; runtimeRoot?: string; sourceFingerprint?: string; needsReopen?: boolean };
+    let origin: string;
     try {
-      const session = JSON.parse(readFileSync(join(workspaceRoot, 'session.json'), 'utf8'));
+      session = JSON.parse(readFileSync(join(workspaceRoot, 'session.json'), 'utf8'));
       if (resolve(session.runtimeRoot) !== runtimeRoot || !Number.isInteger(session.updaterPid) || session.updaterPid <= 0) continue;
       process.kill(session.updaterPid, 0);
       if (!Number.isInteger(session.port) || session.port < 1 || session.port > 65535 || !session.token) continue;
-      const origin = `http://127.0.0.1:${session.port}`;
-      const response = await fetch(`${origin}/api/health?token=${encodeURIComponent(session.token)}`, { signal: AbortSignal.timeout(750) });
-      const status = await response.json() as { success?: boolean };
-      if (response.ok && status.success === true) return `${origin}/?token=${encodeURIComponent(session.token)}`;
-    } catch { /* An abandoned session cannot supply a reusable window. */ }
+      origin = `http://127.0.0.1:${session.port}`;
+      const response = await fetch(`${origin}/api/health?token=${encodeURIComponent(session.token)}`, { cache: 'no-store', signal: AbortSignal.timeout(750) });
+      status = await response.json();
+      if (!response.ok || status.success !== true || status.runtimeRoot !== runtimeRoot) continue;
+    } catch { continue; }
+    if (session.sourceFingerprint === fingerprint && resolve(session.sourceRoot) === resolve(sourceRoot)
+      && status.sourceFingerprint === fingerprint && !status.needsReopen) return `${origin}/?token=${encodeURIComponent(session.token)}`;
+    // Ask the owned session to close. Its admission guard preserves active jobs;
+    // never kill an updater or overwrite its live cache snapshot.
+    const closing = await fetch(`${origin}/api/close?token=${encodeURIComponent(session.token)}`, { method: 'POST', signal: AbortSignal.timeout(2000) });
+    const result = await closing.json() as { success?: boolean; error?: string };
+    if (!closing.ok || !result.success) throw new Error(result.error || 'Finish the current Setup operation before reopening the updated Setup.');
+    let exited = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await Bun.sleep(100);
+      try { process.kill(session.updaterPid, 0); } catch { exited = true; break; }
+    }
+    if (!exited) throw new Error('The old Setup is still closing. Retry opening Setup.');
   }
   return '';
 }
@@ -103,10 +132,14 @@ function openBrowser(url: string) {
   }).unref();
 }
 
-async function availablePort(): Promise<number> {
+async function availablePort(preferred = 0): Promise<number> {
   return new Promise((ok, fail) => {
-    const probe = createServer(); probe.once('error', fail);
-    probe.listen(0, '127.0.0.1', () => {
+    const probe = createServer(); probe.once('error', error => {
+      probe.close();
+      if (preferred && (error as NodeJS.ErrnoException).code === 'EADDRINUSE') void availablePort().then(ok, fail);
+      else fail(error);
+    });
+    probe.listen(preferred, '127.0.0.1', () => {
       const address = probe.address();
       const port = address && typeof address === 'object' ? address.port : 0;
       probe.close(error => error ? fail(error) : port ? ok(port) : fail(new Error('Could not allocate a Setup port.')));
@@ -118,7 +151,7 @@ async function main() {
   const runtimeRoot = resolve(readArg('--root', process.env.UMBRA_ROOT || process.cwd()));
   const sourceRoot = resolve(readArg('--source', join(runtimeRoot, 'resources', 'app')));
   const requestedPort = Number(readArg('--port', String(DEFAULT_UPDATER_PORT)));
-  const port = requestedPort === 0 ? await availablePort() : Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535 ? requestedPort : DEFAULT_UPDATER_PORT;
+  const preferredPort = Number.isInteger(requestedPort) && requestedPort >= 0 && requestedPort <= 65535 ? requestedPort : DEFAULT_UPDATER_PORT;
   const token = readArg('--token') || randomUUID();
   const serverPid = Math.max(0, Number.parseInt(readArg('--server-pid', '0'), 10) || 0);
   const launcherPid = Math.max(0, Number.parseInt(readArg('--launcher-pid', '0'), 10) || 0);
@@ -131,7 +164,7 @@ async function main() {
   const appHost = readArg('--app-host', '127.0.0.1');
   const requestedTab = readArg('--tab', 'updates');
   const tab = ['tools', 'models', 'updates', 'onboarding'].includes(requestedTab) ? requestedTab : 'onboarding';
-  const existing = hasArg('--no-reuse') ? '' : await existingUpdaterUrl(runtimeRoot);
+  const existing = hasArg('--no-reuse') ? '' : await existingUpdaterUrl(runtimeRoot, sourceRoot);
   if (existing) {
     const url = `${existing}&tab=${tab}`;
     console.log(`UMBRA_UPDATER_URL=${url}`);
@@ -139,6 +172,7 @@ async function main() {
     if (!hasArg('--no-open')) openBrowser(url);
     return;
   }
+  const port = await availablePort(preferredPort);
   cleanupInactiveUmbraUpdaterWorkspaces(runtimeRoot, {
     staleAfterMs: ABANDONED_WORKSPACE_AGE_MS,
   });
@@ -169,6 +203,7 @@ async function main() {
   const session = {
     runtimeRoot,
     sourceRoot,
+    sourceFingerprint: setupSourceFingerprint(sourceRoot),
     workspaceRoot,
     token,
     port,
