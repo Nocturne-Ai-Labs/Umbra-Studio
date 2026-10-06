@@ -114,7 +114,10 @@ function renderModelReview() {
     const link = document.createElement('a'); link.href = model.reference; link.target = '_blank'; link.rel = 'noopener noreferrer';
     link.textContent = `${model.purpose} — ${new URL(model.reference).hostname === 'civitai.com' ? 'Download on Civitai' : 'Manual download'}`;
     const detail = document.createElement('small');
-    detail.textContent = `Save in Tools/ComfyUI/models/${model.destinations.join(', ')}. Not installed by Setup.`;
+    detail.textContent = model.destinations.map(destination => {
+      const separator = destination.lastIndexOf('/');
+      return `Place ${destination.slice(separator + 1)} in Tools/ComfyUI/models/${destination.slice(0, separator + 1)} inside your Umbra Studio folder.`;
+    }).join(' ') + ' Not installed by Setup.';
     row.append(link, detail); list.append(row);
   }
   setModelBusy(modelBusy);
