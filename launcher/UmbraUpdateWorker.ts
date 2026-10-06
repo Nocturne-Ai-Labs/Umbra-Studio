@@ -441,8 +441,9 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
   if (packagedVersion !== request.targetVersion.replace(/^v/i, '')) {
     throw new Error(`Release version mismatch: expected ${request.targetVersion}, found ${packagedVersion || 'unknown'}.`);
   }
-  const mediaPolicy = join(payloadRoot, 'resources', 'app', 'defaults', 'MediaTools', 'manifest.json');
-  if (existsSync(mediaPolicy)) verifyBundledMediaRuntime(payloadRoot, process.platform, JSON.parse(readFileSync(mediaPolicy, 'utf8')));
+  const mediaPolicy = join(payloadRoot, 'resources', 'app', 'defaults', 'MediaTools', 'source-build-manifest.json');
+  if (!existsSync(mediaPolicy)) throw new Error('Release package is missing its source-built media policy.');
+  verifyBundledMediaRuntime(payloadRoot, process.platform, JSON.parse(readFileSync(mediaPolicy, 'utf8')));
   const helperPolicy = join(payloadRoot, 'resources', 'app', 'defaults', 'PythonHelpers', 'manifest.json');
   if (existsSync(helperPolicy)) verifyBundledPythonHelpers(payloadRoot, process.platform, JSON.parse(readFileSync(helperPolicy, 'utf8')));
 }

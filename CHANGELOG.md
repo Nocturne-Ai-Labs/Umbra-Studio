@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.90.6-beta - Bundled Media And Python Helpers, Updater Reliability
+## v0.90.6-beta - Guided Setup, Localization And Bundled Helpers
 
 ### TL;DR - Setup After Updating
 
@@ -70,10 +70,10 @@
 - Gallery thumbnails, shared video previews, metadata probes, and extended-video
   exports share media executable discovery. Discovery checks explicit overrides,
   Umbra-managed tools, the release's bundled pair, this instance's imageio FFmpeg, and PATH.
-- Package the checksum-pinned FFmpeg 8.1.3 build under `Runtime/FFmpeg`, including
-  license notices and source/build references. App updates replace these runtime
+- Build FFmpeg 8.1.3 and its required codec libraries from checksum-pinned sources under `Runtime/FFmpeg`, including
+  the complete corresponding source archives, exact build script, configuration and license notices. App updates replace these runtime
   files while preserving users' `Tools` and `User` directories.
-- Setup's Tools page and Updater's Dependencies page show FFmpeg and ffprobe
+- Setup's Tools page and the unified app's Dependencies page show FFmpeg and ffprobe
   verification separately and offer a dedicated install/repair action.
 - Repair stages and verifies both binaries, required PNG/WebP encoders, and
   license notices before switching to the new portable tools. A failed download

@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdtemp, rename } from 'node:fs/promises';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, cpSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import manifest from '../defaults/MediaTools/manifest.json';
-import { downloadMediaArchive, extractAndVerifyMediaArchive, mediaToolsPackage } from '../setup/MediaTools';
+import policy from '../defaults/MediaTools/source-build-manifest.json';
 import { verifyBundledMediaRuntime } from '../shared/bundledMediaRuntime';
 
 function assertLocal(root: string, target: string) {
@@ -19,52 +18,60 @@ function assertLocal(root: string, target: string) {
 }
 const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
-export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = resolve(import.meta.dir, '../node_modules/.cache/umbra-media')) {
+export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = resolve(import.meta.dir, '../node_modules/.cache/umbra-media-source')) {
+  if (!policy.platforms.includes(process.platform) || process.arch !== 'x64') throw new Error('Pinned-source media bundle requires Windows or Linux x64.');
   const root = resolve(runtimeRoot);
   const target = join(root, 'Runtime', 'FFmpeg', process.platform);
   assertLocal(root, target);
-  const item = mediaToolsPackage();
-  mkdirSync(cacheRoot, { recursive: true });
-  const archive = join(cacheRoot, item.name);
-  if (existsSync(archive) && (lstatSync(archive).isSymbolicLink() || lstatSync(archive).size !== item.bytes || hash(archive) !== item.sha256)) {
-    throw new Error(`Invalid media build cache: ${archive}. Remove this cache file and retry.`);
-  }
-  if (!existsSync(archive)) {
-    const partial = `${archive}.${randomUUID()}.partial`;
-    try {
-      await downloadMediaArchive(item.url, partial, item, line => console.log(`[media-runtime] ${line}`));
-      await rename(partial, archive);
-    } finally { if (existsSync(partial)) rmSync(partial); }
-  }
   mkdirSync(dirname(target), { recursive: true });
   const stage = await mkdtemp(join(dirname(target), '.prepare-'));
   let previous = '';
   try {
-    const extracted = extractAndVerifyMediaArchive(archive, stage);
+    const prebuilt = process.env.UMBRA_MEDIA_SOURCE_BUILD;
+    if (prebuilt) {
+      // Inspect every source entry before copy; cpSync must never follow build-tree links.
+      const inspect = (path: string) => {
+        const stat = lstatSync(path);
+        if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) throw new Error('Source media build contains a redirected or irregular entry.');
+        if (stat.isDirectory()) for (const name of readdirSync(path)) inspect(join(path, name));
+      };
+      inspect(resolve(prebuilt));
+      cpSync(resolve(prebuilt), stage, { recursive: true });
+    } else {
+      const work = join(resolve(cacheRoot), `build-${process.platform}-${randomUUID()}`);
+      mkdirSync(work, { recursive: true });
+      const script = resolve(import.meta.dir, 'build-media-from-source.sh');
+      const build = spawnSync(process.env.UMBRA_MEDIA_BUILD_BASH || 'bash', [script, process.platform, stage, work], { stdio: 'inherit', windowsHide: true });
+      if (build.status !== 0) throw new Error('Pinned-source FFmpeg build failed. Install the release workflow build tools or provide UMBRA_MEDIA_SOURCE_BUILD from the native source build.');
+    }
+    const suffix = process.platform === 'win32' ? '.exe' : '';
+    for (const tool of ['ffmpeg', 'ffprobe']) {
+      const probe = spawnSync(join(stage, 'bin', tool + suffix), ['-version'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      if (probe.status !== 0) throw new Error(`Source-built ${tool} does not run on the native packaging host.`);
+    }
+    const policySha256 = createHash('sha256').update(JSON.stringify(policy)).digest('hex');
+    writeFileSync(join(stage, 'SOURCE.json'), JSON.stringify({ schemaVersion: 2, buildKind: 'pinned-source', policySha256,
+      sources: policy.sources, recipe: 'corresponding-source/build-media-from-source.sh', patches: [] }, null, 2) + '\n');
     const files: Record<string, { bytes: number; sha256: string }> = {};
     const walk = (path: string) => {
       for (const entry of readdirSync(path, { withFileTypes: true })) {
         const absolute = join(path, entry.name);
         if (entry.isSymbolicLink()) throw new Error('Media bundle contains a linked file.');
         if (entry.isDirectory()) walk(absolute);
-        else if (entry.isFile()) files[relative(extracted, absolute).split(sep).join('/')] = { bytes: lstatSync(absolute).size, sha256: hash(absolute) };
-        else throw new Error('Media bundle contains a non-regular file.');
+        else if (entry.isFile()) {
+          const name = relative(stage, absolute).split(sep).join('/');
+          if (name !== 'installed.json') files[name] = { bytes: lstatSync(absolute).size, sha256: hash(absolute) };
+        } else throw new Error('Media bundle contains a non-regular file.');
       }
     };
-    walk(extracted);
-    const ffmpeg = join(extracted, 'bin', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
-    const configuration = spawnSync(ffmpeg, ['-hide_banner', '-buildconf'], { encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 128 * 1024 });
-    if (configuration.status !== 0) throw new Error('Bundled FFmpeg build configuration could not be verified.');
-    writeFileSync(join(extracted, 'BUILD-CONFIG.txt'), `${configuration.stdout || ''}${configuration.stderr || ''}`);
-    writeFileSync(join(extracted, 'SOURCE.json'), JSON.stringify({ ffmpeg: manifest.ffmpegSource, build: manifest.buildSource, upstreamBinary: item.url }, null, 2) + '\n');
-    writeFileSync(join(extracted, 'installed.json'), JSON.stringify({ schemaVersion: 1, version: manifest.version, release: manifest.release,
-      license: manifest.license, binDirectory: 'bin', archiveSha256: item.sha256, archiveBytes: item.bytes, archiveUrl: item.url, files }, null, 2) + '\n');
+    walk(stage);
+    writeFileSync(join(stage, 'installed.json'), JSON.stringify({ schemaVersion: 2, buildKind: 'pinned-source', policySha256,
+      version: policy.version, release: policy.release, license: policy.license, platform: process.platform, binDirectory: 'bin', files }, null, 2) + '\n');
     assertLocal(root, target);
     if (existsSync(target)) { previous = `${target}.previous-${randomUUID()}`; renameSync(target, previous); }
     let installed = false;
     try {
-      renameSync(extracted, target);
-      installed = true;
+      renameSync(stage, target); installed = true;
       verifyBundledMediaRuntime(root);
     } catch (error) {
       if (installed) { assertLocal(root, target); rmSync(target, { recursive: true, force: true }); }
@@ -72,9 +79,9 @@ export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = resol
       throw error;
     }
     if (previous) { assertLocal(root, previous); rmSync(previous, { recursive: true, force: true }); }
-    console.log(`[media-runtime] Bundled FFmpeg ${manifest.version} and ffprobe for ${process.platform}/${process.arch}.`);
+    console.log(`[media-runtime] Bundled source-built FFmpeg ${policy.version}, ffprobe and complete corresponding sources for ${process.platform}.`);
     return target;
-  } finally { assertLocal(root, stage); rmSync(stage, { recursive: true, force: true }); }
+  } finally { if (existsSync(stage)) { assertLocal(root, stage); rmSync(stage, { recursive: true, force: true }); } }
 }
 
 if (import.meta.main) {

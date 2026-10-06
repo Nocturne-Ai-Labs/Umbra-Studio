@@ -32,9 +32,26 @@ jobs:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
         run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
+      - name: Install native Windows media build tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make nasm tar
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+      - name: Build Windows media from pinned sources
+        shell: msys2 {0}
+        run: |
+          source_root="$(cygpath -u "$GITHUB_WORKSPACE")"
+          bash scripts/build-media-from-source.sh win32 "$source_root/release/media-source-win32" "$source_root/release/media-work-win32"
       - name: Build Windows BAT portable folder
         shell: pwsh
         env:
+          UMBRA_MEDIA_SOURCE_BUILD: ${{ github.workspace }}\release\media-source-win32
           UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows-bat\Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
@@ -97,8 +114,13 @@ jobs:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
         run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
+      - name: Install native Linux media build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential nasm cmake pkg-config python3
+      - name: Build Linux media from pinned sources
+        run: bash scripts/build-media-from-source.sh linux "$GITHUB_WORKSPACE/release/media-source-linux" "$GITHUB_WORKSPACE/release/media-work-linux"
       - name: Build Linux portable folder
         env:
+          UMBRA_MEDIA_SOURCE_BUILD: ${{ github.workspace }}/release/media-source-linux
           UMBRA_LINUX_PUBLISH_ROOT: ${{ github.workspace }}/release/linux/Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'

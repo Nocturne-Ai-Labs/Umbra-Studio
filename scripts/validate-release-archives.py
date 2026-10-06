@@ -116,30 +116,64 @@ def validate(archive, version, platform):
         manifest = json.loads(package.read('Umbra Studio/resources/app/package.json'))
         if manifest['version'] != version:
             raise ValueError(f'{archive.name}: version mismatch')
-        policy_path = Path(__file__).resolve().parent.parent / 'defaults/MediaTools/manifest.json'
+        policy_path = Path(__file__).resolve().parent.parent / 'defaults/MediaTools/source-build-manifest.json'
         policy = json.loads(policy_path.read_text(encoding='utf-8'))
-        packaged_policy = json.loads(package.read('Umbra Studio/resources/app/defaults/MediaTools/manifest.json'))
+        packaged_policy = json.loads(package.read('Umbra Studio/resources/app/defaults/MediaTools/source-build-manifest.json'))
         if packaged_policy != policy:
-            raise ValueError(f'{archive.name}: media policy differs from release source')
+            raise ValueError(f'{archive.name}: media source policy differs from release source')
         media_platform = 'win32' if platform == 'Windows-x64-BAT' else 'linux'
         media_root = f'Umbra Studio/Runtime/FFmpeg/{media_platform}/'
         installed = json.loads(package.read(media_root + 'installed.json'))
-        pin = policy['packages'][media_platform]
-        if (installed.get('version') != policy['version'] or installed.get('release') != policy['release']
-                or installed.get('license') != policy['license'] or installed.get('binDirectory') != 'bin'
-                or installed.get('archiveSha256') != pin['sha256'] or installed.get('archiveBytes') != pin['bytes']):
-            raise ValueError(f'{archive.name}: invalid bundled FFmpeg provenance')
-        suffix = '.exe' if media_platform == 'win32' else ''
-        for name in [f'bin/ffmpeg{suffix}', f'bin/ffprobe{suffix}', 'LICENSE.txt']:
-            expected = installed.get('files', {}).get(name, {})
+        policy_hash = hashlib.sha256(json.dumps(policy, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+        if (installed.get('schemaVersion') != 2 or installed.get('buildKind') != 'pinned-source'
+                or installed.get('policySha256') != policy_hash or installed.get('platform') != media_platform
+                or installed.get('version') != policy['version'] or installed.get('release') != policy['release']
+                or installed.get('license') != policy['license'] or installed.get('binDirectory') != 'bin'):
+            raise ValueError(f'{archive.name}: invalid source-built FFmpeg provenance')
+        media_files = {entry.filename[len(media_root):] for entry in entries
+                       if entry.filename.startswith(media_root) and not entry.is_dir()
+                       and entry.filename != media_root + 'installed.json'}
+        if media_files != set(installed.get('files', {})):
+            raise ValueError(f'{archive.name}: media inventory must cover every actual file')
+        for name, expected in installed['files'].items():
             member = package.getinfo(media_root + name)
             if member.file_size != expected.get('bytes') or digest(member.filename).hex() != expected.get('sha256'):
                 raise ValueError(f'{archive.name}: bundled media checksum mismatch: {name}')
-            if media_platform == 'linux' and name.startswith('bin/') and not (member.external_attr >> 16) & 0o111:
+        suffix = '.exe' if media_platform == 'win32' else ''
+        required = [f'bin/ffmpeg{suffix}', f'bin/ffprobe{suffix}', 'LICENSE.txt', 'SOURCE.json', 'BUILD-CONFIG.txt',
+                    'corresponding-source/source-build-manifest.json', 'corresponding-source/build-media-from-source.sh', 'corresponding-source/README.txt',
+                    'build-evidence/toolchain.txt', 'build-evidence/encoders.txt', 'build-evidence/decoders.txt', 'build-evidence/native-dependencies.txt',
+                    'build-evidence/ffmpeg-configure-args.txt', 'build-evidence/ffmpeg-config.txt', 'build-evidence/x264-config.txt',
+                    'build-evidence/vpx-config.txt', 'build-evidence/webp-config.txt', 'build-evidence/zlib-config.txt', 'build-evidence/smoke-results.json',
+                    'NOTICE.txt', 'licenses/ffmpeg.txt', 'licenses/x264.txt', 'licenses/vpx.txt', 'licenses/webp.txt', 'licenses/zlib.txt', 'build-evidence/smoke-results.json',
+    'NOTICE.txt', 'licenses/ffmpeg.txt', 'licenses/x264.txt', 'licenses/vpx.txt', 'licenses/webp.txt', 'licenses/zlib.txt']
+        for name in required:
+            if name not in media_files: raise ValueError(f'{archive.name}: missing media source/build evidence: {name}')
+            if media_platform == 'linux' and name.startswith('bin/') and not (package.getinfo(media_root + name).external_attr >> 16) & 0o111:
                 raise ValueError(f'{archive.name}: media executable permission missing: {name}')
-        for name in ['SOURCE.json', 'BUILD-CONFIG.txt']:
-            if media_root + name not in names:
-                raise ValueError(f'{archive.name}: missing media notice: {name}')
+        if json.loads(package.read(media_root + 'corresponding-source/source-build-manifest.json')) != policy:
+            raise ValueError(f'{archive.name}: corresponding-source manifest differs')
+        if installed['files']['corresponding-source/build-media-from-source.sh']['sha256'] != policy['recipeSha256']:
+            raise ValueError(f'{archive.name}: source build recipe differs from policy')
+        for source in policy['sources']:
+            entry = installed['files'].get(f"corresponding-source/{source['name']}.tar.gz", {})
+            if entry.get('sha256') != source['sha256'] or entry.get('bytes') != source['bytes']:
+                raise ValueError(f'{archive.name}: incomplete/mismatched corresponding source: {source["name"]}')
+        provenance = json.loads(package.read(media_root + 'SOURCE.json'))
+        if (provenance.get('policySha256') != policy_hash or provenance.get('buildKind') != 'pinned-source'
+                or provenance.get('sources') != policy['sources'] or provenance.get('patches') != []):
+            raise ValueError(f'{archive.name}: source provenance mismatch')
+        config = package.read(media_root + 'BUILD-CONFIG.txt').decode()
+        for flag in ['--disable-autodetect', '--enable-gpl', '--enable-version3', '--enable-libx264', '--enable-libvpx', '--enable-libwebp', '--enable-zlib']:
+            if flag not in config: raise ValueError(f'{archive.name}: media configure flag missing: {flag}')
+        if '--enable-nonfree' in config: raise ValueError(f'{archive.name}: nonfree media runtime')
+        encoders = package.read(media_root + 'build-evidence/encoders.txt').decode()
+        for encoder in policy['requiredEncoders']:
+            if not re.search(r'\b' + re.escape(encoder) + r'\b', encoders):
+                raise ValueError(f'{archive.name}: required media encoder missing: {encoder}')
+        smoke = json.loads(package.read(media_root + 'build-evidence/smoke-results.json'))
+        if smoke.get('platform') != media_platform or smoke.get('passed') is not True or len(smoke.get('results', [])) != 4 or any(item.get('decodePassed') is not True for item in smoke['results']):
+            raise ValueError(f'{archive.name}: media codec smoke qualification missing')
         helper_policy = json.loads((policy_path.parent.parent / 'PythonHelpers/manifest.json').read_text(encoding='utf-8'))
         if json.loads(package.read('Umbra Studio/resources/app/defaults/PythonHelpers/manifest.json')) != helper_policy:
             raise ValueError(f'{archive.name}: Python helper policy differs from release source')

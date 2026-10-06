@@ -250,7 +250,7 @@ files between versioned folders. Language can also be changed later under
 Windows and Linux release packages include FFmpeg and ffprobe in
 `Runtime/FFmpeg/<platform>`. Fresh installs and app updates receive the pair
 automatically; no separate FFmpeg download or system PATH setup is required.
-The pinned GPL-3.0-or-later executables retain license, source/build references,
+The source-built GPL-3.0-or-later executables include complete corresponding source archives, the exact build script, licenses, configuration and codec smoke-test evidence,
 and build configuration beside the binaries.
 
 Releases also include a portable CPU Python 3.11 helper environment with pandas,
