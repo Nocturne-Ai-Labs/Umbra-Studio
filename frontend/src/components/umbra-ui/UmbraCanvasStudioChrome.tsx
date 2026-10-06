@@ -60,7 +60,7 @@ export function UmbraCanvasStudioToolbar({ studio, onFitView, onResetView, onZoo
           <option value={studio.project.id}>{studio.project.name}</option>
         ) : null}
         {studio.projects.map((project) => (
-          <option key={project.id} value={project.id}>{project.name} / {project.artboardCount} artboards</option>
+          <option data-i18n-skip="" key={project.id} value={project.id}>{project.name} / {project.artboardCount} artboards</option>
         ))}
       </UmbraSelectControl>
       <button type="button" onClick={() => void studio.createProject()} title="Create a project from the current canvas" className="inline-flex h-8 w-8 items-center justify-center border border-cyan-300/20 text-cyan-200 hover:bg-cyan-500/10"><Plus size={11} /></button>

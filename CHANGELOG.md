@@ -2,6 +2,12 @@
 
 ## v0.90.6-beta - Bundled Media And Python Helpers, Updater Reliability
 
+- Setup's Tools, Models and guided onboarding now share English, Japanese,
+  Simplified Chinese, Korean and German labels and instructions. Main-app
+  translation now preserves user prompts, tags, model/file names and preset
+  labels, including custom selection menus. Localization audits include long
+  instructions and conditional labels; full main-app coverage is still pending.
+
 - Setup now shows the optional Eyes detailer's original CivitAI download link
   and destination folder. The model remains manual and excluded from packages
   and automatic installation; credits no longer point to a mirrored weight file.

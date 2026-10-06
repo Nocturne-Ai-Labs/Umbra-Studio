@@ -306,7 +306,7 @@ export function WildcardLibraryManager({
             className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-sm border px-2 text-left text-[9px] font-bold ${selected ? 'border-cyan-300/35 bg-cyan-500/10 text-cyan-100' : 'border-transparent text-zinc-400 hover:border-white/10 hover:text-zinc-100'}`}
           >
             {expanded ? <FolderOpen size={13} className="shrink-0" /> : <Folder size={13} className="shrink-0" />}
-            <span className="min-w-0 flex-1 truncate">{node.name}</span>
+            <span data-i18n-skip="" className="min-w-0 flex-1 truncate">{node.name}</span>
             <span className="font-mono text-[8px] opacity-60">{node.totalCount}</span>
           </button>
         </div>
@@ -370,7 +370,7 @@ export function WildcardLibraryManager({
                   <button key={wildcard.path} type="button" onClick={() => openEditor(wildcard)} className={`mb-1.5 flex min-h-14 w-full items-center gap-2 rounded-sm border px-2.5 py-2 text-left ${selected ? 'border-fuchsia-300/40 bg-fuchsia-500/10' : 'border-white/[0.08] bg-white/[0.018] hover:border-white/15'}`}>
                     <FileText size={14} className={selected ? 'shrink-0 text-fuchsia-200' : 'shrink-0 text-zinc-600'} />
                     <span className="min-w-0 flex-1">
-                      <strong className="block truncate font-mono text-[10px] text-zinc-200">__{wildcard.name}__</strong>
+                      <strong className="block truncate font-mono text-[10px] text-zinc-200">__<span data-i18n-skip="">{wildcard.name}</span>__</strong>
                       <small className="mt-1 flex items-center gap-1.5 truncate text-[8px] uppercase tracking-[0.08em] text-zinc-600">
                         <span className={`shrink-0 rounded-sm border px-1 py-0.5 ${wildcard.structured ? 'border-emerald-300/20 bg-emerald-500/[0.08] text-emerald-200' : wildcard.source === 'umbra' ? 'border-cyan-300/20 bg-cyan-500/[0.06] text-cyan-200' : 'border-white/10 text-zinc-500'}`}>{wildcard.structured ? 'Umbra Structured' : wildcard.source === 'umbra' ? 'Umbra Legacy' : 'Legacy Text'}</span>
                         <span className="truncate">{wildcard.folder || 'Root'} · {wildcard.values.length} lines</span>
@@ -391,7 +391,7 @@ export function WildcardLibraryManager({
             ) : (
               <div className="space-y-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div><h3 className="font-mono text-sm font-bold text-fuchsia-100">__{editor.name}__</h3><p className="mt-1 text-[9px] text-zinc-600">{editorLineCount} prompt lines · source {editor.originalPath}.txt</p></div>
+                  <div><h3 className="font-mono text-sm font-bold text-fuchsia-100">__<span data-i18n-skip="">{editor.name}</span>__</h3><p className="mt-1 text-[9px] text-zinc-600">{editorLineCount} prompt lines · source {editor.originalPath}.txt</p></div>
                   <div className="flex flex-wrap justify-end gap-2">
                     {wildcards.find((entry) => entry.path === editor.originalPath)?.structured ? <button type="button" disabled={busy} onClick={() => { const wildcard = wildcards.find((entry) => entry.path === editor.originalPath); if (wildcard) onEditStructured(wildcard); }} className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-emerald-300/25 bg-emerald-500/[0.08] px-2.5 text-[9px] font-black uppercase tracking-[0.08em] text-emerald-100"><Pencil size={12} /> Edit Groups</button> : null}
                     <button type="button" disabled={busy} onClick={() => void deleteEditor()} className={`inline-flex h-9 items-center gap-1.5 rounded-sm border px-2.5 text-[9px] font-black uppercase tracking-[0.08em] disabled:opacity-40 ${deleteArmed ? 'border-red-300/55 bg-red-500/15 text-red-100' : 'border-red-300/20 text-red-200/70 hover:text-red-100'}`}><Trash2 size={12} /> {deleteArmed ? 'Confirm Delete' : 'Delete'}</button>

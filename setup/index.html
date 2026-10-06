@@ -412,7 +412,7 @@
       },
     }).then(async (response) => {
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || body.success === false) throw new Error(body.error || `Request failed (${response.status})`);
+      if (!response.ok || body.success === false) throw new Error(body.error || setupFormat('requestFailed', { status: response.status }));
       return body;
     });
     const status = document.getElementById('status');
@@ -459,7 +459,28 @@
         'Installing Umbra UI support models': 'installingUmbraUiModels',
         'Installation complete': 'installationComplete',
         'Installation failed': 'installationFailed',
+        'Verifying installation': 'verifyRunning',
+        'Verifying generation checkpoint': 'verifyCheckpoint',
+        'Installation verified': 'installationVerified',
+        'Verification held': 'verificationHeld',
+        'FFmpeg and ffprobe verified': 'mediaVerified',
+        'Managed tool files verified': 'filesVerified',
+        'Managed tool repair failed': 'repairFailed',
+        'Restart required; runtime preflight pending': 'restartPending',
+        'Managed repair held': 'held',
       };
+      if (jobSteps[step]) return tr(jobSteps[step]);
+      const toolAction = /^(ComfyUI|AI Toolkit): (.+)$/.exec(step);
+      if (toolAction) {
+        const actionKey = { install: 'installTool', 'install core': 'installTool', update: 'updateTool', 'update pytorch': 'updateCuda', 'custom nodes': 'updateCustomNodes', 'nodes only': 'updateCustomNodes', 'h3 nodes': 'updateH3Nodes', 'install sageattention': 'repairSage', 'set comfyui version': 'switchVersion' }[toolAction[2]];
+        if (actionKey) return `${toolAction[1]}: ${tr(actionKey)}`;
+      }
+      if (/maintenance complete$/i.test(step)) return tr('maintenanceComplete');
+      if (/maintenance failed$/i.test(step)) return tr('installationFailed');
+      if (/^(Installing|Updating|Repairing|Switching) (ComfyUI|AI Toolkit)/.test(step)) return tr('maintenanceRunning');
+      if (/^(Checking|Verifying) (setup|readiness)/i.test(step)) return tr('verifyRunning');
+      if (step.startsWith('Installing ')) return setupFormat('installingTool', { tool: step.slice(11) });
+      if (step.startsWith('Preparing ')) return setupFormat('preparingTool', { tool: step.slice(10) });
       return tr(jobSteps[step] || step);
     }
 

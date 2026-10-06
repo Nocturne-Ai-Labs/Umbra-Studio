@@ -72,7 +72,7 @@ export function TrainingProgressStatus({ collapsed = false, enabled = true, aiTo
         <div className="max-h-48 overflow-y-auto">
           {jobs.length ? jobs.map((job) => (
             <div key={job.id} className="min-w-0 py-1.5" title={`${job.name}: ${describeJob(job)}`}>
-              <div className="truncate text-xs font-medium">{job.name}</div>
+              <div data-i18n-skip="" className="truncate text-xs font-medium">{job.name}</div>
               <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 text-[10px] leading-4 text-[var(--umbra-text-muted)]">
                 <span>{STATUS_LABELS[job.status]}</span>
                 <span className="min-w-0 break-all tabular-nums">{job.step?.toLocaleString() ?? '?'} / {job.totalSteps?.toLocaleString() ?? '?'} steps{job.progress === null ? '' : ` (${job.progress}%)`}</span>

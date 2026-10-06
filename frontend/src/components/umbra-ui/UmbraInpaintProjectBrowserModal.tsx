@@ -141,7 +141,7 @@ export function UmbraInpaintProjectBrowserModal({
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
                     <FolderOpen size={14} className={active ? 'shrink-0 text-cyan-200' : 'shrink-0 text-zinc-500'} />
-                    <span className="truncate text-[12px] font-black text-zinc-100">{project.name}</span>
+                    <span data-i18n-skip="" className="truncate text-[12px] font-black text-zinc-100">{project.name}</span>
                     {active ? (
                       <span className="inline-flex shrink-0 items-center gap-1 rounded border border-cyan-300/25 px-1.5 py-0.5 font-mono text-[8px] font-black uppercase text-cyan-200">
                         <Check size={8} /> Active

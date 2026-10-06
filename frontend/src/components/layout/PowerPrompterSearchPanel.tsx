@@ -844,7 +844,7 @@ export const PowerPrompterSearchPanel = React.memo(({
                       return (
                         <label key={sourceId} data-umbra-powerprompter-catalog-source={sourceId} className={`group flex min-h-10 cursor-pointer items-center gap-3 rounded-sm border px-2.5 py-2 transition ${checked ? type === 'character' ? 'border-emerald-300/25 bg-emerald-400/10' : 'border-cyan-300/25 bg-cyan-400/10' : 'border-white/[0.07] bg-white/[0.018] hover:border-white/15'}`}>
                           <input type="checkbox" checked={checked} onChange={() => onToggleCSV(sourceId)} className="h-3.5 w-3.5 accent-cyan-400" />
-                          <span className={`min-w-0 flex-1 truncate text-[10px] ${checked ? 'text-zinc-100' : 'text-zinc-500 group-hover:text-zinc-300'}`}>{fileName}</span>
+                          <span data-i18n-skip="" className={`min-w-0 flex-1 truncate text-[10px] ${checked ? 'text-zinc-100' : 'text-zinc-500 group-hover:text-zinc-300'}`}>{fileName}</span>
                           <span className="text-[8px] font-black uppercase tracking-[0.08em] text-zinc-700">{type === 'character' ? 'Char' : 'Tag'}</span>
                         </label>
                       );

@@ -389,10 +389,10 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
               {item.isVideo ? (
                 <video src={item.blobUrl} controls className="w-full max-h-56 object-contain rounded umbra-surface-deep" />
               ) : (
-                <img src={item.blobUrl} alt={item.name} className="w-full max-h-56 object-contain rounded umbra-surface-deep" />
+                <img data-i18n-skip="" src={item.blobUrl} alt={item.name} className="w-full max-h-56 object-contain rounded umbra-surface-deep" />
               )}
-              <p className="text-xs umbra-text-muted mt-2 truncate" title={item.path}>{item.name}</p>
-              <p className="text-[11px] umbra-text-faint truncate" title={item.path}>{item.path}</p>
+              <p data-i18n-skip="" className="text-xs umbra-text-muted mt-2 truncate" title={item.path}>{item.name}</p>
+              <p data-i18n-skip="" className="text-[11px] umbra-text-faint truncate" title={item.path}>{item.path}</p>
             </div>
 
             <div className="space-y-3">
@@ -621,7 +621,7 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
                   <div className="flex flex-wrap gap-1.5">
                     {Object.entries(item.waifuTagger.result.rating).map(([tag, score]) => (
                       <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
-                        {tag} ({(score * 100).toFixed(1)}%)
+                        <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                       </span>
                     ))}
                   </div>
@@ -643,7 +643,7 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
                   <div className="flex flex-wrap gap-1.5">
                     {item.waifuTagger.result.character.map(({ tag, score }) => (
                       <span key={tag} className="px-2 py-1 rounded bg-[var(--umbra-accent)]/15 border border-[var(--umbra-accent)]/25 text-[11px] text-[var(--umbra-accent)]">
-                        {tag} ({(score * 100).toFixed(1)}%)
+                        <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                       </span>
                     ))}
                   </div>
@@ -665,7 +665,7 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
                   <div className="flex flex-wrap gap-1.5">
                     {item.waifuTagger.result.general.map(({ tag, score }) => (
                       <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
-                        {tag} ({(score * 100).toFixed(1)}%)
+                        <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                       </span>
                     ))}
                   </div>
@@ -677,7 +677,7 @@ export function WaifuTaggerPanel({ imagePath, imageName, onSendToWaifuDiffusion 
                   <div className="flex flex-wrap gap-1.5">
                     {item.waifuTagger.result.style?.map(({ tag, score }) => (
                       <span key={tag} className="px-2 py-1 rounded text-[11px] umbra-chip-neutral">
-                        {tag} ({(score * 100).toFixed(1)}%)
+                        <span data-i18n-skip="">{tag}</span> ({(score * 100).toFixed(1)}%)
                       </span>
                     ))}
                   </div>

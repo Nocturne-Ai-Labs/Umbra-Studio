@@ -451,7 +451,7 @@ function TagComposer({
               }}
               className="flex min-h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-zinc-300 hover:bg-cyan-500/10 hover:text-cyan-100"
             >
-              <span className="min-w-0 flex-1 truncate font-mono">{suggestion.tag}</span>
+              <span data-i18n-skip="" className="min-w-0 flex-1 truncate font-mono">{suggestion.tag}</span>
               <span className="shrink-0 text-[9px] uppercase text-zinc-600">{CATEGORY_LABELS[suggestion.category] || `Category ${suggestion.category}`}</span>
               <span className="w-20 shrink-0 text-right font-mono text-[10px] text-cyan-200/80">{formatPostCount(suggestion.postCount)}</span>
             </button>
@@ -468,7 +468,7 @@ function TagList({ tags, onRemove, emptyLabel }: { tags: WildcardTag[]; onRemove
     <div className="flex flex-wrap gap-1.5">
       {tags.map((tag) => (
         <span key={tag.tag} className="inline-flex min-h-7 items-center gap-1 rounded-sm border border-white/10 bg-black/25 pl-2 text-[10px] text-zinc-300">
-          <span className="font-mono">{tag.tag}</span>
+          <span data-i18n-skip="" className="font-mono">{tag.tag}</span>
           <span className={`text-[8px] ${isNaturalLanguageEntry(tag) || isFreeformEntry(tag) ? 'text-fuchsia-200/70' : 'text-cyan-200/70'}`}>
             {isFreeformEntry(tag) ? 'Freeform' : isNaturalLanguageEntry(tag) ? 'Natural' : formatPostCount(tag.postCount)}
           </span>
@@ -992,7 +992,7 @@ function WildcardTagCatalogDrawer({
           <div className="custom-scrollbar mt-2 flex max-h-16 flex-wrap gap-1 overflow-y-auto rounded-sm border border-white/[0.08] bg-black/20 p-1.5">
             {selectedTags.map((tag) => (
               <button key={tag.tag} type="button" onClick={() => toggleTag(tag)} className="inline-flex h-6 items-center gap-1 rounded-sm border border-cyan-300/20 bg-cyan-500/[0.08] px-1.5 font-mono text-[9px] text-cyan-100" title={`Remove ${tag.tag} from selection`}>
-                {tag.tag}<X className="h-2.5 w-2.5" />
+                <span data-i18n-skip="">{tag.tag}</span><X className="h-2.5 w-2.5" />
               </button>
             ))}
           </div>
@@ -1053,7 +1053,7 @@ function WildcardTagCatalogDrawer({
                     title={`${suggestion.conditionalPercent.toFixed(1)}% together · ${suggestion.lift.toFixed(2)}x lift · ${new Intl.NumberFormat().format(suggestion.cooccurrenceCount)} matching posts`}
                   >
                     {selected ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3 opacity-60" />}
-                    {tag.tag}
+                    <span data-i18n-skip="">{tag.tag}</span>
                     <span className="text-[8px] opacity-55">{suggestion.conditionalPercent.toFixed(0)}%</span>
                   </button>
                 );
@@ -1090,7 +1090,7 @@ function WildcardTagCatalogDrawer({
                 >
                   <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border ${selected ? 'border-cyan-200/50 bg-cyan-300/20 text-cyan-50' : 'border-white/15 text-transparent'}`}>{selected ? <Check className="h-2.5 w-2.5" /> : null}</span>
                   <span className="min-w-0">
-                    <span className="block truncate font-mono text-[10px] text-zinc-200" title={tag.tag}>{tag.tag}</span>
+                    <span data-i18n-skip="" className="block truncate font-mono text-[10px] text-zinc-200" title={tag.tag}>{tag.tag}</span>
                     <span className="mt-0.5 block truncate text-[8px] font-black uppercase tracking-[0.08em] text-zinc-600" title={tag.catalogSource || 'CSV'}>
                       {CATEGORY_LABELS[tag.category] || `Category ${tag.category}`} · {tag.catalogSource || (tag.source === 'danbooru' ? 'Live' : 'CSV')}
                     </span>
@@ -1155,7 +1155,7 @@ function WildcardTagCatalogDrawer({
                           className={`grid min-h-10 w-full grid-cols-[1.2rem_minmax(0,1fr)_auto] items-center gap-2 rounded-sm border px-2.5 py-2 text-left transition ${enabled ? 'border-cyan-300/30 bg-cyan-500/[0.08] text-cyan-50' : 'border-white/[0.08] bg-black/20 text-zinc-500 hover:border-white/15 hover:text-zinc-200'}`}
                         >
                           <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border ${enabled ? 'border-cyan-200/50 bg-cyan-300/20 text-cyan-50' : 'border-white/15 text-transparent'}`}>{enabled ? <Check className="h-2.5 w-2.5" /> : null}</span>
-                          <span className="min-w-0 truncate font-mono text-[10px]" title={fileName}>{fileName}</span>
+                          <span data-i18n-skip="" className="min-w-0 truncate font-mono text-[10px]" title={fileName}>{fileName}</span>
                           <span className="text-[8px] font-black uppercase tracking-[0.08em] opacity-55">{enabled ? 'Enabled' : 'Off'}</span>
                         </button>
                       );

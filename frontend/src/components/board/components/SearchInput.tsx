@@ -115,7 +115,7 @@ export function SearchInput({
       {showSuggestions && suggestions.length > 0 && (
         <div className="glass-panel custom-scrollbar absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-lg border-white/10 p-1">
           {suggestions.map((tag, index) => (
-            <button
+            <button data-i18n-skip=""
               key={tag}
               onClick={() => insertSuggestion(tag)}
               className={`w-full rounded px-2.5 py-1.5 text-left text-xs transition-colors ${

@@ -3720,7 +3720,7 @@ export function ModelManagerWorkspace() {
                 >
                   {folder.hasChildren ? (isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}
                 </button>
-                <button
+                <button data-i18n-skip=""
                   type="button"
                   className="min-w-0 flex-1 truncate text-left"
                   onClick={() => handleOpenFolder(childPath)}
@@ -4573,7 +4573,7 @@ export function ModelManagerWorkspace() {
                           </div>
                           <div className="model-manager-entry-info">
                             <span className="model-manager-entry-type text-zinc-500">{entry.kind === 'folder' ? 'Folder' : entry.modelType || entry.extension || 'Model'}</span>
-                            <span className="model-manager-entry-name">{entry.name}</span>
+                            <span data-i18n-skip="" className="model-manager-entry-name">{entry.name}</span>
                             <span className="model-manager-entry-meta">
                               <span>{entry.kind === 'folder' ? formatFolderSummary(entry) : formatBytes(entry.size)}</span>
                               {entry.kind === 'file' && entry.snapshot ? <span className="text-emerald-300/80" title="Saved model metadata">Snapshot</span> : null}
@@ -5256,7 +5256,7 @@ export function ModelManagerWorkspace() {
                           <div key={item.id} className="mb-2 rounded-md border border-white/10 bg-white/[0.04] p-3 last:mb-0">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-zinc-100">{item.fileName}</div>
+                                <div data-i18n-skip="" className="truncate text-sm font-semibold text-zinc-100">{item.fileName}</div>
                                 <div className="mt-0.5 truncate text-[11px] text-zinc-500">{item.savePath}</div>
                               </div>
                               <div className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-black uppercase text-zinc-200">{item.state}</div>
@@ -5568,7 +5568,7 @@ export function ModelManagerWorkspace() {
                       >
                         <Folder size={20} className="shrink-0 text-[var(--umbra-accent)]" />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-semibold">{folder.name}</span>
+                          <span data-i18n-skip="" className="block truncate text-sm font-semibold">{folder.name}</span>
                           <span className="block text-xs text-zinc-500">{formatFolderSummary(folder)}</span>
                         </span>
                         <ChevronRight size={18} className="shrink-0 text-zinc-600" />
@@ -5940,7 +5940,7 @@ export function ModelManagerWorkspace() {
                             {(version.files || []).map((file) => (
                               <div key={`${version.id}:${file.name}`} className="flex items-center gap-2">
                                 <div className="min-w-0 flex-1">
-                                  <div className="truncate text-[11px] text-zinc-300">{file.name}</div>
+                                  <div data-i18n-skip="" className="truncate text-[11px] text-zinc-300">{file.name}</div>
                                   <div className="text-[10px] text-zinc-500">{formatBytes((file.sizeKB || 0) * 1024)}</div>
                                 </div>
                                 <button
@@ -6038,7 +6038,7 @@ export function ModelManagerWorkspace() {
                   <div key={job.jobId} className="rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
                     <div className="flex items-center gap-2">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs text-zinc-200">{job.fileName}</div>
+                        <div data-i18n-skip="" className="truncate text-xs text-zinc-200">{job.fileName}</div>
                         <div className="text-[10px] text-zinc-500">{job.cancelRequested && ['queued', 'downloading'].includes(job.status) ? 'Cancelling' : job.status}</div>
                       </div>
                       <div className="text-[11px] text-zinc-400">{Math.max(0, Math.min(100, Math.round(job.progress || 0)))}%</div>

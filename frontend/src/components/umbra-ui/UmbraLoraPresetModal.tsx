@@ -94,7 +94,7 @@ export function UmbraLoraPresetModal({ loras, onLoad, onClose }: {
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded bg-black/30">
                     {preset.thumbnail ? <img src={preset.thumbnail} alt="" className="h-full w-full object-contain" loading="lazy" /> : <ImagePlus size={18} />}
                   </span>
-                  <span className="min-w-0 flex-1"><span className="block break-words text-sm">{preset.name}</span><span className="text-xs text-zinc-500">{preset.loras.length} LoRAs</span></span>
+                  <span className="min-w-0 flex-1"><span data-i18n-skip="" className="block break-words text-sm">{preset.name}</span><span className="text-xs text-zinc-500">{preset.loras.length} LoRAs</span></span>
                 </button>
               ))}
             </div>

@@ -138,7 +138,7 @@ export function PowerPrompterQueueHistoryModal({
                             >
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-bold text-zinc-100">{item.name}</div>
+                                  <div data-i18n-skip="" className="truncate text-sm font-bold text-zinc-100">{item.name}</div>
                                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                                     <span>{item.status}</span>
                                     <span>{progressLabel}</span>

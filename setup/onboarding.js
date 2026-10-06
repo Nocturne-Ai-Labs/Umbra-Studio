@@ -65,7 +65,7 @@ function onboardingPackSelection(packId, container) {
       checkbox.checked ? selected.add(profile.id) : selected.delete(profile.id);
       void saveOnboarding({ [key]: [...selected], ...(packId === 'requirements' ? { checkpoint: '' } : {}) }).catch(modelError);
     });
-    const description = onboardingElement('div'); description.append(onboardingElement('strong', profile.label), onboardingElement('p', profile.description));
+    const description = onboardingElement('div'); description.append(onboardingElement('strong', setupProfileLabel(profile, pack)), onboardingElement('p', setupProfileDescription(profile, pack)));
     label.append(checkbox, description); options.append(label);
   }
   container.append(options);

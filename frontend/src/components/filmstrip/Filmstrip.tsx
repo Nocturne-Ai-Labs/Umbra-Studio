@@ -550,7 +550,7 @@ export function FilmstripFolderSelector({
                     <Pin size={13} className="shrink-0 text-[var(--umbra-accent)]" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-medium text-zinc-200">{folder.label || folder.path}</span>
-                      <span className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
+                      <span data-i18n-skip="" className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
                     </span>
                     {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
                     <FolderActivityBadge count={folder.unreadCount || 0} />
@@ -602,7 +602,7 @@ export function FilmstripFolderSelector({
                 <History size={13} className="shrink-0 text-zinc-500" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-zinc-200">{folder.label || folder.path}</span>
-                  <span className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
+                  <span data-i18n-skip="" className="block truncate text-[10px] text-zinc-600">{folder.path}</span>
                 </span>
                 {folder.isCurrent ? <span className="shrink-0 text-[8px] font-black uppercase text-[var(--umbra-accent)]">Open</span> : null}
                 <FolderActivityBadge count={folder.unreadCount || 0} />
@@ -869,7 +869,7 @@ function FilmstripTile({
       )}
     >
       {src ? (
-        <img
+        <img data-i18n-skip=""
           data-umbra-nsfw-media={isNsfw ? '' : undefined}
           src={src}
           alt={image.name}
@@ -946,7 +946,7 @@ function FilmstripTile({
       ) : null}
 
       <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/92 via-black/55 to-transparent px-1.5 pb-1 pt-5">
-        <div className="truncate text-[10px] font-medium text-zinc-100">{image.name}</div>
+        <div data-i18n-skip="" className="truncate text-[10px] font-medium text-zinc-100">{image.name}</div>
         {isLivePreview ? (
           <div className="truncate text-[9px] font-semibold text-emerald-200">Streaming preview</div>
         ) : size ? <div className="truncate text-[9px] text-zinc-400">{size}</div> : null}

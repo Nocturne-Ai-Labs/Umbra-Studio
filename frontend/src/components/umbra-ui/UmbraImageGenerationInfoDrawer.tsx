@@ -32,7 +32,7 @@ function PromptBlock({ label, value }: { label: string; value: string }) {
     <section className="space-y-1.5">
       <span className={labelClass}>{label}</span>
       <div className="max-h-44 overflow-y-auto rounded-md border border-white/10 bg-black/35 p-3 font-mono text-[11px] leading-relaxed text-zinc-300 custom-scrollbar">
-        {value.trim() || <span className="text-zinc-700">None</span>}
+        {value.trim() ? <span data-i18n-skip="">{value.trim()}</span> : <span className="text-zinc-700">None</span>}
       </div>
     </section>
   );

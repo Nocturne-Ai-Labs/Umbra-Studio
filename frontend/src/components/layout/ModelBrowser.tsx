@@ -384,7 +384,7 @@ export const ModelBrowser = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {localModels.map((model, idx) => (
                             <div key={idx} className="bg-black/20 border border-white/5 rounded-lg p-4">
-                                <div className="text-sm font-bold text-white mb-1">{model.name}</div>
+                                <div data-i18n-skip="" className="text-sm font-bold text-white mb-1">{model.name}</div>
                                 <div className="text-xs text-zinc-500">{model.type}</div>
                                 <div className="text-xs text-zinc-600 mt-2">{formatFileSize(model.sizeKB)}</div>
                             </div>
@@ -425,7 +425,7 @@ const ModelCard = ({ model, onDownload, isDownloading, formatFileSize, formatNum
             {/* Image */}
             {previewImage && (
                 <div className="relative aspect-square overflow-hidden bg-black">
-                    <img
+                    <img data-i18n-skip=""
                         src={previewImage.url}
                         alt={model.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -440,7 +440,7 @@ const ModelCard = ({ model, onDownload, isDownloading, formatFileSize, formatNum
 
             {/* Content */}
             <div className="p-3">
-                <h3 className="text-sm font-bold text-white mb-1 line-clamp-1">{model.name}</h3>
+                <h3 data-i18n-skip="" className="text-sm font-bold text-white mb-1 line-clamp-1">{model.name}</h3>
                 <p className="text-[10px] text-zinc-500 mb-2 line-clamp-2">{latestVersion?.name}</p>
 
                 {/* Stats */}

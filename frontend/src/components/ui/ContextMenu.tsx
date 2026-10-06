@@ -287,7 +287,7 @@ function MenuPanel({
                   {item.icon}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate">{item.label}</span>
+                  <span data-i18n-skip={item.i18nSkip ? '' : undefined} className="block truncate">{item.label}</span>
                   {item.description ? (
                     <span className="umbra-context-menu-description mt-0.5 block truncate">
                       {item.description}

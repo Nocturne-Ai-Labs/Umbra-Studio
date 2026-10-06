@@ -129,7 +129,7 @@ export function PowerPrompterPresetBar(props: PowerPrompterPresetBarProps) {
                         data-active={active ? '1' : '0'}
                         onClick={() => setSelectedPresetId(String(preset.id || ''))}
                       >
-                        <span>{preset.name}</span>
+                        <span data-i18n-skip="">{preset.name}</span>
                         {active ? <Check size={17} /> : null}
                       </button>
                     );
@@ -280,7 +280,7 @@ export function PowerPrompterPresetBar(props: PowerPrompterPresetBarProps) {
               </option>
             ) : null}
             {presets.map((preset: any) => (
-              <option
+              <option data-i18n-skip=""
                 key={preset.id}
                 value={preset.id}
                 style={{ color: '#e4e4e7', backgroundColor: '#09090b' }}

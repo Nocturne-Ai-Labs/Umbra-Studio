@@ -450,7 +450,9 @@ function shouldSkipNode(node: Node): boolean {
   if (!element) return true;
   return Boolean(element.closest([
     '[data-i18n-skip]',
-    '[contenteditable="true"]',
+    '[translate="no"]',
+    '.notranslate',
+    '[contenteditable]:not([contenteditable="false"])',
     'canvas',
     'code',
     'kbd',
@@ -477,7 +479,7 @@ function localizeTextNode(node: Text, language: AppLanguage) {
 }
 
 function localizeElementAttributes(element: Element, language: AppLanguage) {
-  if (element.closest('[data-i18n-skip],[contenteditable="true"],code,kbd,pre,samp,script,style,svg')) return;
+  if (element.closest('[data-i18n-skip],[translate="no"],.notranslate,[contenteditable]:not([contenteditable="false"]),code,kbd,pre,samp,script,style,svg')) return;
   let originals = ORIGINAL_ATTRIBUTES.get(element);
   let rendered = LAST_RENDERED_ATTRIBUTES.get(element);
   if (!originals) {

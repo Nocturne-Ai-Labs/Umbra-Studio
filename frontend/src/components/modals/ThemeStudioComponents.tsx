@@ -372,7 +372,7 @@ export const ThemeStudioSettings = () => {
                     className="h-16 bg-cover bg-center transition-transform duration-200 group-hover:scale-105"
                     style={{ backgroundImage: `url(${background.src})` }}
                   />
-                  <div className="px-2 py-2 text-[10px] font-black uppercase tracking-[0.12em]">
+                  <div data-i18n-skip="" className="px-2 py-2 text-[10px] font-black uppercase tracking-[0.12em]">
                     {background.name}
                   </div>
                 </button>

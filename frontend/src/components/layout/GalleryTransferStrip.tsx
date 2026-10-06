@@ -59,7 +59,7 @@ export function GalleryTransferStrip({ transfer }: { transfer: GalleryTransferSt
           <span>{currentPage + 1} / {maxPage + 1}</span>
           <button type="button" className="flex h-9 w-9 items-center justify-center disabled:opacity-30" aria-label="Next transfer results" disabled={currentPage === maxPage} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button>
         </div>}
-        {transfer.results.slice(currentPage * 25, currentPage * 25 + 25).map((result, index) => <div key={`${result.path}-${index}`} className="mt-1 break-all">{result.success ? 'Transferred' : 'Failed'}: {result.path}{result.error ? ` - ${result.error}` : result.newPath ? ` -> ${result.newPath}` : ''}</div>)}
+        {transfer.results.slice(currentPage * 25, currentPage * 25 + 25).map((result, index) => <div key={`${result.path}-${index}`} className="mt-1 break-all">{result.success ? 'Transferred' : 'Failed'}: <span data-i18n-skip="">{result.path}</span>{result.error ? ` - ${result.error}` : result.newPath ? ` -> ${result.newPath}` : ''}</div>)}
       </div>}
     </aside>
   );

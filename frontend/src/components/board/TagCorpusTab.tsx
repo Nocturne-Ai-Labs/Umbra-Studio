@@ -266,7 +266,7 @@ function CorpusLiveMonitor({ status, samples }: { status: CorpusStatus | null; s
                 {matrixTags.map((entry, index) => (
                   <div key={`column-${entry.tag}`} className="min-w-0 pb-1 text-center" title={entry.tag}>
                     <div className="font-mono text-[8px] text-cyan-200/80">{index + 1}</div>
-                    <div className="truncate font-mono text-[7px] text-zinc-700">{entry.tag}</div>
+                    <div data-i18n-skip="" className="truncate font-mono text-[7px] text-zinc-700">{entry.tag}</div>
                   </div>
                 ))}
                 {matrixTags.map((rowTag, rowIndex) => (
@@ -318,7 +318,7 @@ function CorpusLiveMonitor({ status, samples }: { status: CorpusStatus | null; s
                       />
                       <div className="relative flex h-full items-center gap-2 px-2 font-mono text-[9px]">
                         <span className="w-4 shrink-0 text-zinc-700">{index + 1}</span>
-                        <span className="min-w-0 flex-1 truncate text-zinc-300">{entry.tag}</span>
+                        <span data-i18n-skip="" className="min-w-0 flex-1 truncate text-zinc-300">{entry.tag}</span>
                         <span className="shrink-0 text-cyan-200/70">{numberFormatter.format(entry.count)}</span>
                       </div>
                     </div>

@@ -237,7 +237,7 @@ export function DatasetTree({
                   ) : (
                     <Folder className="w-4 h-4 text-amber-500" />
                   )}
-                  <span className="text-sm truncate">{dataset.name}</span>
+                  <span data-i18n-skip="" className="text-sm truncate">{dataset.name}</span>
                   {isFlat && <span className="text-xs text-zinc-500">{dataset.concepts[0]?.imageCount || 0}</span>}
                 </button>
 

@@ -883,7 +883,7 @@ export function UmbraCensorReviewWorkspace() {
               >
                 <ChevronLeft size={16} />
               </CensorIconButton>
-              <span className="min-w-0 flex-1 truncate text-xs" title={item.name}>
+              <span data-i18n-skip="" className="min-w-0 flex-1 truncate text-xs" title={item.name}>
                 {item.name}
               </span>
               <span
@@ -1351,7 +1351,7 @@ export function UmbraCensorReviewWorkspace() {
                         </span>
                       )}
                       {!hidden && (
-                        <img
+                        <img data-i18n-skip=""
                           loading="lazy"
                           src={api.asset(project!.id, image.id, 'thumbnail.jpg')}
                           alt={image.name}
@@ -1359,7 +1359,7 @@ export function UmbraCensorReviewWorkspace() {
                         />
                       )}
                     </div>
-                    <div className="truncate px-1 text-[10px]">{image.name}</div>
+                    <div data-i18n-skip="" className="truncate px-1 text-[10px]">{image.name}</div>
                     <div
                       className={`truncate px-1 text-[10px] ${image.status === 'approved' ? 'text-emerald-300' : 'text-amber-200'}`}
                     >

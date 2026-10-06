@@ -180,7 +180,7 @@ export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled,
           onChange={event => { const enabled = event.target.checked; const audio = latest.current.audio; patch({ motion: { ...latest.current.motion, enabled },
             audio: enabled || !audio.overrideMotion ? audio : { ...audio, overrideMotion: false, enabled: audio.enabledBeforeOverride, enabledBeforeOverride: false } }); }} />Enable motion track</label>{uploadButton('motion')}</div>
         {settings.motion.segments.map((item, index) => <div key={item.id} className="space-y-2 border-t border-white/10 pt-2">
-          <div className="flex min-w-0 items-center gap-2 text-xs"><Film size={15} className="shrink-0" /><span className="min-w-0 flex-1 truncate" title={item.filename}>{index + 1}. {item.filename}</span>
+          <div className="flex min-w-0 items-center gap-2 text-xs"><Film size={15} className="shrink-0" /><span className="min-w-0 flex-1 truncate" title={item.filename}>{index + 1}. <span data-i18n-skip="">{item.filename}</span></span>
             <button type="button" className={iconClass} disabled={laneLocked} title="Remove motion clip" aria-label={`Remove motion clip ${index + 1}`}
               onClick={() => { const current = latest.current; const segments = current.motion.segments.filter(clip => clip.id !== item.id);
                 const audio = current.audio; patch({ motion: { ...current.motion, segments }, audio: segments.length || !audio.overrideMotion ? audio
@@ -210,7 +210,7 @@ export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled,
               enabled: overrideMotion ? false : latest.current.audio.enabledBeforeOverride }); }} />Use motion video audio</label>
         </div><div className="flex gap-1">{uploadButton('audio')}{uploadButton('audioVideo')}</div></div>
         {settings.audio.segments.map((item, index) => <div key={item.id} className="space-y-2 border-t border-white/10 pt-2">
-          <div className="flex min-w-0 items-center gap-2 text-xs"><Music2 size={15} className="shrink-0" /><span className="min-w-0 flex-1 truncate" title={item.filename}>{index + 1}. {item.filename}</span>
+          <div className="flex min-w-0 items-center gap-2 text-xs"><Music2 size={15} className="shrink-0" /><span className="min-w-0 flex-1 truncate" title={item.filename}>{index + 1}. <span data-i18n-skip="">{item.filename}</span></span>
             <button type="button" className={iconClass} disabled={laneLocked} title="Remove audio clip" aria-label={`Remove audio clip ${index + 1}`}
               onClick={() => patchAudio({ segments: latest.current.audio.segments.filter(clip => clip.id !== item.id) })}><Trash2 size={15} /></button></div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3">

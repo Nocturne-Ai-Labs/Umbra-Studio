@@ -149,8 +149,8 @@ export function UmbraTransparencyWorkspace({ active = true }: { active?: boolean
       <div className="flex h-9 items-center gap-3 px-3 text-xs text-zinc-500"><span>{images.length} images</span><span>PNG · original size · alpha</span></div>
       <div className="flex h-[96px] gap-2 overflow-x-auto px-2 pb-2">
         {images.map(item => <button type="button" key={item.id} aria-label={`Edit transparency: ${item.name}`} aria-pressed={item.id === selectedId} disabled={drawing || exporting} onClick={() => select(item.id)} className={`w-[100px] shrink-0 overflow-hidden rounded border ${item.id === selectedId ? 'border-emerald-300' : 'border-white/15'}`}>
-          <img src={item.url} alt={item.name} className="h-12 w-full object-contain" style={{ backgroundColor: '#18181b' }} draggable={false} />
-          <span className="block truncate px-1 text-[10px]">{item.name}</span><span className="block truncate px-1 text-[10px] text-zinc-500">{item.history.present.base ? 'CPU + mask' : item.history.present.strokes.length ? 'Manual mask' : 'Original'}</span>
+          <img data-i18n-skip="" src={item.url} alt={item.name} className="h-12 w-full object-contain" style={{ backgroundColor: '#18181b' }} draggable={false} />
+          <span data-i18n-skip="" className="block truncate px-1 text-[10px]">{item.name}</span><span className="block truncate px-1 text-[10px] text-zinc-500">{item.history.present.base ? 'CPU + mask' : item.history.present.strokes.length ? 'Manual mask' : 'Original'}</span>
         </button>)}
       </div>
     </footer>

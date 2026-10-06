@@ -5,6 +5,7 @@ import { useState, useCallback, useEffect } from 'react';
 export type ContextMenuItem = 
   | {
       label: string;
+      i18nSkip?: boolean;
       icon?: React.ReactNode;
       action?: () => void;
       onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>) => void;
