@@ -65,7 +65,7 @@
       "sha256": "d4956d2a926011e242659e0d0e21b0213d61e14e853fa5585a8b79b2a0f115ba"
     }
   ],
-  "recipeSha256": "6c68d4342af7f4b5ec874e7aa137fcbe8b2540db73b6d8c559372d9eca45a631",
+  "recipeSha256": "554076ea2cf3b02a8fddc1a4e64f87dc799164c2f0edbf06d059490076e3b31e",
   "requiredDecoders": [
     "libdav1d",
     "h264",

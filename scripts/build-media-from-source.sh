@@ -69,7 +69,7 @@ cmake -S "$work/src/webp" -B "$work/webp-build" -G 'Unix Makefiles' -DCMAKE_INST
 cmake --build "$work/webp-build" --parallel "$jobs"
 cmake --install "$work/webp-build"
 cp "$work/webp-build/CMakeCache.txt" "$output/build-evidence/webp-config.txt"
-meson setup "$work/dav1d-build" "$work/src/dav1d" --prefix="$prefix" --buildtype=release --default-library=static --wrap-mode=nodownload -Denable_tools=false -Denable_tests=false -Denable_examples=false -Denable_docs=false -Dxxhash_muxer=disabled
+meson setup "$work/dav1d-build" "$work/src/dav1d" --prefix="$prefix" --libdir=lib --buildtype=release --default-library=static --wrap-mode=nodownload -Denable_tools=false -Denable_tests=false -Denable_examples=false -Denable_docs=false -Dxxhash_muxer=disabled
 meson compile -C "$work/dav1d-build" -j "$jobs"
 meson install -C "$work/dav1d-build"
 meson configure "$work/dav1d-build" > "$output/build-evidence/dav1d-config.txt"
