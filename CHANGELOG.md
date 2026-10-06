@@ -49,6 +49,7 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 
 - Fixed: broken Microsoft Store interpreter references blocking ComfyUI and AI Toolkit.
 - Fixed: Windows long-path failures during CUDA/PyTorch installation.
+- Fixed: first-time ComfyUI setup after browsing generation workspaces creates empty input/output folders. Existing files and unknown installations remain protected.
 - Fixed: launching tools with interrupted upgrades or incompatible AI Toolkit dependencies.
 - Improved: explicit Python upgrades, patch-version detection and separate managed runtimes.
 - Improved: rollback preserves old environments and Python bases, and missing Git can be repaired through Setup.

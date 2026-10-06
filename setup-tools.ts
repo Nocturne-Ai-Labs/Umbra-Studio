@@ -33,6 +33,7 @@ import { joinToolMaintenance } from './shared/toolMaintenanceLock';
 import { assertAIToolkitStopped } from './setup/ToolMaintenance';
 import { installAIToolkitPythonDependencies, verifyAIToolkitPython } from './setup/AIToolkitPython';
 import { restoreComfyAttention } from './setup/ComfyAttentionUpgrade';
+import { isComfyInstallScaffold } from './setup/ComfyInstallScaffold';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
 const MANAGED_SOURCE_ROOT = process.env.UMBRA_SOURCE_ROOT || import.meta.dir;
@@ -2245,12 +2246,12 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
 
 async function repairManagedComfyCore(): Promise<void> {
     const cfg = CONFIG.comfyui;
-    const toolDir = join(TOOLS_DIR, cfg.dir);
+    const toolDir = ownedPath(ROOT_DIR, 'Tools', cfg.dir);
     const status = inspectManagedDependencies(MANAGED_SOURCE_ROOT, ROOT_DIR);
     const minimum = status.comfyui.minimumRequired;
     if (!minimum) throw new Error('This build does not declare a reviewed ComfyUI core version.');
-    if (!existsSync(toolDir)) {
-        if (findToolPath(cfg.search)) throw new Error('A differently named ComfyUI installation exists. It was preserved; review its managed path before repairing.');
+    if (!existsSync(toolDir) || isComfyInstallScaffold(toolDir)) {
+        if (!existsSync(toolDir) && findToolPath(cfg.search)) throw new Error('A differently named ComfyUI installation exists. It was preserved; review its managed path before repairing.');
         const originalBranch = cfg.branch;
         try {
             cfg.branch = `v${minimum}`;
