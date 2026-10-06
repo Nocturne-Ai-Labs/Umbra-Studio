@@ -15,6 +15,8 @@ import { UmbraOfficialVideoEditor } from './UmbraOfficialVideoEditor';
 import { configureOfficialH3DirectorSettings, hasOfficialH3Continuity } from '../../../../shared/umbra-ui/officialH3Director';
 import { configureOfficialLtxDirectorSettings } from '../../../../shared/umbra-ui/officialLtxDirector';
 import { serializeOfficialVideoLoraStack, validateOfficialVideoLoraChoices } from '../../../../shared/umbra-ui/officialVideoLora';
+import { applyOfficialVideoMediaHandoff, officialVideoHandoffWorkflow } from '@/lib/umbraOfficialVideoMediaHandoff';
+import { clearPendingUmbraUiMediaHandoff, normalizeUmbraUiMediaHandoff, UMBRA_UI_MEDIA_HANDOFF_EVENT, UMBRA_UI_MEDIA_HANDOFF_KEY, type UmbraUiMediaHandoff } from '@/lib/umbraUiMediaHandoff';
 
 type OfficialWorkflowId = UmbraOfficialVideoQueueOptions['workflowId'];
 interface OfficialWorkflow {
@@ -91,6 +93,13 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const [settingsError, setSettingsError] = React.useState('');
   const [nodeCatalog, setNodeCatalog] = React.useState<Record<string, unknown>>({});
   const [mediaBusy, setMediaBusy] = React.useState(false);
+  const [pendingHandoff, setPendingHandoff] = React.useState<UmbraUiMediaHandoff | null>(null);
+  const [handoffBusy, setHandoffBusy] = React.useState(false);
+  const [handoffError, setHandoffError] = React.useState('');
+  const [handoffRetry, setHandoffRetry] = React.useState(0);
+  const latestHandoffRef = React.useRef<UmbraUiMediaHandoff | null>(null);
+  const failedHandoffRef = React.useRef('');
+  const appliedHandoffAtRef = React.useRef(0);
   const backgroundLoadRef = React.useRef(false);
   const operationRef = React.useRef(false);
   const loadRequestRef = React.useRef('');
@@ -98,6 +107,53 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const reviewId = React.useId();
   const selected = items.find(item => item.id === selectedId);
   const editor = editors[selectedId];
+
+  React.useEffect(() => {
+    const receive = (value: unknown) => {
+      const handoff = normalizeUmbraUiMediaHandoff(value);
+      if (!handoff || handoff.mode !== 'video') return;
+      if (handoff.createdAt <= appliedHandoffAtRef.current) return;
+      if (latestHandoffRef.current && handoff.createdAt < latestHandoffRef.current.createdAt) return;
+      latestHandoffRef.current = handoff;
+      failedHandoffRef.current = '';
+      setPendingHandoff(current => !current || handoff.createdAt >= current.createdAt ? handoff : current);
+      setSelectedId(current => officialVideoHandoffWorkflow(current, handoff));
+      setHandoffError('');
+    };
+    const onHandoff = (event: Event) => receive((event as CustomEvent).detail);
+    window.addEventListener(UMBRA_UI_MEDIA_HANDOFF_EVENT, onHandoff);
+    const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
+    if (target.__umbraPendingUmbraUiMediaHandoff) receive(target.__umbraPendingUmbraUiMediaHandoff);
+    else { try { receive(JSON.parse(window.sessionStorage.getItem(UMBRA_UI_MEDIA_HANDOFF_KEY) || 'null')); } catch { /* best effort */ } }
+    return () => window.removeEventListener(UMBRA_UI_MEDIA_HANDOFF_EVENT, onHandoff);
+  }, []);
+
+  React.useEffect(() => {
+    if (!pendingHandoff || !selected || !editor || busy || policySaving || mediaBusy) return;
+    const attempt = `${pendingHandoff.createdAt}:${selectedId}:${handoffRetry}`;
+    if (failedHandoffRef.current === attempt) return;
+    const abort = new AbortController();
+    setHandoffBusy(true);
+    setHandoffError('');
+    void (async () => {
+      const kind = pendingHandoff.videoFrameRole === 'source_video' || pendingHandoff.h3DirectorRole === 'motion_video' ? 'video' : 'image';
+      const response = await fetch('/api/comfy/copy-media', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourcePath: pendingHandoff.path, kind }), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]) });
+      const result = await response.json();
+      if (abort.signal.aborted || latestHandoffRef.current?.createdAt !== pendingHandoff.createdAt) return;
+      if (!response.ok || result.success !== true || typeof result.filename !== 'string') throw new Error(String(result.error || 'The image could not be transferred to video.'));
+      const draft = applyOfficialVideoMediaHandoff(editor.draft, selectedId, pendingHandoff, result.filename);
+      setEditors(current => ({ ...current, [selectedId]: { ...editor, draft } }));
+      try { window.localStorage.setItem(draftStorageKey(selected), JSON.stringify(draft)); } catch { /* In-memory editing still works. */ }
+      clearPendingUmbraUiMediaHandoff(pendingHandoff);
+      appliedHandoffAtRef.current = pendingHandoff.createdAt;
+      setPendingHandoff(null);
+      setCaptured(null);
+      setStatus('Media loaded into video generation.');
+    })().catch(error => { if (!abort.signal.aborted) { failedHandoffRef.current = attempt; setHandoffError(errorText(error)); } })
+      .finally(() => { if (!abort.signal.aborted) setHandoffBusy(false); });
+    return () => { abort.abort(); setHandoffBusy(false); };
+  }, [pendingHandoff, selected, selectedId, editor, busy, policySaving, mediaBusy, handoffRetry]);
 
   React.useEffect(() => { setWorkflowFile(null); setApiFile(null); }, [selectedId]);
 
@@ -306,7 +362,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     } finally { backgroundLoadRef.current = false; }
   };
   const generateFromEditor = async (queue = true) => {
-    if (!selected?.readiness.ready || !editor || !comfyConnected || busy || policySaving || mediaBusy || operationRef.current || (queue && !queueConnected)) return;
+    if (!selected?.readiness.ready || !editor || !comfyConnected || busy || policySaving || mediaBusy || handoffBusy || pendingHandoff || operationRef.current || (queue && !queueConnected)) return;
     operationRef.current = true;
     setCaptured(null); setActionError(''); setStatus('');
     try {
@@ -350,7 +406,9 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
           </section> : null}
           {editorError ? <p role="alert" className="text-xs text-red-300">{editorError}</p> : null}
           {settingsError ? <p role="alert" className="text-xs text-red-300">{settingsError}</p> : null}
-          {editor ? <UmbraOfficialVideoEditor key={selectedId} workflowId={selectedId} source={editor.source} draft={editor.draft} catalog={nodeCatalog} disabled={!!busy || mediaBusy} comfyConnected={comfyConnected} preview={preview} onMediaBusyChange={setMediaBusy}
+          {handoffBusy ? <p role="status" className="text-xs text-zinc-400">Loading media into video generation…</p> : null}
+          {handoffError ? <div role="alert" className="space-y-2 text-xs text-red-300"><p>{handoffError}</p><button type="button" className={buttonClass} disabled={handoffBusy || !!busy || mediaBusy} onClick={() => setHandoffRetry(current => current + 1)}>Retry media transfer</button></div> : null}
+          {editor ? <UmbraOfficialVideoEditor key={selectedId} workflowId={selectedId} source={editor.source} draft={editor.draft} catalog={nodeCatalog} disabled={!!busy || mediaBusy || handoffBusy} comfyConnected={comfyConnected} preview={preview} onMediaBusyChange={setMediaBusy}
             onChange={draft => {
               setEditors(current => ({ ...current, [selectedId]: { ...editor, draft } }));
               if (selected) { try { window.localStorage.setItem(draftStorageKey(selected), JSON.stringify(draft)); } catch { /* In-memory editing works when storage is unavailable. */ } }
@@ -377,8 +435,8 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
         <aside id={reviewId} hidden={!reviewOpen} aria-label="Video queue and results" className="min-h-72 min-w-0 shrink-0 border-t border-white/10 xl:w-80 xl:border-l xl:border-t-0">{review}</aside>
       </div>
       <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 p-3">
-        <button type="button" className={cn(buttonClass, 'border-[var(--umbra-accent)]')} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !queueConnected || !!busy || mediaBusy || policySaving} onClick={() => void generateFromEditor()}><Play size={14} />Generate video</button>
-        <button type="button" className={buttonClass} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !!busy || mediaBusy || policySaving} onClick={() => void generateFromEditor(false)}><Camera size={14} />Verify video configuration</button>
+        <button type="button" className={cn(buttonClass, 'border-[var(--umbra-accent)]')} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !queueConnected || !!busy || mediaBusy || handoffBusy || !!pendingHandoff || policySaving} onClick={() => void generateFromEditor()}><Play size={14} />Generate video</button>
+        <button type="button" className={buttonClass} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !!busy || mediaBusy || handoffBusy || !!pendingHandoff || policySaving} onClick={() => void generateFromEditor(false)}><Camera size={14} />Verify video configuration</button>
         {!comfyConnected ? <p className="text-[11px] text-zinc-500">ComfyUI is not connected.</p> : null}
       </footer>
     </section>

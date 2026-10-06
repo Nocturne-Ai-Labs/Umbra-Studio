@@ -71,7 +71,7 @@ import {
 } from '@/components/umbra-ui/UmbraQueuePlacementControls';
 import { resolveUmbraUiPipeline } from '@/lib/umbraUiPipelines';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
-import { prepareVideoControlsForHandoff } from '@/lib/umbraUiVideoHandoffControls';
+import { prepareVideoControlsForHandoff, resolveVideoHandoffDirectorRole } from '@/lib/umbraUiVideoHandoffControls';
 import { applyLtxOmniForgeFrameHandoff } from '@/lib/umbraUiLtxOmniForgeHandoff';
 import { hasUmbraVideoSourceDimensions, selectUmbraVideoMode, startsUmbraLtxExtendedFromImage } from '@/lib/umbraVideoQueueSource';
 import { resolveUmbraVideoQueueNegativePrompt } from '@/lib/umbraVideoQueuePrompt';
@@ -930,6 +930,7 @@ export function UmbraVideoGenerationControls({
   const handoffRolesRef = React.useRef(new Set<UmbraUiVideoFrameRole>());
   const directorHandoffsRef = React.useRef<UmbraUiMediaHandoff[]>([]);
   const handoffAppliedAtRef = React.useRef(0);
+  const pendingHandoffRef = React.useRef<UmbraUiMediaHandoff | null>(null);
   const targetDimensions = React.useMemo(() => resolveUmbraVideoTargetDimensions({
     resolutionPreset: video.resolutionPreset,
     sourceWidth: video.mode === 'text_to_video' || (video.family === 'minimax_h3' && video.minimaxH3.director.enabled) || (video.family === 'ltx23' && video.ltx.omniForge.enabled) ? 0 : video.sourceWidth,
@@ -1396,10 +1397,33 @@ export function UmbraVideoGenerationControls({
   const applyHandoff = React.useCallback((detail: UmbraUiMediaHandoff | null) => {
     if (!detail || detail.mode !== 'video' || !detail.path) return;
     if (detail.createdAt <= handoffAppliedAtRef.current) return;
+    // Restore the actual destination mode before choosing its media slots.
+    if (!settingsResolved) {
+      if (!pendingHandoffRef.current || detail.createdAt > pendingHandoffRef.current.createdAt) {
+        pendingHandoffRef.current = detail;
+      }
+      return;
+    }
+    pendingHandoffRef.current = null;
     handoffAppliedAtRef.current = detail.createdAt;
-    if (detail.h3DirectorRole) {
-      directorHandoffsRef.current.push(detail);
-      setVideo((current) => applyH3DirectorMediaHandoff(current, detail));
+    const handoffSegments = (detail.generation?.positivePromptSegments || []).map((segment) => createUmbraUiPromptSegment(segment.text, {
+      label: segment.label,
+      slotType: segment.slotType,
+      variantId: segment.variantId,
+      variantName: segment.variantName,
+      preserveRepeatedTerms: segment.preserveRepeatedTerms,
+    }));
+    if (detail.generation && (detail.generation.positivePrompt || handoffSegments.length > 0)) {
+      replacePromptSegments(detail.generation.positivePrompt, handoffSegments);
+      setNegativePrompt(detail.generation.negativePrompt);
+    } else if (detail.generation?.negativePrompt) {
+      setNegativePrompt(detail.generation.negativePrompt);
+    }
+    const directorRole = resolveVideoHandoffDirectorRole(videoRef.current, detail);
+    if (directorRole) {
+      const directorHandoff = { ...detail, h3DirectorRole: directorRole };
+      directorHandoffsRef.current.push(directorHandoff);
+      setVideo((current) => applyH3DirectorMediaHandoff(current, directorHandoff));
       clearPendingUmbraUiMediaHandoff(detail);
       return;
     }
@@ -1448,24 +1472,16 @@ export function UmbraVideoGenerationControls({
       };
     });
     if (role === 'first') setSourcePreviewUrl(detail.imageUrl || `/api/fs/image?path=${encodeURIComponent(detail.path)}`);
-    if (detail.generation?.positivePrompt) {
-      const handoffSegments = Array.isArray(detail.generation.positivePromptSegments)
-        ? detail.generation.positivePromptSegments.map((segment) => createUmbraUiPromptSegment(segment.text, {
-          label: segment.label,
-          slotType: segment.slotType,
-          variantId: segment.variantId,
-          variantName: segment.variantName,
-          preserveRepeatedTerms: segment.preserveRepeatedTerms,
-        }))
-        : [];
-      replacePromptSegments(detail.generation.positivePrompt, handoffSegments);
-    }
-    if (detail.generation?.negativePrompt) setNegativePrompt(detail.generation.negativePrompt);
     clearPendingUmbraUiMediaHandoff(detail);
-  }, [replacePromptSegments]);
+  }, [replacePromptSegments, settingsResolved]);
 
   React.useEffect(() => {
     const target = window as typeof window & { __umbraPendingUmbraUiMediaHandoff?: unknown };
+    const buffered = pendingHandoffRef.current;
+    const pending = normalizeUmbraUiMediaHandoff(target.__umbraPendingUmbraUiMediaHandoff);
+    if (buffered && (!pending || buffered.createdAt >= pending.createdAt)) {
+      applyHandoff(buffered);
+    }
     if (target.__umbraPendingUmbraUiMediaHandoff) {
       applyHandoff(normalizeUmbraUiMediaHandoff(target.__umbraPendingUmbraUiMediaHandoff));
     } else {
