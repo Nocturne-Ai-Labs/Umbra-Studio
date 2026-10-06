@@ -33,19 +33,21 @@ for s in p['sources']:
 PY
 cp "$policy" "$output/corresponding-source/source-build-manifest.json"
 cp "$0" "$output/corresponding-source/build-media-from-source.sh"
-printf '%s\n' 'Complete corresponding source: the five original archives, pinned policy, and this build script.' 'No source patches are applied. Generated configure evidence is retained in build-evidence.' 'Licenses: ffmpeg/COPYING.GPLv3, x264/COPYING, vpx/LICENSE, webp/COPYING and zlib/LICENSE; copies are in ../licenses/.' 'Build with the tools listed in the repository release workflow; run this script with platform, empty output, and fresh work arguments.' > "$output/corresponding-source/README.txt"
-for pair in 'ffmpeg:COPYING.GPLv3' 'x264:COPYING' 'vpx:LICENSE' 'webp:COPYING' 'zlib:LICENSE'; do
+printf '%s\n' 'Complete corresponding source: the six original archives, pinned policy, and this build script.' 'No source patches are applied. Generated configure evidence is retained in build-evidence.' 'Licenses: ffmpeg/COPYING.GPLv3, x264/COPYING, vpx/LICENSE, webp/COPYING zlib/LICENSE and dav1d/COPYING; copies are in ../licenses/.' 'Build with the tools listed in the repository release workflow; run this script with platform, empty output, and fresh work arguments.' > "$output/corresponding-source/README.txt"
+for pair in 'ffmpeg:COPYING.GPLv3' 'x264:COPYING' 'vpx:LICENSE' 'webp:COPYING' 'zlib:LICENSE' 'dav1d:COPYING'; do
  name="${pair%%:*}"; license="${pair#*:}"
  cp "$work/src/$name/$license" "$output/licenses/$name.txt"
 done
-printf '%s\n' 'Umbra bundled FFmpeg is GPL-3.0-or-later. x264 is GPL-2.0-or-later; libvpx/libwebp use BSD licenses; zlib uses the zlib license.' 'Exact original license texts are in licenses/. Full original sources and build recipe are in corresponding-source/.' 'No extra linked media libraries or source patches are included; OS libraries remain system dependencies.' > "$output/NOTICE.txt"
+printf '%s\n' 'Umbra bundled FFmpeg is GPL-3.0-or-later. x264 is GPL-2.0-or-later; libvpx/libwebp/dav1d use BSD licenses; zlib uses the zlib license.' 'Exact original license texts are in licenses/. Full original sources and build recipe are in corresponding-source/.' 'No extra linked media libraries or source patches are included; OS libraries remain system dependencies.' > "$output/NOTICE.txt"
 prefix="$work/prefix"
 # Do not use host optional libraries: all linked media libraries come from this prefix.
 export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig:$prefix/lib64/pkgconfig"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
-export CFLAGS='-O2'; export CXXFLAGS='-O2'; export LDFLAGS='-static'
+export CFLAGS='-O2'; export CXXFLAGS='-O2'; export LDFLAGS=''
+[[ "$platform" != win32 ]] || export LDFLAGS='-static'
+link_flags="-L$prefix/lib"; [[ "$platform" != win32 ]] || link_flags+=" -static"
 jobs="${UMBRA_MEDIA_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
-{ gcc --version; make --version; cmake --version; nasm -v; pkg-config --version; uname -a; } > "$output/build-evidence/toolchain.txt"
+{ gcc --version; make --version; cmake --version; nasm -v; pkg-config --version; meson --version; ninja --version; uname -a; } > "$output/build-evidence/toolchain.txt"
 cmake -S "$work/src/zlib" -B "$work/zlib-build" -G 'Unix Makefiles' -DCMAKE_INSTALL_PREFIX="$prefix" -DCMAKE_BUILD_TYPE=Release -DZLIB_BUILD_SHARED=OFF -DZLIB_BUILD_STATIC=ON -DZLIB_BUILD_TESTING=OFF
 cmake --build "$work/zlib-build" --parallel "$jobs"
 cmake --install "$work/zlib-build"
@@ -67,8 +69,12 @@ cmake -S "$work/src/webp" -B "$work/webp-build" -G 'Unix Makefiles' -DCMAKE_INST
 cmake --build "$work/webp-build" --parallel "$jobs"
 cmake --install "$work/webp-build"
 cp "$work/webp-build/CMakeCache.txt" "$output/build-evidence/webp-config.txt"
+meson setup "$work/dav1d-build" "$work/src/dav1d" --prefix="$prefix" --buildtype=release --default-library=static --wrap-mode=nodownload -Denable_tools=false -Denable_tests=false -Denable_examples=false -Denable_docs=false -Dxxhash_muxer=disabled
+meson compile -C "$work/dav1d-build" -j "$jobs"
+meson install -C "$work/dav1d-build"
+meson configure "$work/dav1d-build" > "$output/build-evidence/dav1d-config.txt"
 cd "$work/src/ffmpeg"
-ff_flags=(--prefix="$work/ffmpeg-install" --disable-autodetect --enable-gpl --enable-version3 --disable-debug --disable-doc --disable-ffplay --disable-shared --enable-static --enable-libx264 --enable-libvpx --enable-libwebp --enable-zlib --pkg-config-flags=--static --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib -static" --extra-version=umbra-source-1)
+ff_flags=(--prefix="$work/ffmpeg-install" --disable-autodetect --enable-gpl --enable-version3 --disable-debug --disable-doc --disable-ffplay --disable-shared --enable-static --enable-libx264 --enable-libvpx --enable-libwebp --enable-zlib --enable-libdav1d --pkg-config-flags=--static --extra-cflags="-I$prefix/include" --extra-ldflags="$link_flags" --extra-version=umbra-source-1)
 if [[ "$platform" == win32 ]]; then ff_flags+=(--target-os=mingw32 --arch=x86_64); fi
 printf '%s\n' "${ff_flags[@]}" > "$output/build-evidence/ffmpeg-configure-args.txt"
 ./configure "${ff_flags[@]}"
@@ -90,16 +96,29 @@ for name in re.findall(r'DLL Name:\s*(\S+)',text):
  if name.lower() not in allowed and not name.lower().startswith('api-ms-win-'):raise SystemExit(f'Unexpected non-system DLL: {name}')
 PY
 else
- if ldd "$output/bin/ffmpeg" > "$output/build-evidence/native-dependencies.txt" 2>&1; then echo 'Expected fully static Linux executable' >&2; exit 1; fi
+ ldd "$output/bin/ffmpeg" "$output/bin/ffprobe" > "$output/build-evidence/native-dependencies.txt" 2>&1
+ "$python_bin" - "$output/build-evidence/native-dependencies.txt" <<'PY'
+import pathlib,re,sys
+text=pathlib.Path(sys.argv[1]).read_text()
+if 'not found' in text:raise SystemExit('Missing native Linux dependency')
+allowed={'linux-vdso.so.1','libc.so.6','libm.so.6','libpthread.so.0','libdl.so.2','librt.so.1','ld-linux-x86-64.so.2'}
+for line in text.splitlines():
+ if not line.strip() or line.endswith(':'):continue
+ name=line.strip().split()[0].split('/')[-1]
+ if name not in allowed:raise SystemExit(f'Unexpected non-system Linux shared library: {name}')
+PY
 fi
 "$python_bin" - "$output" <<'PY'
 import pathlib,re,sys,json
 out=pathlib.Path(sys.argv[1]);p=json.loads((out/'corresponding-source/source-build-manifest.json').read_text());enc=(out/'build-evidence/encoders.txt').read_text()
 for name in p['requiredEncoders']:
  if not re.search(r'\b'+re.escape(name)+r'\b',enc):raise SystemExit(f'Missing required encoder: {name}')
+dec=(out/'build-evidence/decoders.txt').read_text()
+for name in p['requiredDecoders']:
+ if not re.search(r'\b'+re.escape(name)+r'\b',dec):raise SystemExit(f'Missing required decoder: {name}')
 PY
 "$python_bin" - "$output" "$work" "$platform" <<'PY'
-import json,pathlib,subprocess,sys
+import base64,hashlib,json,pathlib,subprocess,sys
 out,work=map(pathlib.Path,sys.argv[1:3]);suffix='.exe' if sys.argv[3]=='win32' else '';ff=str(out/'bin'/('ffmpeg'+suffix));probe=str(out/'bin'/('ffprobe'+suffix));smoke=work/'smoke';smoke.mkdir()
 def run(args):
  r=subprocess.run(args,capture_output=True,text=True)
@@ -109,8 +128,13 @@ run([ff,'-hide_banner','-y','-f','lavfi','-i','testsrc2=size=64x64:rate=5','-f',
 run([ff,'-hide_banner','-y','-i',str(smoke/'h264.mp4'),'-frames:v','1','-c:v','png','-threads','1',str(smoke/'png.png')])
 run([ff,'-hide_banner','-y','-i',str(smoke/'h264.mp4'),'-frames:v','1','-c:v','libwebp','-threads','1',str(smoke/'webp.webp')])
 run([ff,'-hide_banner','-y','-i',str(smoke/'h264.mp4'),'-an','-c:v','libvpx-vp9','-threads','1',str(smoke/'vp9.webm')])
+fixture=base64.b64decode('REtJRgAAIABBVjAxQABAAAEAAAABAAAAAQAAAAAAAAAkAAAAAAAAAAAAAAASAAoKAAAAAq//m18gCDIUEADAAAACgAAACgV2pNYvH/oePNg=')
+p=json.loads((out/'corresponding-source/source-build-manifest.json').read_text())
+if len(fixture)!=p['av1SmokeFixture']['bytes'] or hashlib.sha256(fixture).hexdigest()!=p['av1SmokeFixture']['sha256']:raise SystemExit('AV1 fixture mismatch')
+(smoke/'av1.ivf').write_bytes(fixture)
+run([ff,'-v','error','-c:v','libdav1d','-i',str(smoke/'av1.ivf'),'-f','null','-'])
 results=[]
-for name,codecs in [('h264.mp4',{'h264','aac'}),('png.png',{'png'}),('webp.webp',{'webp'}),('vp9.webm',{'vp9'})]:
+for name,codecs in [('h264.mp4',{'h264','aac'}),('png.png',{'png'}),('webp.webp',{'webp'}),('vp9.webm',{'vp9'}),('av1.ivf',{'av1'})]:
  info=json.loads(run([probe,'-v','error','-show_streams','-of','json',str(smoke/name)]))
  actual={stream['codec_name'] for stream in info['streams']}
  if actual!=codecs:raise SystemExit(f'Unexpected smoke codecs: {name}: {actual}')

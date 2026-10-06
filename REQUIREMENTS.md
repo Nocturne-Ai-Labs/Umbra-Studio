@@ -78,6 +78,10 @@ downloads. GPU/PyTorch helpers continue using managed tool/helper environments.
 
 ## Linux Host Packages
 
+Portable Linux releases require **glibc 2.35 or newer** (for example Ubuntu
+22.04 or a compatible newer distribution). Bundled FFmpeg links its pinned
+media libraries statically and uses only the host C/math/thread runtime.
+
 On Debian or Ubuntu, install the common native prerequisites before setting up
 managed Python tools:
 

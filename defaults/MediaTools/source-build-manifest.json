@@ -55,7 +55,29 @@
       "url": "https://codeload.github.com/madler/zlib/tar.gz/767c4c947852e143f582c85f14cf573411df1b35",
       "bytes": 1570307,
       "sha256": "cafa75b907cd067b471fba32a2772c010a859086241ef70d3d57eda6aeea3a64"
+    },
+    {
+      "name": "dav1d",
+      "repository": "https://github.com/videolan/dav1d",
+      "commit": "9711965b60bb692ae24004659acf61f5c7d9ed61",
+      "url": "https://codeload.github.com/videolan/dav1d/tar.gz/9711965b60bb692ae24004659acf61f5c7d9ed61",
+      "bytes": 1752503,
+      "sha256": "d4956d2a926011e242659e0d0e21b0213d61e14e853fa5585a8b79b2a0f115ba"
     }
   ],
-  "recipeSha256": "5034a80d093badbf5a680e2304a2f5233979e7462524ae4a0ac2bd64c04f9e1a"
+  "recipeSha256": "6c68d4342af7f4b5ec874e7aa137fcbe8b2540db73b6d8c559372d9eca45a631",
+  "requiredDecoders": [
+    "libdav1d",
+    "h264",
+    "hevc",
+    "vp9",
+    "png",
+    "webp",
+    "aac"
+  ],
+  "av1SmokeFixture": {
+    "description": "One synthetic blue64x64 AV1 frame; embedded in the source build recipe.",
+    "sha256": "315ad7b1d1fe12e928f787f5355a24b864e7c9bf5f6c7aa0d80231f0c5a01f29",
+    "bytes": 80
+  }
 }

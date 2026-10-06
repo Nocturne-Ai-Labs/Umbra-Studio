@@ -145,8 +145,7 @@ def validate(archive, version, platform):
                     'build-evidence/toolchain.txt', 'build-evidence/encoders.txt', 'build-evidence/decoders.txt', 'build-evidence/native-dependencies.txt',
                     'build-evidence/ffmpeg-configure-args.txt', 'build-evidence/ffmpeg-config.txt', 'build-evidence/x264-config.txt',
                     'build-evidence/vpx-config.txt', 'build-evidence/webp-config.txt', 'build-evidence/zlib-config.txt', 'build-evidence/smoke-results.json',
-                    'NOTICE.txt', 'licenses/ffmpeg.txt', 'licenses/x264.txt', 'licenses/vpx.txt', 'licenses/webp.txt', 'licenses/zlib.txt', 'build-evidence/smoke-results.json',
-    'NOTICE.txt', 'licenses/ffmpeg.txt', 'licenses/x264.txt', 'licenses/vpx.txt', 'licenses/webp.txt', 'licenses/zlib.txt']
+                    'NOTICE.txt', 'licenses/ffmpeg.txt', 'licenses/x264.txt', 'licenses/vpx.txt', 'licenses/webp.txt', 'licenses/zlib.txt', 'licenses/dav1d.txt', 'build-evidence/dav1d-config.txt']
         for name in required:
             if name not in media_files: raise ValueError(f'{archive.name}: missing media source/build evidence: {name}')
             if media_platform == 'linux' and name.startswith('bin/') and not (package.getinfo(media_root + name).external_attr >> 16) & 0o111:
@@ -164,15 +163,18 @@ def validate(archive, version, platform):
                 or provenance.get('sources') != policy['sources'] or provenance.get('patches') != []):
             raise ValueError(f'{archive.name}: source provenance mismatch')
         config = package.read(media_root + 'BUILD-CONFIG.txt').decode()
-        for flag in ['--disable-autodetect', '--enable-gpl', '--enable-version3', '--enable-libx264', '--enable-libvpx', '--enable-libwebp', '--enable-zlib']:
+        for flag in ['--disable-autodetect', '--enable-gpl', '--enable-version3', '--enable-libx264', '--enable-libvpx', '--enable-libwebp', '--enable-zlib', '--enable-libdav1d']:
             if flag not in config: raise ValueError(f'{archive.name}: media configure flag missing: {flag}')
         if '--enable-nonfree' in config: raise ValueError(f'{archive.name}: nonfree media runtime')
         encoders = package.read(media_root + 'build-evidence/encoders.txt').decode()
         for encoder in policy['requiredEncoders']:
             if not re.search(r'\b' + re.escape(encoder) + r'\b', encoders):
                 raise ValueError(f'{archive.name}: required media encoder missing: {encoder}')
+        decoders = package.read(media_root + 'build-evidence/decoders.txt').decode()
+        for decoder in policy['requiredDecoders']:
+            if not re.search(r'\b' + re.escape(decoder) + r'\b', decoders): raise ValueError(f'{archive.name}: required decoder missing: {decoder}')
         smoke = json.loads(package.read(media_root + 'build-evidence/smoke-results.json'))
-        if smoke.get('platform') != media_platform or smoke.get('passed') is not True or len(smoke.get('results', [])) != 4 or any(item.get('decodePassed') is not True for item in smoke['results']):
+        if smoke.get('platform') != media_platform or smoke.get('passed') is not True or len(smoke.get('results', [])) != 5 or any(item.get('decodePassed') is not True for item in smoke['results']):
             raise ValueError(f'{archive.name}: media codec smoke qualification missing')
         helper_policy = json.loads((policy_path.parent.parent / 'PythonHelpers/manifest.json').read_text(encoding='utf-8'))
         if json.loads(package.read('Umbra Studio/resources/app/defaults/PythonHelpers/manifest.json')) != helper_policy:
