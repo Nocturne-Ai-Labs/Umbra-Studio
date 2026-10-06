@@ -185,6 +185,17 @@ Readiness checks verify installation and model integrity without generating an i
 
 ## Source Development
 
+Portable packaging builds FFmpeg from the six checksum-pinned source archives in
+`defaults/MediaTools/source-build-manifest.json`. Linux builders need a C/C++
+compiler, Make, NASM, CMake, pkg-config, Python 3, Meson and Ninja. Windows
+builders use native MSYS2 UCRT64 GCC/CMake/pkgconf/Python/Meson/Ninja plus MSYS
+Make, NASM, tar, diffutils and Perl. The exact native setup and invocation are
+checked into `.github/workflows/release.yml` and
+`scripts/build-media-from-source.sh`. Build into fresh output/work folders and
+set `UMBRA_MEDIA_SOURCE_BUILD` to that output before running the portable
+packager. Application users receive the compiled tools and complete sources;
+these compilation prerequisites apply to source/package builders.
+
 Required:
 
 - [Bun](https://bun.sh/) 1.3 or newer

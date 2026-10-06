@@ -102,6 +102,7 @@ def validate(archive, version, platform):
         required += (['UmbraStudio.bat', 'UmbraSetup.bat', 'Runtime/Bun/win32/bun.exe']
                      if platform == 'Windows-x64-BAT' else
                      ['umbra-setup.sh', 'start-umbra.sh', 'UmbraStudio.desktop', 'Runtime/Bun/linux/bun'])
+        if media_platform == 'win32': required.extend(policy['windowsRuntimeNotices'])
         for name in required:
             if f'Umbra Studio/{name}' not in names:
                 raise ValueError(f'{archive.name}: missing {name}')

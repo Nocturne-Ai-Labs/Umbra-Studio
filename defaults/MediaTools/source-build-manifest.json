@@ -65,7 +65,7 @@
       "sha256": "d4956d2a926011e242659e0d0e21b0213d61e14e853fa5585a8b79b2a0f115ba"
     }
   ],
-  "recipeSha256": "554076ea2cf3b02a8fddc1a4e64f87dc799164c2f0edbf06d059490076e3b31e",
+  "recipeSha256": "7d41554d80e6b6c6070bae86f4a671d7960333d4485508abc4ac5061278498b8",
   "requiredDecoders": [
     "libdav1d",
     "h264",
@@ -79,5 +79,14 @@
     "description": "One synthetic blue64x64 AV1 frame; embedded in the source build recipe.",
     "sha256": "315ad7b1d1fe12e928f787f5355a24b864e7c9bf5f6c7aa0d80231f0c5a01f29",
     "bytes": 80
-  }
+  },
+  "windowsRuntimeNotices": [
+    "licenses/windows-toolchain/crt/COPYING",
+    "licenses/windows-toolchain/crt/COPYING.MinGW-w64.txt",
+    "licenses/windows-toolchain/crt/COPYING.MinGW-w64-runtime.txt",
+    "licenses/windows-toolchain/winpthreads/COPYING",
+    "licenses/windows-toolchain/libgcc/COPYING3",
+    "licenses/windows-toolchain/libgcc/COPYING.RUNTIME",
+    "build-evidence/windows-toolchain-packages.txt"
+  ]
 }

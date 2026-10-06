@@ -38,7 +38,16 @@ for pair in 'ffmpeg:COPYING.GPLv3' 'x264:COPYING' 'vpx:LICENSE' 'webp:COPYING' '
  name="${pair%%:*}"; license="${pair#*:}"
  cp "$work/src/$name/$license" "$output/licenses/$name.txt"
 done
-printf '%s\n' 'Umbra bundled FFmpeg is GPL-3.0-or-later. x264 is GPL-2.0-or-later; libvpx/libwebp/dav1d use BSD licenses; zlib uses the zlib license.' 'Exact original license texts are in licenses/. Full original sources and build recipe are in corresponding-source/.' 'No extra linked media libraries or source patches are included; OS libraries remain system dependencies.' > "$output/NOTICE.txt"
+printf '%s\n' 'Umbra bundled FFmpeg is GPL-3.0-or-later. x264 is GPL-2.0-or-later; libvpx/libwebp/dav1d use BSD licenses; zlib uses the zlib license.' 'Exact original license texts are in licenses/. Full original sources and build recipe are in corresponding-source/.' 'The pinned media inputs are accompanied by standard compiler/startup runtimes and OS libraries. No source patches are applied.' 'Windows MinGW-w64 CRT and winpthreads notices and GCC Runtime Library Exception texts are in licenses/windows-toolchain; exact native package versions are recorded in build-evidence.' 'Linux uses dynamic OS glibc/math/thread libraries; Windows OS DLLs remain provided by Windows. Compiler runtime libraries are standard compilation support under their recorded exceptions/licenses.' > "$output/NOTICE.txt"
+if [[ "$platform" == win32 ]]; then
+ toolchain_prefix="${MINGW_PREFIX:-/ucrt64}"
+ mkdir -p "$output/licenses/windows-toolchain"
+ for name in crt winpthreads libgcc; do
+  [[ -d "$toolchain_prefix/share/licenses/$name" ]] || { echo "Missing native toolchain license directory: $name" >&2; exit 1; }
+  cp -R "$toolchain_prefix/share/licenses/$name" "$output/licenses/windows-toolchain/$name"
+ done
+ pacman -Q mingw-w64-ucrt-x86_64-crt mingw-w64-ucrt-x86_64-winpthreads mingw-w64-ucrt-x86_64-libgcc > "$output/build-evidence/windows-toolchain-packages.txt"
+fi
 prefix="$work/prefix"
 # Do not use host optional libraries: all linked media libraries come from this prefix.
 export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig:$prefix/lib64/pkgconfig"

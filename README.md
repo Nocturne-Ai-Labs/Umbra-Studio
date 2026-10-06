@@ -53,7 +53,7 @@ download and installation progress, then use **Launch Umbra Studio** when the
 update finishes. Updates preserve `User/` and `Tools/`. Downloads, rollback
 backups, and logs use the root-local `User/Cache/UmbraUpdater` workspace.
 `UmbraUpdater.bat` and `umbra-updater.sh` remain compatibility shortcuts to the
-same app’s Updates tab. An existing Setup session is reused.
+same appâ€™s Updates tab. An existing Setup session is reused.
 
 Quick summary:
 
@@ -229,7 +229,7 @@ The utility uses the bundled Bun runtime and serves one local-only Setup app
    download link and the exact destination folder.
 6. Choose one generation family, install its prerequisites, and select a compatible
    checkpoint. Some packs include generation weights; prerequisite-only packs
-   require a separate checkpoint from Umbra’s Model Manager. Additional families
+   require a separate checkpoint from Umbraâ€™s Model Manager. Additional families
    and feature models can be installed later through **Models**.
 7. Verify installed requirements, nodes, model checksums, and checkpoint integrity.
    This check does not generate an image. Launch ComfyUI through Umbra afterwards;
@@ -535,6 +535,44 @@ Actions builds use the no-bump packaging commands because the source version is
 already final.
 
 GitHub releases are built by `.github/workflows/release.yml`.
+
+### Prepare the bundled media tools
+
+Both packagers require FFmpeg/ffprobe built from the pinned sources before
+packaging. The native CI steps in
+[release.yml](.github/workflows/release.yml) install the build tools and run
+[build-media-from-source.sh](scripts/build-media-from-source.sh). Use fresh,
+empty output/work folders for each build attempt. The example paths below live
+in the ignored dependency cache; keep your application publish root separate.
+
+On Windows, install MSYS2 and open its **UCRT64** shell in the repository. Install
+these compiler/build tools, then build the media pair:
+
+```bash
+pacman -S --needed make nasm tar diffutils perl mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja
+bash scripts/build-media-from-source.sh win32 "$PWD/node_modules/.cache/umbra-media-source/windows-output" "$PWD/node_modules/.cache/umbra-media-source/windows-work"
+```
+
+Return to PowerShell in the same repository and point the packager at that
+completed source build:
+
+```powershell
+$env:UMBRA_MEDIA_SOURCE_BUILD = Join-Path $PWD 'node_modules/.cache/umbra-media-source/windows-output'
+```
+
+On Linux, use glibc 2.35 or newer. Install the native tools and build the media
+pair before invoking the Linux packager:
+
+```bash
+sudo apt-get install build-essential nasm cmake pkg-config python3 meson ninja-build
+bash scripts/build-media-from-source.sh linux "$PWD/node_modules/.cache/umbra-media-source/linux-output" "$PWD/node_modules/.cache/umbra-media-source/linux-work"
+export UMBRA_MEDIA_SOURCE_BUILD="$PWD/node_modules/.cache/umbra-media-source/linux-output"
+```
+
+The build verifies each source archive, compiles the required media libraries,
+checks native dependencies and runs codec encode/decode tests. Both portable
+packages retain complete source archives, the exact recipe, configuration and
+license notices. Neither packager copies an installed developer FFmpeg binary.
 
 Windows portable folder builds:
 

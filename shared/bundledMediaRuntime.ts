@@ -36,6 +36,7 @@ export function verifyBundledMediaRuntime(runtimeRoot: string, platform: NodeJS.
     'build-evidence/ffmpeg-configure-args.txt', 'build-evidence/ffmpeg-config.txt', 'build-evidence/x264-config.txt', 'build-evidence/vpx-config.txt',
     'build-evidence/webp-config.txt', 'build-evidence/zlib-config.txt', 'build-evidence/smoke-results.json',
     'NOTICE.txt', 'licenses/ffmpeg.txt', 'licenses/x264.txt', 'licenses/vpx.txt', 'licenses/webp.txt', 'licenses/zlib.txt', 'licenses/dav1d.txt', 'build-evidence/dav1d-config.txt']) if (!actual.has(name)) throw new Error(`Bundled media missing ${name}.`);
+  if (platform === 'win32') for (const name of policy.windowsRuntimeNotices) if (!actual.has(name)) throw new Error(`Missing Windows compiler/runtime notice: ${name}`);
   if (JSON.stringify(JSON.parse(readFileSync(join(root, 'corresponding-source/source-build-manifest.json'), 'utf8'))) !== JSON.stringify(policy))
     throw new Error('Bundled corresponding-source policy differs.');
   if (installed.files['corresponding-source/build-media-from-source.sh'].sha256 !== policy.recipeSha256) throw new Error('Bundled media build recipe differs from policy.');
