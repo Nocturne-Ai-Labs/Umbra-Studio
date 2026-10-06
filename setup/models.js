@@ -219,25 +219,28 @@ const modelSelections = {
 };
 let completedModelJob = '';
 const modelElement = id => document.getElementById(id);
-document.querySelector('main').insertBefore(progress, modelElement('general-panel'));
+
 const modelBytes = value => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(2)} GB` : `${(value / 1024 ** 2).toFixed(1)} MB`;
 function modelError(error) { status.textContent = error.message; status.classList.add('error'); }
 
 function showSetupTab(tab) {
+  if (tab === 'tools' || tab === 'models') modelElement('setup-advanced').open = true;
+  modelElement('setup-steps').hidden = tab !== 'general';
+  modelElement('setup-step-summary').hidden = tab !== 'general';
   ['general', 'models', 'tools', 'updates'].forEach(id => {
     modelElement(`${id}-panel`).hidden = tab !== id;
     modelElement(`tab-${id}`).setAttribute('aria-selected', String(tab === id));
-    modelElement(`tab-${id}`).tabIndex = tab === id ? 0 : -1;
+    modelElement(`tab-${id}`).tabIndex = 0;
   });
 }
 const setupTabs = ['general', 'tools', 'models', 'updates'];
 setupTabs.forEach(tab => {
   modelElement(`tab-${tab}`).addEventListener('click', () => showSetupTab(tab));
   modelElement(`tab-${tab}`).addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const next = event.key === 'Home' ? setupTabs[0] : event.key === 'End' ? setupTabs.at(-1)
-      : setupTabs[(setupTabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : setupTabs.length - 1)) % setupTabs.length];
+      : setupTabs[(setupTabs.indexOf(tab) + (['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : setupTabs.length - 1)) % setupTabs.length];
     showSetupTab(next); modelElement(`tab-${next}`).focus();
   });
 });

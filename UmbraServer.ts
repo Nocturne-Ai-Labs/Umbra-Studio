@@ -2,7 +2,7 @@ import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
 import { inspectAIToolkitPython } from './setup/ComfyPythonRuntime';
 import { createToolOperationAdmission, type ToolOperationClaim } from './backend/ToolOperationAdmission';
 import { existingUpdaterUrl } from './launcher/UmbraUpdaterBootstrap';
-import { openToolsSetup } from './backend/SetupLaunchService';
+import { openToolsSetup, openUmbraSetup } from './backend/SetupLaunchService';
 import { comfyPythonUpgradePending, toolPythonUpgradePending, readToolMaintenance } from './shared/toolMaintenanceLock';
 import { createToolLineFramer, MAX_TOOL_LOGS, MAX_TOOL_JOBS } from './backend/ToolActionConsole';
 import { createActionRelay } from './shared/backendActionRelay';
@@ -17234,7 +17234,7 @@ function isPortableAppUpdateAvailable(): boolean {
 
 async function prepareStandaloneUpdaterLaunch(): Promise<StandaloneUpdaterLaunch> {
   if (readToolMaintenance(ROOT_DIR, 'comfyui') || readToolMaintenance(ROOT_DIR, 'aitoolkit')) throw new Error('Finish the current tool maintenance before opening updates.');
-  const existing = await existingUpdaterUrl(ROOT_DIR);
+  const existing = await existingUpdaterUrl(ROOT_DIR, SOURCE_DIR);
   if (existing) {
     const url = new URL(existing); url.searchParams.set('tab', 'updates');
     const statusUrl = new URL('/api/state', url); statusUrl.searchParams.set('token', url.searchParams.get('token') || '');
@@ -35507,6 +35507,15 @@ const server = Bun.serve<UmbraSocketData>({
         } finally { if (!transferred) claim.release(); }
       }
 
+      if (path === '/api/setup/open' && method === 'POST') {
+        if (!isHostRequest(req, url, server)) return json({ error: 'Umbra Setup is only available from the host PC.' }, 403);
+        try {
+          const body = await req.json() as { tab?: string };
+          const tab = body.tab || 'onboarding';
+          if (!['tools', 'models', 'updates', 'onboarding'].includes(tab)) return json({ error: 'Unknown Setup tab.' }, 400);
+          return json({ success: true, url: await openUmbraSetup(ROOT_DIR, SOURCE_DIR, PORT, tab as import('./backend/SetupLaunchService').SetupTab) });
+        } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
       if (path === '/api/tools/setup' && method === 'POST') {
         if (isRemoteRequest(req, url, server)) return json({ error: 'Umbra Setup is only available from the host PC.' }, 403);
         try { return json({ success: true, url: await openToolsSetup(ROOT_DIR, SOURCE_DIR, PORT) }); }

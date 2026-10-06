@@ -293,6 +293,12 @@ function translateDynamicUi(language: AppLanguage, value: string): string | null
           : `現在: ${currentValueMatch[1]}`;
   }
 
+  const setupLabelMatch = value.match(/^(Umbra Studio v.+?)(?: - |\. )Open Umbra Setup\.?$/i);
+  if (setupLabelMatch) {
+    const label = lookupLocalized(language, 'Open Umbra Setup');
+    return label ? `${setupLabelMatch[1]}. ${label}` : null;
+  }
+
   const updaterLabelMatch = value.match(/^(Umbra Studio v[^.\s]+(?:\.[^.\s]+)*)\. Open updater\.$/i);
   if (updaterLabelMatch) {
     return language === 'zh-CN'

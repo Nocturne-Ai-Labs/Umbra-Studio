@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.90.8-beta - Desktop Setup Wizard And Session Repairs
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**This release continues the massive refactor of Umbra Studio's setup flow. Setup now uses the full desktop window and shows one task at a time.**
+
+- After updating, reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Setup replaces an old idle cached session with the installed version. Finish any active installation or download before reopening.
+- **Guided setup** starts with language, then ComfyUI, optional AI Toolkit, custom nodes, support models, generation resources and readiness. Existing setups resume at the first incomplete step. A broken ComfyUI Python environment leads with **Update Python 3.13**. The checks do not generate a test image.
+- Individual maintenance is under **Advanced > Tools**, including **ComfyUI > Update Python 3.13**, **AI Toolkit > Update Python 3.12**, CUDA/PyTorch and SageAttention. Additional model packs are under **Advanced > Models**. App updates have their own **Updates** screen.
+- No additional model downloads are required for this interface update. Existing Python environments remain preserved by app updates; run the explicit repair only when needed. Stop the corresponding tool first. Python repairs can download several GB of dependencies and retain the previous environment for rollback; models, datasets and outputs stay in place.
+- AI Toolkit is optional and needs host Node.js 20 or newer with npm. Linux requires glibc 2.35 or newer, `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or equivalents. FFmpeg and lightweight CPU helpers remain bundled; tagger model weights remain optional downloads.
+
+### Focused Desktop Setup
+
+- Full-window navigation shows the seven steps and completion status on the left, one focused task and primary action in the working area, and persistent progress at the bottom.
+- Language choices save and advance directly to ComfyUI. Optional training can be skipped; detailed file inventories, access tokens, logs and individual repairs remain collapsed until needed.
+- Existing installations show a clear Python repair action. Readiness uses concise checks without generating content. A failed install shows a short visible reason and restores its retry action.
+- Guided steps, navigation and new instructions support English, Japanese, Simplified Chinese, Korean and German.
+
+### Setup Launch Reliability
+
+- The sidebar opens unified Setup's Updates tab in a separate tab while Umbra remains running. Installing an app update still closes Umbra and its managed tools cleanly.
+- Setup reuse checks the exact cached interface and worker file identity. Old or same-version stale snapshots close through the guarded API before the new interface opens; active jobs are preserved.
+- If the default Setup port is occupied, standalone Setup selects a free local port.
+
+### Validation
+
+Isolated Windows browser/runtime checks covered the sidebar, stale and matching sessions, active-operation guards, all five languages, real language persistence, model selections, readiness, and progress/failure states at desktop and laptop resolutions. Installer action targets were checked with controlled UI fixtures; this interface release does not rerun Python migrations, model downloads, full training or generation. Native builds and archive checks cover both platforms; local Linux runtime/GPU testing remains unqualified.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: the sidebar using the retired updater shutdown-and-redirect flow.
+- Fixed: reopening an old cached Setup after updating, which hid new Python repair controls.
+- Fixed: stale same-version Setup sessions and default-port collisions.
+- Improved: a full-window desktop wizard with one task and primary action per step.
+- Improved: language-first onboarding, optional training, visible Python repairs and concise progress/failure status.
+- Improved: maintenance controls and detailed inventories are available under Advanced without overwhelming first use.
+
 ## v0.90.7-beta - Managed Tool Python Upgrades
 
 ### TL;DR - Setup After Updating

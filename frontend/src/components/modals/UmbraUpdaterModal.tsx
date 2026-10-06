@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { openUmbraSetup } from '@/lib/openUmbraSetup';
 import { AlertTriangle, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
@@ -46,26 +47,16 @@ export function UmbraUpdaterModal({
     setLaunching(true);
     setError('');
     try {
-      const response = await fetch('/api/app/updater/launch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      });
-      const payload = await response.json();
-      if (!response.ok || !payload?.success || !payload?.updaterUrl) {
-        throw new Error(payload?.error || 'Umbra Setup could not be launched.');
-      }
+      await openUmbraSetup('updates');
       if (launchAttemptRef.current !== attempt) return;
-      // The app releases its listener before spawning the updater so Windows
-      // cannot inherit the Umbra server socket into the updater process tree.
-      await new Promise((resolveDelay) => window.setTimeout(resolveDelay, 2_000));
-      window.location.assign(String(payload.updaterUrl));
+      setLaunching(false);
+      onClose();
     } catch (launchError) {
       if (launchAttemptRef.current !== attempt) return;
       setError(launchError instanceof Error ? launchError.message : 'Umbra Setup could not be launched.');
       setLaunching(false);
     }
-  }, []);
+  }, [onClose]);
 
   React.useEffect(() => {
     if (!open) {
@@ -117,8 +108,8 @@ export function UmbraUpdaterModal({
               </div>
               <p className="mt-2 text-xs leading-5 text-zinc-500">
                 {launching
-                  ? 'Umbra Setup will open its Updates tab after Umbra Studio and its managed tools close cleanly.'
-                  : error || 'Umbra Studio and ComfyUI will shut down before Setup opens. Save any work in progress before continuing.'}
+                  ? 'Opening the Updates tab in Umbra Setup.'
+                  : error || 'Umbra Setup opens in a separate tab. Save your work before installing an update.'}
               </p>
               {!launching && !error ? (
                 <p className="mt-3 text-xs font-semibold leading-5 text-zinc-300">

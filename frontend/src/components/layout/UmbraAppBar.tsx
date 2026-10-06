@@ -1690,9 +1690,9 @@ export const UmbraAppBar = () => {
             title={
               appUpdateCount > 0
                 ? `${appUpdateCount} Umbra Studio update${appUpdateCount === 1 ? '' : 's'} available`
-                : `Umbra Studio v${UMBRA_APP_VERSION} - Open updater`
+                : `Umbra Studio v${UMBRA_APP_VERSION} - Open Umbra Setup`
             }
-            aria-label={`Umbra Studio v${UMBRA_APP_VERSION}${appUpdateCount > 0 ? `, ${appUpdateCount} updates available` : ''}. Open updater.`}
+            aria-label={`Umbra Studio v${UMBRA_APP_VERSION}${appUpdateCount > 0 ? `, ${appUpdateCount} updates available` : ''}. Open Umbra Setup.`}
           >
             <RefreshCw size={isSidebarExpanded ? 12 : 10} />
             <span className="min-w-0 truncate">
