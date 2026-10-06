@@ -322,13 +322,13 @@ follow their latest upstream default branches.
 - Best-known original listing: https://civitai.com/models/150925/eyes-detection-adetailer
 - Creator / publisher: SnowyYukino
 - Model file: `Eyes.pt`
-- Verified mirror: https://huggingface.co/Kevalon/adetailerModels/blob/main/Eyes.pt
 - SHA-256: `c59bb696818ad5dfe58c54a881ffb6895c260bd42b4c34dfc97dff2203f45621`
 - License / permissions:
   - The source listing uses CivitAI model permissions rather than a standard SPDX license
-  - Automatic redistribution should remain disabled unless those source-specific terms are reviewed for the target release
+  - Umbra does not bundle or automatically download this model; download it from the original CivitAI listing under its terms
 - Usage in Umbra Studio:
   - Optional eye-detailer detection
+  - Save the downloaded `Eyes.pt` in `Tools/ComfyUI/models/ultralytics/bbox/`
 
 ### Segment Anything ViT-B
 - Project: https://github.com/facebookresearch/segment-anything

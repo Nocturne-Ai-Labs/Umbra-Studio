@@ -156,6 +156,13 @@ CLIP Vision encoder. It is kept separate because it is roughly 3 GB. The
 manifest also documents models that must remain manual because their original
 terms are source-specific or non-commercial.
 
+The optional Eyes detailer is a manual download from
+[Eyes Detection (ADetailer) on CivitAI](https://civitai.com/models/150925/eyes-detection-adetailer).
+Setup provides this link under **Models > Pipeline support**. Review the original
+model terms and save `Eyes.pt` in `Tools/ComfyUI/models/ultralytics/bbox/`.
+Umbra does not bundle or automatically download the eye model. Eyes remains
+disabled by default; enable it after installing the model yourself.
+
 These support files do not include generation checkpoints, LoRAs, VAEs, text
 encoders, ControlNet weights, or video diffusion models. Users choose those
 according to the model families and hardware they intend to run.

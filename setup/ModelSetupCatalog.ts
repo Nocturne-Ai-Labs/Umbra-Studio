@@ -28,7 +28,7 @@ type Manifest = {
   profiles: Record<string, { label: string; description: string; noDownload?: boolean; requiresProfiles?: string[] }>;
   models: {
     id: string; installPolicy: string; profiles: string[]; license?: string; licenseUrl?: string;
-    licenseNotice?: string; repository?: string; revision?: string; files: ModelFile[];
+    licenseNotice?: string; reference?: string; purpose?: string; repository?: string; revision?: string; files: ModelFile[];
   }[];
 };
 
@@ -89,7 +89,11 @@ export async function modelSetupCatalog(sourceRoot: string, runtimeRoot: string)
         }
       }
     }
-    packs.push({ id: pack, profiles: Object.entries(manifest.profiles).map(([id, profile]) => ({ id, ...profile })), files: [...files.values()] });
+    const manualModels = manifest.models.filter(model => model.installPolicy === 'manual' && model.reference).map(model => ({
+      id: model.id, purpose: model.purpose || model.id, reference: model.reference,
+      destinations: model.files.map(file => file.destination),
+    }));
+    packs.push({ id: pack, profiles: Object.entries(manifest.profiles).map(([id, profile]) => ({ id, ...profile })), files: [...files.values()], manualModels });
   }
   return { modelsRoot, packs };
 }

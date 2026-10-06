@@ -109,6 +109,14 @@ function renderModelReview() {
     }
     row.append(detail); list.append(row);
   }
+  for (const model of currentModelPack()?.manualModels || []) {
+    const row = document.createElement('div'); row.className = 'model-file';
+    const link = document.createElement('a'); link.href = model.reference; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = `${model.purpose} — ${new URL(model.reference).hostname === 'civitai.com' ? 'Download on Civitai' : 'Manual download'}`;
+    const detail = document.createElement('small');
+    detail.textContent = `Save in Tools/ComfyUI/models/${model.destinations.join(', ')}. Not installed by Setup.`;
+    row.append(link, detail); list.append(row);
+  }
   setModelBusy(modelBusy);
 }
 const recommendedModels = [

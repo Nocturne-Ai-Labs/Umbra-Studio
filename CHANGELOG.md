@@ -2,6 +2,10 @@
 
 ## v0.90.6-beta - Bundled Media And Python Helpers, Updater Reliability
 
+- Setup now shows the optional Eyes detailer's original CivitAI download link
+  and destination folder. The model remains manual and excluded from packages
+  and automatic installation; credits no longer point to a mirrored weight file.
+
 ### TL;DR - Setup After Updating
 
 **Umbra Studio Mobile is experimental and is not ready for feedback.**
