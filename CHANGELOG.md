@@ -2,41 +2,19 @@
 
 ## v0.90.6-beta - Bundled Media And Python Helpers, Updater Reliability
 
-- Setup's Tools, Models and guided onboarding now share English, Japanese,
-  Simplified Chinese, Korean and German labels and instructions. Main-app
-  translation now preserves user prompts, tags, model/file names and preset
-  labels, including custom selection menus and file/folder context-menu headings.
-  Main-app localization now covers the audited labels, long instructions,
-  conditional controls, option descriptions and static notifications. Reviewed
-  numeric templates translate Gallery, filmstrip and queue counts; explicit
-  keys translate resource readiness and dataset actions without altering values.
-  Raw technical diagnostics remain original; audit coverage does not certify
-  every arbitrary dynamic backend message.
-
-- Setup now shows the optional Eyes detailer's original CivitAI download link
-  and destination folder. The model remains manual and excluded from packages
-  and automatic installation; credits no longer point to a mirrored weight file.
-
-- Umbra Setup and Updater now share one local app. Guided setup saves progress
-  through language first, ComfyUI, optional AI Toolkit, custom nodes, support
-  models, generation prerequisites/checkpoint and integrity verification. The
-  final check does not generate an image. Updates show transfer progress and
-  preserve existing models and user files; legacy updater shortcuts open the
-  same Updates tab. Setup/update operations cannot overlap.
-
 ### TL;DR - Setup After Updating
-
-- ComfyUI and AI Toolkit install/update controls now live in **Umbra Setup >
-  Tools**, including CUDA/PyTorch, SageAttention, custom nodes and ComfyUI version
-  switching. Main-app tool panels open Setup; launch, stop and connection checks
-  remain in Umbra. Setup keeps installer progress/logs visible and blocks launches
-  while a maintenance job owns the tool.
 
 **Umbra Studio Mobile is experimental and is not ready for feedback.**
 
 **Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
 
 **Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- ComfyUI and AI Toolkit install/update controls now live in **Umbra Setup >
+  Tools**, including CUDA/PyTorch, SageAttention, custom nodes and ComfyUI version
+  switching. Main-app tool panels open Setup; launch, stop and connection checks
+  remain in Umbra. Setup keeps installer progress/logs visible and blocks launches
+  while a maintenance job owns the tool.
 
 - Update Umbra Studio and reopen it. Windows and Linux release packages now
   include FFmpeg and ffprobe. Fresh installs and app updates receive them
@@ -60,6 +38,32 @@
   for this repair. Existing user data, installed tools, and system PATH are
   preserved. Explicit `FFMPEG_PATH` and `FFPROBE_PATH` overrides remain preferred;
   review those paths if executable verification fails.
+
+- Linux custom-node prerequisites remain `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Guided Setup And Localization
+
+- Setup's Tools, Models and guided onboarding now share English, Japanese,
+  Simplified Chinese, Korean and German labels and instructions. Main-app
+  translation now preserves user prompts, tags, model/file names and preset
+  labels, including custom selection menus and file/folder context-menu headings.
+  Main-app localization now covers the audited labels, long instructions,
+  conditional controls, option descriptions and static notifications. Reviewed
+  numeric templates translate Gallery, filmstrip and queue counts; explicit
+  keys translate resource readiness and dataset actions without altering values.
+  Raw technical diagnostics remain original; audit coverage does not certify
+  every arbitrary dynamic backend message.
+
+- Setup now shows the optional Eyes detailer's original CivitAI download link
+  and destination folder. The model remains manual and excluded from packages
+  and automatic installation; credits no longer point to a mirrored weight file.
+
+- Umbra Setup and Updater now share one local app. Guided setup saves progress
+  through language first, ComfyUI, optional AI Toolkit, custom nodes, support
+  models, generation prerequisites/checkpoint and integrity verification. The
+  final check does not generate an image. Updates show transfer progress and
+  preserve existing models and user files; legacy updater shortcuts open the
+  same Updates tab. Setup/update operations cannot overlap.
 
 ### Media Reliability
 
@@ -123,6 +127,8 @@
 
 ### Fixes And Quality-of-Life Recap
 
+- Improved: one Setup app for guided onboarding, tool maintenance and updates, with language selection first.
+- Improved: audited app labels and dynamic counts in Japanese, Simplified Chinese, Korean and German, while preserving user-entered text.
 - Fixed: fresh ComfyUI setup handles pinned Git tags without looking for a
   nonexistent remote branch with the tag's name.
 - Fixed: image generation skips disabled output-upscale stages, so they no
