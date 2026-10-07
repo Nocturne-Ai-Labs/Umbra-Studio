@@ -362,7 +362,7 @@
         <details><summary data-i18n="installerLog">Installer log</summary><pre id="job-log">Waiting for installer output...</pre></details>
       </section>
     <footer>
-      <div id="setup-footer-status" class="status" data-i18n="setupProgressSaved">Setup progress is saved automatically.</div>
+      <div><div id="setup-footer-status" class="status" data-i18n="setupProgressSaved">Setup progress is saved automatically.</div><p data-i18n="installationNotice">Save your work: installations close Umbra Studio and its managed tools. Your files and models are preserved.</p></div>
       <div class="actions">
         <button id="close" class="button" type="button" data-i18n="closeSetup">Close Setup</button>
         <button id="launch" class="button primary" type="button" data-i18n="launchUmbra">Launch Umbra Studio</button>
@@ -516,6 +516,14 @@
     function tr(key) {
       return SETUP_TRANSLATIONS[currentLanguage]?.[key] || SETUP_TRANSLATIONS.en[key] || key;
     }
+
+    for (const [locale, text] of Object.entries({
+      en: 'Save your work: installations close Umbra Studio and its managed tools. Your files and models are preserved.',
+      ja: '作業を保存してください。インストール時にUmbra Studioと管理ツールが終了します。ファイルとモデルは保持されます。',
+      'zh-CN': '请保存工作：安装时将关闭 Umbra Studio 及其托管工具。文件和模型会保留。',
+      ko: '작업을 저장하세요. 설치하면 Umbra Studio와 관리 도구가 종료됩니다. 파일과 모델은 유지됩니다.',
+      de: 'Speichern Sie Ihre Arbeit: Installationen schließen Umbra Studio und seine verwalteten Werkzeuge. Dateien und Modelle bleiben erhalten.',
+    })) SETUP_TRANSLATIONS[locale].installationNotice = text;
 
     function setSetupLanguage(value, markDirty = false) {
       const changed = currentLanguage !== value;

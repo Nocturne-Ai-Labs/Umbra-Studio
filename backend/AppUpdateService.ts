@@ -24,7 +24,7 @@ import {
   type UmbraWindowsLauncherFlavor,
 } from '../shared/portableLauncher';
 
-const RELEASES_API_URL = 'https://api.github.com/repos/Nocturne-Ai-Labs/Umbra-Studio/releases?per_page=30';
+const RELEASES_API_URL = 'https://api.github.com/repos/Nocturne-Ai-Labs/Umbra-Studio/releases?per_page=100';
 const RELEASE_CACHE_TTL_MS = 5 * 60 * 1000;
 const DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 const MAX_PACKAGE_BYTES = 8 * 1024 * 1024 * 1024;
@@ -161,23 +161,29 @@ export class AppUpdateService {
     if (!options.refresh && this.releaseCache && this.releaseCache.expiresAt > Date.now()) {
       return this.summarizeReleases(this.releaseCache.releases, options.includePrerelease === true);
     }
-    const response = await fetch(RELEASES_API_URL, {
-      signal: AbortSignal.timeout(20_000),
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': `Umbra-Studio/${this.currentVersion || 'unknown'}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-        'Cache-Control': 'no-cache',
-      },
-    });
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => '')).trim().slice(0, 300);
-      throw new Error(detail
-        ? `GitHub release check failed (${response.status}): ${detail}`
-        : `GitHub release check failed (${response.status}).`);
+    const payload: GithubRelease[] = [];
+    for (let page = 1; ; page++) {
+      if (page > 20) throw new Error('GitHub release history exceeded the supported page count. No incomplete list was cached.');
+      const response = await fetch(`${RELEASES_API_URL}&page=${page}`, {
+        signal: AbortSignal.timeout(20_000),
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': `Umbra-Studio/${this.currentVersion || 'unknown'}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Cache-Control': 'no-cache',
+        },
+      });
+      if (!response.ok) {
+        const detail = (await response.text().catch(() => '')).trim().slice(0, 300);
+        throw new Error(detail
+          ? `GitHub release check failed (${response.status}): ${detail}`
+          : `GitHub release check failed (${response.status}).`);
+      }
+      const entries = await response.json();
+      if (!Array.isArray(entries)) throw new Error('Invalid GitHub release list. Please try checking for updates again.');
+      payload.push(...entries);
+      if (entries.length < 100) break;
     }
-    const payload = await response.json();
-    if (!Array.isArray(payload)) throw new Error('Invalid GitHub release list. Please try checking for updates again.');
     const releases = payload
       .map((entry) => normalizeGithubRelease(
         entry as GithubRelease,

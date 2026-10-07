@@ -414,6 +414,7 @@ function verifyPublish() {
     'resources/app/updater/update-panel.html',
     'resources/app/updater/update-panel.css',
     'resources/app/updater/update-panel.js',
+    'resources/app/updater/update-panel.bundle.js',
     'resources/app/setup/UmbraSetupApp.js',
     'resources/app/setup/onboarding.js',
     'resources/app/setup/index.html',
@@ -567,6 +568,7 @@ function publish() {
     path.join(root, 'dist-webapp', 'UmbraSetupApp.js'),
     path.join(packagedAppDir, 'setup', 'UmbraSetupApp.js'),
   );
+  copyExplicitFile(path.join(root, 'dist-webapp', 'update-panel.bundle.js'), path.join(packagedAppDir, 'updater', 'update-panel.bundle.js'));
 
   for (const file of ['Credits.md', 'LICENSE', 'NOTICE']) {
     copyTree(path.join(root, file), path.join(publishRoot, file));

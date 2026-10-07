@@ -373,7 +373,7 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
             refresh: url.searchParams.get('refresh') === 'true',
             includePrerelease: url.searchParams.get('channel') === 'prerelease',
           });
-          return json({ success: true, ...summary, releases: summary.releases.filter(release => compareUmbraVersions(release.version, currentVersion) > 0), installedVersionVerified });
+          return json({ success: true, ...summary, installedVersionVerified });
         } catch (error) {
           return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 502);
         }

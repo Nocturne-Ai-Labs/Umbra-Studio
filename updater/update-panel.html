@@ -1,13 +1,28 @@
 <section id="umbra-updates" aria-label="Umbra Studio updates">
 
-  <div class="updates-toolbar"><div><h2 id="updates-title">Umbra Studio updates</h2><p id="updates-version">Reading installed version…</p></div><button type="button" id="updates-refresh">Check for updates</button></div>
-
-  <label class="updates-channel"><input type="checkbox" id="updates-prerelease"> <span id="updates-beta">Include beta releases</span></label>
+  <div class="updates-toolbar"><div><h2 id="updates-title">Umbra Studio updates</h2><p id="updates-version">Reading installed version…</p></div><button class="button" type="button" id="updates-refresh">Check for updates</button></div>
 
   <p id="updates-message" role="status" aria-live="polite"></p>
-
-  <div id="updates-releases" aria-label="Available releases"></div>
-
+  <div class="updates-workspace">
+    <aside class="updates-sidebar" aria-labelledby="updates-list-title">
+      <h3 id="updates-list-title">Available versions</h3>
+      <label class="updates-channel"><input type="checkbox" id="updates-prerelease"> <span id="updates-beta">Include beta releases</span></label>
+      <div id="updates-releases" aria-label="Available releases"></div>
+    </aside>
+    <div class="updates-detail">
+      <div class="updates-release-heading">
+        <div><span id="updates-selected-version" class="updates-release-version">Umbra Studio</span><h3 id="updates-selected-name">Select a release</h3><p id="updates-selected-meta"></p></div>
+        <a id="updates-github" hidden target="_blank" rel="noopener noreferrer">View on GitHub</a>
+      </div>
+      <div class="updates-version-pair">
+        <div><span id="updates-installed-label">Installed</span><strong id="updates-installed-version">—</strong></div>
+        <span aria-hidden="true">→</span>
+        <div><span id="updates-target-label">Selected version</span><strong id="updates-target-version">—</strong></div>
+      </div>
+      <section class="updates-notes-section" aria-labelledby="updates-notes-title">
+        <h3 id="updates-notes-title">Release notes</h3>
+        <article id="updates-notes" class="updates-markdown"></article>
+      </section>
   <div id="updates-progress" hidden>
 
     <div class="updates-progress-label"><strong id="updates-phase">Ready</strong><span id="updates-percent"></span></div>
@@ -18,8 +33,9 @@
 
   </div>
 
-  <div class="updates-actions"><button type="button" id="updates-install" disabled>Install selected update</button><button type="button" id="updates-launch" hidden>Launch Umbra Studio</button></div>
+  <div class="updates-actions"><button class="button primary" type="button" id="updates-install" disabled>Install selected update</button><button class="button primary" type="button" id="updates-launch" hidden>Launch Umbra Studio</button><p id="updates-selection-hint"></p></div>
 
   <p id="updates-notice" class="updates-notice">Save your work before installing. Umbra Studio and its managed tools close during the update. Your models and user files are preserved.</p>
-
+    </div>
+  </div>
 </section>

@@ -21,6 +21,7 @@ import { setupSourceFingerprint } from '../launcher/UmbraUpdaterBootstrap';
 import { installerFailureMessage } from '../shared/installerFailure';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { installMediaTools, inspectMediaTools } from './MediaTools';
+import { shutdownUmbraForInstallation } from '../shared/umbraInstallationShutdown';
 import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, managedRepairStepArgs, managedRepairStatePath, managedWorkflowRepairPlans, preflightManagedWorkflowRepair, readManagedRepairState, runManagedWorkflowRepair, type ManagedRepairState } from '../updater/ManagedDependencyRepair';
 
 const DEFAULT_SETUP_PORT = 8215;
@@ -289,34 +290,53 @@ async function main() {
   const requestedPort = Number(readArg('--port', String(DEFAULT_SETUP_PORT)));
   const port = Number.isInteger(requestedPort) && requestedPort >= 0 && requestedPort <= 65535 ? requestedPort : DEFAULT_SETUP_PORT;
   const token = readArg('--token') || randomUUID();
-  if (sessionPath) {
-    const session = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  const session = sessionPath ? JSON.parse(readFileSync(sessionPath, 'utf8')) : null;
+  if (session) {
     if (resolve(session.runtimeRoot) !== runtimeRoot || resolve(session.sourceRoot) !== sourceRoot || session.token !== token) throw new Error('Setup and update session ownership does not match this installation.');
   }
   const uiSourceRoot = resolve(readArg('--ui-source', sourceRoot));
   const sourceFingerprint = sessionPath ? JSON.parse(readFileSync(sessionPath, 'utf8')).sourceFingerprint : '';
   const htmlPath = join(uiSourceRoot, 'setup', 'index.html');
   if (!existsSync(htmlPath)) throw new Error(`Setup page is missing: ${htmlPath}`);
+  const updateBundlePath = join(uiSourceRoot, 'updater', 'update-panel.bundle.js');
+  let updatePanelScript: string;
+  if (existsSync(updateBundlePath)) updatePanelScript = readFileSync(updateBundlePath, 'utf8');
+  else {
+    const built = await Bun.build({ entrypoints: [join(uiSourceRoot, 'updater', 'update-panel.js')], target: 'browser', format: 'iife', minify: true });
+    if (!built.success) throw new Error(`Update panel build failed: ${built.logs.join('\n')}`);
+    updatePanelScript = await built.outputs[0].text();
+  }
   const html = readFileSync(htmlPath, 'utf8')
     .replace('/* MODEL_SETUP_SCRIPT */', () => readFileSync(join(uiSourceRoot, 'setup', 'models.js'), 'utf8'))
     .replace('/* ONBOARDING_SCRIPT */', () => readFileSync(join(uiSourceRoot, 'setup', 'onboarding.js'), 'utf8'))
     .replace('<!-- UPDATE_PANEL -->', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.html'), 'utf8'))
     .replace('/* UPDATE_STYLE */', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.css'), 'utf8'))
-    .replace('/* UPDATE_SCRIPT */', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.js'), 'utf8'));
+    .replace('/* UPDATE_SCRIPT */', () => updatePanelScript);
   let activeJob: SetupJobState | null = null;
   let managedRepairState = readManagedRepairState(runtimeRoot);
   const persistManagedRepair = async (state: ManagedRepairState) => { managedRepairState = state; writeJsonAtomic(managedRepairStatePath(runtimeRoot), state); };
   const umbraOrigin = () => {
     const settings = readSettings(join(runtimeRoot, 'User', 'Config', 'settings.json'));
     const servers = settings.servers as { umbra?: { port?: number } } | undefined;
-    const appPort = Number(process.env.UMBRA_PORT || servers?.umbra?.port || 8212);
+    const appPort = Number(session?.appPort || process.env.UMBRA_PORT || servers?.umbra?.port || 8212);
     if (!Number.isInteger(appPort) || appPort < 1 || appPort > 65535) throw new Error('The Umbra Studio listener port is invalid.');
-    return `http://127.0.0.1:${appPort}`;
+    return `http://${session?.appHost === '::1' ? '[::1]' : '127.0.0.1'}:${appPort}`;
   };
   const assertDependencyIdle = () => assertManagedDependencyRepairIdle({ runtimeRoot, origin: umbraOrigin() });
+  let installationPreparing = false;
+  const prepareForInstallation = async (job?: SetupJobState) => {
+    if (installationPreparing) throw new Error('Another installation is preparing. Wait for it to finish.');
+    installationPreparing = true;
+    try {
+      await shutdownUmbraForInstallation({ runtimeRoot, origin: umbraOrigin(), serverPid: session?.serverPid, launcherPid: session?.launcherPid,
+        onProgress: message => { if (job) { job.step = message; appendOutput(job, message); } } });
+      await assertDependencyIdle();
+      await assertAIToolkitStopped(runtimeRoot);
+    } finally { installationPreparing = false; }
+  };
   let updateController: Awaited<ReturnType<typeof createUmbraUpdateController>> | null = null;
-  const setupBusy = () => activeJob?.phase === 'running' || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit');
-  const hasRunningInstaller = () => activeJob?.phase === 'running' || updateController?.isBusy() === true;
+  const setupBusy = () => installationPreparing || activeJob?.phase === 'running' || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit');
+  const hasRunningInstaller = () => installationPreparing || activeJob?.phase === 'running' || updateController?.isBusy() === true;
   const closeSetup = () => { updateController?.close(); server.stop(true); process.exit(0); };
   if (sessionPath) updateController = await createUmbraUpdateController(sessionPath, { isSetupBusy: setupBusy, onClose: closeSetup });
 
@@ -408,6 +428,7 @@ async function main() {
               const action = detect[body.tool as string]?.activeAction;
               if (action && action.ownerPid !== process.pid) throw new Error('Finish the active Umbra tool operation before maintenance.');
             }
+            await prepareForInstallation();
             if (body.tool === 'comfyui') await assertDependencyIdle();
             else await assertAIToolkitStopped(runtimeRoot);
           } catch (error) { release(); throw error; }
@@ -445,6 +466,7 @@ async function main() {
             : kind === 'node' && status.features.some((feature) => feature.customNodes.some((node) => node.name === target)) ? ['comfy-node', target]
             : null;
           if (!args) return json({ success: false, error: 'Choose a dependency declared by this Umbra Studio build.' }, 400);
+          await prepareForInstallation();
           if (!media) await assertDependencyIdle();
           if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
           const job: SetupJobState = {
@@ -488,6 +510,7 @@ async function main() {
         try {
           const plan = createManagedWorkflowRepairPlan(inspectManagedDependencies(sourceRoot, runtimeRoot), String(body.featureId || ''));
           if (body.planId !== plan.id) return json({ success: false, error: 'Review and approve the current managed dependency plan.' }, 409);
+          await prepareForInstallation();
           await assertDependencyIdle();
           if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);
           const prior = managedRepairState;
@@ -596,7 +619,7 @@ async function main() {
         try {
           if (kind === 'requirements' || kind === 'support') profiles = modelSetupSelection(sourceRoot, kind as ModelSetupPack, body.profiles);
           if (body.hfToken !== undefined && (typeof body.hfToken !== 'string' || body.hfToken.length > 512 || /[\r\n]/.test(body.hfToken))) throw new Error('Invalid Hugging Face token.');
-          if ((kind === 'data-forge' || kind === 'data-forge-pixai') && body.check) throw new Error('Data Forge verification runs during installation.');
+          if (['data-forge', 'data-forge-pixai', 'python-helpers'].includes(kind) && body.check) throw new Error('This installer verifies its dependencies during installation.');
         } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 400); }
         // Reading the request body yields; another installer may now own the slot.
         if (hasRunningInstaller()) {
@@ -614,7 +637,8 @@ async function main() {
           cancellable: kind !== 'data-forge' && kind !== 'data-forge-pixai' && kind !== 'python-helpers',
         };
         activeJob = job;
-        void runModelInstall(runtimeRoot, sourceRoot, kind, job, profiles, body.check === true, String(body.hfToken || '').trim())
+        void (body.check === true ? Promise.resolve() : prepareForInstallation(job))
+          .then(() => runModelInstall(runtimeRoot, sourceRoot, kind, job, profiles, body.check === true, String(body.hfToken || '').trim()))
           .then(() => {
             job.phase = 'complete';
             job.step = 'Installation complete';
