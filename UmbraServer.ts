@@ -41,6 +41,7 @@ import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } 
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
 import { MAX_DATASET_CONCEPT_SETTINGS_REQUEST_BYTES, readDatasetConceptSettingsText, serializeDatasetConceptSettings } from './backend/DatasetConceptSettingsFile';
+import { isRecoverableUiSessionKey, readUiSessionConfigValue } from './backend/UiSessionConfigRecovery';
 import { checkDatasetCaptionSize, DatasetCaptionTooLargeError, MAX_DATASET_CAPTION_REQUEST_BYTES, readExistingDatasetCaption } from './backend/DatasetCaptionFile';
 import { createReadStream, createWriteStream, existsSync, statSync, realpathSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
@@ -20555,6 +20556,17 @@ function resolveUserConfigPath(key: unknown): string | null {
 async function readUserConfigValue(key: unknown): Promise<unknown | null> {
   const configPath = resolveUserConfigPath(key);
   if (!configPath) return null;
+  if (isRecoverableUiSessionKey(key)) {
+    return withUserConfigMutation(key, path => readUserConfigFile(key, path));
+  }
+  return readUserConfigFile(key, configPath);
+}
+
+// Also used by POST while it already owns the mutation lock.
+async function readUserConfigFile(key: unknown, configPath: string): Promise<unknown | null> {
+  if (isRecoverableUiSessionKey(key)) {
+    return readUiSessionConfigValue(configPath, () => writeUserConfigFile(configPath, null));
+  }
   try {
     return JSON.parse(await fs.readFile(configPath, 'utf-8'));
   } catch (error) {
@@ -20586,6 +20598,7 @@ async function writeUserConfigFile(configPath: string, value: unknown): Promise<
   const handle = await fs.open(temporary, 'wx');
   try {
     await handle.writeFile(content, 'utf-8');
+    await handle.sync();
     await handle.close();
     for (let attempt = 0; ; attempt++) {
       try {
@@ -38124,7 +38137,7 @@ const server = Bun.serve<UmbraSocketData>({
               && typeof value === 'object'
             ) {
               const incomingUpdatedAt = Math.max(0, Math.floor(Number((value as Record<string, unknown>).updatedAt) || 0));
-              const existing = await readUserConfigValue(normalizedKey) as Record<string, unknown> | null;
+              const existing = await readUserConfigFile(normalizedKey, configPath) as Record<string, unknown> | null;
               const existingUpdatedAt = existing && typeof existing === 'object'
                 ? Math.max(0, Math.floor(Number(existing.updatedAt) || 0))
                 : 0;
