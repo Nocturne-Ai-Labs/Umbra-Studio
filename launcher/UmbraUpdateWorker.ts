@@ -27,6 +27,7 @@ import {
 } from '../shared/appUpdate';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { inspectUmbraRuntimeHealth } from '../shared/umbraRuntimeHealth';
+import { isUmbraInstallationListenerClosed } from '../shared/umbraInstallationShutdown';
 import { verifyBundledMediaRuntime } from '../shared/bundledMediaRuntime';
 import { verifyBundledPythonHelpers } from '../shared/bundledPythonHelpers';
 import {
@@ -241,7 +242,7 @@ export async function waitForProcesses(
   request: UmbraUpdateWorkerRequest,
   options: UmbraUpdateShutdownWaitOptions = {},
 ) {
-  const pids = collectRequestedProcessPids(request);
+  const pids = [...new Set([...collectRequestedProcessPids(request), ...getTrackedShutdownToolPids(request)])];
   if (pids.length === 0) return;
   const gracefulTimeoutMs = Math.max(1, Number(options.gracefulTimeoutMs) || UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS);
   const forcedTimeoutMs = Math.max(1, Number(options.forcedTimeoutMs) || UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS);
@@ -634,6 +635,12 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
       currentItem: 'Allowing the previous Umbra server to finish releasing resources',
     });
     await Bun.sleep(UMBRA_SHUTDOWN_SETTLE_MS);
+    // Recheck after the settling delay: a tool may have survived the server or
+    // an unrelated process may have taken the listener. Never replace live files.
+    await waitForProcesses(request);
+    if (!await isUmbraInstallationListenerClosed(request.bindHost === '::1' ? '::1' : '127.0.0.1', request.port)) {
+      throw new Error(`Port ${request.port} is still in use after shutdown. No application files were replaced.`);
+    }
     await writeState(request, { phase: 'applying', currentItem: 'Replacing application files' });
     ({ backupRoot, preservedRoot } = applyPayload(request, payloadRoot));
     await writeState(request, { phase: 'updating_nodes', currentItem: 'Updating Umbra Nodes' });

@@ -73,7 +73,7 @@ export function setupSourceFingerprint(sourceRoot: string): string {
   const hash = createHash('sha256');
   for (const file of ['setup/UmbraSetupApp.js', 'setup/index.html', 'setup/models.js', 'setup/onboarding.js',
     'launcher/UmbraUpdateWorker.js', 'updater/UmbraRelaunchWorker.js',
-    'updater/update-panel.html', 'updater/update-panel.css', 'updater/update-panel.js']) {
+    'updater/update-panel.html', 'updater/update-panel.css', 'updater/update-panel.js', 'updater/update-panel.bundle.js']) {
     hash.update(file + '\0'); hash.update(readFileSync(join(sourceRoot, file))); hash.update('\0');
   }
   return hash.digest('hex');
@@ -192,7 +192,7 @@ async function main() {
   copyRequired(process.execPath, bunPath);
   copyRequired(join(sourceRoot, 'setup', 'UmbraSetupApp.js'), updaterPath);
   for (const file of ['index.html', 'models.js', 'onboarding.js']) copyRequired(join(sourceRoot, 'setup', file), join(workspaceRoot, 'setup', file));
-  for (const file of ['update-panel.html', 'update-panel.css', 'update-panel.js']) copyRequired(join(sourceRoot, 'updater', file), join(workspaceRoot, 'updater', file));
+  for (const file of ['update-panel.html', 'update-panel.css', 'update-panel.js', 'update-panel.bundle.js']) copyRequired(join(sourceRoot, 'updater', file), join(workspaceRoot, 'updater', file));
   copyRequired(join(sourceRoot, 'launcher', 'UmbraUpdateWorker.js'), workerPath);
   copyRequired(join(sourceRoot, 'updater', 'UmbraRelaunchWorker.js'), relaunchWorkerPath);
   if (process.platform !== 'win32') {

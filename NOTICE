@@ -36,3 +36,11 @@ LTX-2.3 OmniForge integration notice:
   License (https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE). The Gemma 3
   encoder has separate Gemma terms (https://ai.google.dev/gemma/terms). Umbra's MIT
   license does not replace any of these third-party terms.
+
+Setup release-note rendering:
+- Marked (https://github.com/markedjs/marked), MIT license.
+- DOMPurify (https://github.com/cure53/DOMPurify), dual Apache-2.0 / MPL-2.0
+  license; distributed here under Apache-2.0.
+- Complete upstream licenses and notices are included under
+  resources/app/defaults/ThirdPartyLicenses in portable packages, and under
+  defaults/ThirdPartyLicenses in the source repository.

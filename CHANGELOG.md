@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.90.11-beta - Setup Release Browser And Safe Installation Handoff
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**Recent updates include a massive refactor of Umbra Studio's setup flow.**
+
+- Install through **Umbra Setup > Updates**, then reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux to use the updated interface. Finish active downloads/installations before reopening Setup.
+- Save your work before starting an installation. Opening Setup keeps Umbra running; starting installation closes the matching Umbra Studio and its managed tools, waits for them to exit, and holds if generation work is queued or shutdown cannot be verified. Launch Umbra again from Setup after maintenance.
+- No additional models, custom nodes, or Python upgrades are required for these repairs. Installed tools, Python environments, models, outputs and datasets remain preserved.
+- Damaged Gallery, Remote and Power Prompter UI session JSON is recovered when loaded or saved. The exact damaged file is retained beside the original as a uniquely named `.corrupt-...bak` backup before existing defaults are restored. Valid sessions and non-session data are not reset. Filesystem/permission failures remain visible errors.
+- Windows and Linux archives retain bundled FFmpeg/ffprobe and lightweight CPU helpers without tagger weights. Optional AI Toolkit requires host Git and Node.js 20+ with npm. Linux requires glibc 2.35+, `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents; see `REQUIREMENTS.md`.
+
+### Setup Updates
+
+- Restored the updater's version sidebar, selected-release details and installed/selected version comparison inside the desktop Setup window. Full compatible release history is paginated; installed and older versions remain selectable for reading notes, while installation requires a newer version.
+- Patch notes render GitHub-flavored Markdown with headings, paragraph spacing, nested lists, tables, quotes and code blocks. Remote HTML is sanitized; external links open safely. Long notes scroll separately while installation controls remain visible.
+- Download progress shows the actual download percentage. Verification/extraction/application remain in a working state until installation succeeds; a completed download does not prematurely offer launch.
+- Setup installers share an owned-runtime shutdown handoff. A foreign listener, unavailable/active generation queue, lingering owned process or occupied listener holds installation before installer files are written. Read-only verification stays read-only.
+- The app update worker waits for tracked managed tools even if its server already exited, then rechecks processes and the TCP listener immediately before replacing application files.
+
+### UI Session Recovery
+
+- Recovery is limited to `gallery-ui-session`, `remote-ui-session`, and `powerprompter-ui`. Backup failure prevents a reset; valid files keep their exact contents.
+- Reads and saves share the per-file mutation queue, preserving concurrent saves and existing stale-write protection. Atomic configuration writes sync before replacement.
+
+### Validation
+
+Focused Windows checks passed 20 regression tests, 34 isolated backend API assertions, six actual Setup installer-handoff assertions using owned fixture processes and a fixture installer, and 30 browser assertions against the actual Setup page. Browser update responses were simulated; checks covered published note formatting, unsafe HTML filtering, release selection, progress/launch states, responsive layouts and German/Japanese labels. Native packages and archive checks cover Windows and Linux. Fresh GPU generation, full training, real third-party tool installation and local Linux runtime/GPU checks were not rerun for this patch.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: damaged UI session JSON repeatedly failing to load or save.
+- Fixed: installation proceeding without waiting for tracked managed tool processes to exit.
+- Fixed: completed downloads looking like completed installations.
+- Improved: restored full compatible version history and release selection.
+- Improved: readable GitHub-style patch notes and visible installation controls.
+- Improved: owned-runtime shutdown checks, preserved session backups and concurrent settings saves.
+
 ## v0.90.10-beta - Image And Prompt Transfers To Video
 
 ### TL;DR - Setup After Updating
