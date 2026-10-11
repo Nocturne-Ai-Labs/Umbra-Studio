@@ -1,5 +1,7 @@
 'use client';
 
+import { stageMangaImages } from '@/features/manga/mangaMediaHandoff';
+
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -3125,9 +3127,9 @@ function GalleryMediaViewer({
   onStep,
   onReveal,
   onCopyPath,
-  onSendScanner,
-  onSendWaifu,
+  onContextMenu,
   onSendUmbra,
+  onSendManga,
   onDelete,
 }: {
   file: GalleryFile | null;
@@ -3140,9 +3142,9 @@ function GalleryMediaViewer({
   onStep: (delta: number) => void;
   onReveal: () => void;
   onCopyPath: () => void;
-  onSendScanner: () => void;
-  onSendWaifu: () => void;
+  onContextMenu: (event: GalleryContextMenuEvent, file: GalleryFile) => void;
   onSendUmbra: (mode: UmbraUiMediaHandoffMode, frameRole?: UmbraUiVideoFrameRole, metadata?: ImageMetadata | null, h3DirectorRole?: UmbraUiH3DirectorRole) => void;
+  onSendManga: () => void;
   onDelete: () => void;
 }) {
   const [zoom, setZoom] = useState(1);
@@ -3182,7 +3184,6 @@ function GalleryMediaViewer({
   const isVideo = file?.type === 'video';
   const isNsfw = file?.privacyClass === 'nsfw';
   const isGif = file?.type === 'gif';
-  const canSendWaifu = Boolean(file && !isLivePreview && (file.type === 'image' || file.type === 'gif'));
   const sizeLabel = formatBytes(file?.size);
   const createdLabel = formatDateTime(file?.createdMs);
   const modifiedLabel = formatDateTime(file?.modifiedMs);
@@ -3567,8 +3568,16 @@ function GalleryMediaViewer({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key === '+' || event.key === '=') {
+      if (event.defaultPrevented || document.querySelector('[data-umbra-context-menu-layer]')) return;
+      if (file && !isLivePreview && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+        const bounds = document.querySelector('[data-umbra-gallery-viewer-media]')?.getBoundingClientRect();
+        onContextMenu({
+          clientX: bounds ? bounds.left + bounds.width / 2 : window.innerWidth / 2,
+          clientY: bounds ? bounds.top + bounds.height / 2 : window.innerHeight / 2,
+          preventDefault: () => event.preventDefault(),
+          stopPropagation: () => event.stopPropagation(),
+        }, file);
+      } else if (event.key === '+' || event.key === '=') {
         event.preventDefault();
         setZoom((current) => Math.min(4, Math.round((current + 0.25) * 100) / 100));
       } else if (event.key === '-' || event.key === '_') {
@@ -3581,7 +3590,7 @@ function GalleryMediaViewer({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [file, isLivePreview, onContextMenu]);
 
   const handleViewerWorkflowAction = useCallback(async () => {
     if (!workflowJsonExport) return;
@@ -3656,6 +3665,7 @@ function GalleryMediaViewer({
         {!isPhoneViewer && <button type="button" disabled={isVideo} onClick={() => sendToUmbra('canvas')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Grid3X3 size={12} className="text-cyan-300" /> Canvas
         </button>}
+        {!isPhoneViewer && !isVideo && <button type="button" onClick={onSendManga} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06]"><ImageIcon size={12} /> Add to Manga Studio</button>}
         <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
           <Clapperboard size={12} className="text-fuchsia-300" /> IMG2VID / First Frame
         </button>
@@ -3759,11 +3769,19 @@ function GalleryMediaViewer({
                   <button type="button" data-umbra-gallery-viewer-action="copy" onClick={onCopyPath} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10" title="Copy path">
                     <Copy size={15} />
                   </button>
-                  <button type="button" data-umbra-gallery-viewer-action="scanner" onClick={onSendScanner} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10" title="Send to Metadata Scanner">
-                    <ScanSearch size={15} />
-                  </button>
-                  <button type="button" data-umbra-gallery-viewer-action="waifu" disabled={!canSendWaifu} onClick={onSendWaifu} className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10 disabled:opacity-35" title="Send to Visual Analysis">
-                    <Sparkles size={15} />
+                  <button
+                    type="button"
+                    data-umbra-gallery-viewer-action="context-menu"
+                    aria-label="Media actions"
+                    aria-haspopup="menu"
+                    onClick={(event) => {
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      onContextMenu({ ...galleryPointToContextEvent({ clientX: bounds.left, clientY: bounds.bottom }), stopPropagation: () => event.stopPropagation() }, file);
+                    }}
+                    className="flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300 hover:bg-white/10"
+                    title="Media actions"
+                  >
+                    <MoreHorizontal size={15} />
                   </button>
                 </>
               ) : null}
@@ -3798,6 +3816,7 @@ function GalleryMediaViewer({
       <div className="relative z-10 flex min-h-0 flex-1">
         <main
           data-umbra-gallery-viewer-media=""
+          onContextMenu={(event) => { if (!isLivePreview) onContextMenu(event, file); }}
           className={cn('relative min-w-0 flex-1 bg-black', zoom > 1 ? 'overflow-auto' : 'overflow-hidden')}
           onTouchStart={handleMediaTouchStart}
           onTouchMove={handleMediaTouchMove}
@@ -6475,6 +6494,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     followLiveGenerationViewerRef.current = false;
     setViewerPath('');
     setViewerFileFallback(null);
+    setContextMenu(null);
     updateViewerSessionFiles([]);
   }, [updateViewerSessionFiles]);
 
@@ -6497,6 +6517,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       });
       return;
     }
+    closeViewer();
     addScannedImport(normalizedPaths);
     useStore.getState().setUI('imageInspectorTab', workspace === 'scanner' ? 'scanner' : 'waifu');
     setActiveWorkspace('umbraui');
@@ -6507,7 +6528,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         ? `Sent ${normalizedPaths.length} item${normalizedPaths.length === 1 ? '' : 's'} to Metadata Scanner`
         : `Sent ${normalizedPaths.length} image${normalizedPaths.length === 1 ? '' : 's'} to Visual Analysis`,
     });
-  }, [addScannedImport, addToast, setActiveWorkspace]);
+  }, [addScannedImport, addToast, closeViewer, setActiveWorkspace]);
 
   const revealViewerSelection = useCallback(async () => {
     if (isRemoteClient) {
@@ -6545,25 +6566,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       });
     }
   }, [addToast, selectedOrViewerPaths]);
-
-  const sendViewerToScanner = useCallback(() => {
-    sendSelectionToWorkspace(selectedOrViewerPaths(), 'scanner');
-  }, [selectedOrViewerPaths, sendSelectionToWorkspace]);
-
-  const sendViewerToWaifu = useCallback(() => {
-    const filesByPath = new Map<string, GalleryFile>();
-    for (const file of [...knownFilesRef.current, ...viewerSessionFilesRef.current]) {
-      filesByPath.set(selectionPathKey(file.path), file);
-    }
-    if (viewerFileFallback) {
-      filesByPath.set(selectionPathKey(viewerFileFallback.path), viewerFileFallback);
-    }
-    const imagePaths = selectedOrViewerPaths().map(normalizePath).filter((path) => {
-      const file = filesByPath.get(selectionPathKey(path));
-      return file?.type === 'image' || file?.type === 'gif';
-    });
-    sendSelectionToWorkspace(imagePaths, 'waifudiffusion');
-  }, [selectedOrViewerPaths, sendSelectionToWorkspace, viewerFileFallback]);
 
   const sendPathToUmbraUi = useCallback(async (
     pathValue: string,
@@ -6605,6 +6607,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to send the image to Umbra UI' });
     }
+  }, [addToast, setActiveWorkspace]);
+
+  const sendPathsToManga = useCallback((paths: string[]) => {
+    try { stageMangaImages(paths); setActiveWorkspace('umbraui'); }
+    catch (error) { addToast({ type: 'error', message: error instanceof Error ? error.message : 'Could not add images to Manga Studio.' }); }
   }, [addToast, setActiveWorkspace]);
 
   const sendPathsToUmbraUiExtras = useCallback((pathValues: string[], mode: UmbraUiMediaToolsHandoffMode) => {
@@ -10003,6 +10010,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       targetPath: path,
       paths: menuPaths,
       reorderPaths: reorderSelection,
+      mediaItems: [file, ...viewerSessionFilesRef.current]
+        .filter((entry): entry is GalleryFile & { type: 'image' | 'gif' | 'video' } => menuPaths.some(path => pathsEqual(path, entry.path)) && (entry.type === 'image' || entry.type === 'gif' || entry.type === 'video'))
+        .map((entry) => ({ path: entry.path, type: entry.type })),
     });
   }, [emitSelectionChanged, updateViewerSessionFiles]);
 
@@ -10349,6 +10359,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       { label: 'Add Motion Reference', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video', undefined, 'motion_video') },
     ];
     const umbraUiExtrasItems: ContextMenuItem[] = [
+      ...(!isPhoneRemote && selectedImagePaths.length ? [{ label: selectedImagePaths.length > 1 ? `Add to Manga Studio (${selectedImagePaths.length})` : 'Add to Manga Studio', icon: <ImageIcon size={14} />, action: () => sendPathsToManga(selectedImagePaths) }] : []),
       {
         label: selectedImagePaths.length > 1 ? `Upscale (${selectedImagePaths.length})` : 'Upscale',
         icon: <ImageUp size={14} />,
@@ -10491,6 +10502,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     selectedPaths,
     sendPathToUmbraUi,
     sendPathsToUmbraUiExtras,
+    sendPathsToManga,
     sendPathsToUmbraUiUpscale,
     sendSelectionToWorkspace,
     togglePinnedFolder,
@@ -10543,6 +10555,13 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!active) return;
 
       if (viewerOpen) {
+        if (contextMenu) {
+          if (key === 'Escape') {
+            consumeGalleryKey();
+            setContextMenu(null);
+          }
+          return;
+        }
         if (key === 'Escape') {
           consumeGalleryKey();
           closeViewer();
@@ -10578,7 +10597,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [active, closeViewer, deleteTrashPathsForever, deleteViewerSelection, loading, movePathsToTrash, stepViewer, transferInProgress, viewerPath]);
+  }, [active, closeViewer, contextMenu, deleteTrashPathsForever, deleteViewerSelection, loading, movePathsToTrash, stepViewer, transferInProgress, viewerPath]);
 
   const reorderContextTargetPath = contextMenu?.kind === 'media' && (contextMenu.reorderPaths?.length || 0) > 0
     ? normalizePath(contextMenu.targetPath)
@@ -11802,8 +11821,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           onStep={stepViewer}
           onReveal={revealViewerSelection}
           onCopyPath={copyViewerPaths}
-          onSendScanner={sendViewerToScanner}
-          onSendWaifu={sendViewerToWaifu}
+          onContextMenu={openMediaContextMenu}
+          onSendManga={() => { sendPathsToManga([viewerFile.path]); closeViewer(); }}
           onSendUmbra={sendViewerToUmbra}
           onDelete={deleteViewerSelection}
         />
@@ -11864,7 +11883,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           ] satisfies ContextMenuItem[] : []),
         ]}
         onClose={() => setContextMenu(null)}
-        boundarySelector="[data-umbra-react-gallery-root]"
+        boundarySelector={viewerFile ? '[data-umbra-gallery-viewer]' : '[data-umbra-react-gallery-root]'}
+        presentation={viewerFile && (remoteMode === 'tablet' || remoteMode === 'phone') ? 'touch-sheet' : 'anchored'}
         title={contextMenuHeader.title}
         titleI18nSkip={contextMenuHeader.titleI18nSkip}
         subtitle={contextMenuHeader.subtitle}

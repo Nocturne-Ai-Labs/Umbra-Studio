@@ -1,3 +1,5 @@
+import { isUmbraReleaseVersion } from './releaseVersion.mjs';
+
 export const UMBRA_UPDATE_EXIT_CODE = 76;
 export const UMBRA_UPDATE_SCHEMA_VERSION = 1;
 
@@ -97,7 +99,7 @@ function compareNumericVersionParts(left: string, right: string): number {
 
 export function isKnownUmbraVersion(value: unknown): boolean {
   const normalized = normalizeUmbraVersion(value);
-  if (!/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(normalized)) return false;
+  if (!isUmbraReleaseVersion(normalized)) return false;
   return umbraVersionParts(normalized).core.some((entry) => Number(entry) > 0);
 }
 

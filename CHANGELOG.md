@@ -1,5 +1,81 @@
 # Changelog
 
+## v0.90.12-beta - Manga Studio And Setup Regression Repairs
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**This update continues repairs after the massive refactor of Umbra Studio's setup flow.**
+
+- Save work, install through **Umbra Setup > Updates**, then close and reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux after active operations finish. Linux users updating from an older Setup should reopen Setup if its old Launch action fails; the repaired launcher is in the new session. Manual app launch remains `UmbraStudio.bat` or `./start-umbra.sh`.
+- Open **Umbra UI > Extras > Manga Studio** to try the experimental desktop/tablet editor. Importing still images or GIFs needs no models. Optional scene generation uses your existing managed ComfyUI, pipeline custom nodes and selected model resources; install missing requirements through Setup. Required download sizes depend on the selected family. No additional resources are required for existing tools.
+- Save editable manga books under `User/MangaStudio/Projects`; custom fonts belong in `User/Fonts`. PNG/PDF exports are still editions. HTML embeds the book and animations for a browser reader; physical mobile devices and complete localization remain unqualified.
+- Reopened Setup removes obsolete Umbra Updater launchers and standalone UI files. Keep using **Umbra Setup** for installation and updates. Small temporary archive stubs preserve compatibility with older cached update workers and are removed after installation or successful Setup startup.
+- App updates preserve installed tools, Python environments, models, outputs and datasets. No new model downloads are required for this patch. Custom-node dependency receipts now include nested files; Setup may ask to verify/install custom-node requirements again. Dependency maintenance can download packages.
+- Use **Advanced > Tools** for explicit Python, PyTorch/CUDA or SageAttention maintenance. Both tools' Python migrations use their own fresh environment resolution and retained rollback. Explicit accelerator actions can download several GB; they preserve unrelated packages and hold unsupported combinations rather than guessing. Current reviewed Windows Triton mappings include Torch 2.11 through 2.14; Sage installation uses the version matching the installed Torch.
+- Git ownership/access failures remain visible holds. Setup preserves local files and commits instead of resetting failed updates or silently changing global Git trust. Review the reported ownership/access issue before retrying; restarting a working tool does not prove its repository can update.
+- Windows/Linux packages retain bundled FFmpeg/ffprobe and lightweight CPU helpers, without tagger weights. Optional AI Toolkit requires Node.js 20+ with npm. Linux requires glibc 2.35+ and the host packages in `REQUIREMENTS.md`.
+
+### Manga Studio
+
+- Compose multi-page books with 55 templates, adjustable gutters, diagonal panel clipping, background and character image layers, locking, undo and a page/image filmstrip. Gallery, filmstrip and lightbox image menus can add artwork to a manga project.
+- Editable speech, off-screen dialogue, thoughts, telepathy and effects include hand-drawn balloon contours, integrated tails, adjustable spikes, text/balloon fitting, independent lettering rotation and perspective controls. Comic Neue and Bangers fonts ship with OFL notices; users can supply their own fonts.
+- Optional scene generation shares Umbra's image queue, model resources, high-res fix, detailer stages, tiled VAE, LoRAs and output upscaling. Panel sizing follows a user-selected long-side target and the shared workflow contract, without model-specific recommendation caps. Results enter the image tray for placement.
+- Source-image metadata, image identifiers and resolved wildcard choices survive project saves and editing transfers. Tray and viewer menus send still images/parameters to TXT2IMG, IMG2IMG, Inpainting and Canvas.
+- Direct GIF import preserves original bytes, dimensions and timing. Each layer has independent speed, looping and visibility/hover playback. GIFs do not use the still-image editor transfer actions.
+- Export individual page PNGs, a PNG ZIP, the whole book as a still PDF, or a self-contained animated HTML reader. HTML has a black surround, no visible page labels, zoom/fit controls, autoplay in view and an optional lettering switch. Preview the reader inside Studio at full, tablet or phone width.
+- Manga Studio remains experimental. Browser preview, persistence and metadata checks are distinct from GPU generation and physical touch qualification; see Validation below.
+
+### Update And Maintenance Safety
+
+- Retired standalone Updater source and UI are replaced by Setup’s shared update controller. Cleanup is limited to known regular application files after packaged Setup is available; redirected paths, directories, user data, tool installations and update workspaces are preserved. The main app and update worker no longer require retired updater files.
+- Standalone and reused Setup sessions adopt fresh shutdown evidence for the matching installation, including managed-tool descendants, and wait until those processes exit before file replacement. OS process start identity prevents obsolete session PIDs from authorizing termination. Linux process execution changes remain part of the same live process.
+- Linux update relaunch uses Bash for the Bash launcher and cleans its own process group on failed attempts. Same-version stale snapshots hold new mutations while status, cancellation and close/reopen recovery stay available. Legacy app update links reuse the unified Setup status route.
+- Setup launch waits for the matching application to report ready before handing off. Slow startup responses get a bounded read-only retry; foreign or malformed installation identities still hold immediately. Overlapping launch requests share one startup operation instead of spawning duplicate applications.
+- Failed Git pull/fetch or diverged fetched revisions preserve tracked edits and local commits. No automatic global ownership-trust exception is written. Required-node failures retain the useful Git ownership/access explanation.
+- Explicit Python migration, ordinary dependency repair and accelerator updates use separate policies for the selected tool. Requested Torch/Sage/Triton changes can proceed without releasing unrelated packages; logs distinguish actual version changes from no-op maintenance.
+- Fresh Linux CUDA installation permits PyTorch's required Triton dependency without releasing optional Sage packages. Existing installed accelerator versions remain protected during ordinary repair.
+- Reviewed Windows SageAttention combinations download a checksum-pinned stable-ABI wheel while retaining PyTorch. Source builds find the tool's own build entrypoints, recognize 64-bit Visual Studio editions, and preserve PyTorch's compiler dialect. Linux source builds select an available compiler and use C++20 for PyTorch 2.14.
+- Linux AI Toolkit verifies SQLite with an actual query and rebuilds the exact installed native addon in an owned temporary directory when its prebuilt binary requires a newer glibc. This supports the documented Ubuntu 22.04 baseline without replacing datasets or the database.
+- Ordinary-node verification fingerprints the bounded local requirements/constraints closure. Changing a nested include invalidates its receipt; readiness parses those declarations without treating valid include directives as missing packages.
+
+### Guided Setup
+
+- Model families requiring an externally supplied checkpoint offer **Open Model Manager / import checkpoint**, keep Setup open, and refresh the local checkpoint list on return. Empty automatic packs do not start an installer or close Studio.
+- Rapid selection saves are serialized and stale reads cannot replace newer choices. Installation waits for acknowledged selections; a failed save can recover and retry. Same-step refresh preserves keyboard focus, expanded file/license/access details, scroll and entered session tokens.
+- Stable readiness recovery instructions use translated issue codes in all five interface languages. Model names, paths, licenses and raw diagnostics stay original. Model Manager opens only after Studio reports ready.
+
+### Release Integrity
+
+- Clean public-source exports reject recognized model-weight files regardless of size; legitimate Python path configuration and non-model binary assets remain allowed. Publishing, updater discovery and migration version-folder checks share the same release-version grammar, including combined prerelease/build metadata.
+
+### Validation
+
+Manga editor/model/persistence checks pass with 33 targeted tests, plus independent checks of source-image identifiers, GIF settings, output receipts, oversized-result recovery and export-library notices. Browser preview checks cover independent animation playback, off-screen pausing, lettering visibility, reader zoom, responsive phone width and still-image editor handoffs. Downloaded HTML offline execution, physical mobile devices, complete Manga localization and all-model/GPU combinations remain unqualified.
+
+Focused Windows and native Ubuntu 22.04 Docker checks cover dependency policy, real local Git preservation, nested requirement verification, owned process shutdown/exec/relaunch, CPU helper imports, FFmpeg encode/decode, Setup state and browser interaction. Fresh managed ComfyUI and AI Toolkit installations also pass real RTX 4090 CUDA checks on both platforms. Windows uses the reviewed Sage wheel; Linux compiles the pinned Sage source. Both pass Triton and Sage numerical kernel checks, Anima Turbo txt2img, and queued two-step training with finite saved LoRA weights. Windows img2img passes through the production UI. Linux generation replays the UI request through Umbra's queue. These are targeted smoke checks, not full production-training or all-model/GPU qualification. Selection browser fixtures and archive qualification are recorded separately.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: page composition, lettering, source metadata handoffs and independent GIF playback in the new experimental Manga Studio.
+- Improved: complete-book PDF/HTML exports with optional lettering and reader zoom controls.
+- Improved: obsolete Umbra Updater launchers are removed automatically, with a compatibility bridge for existing installs.
+- Fixed: standalone updates bypassing process-exit waits and Linux update relaunch using the wrong shell.
+- Fixed: failed Git maintenance discarding local work, hidden ownership errors and automatic global trust changes.
+- Fixed: guided AI Toolkit Python repair and explicit accelerator maintenance using inappropriate dependency constraints.
+- Fixed: nested dependency receipts and readiness disagreeing with installed requirements.
+- Fixed: stale Setup mutation admission, legacy update reuse, empty checkpoint installers and overlapping selection saves.
+- Improved: keyboard focus, expanded review details, retry recovery and localized readiness instructions.
+- Improved: model exclusion during source export and consistent release-version recognition.
+- Fixed: fresh Linux CUDA dependency resolution and AI Toolkit SQLite compatibility on glibc 2.35.
+- Fixed: Setup rejecting a slow first startup as an unverified installation or closing before the app reports ready.
+- Improved: reviewed Windows Sage downloads and compiler setup for native Linux Sage builds.
+
 ## v0.90.11-beta - Setup Release Browser And Safe Installation Handoff
 
 ### TL;DR - Setup After Updating

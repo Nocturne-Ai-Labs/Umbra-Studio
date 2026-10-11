@@ -1,3 +1,4 @@
+import { readUmbraProcessIdentity, readManagedProcessTreeIdentities, type UmbraProcessIdentity } from './umbraProcessIdentity';
 import {
   existsSync,
   mkdirSync,
@@ -15,6 +16,8 @@ export type UmbraShutdownMarker = {
   schemaVersion: 1;
   serverPid: number;
   managedProcessPids: number[];
+  processIdentities?: UmbraProcessIdentity[];
+  launcherPid?: number;
   reason: string;
   requestedAtMs: number;
 };
@@ -38,15 +41,19 @@ export function resolveUmbraShutdownMarkerPath(runtimeRoot: string): string {
 export function createUmbraShutdownMarker(input: {
   serverPid: number;
   managedProcessPids?: number[];
+  launcherPid?: number;
   reason: string;
   requestedAtMs?: number;
 }): UmbraShutdownMarker {
   const serverPid = normalizePid(input.serverPid);
   if (!serverPid) throw new Error('A valid Umbra server PID is required for the shutdown marker.');
+  const toolIdentities = readManagedProcessTreeIdentities(normalizeManagedPids(input.managedProcessPids, serverPid));
   return {
     schemaVersion: 1,
     serverPid,
-    managedProcessPids: normalizeManagedPids(input.managedProcessPids, serverPid),
+    managedProcessPids: normalizeManagedPids([...(input.managedProcessPids || []), ...toolIdentities.map(identity => identity.pid)], serverPid),
+    launcherPid: normalizePid(input.launcherPid),
+    processIdentities: [...toolIdentities, ...[serverPid, normalizePid(input.launcherPid)].filter(pid => pid > 0).map(readUmbraProcessIdentity).filter((identity): identity is UmbraProcessIdentity => !!identity)],
     reason: String(input.reason || 'shutdown').trim() || 'shutdown',
     requestedAtMs: Math.max(0, Number(input.requestedAtMs) || Date.now()),
   };
@@ -89,6 +96,8 @@ export function readUmbraShutdownMarker(runtimeRoot: string): UmbraShutdownMarke
       schemaVersion: 1,
       serverPid,
       managedProcessPids: normalizeManagedPids(raw.managedProcessPids, serverPid),
+      launcherPid: normalizePid(raw.launcherPid),
+      processIdentities: Array.isArray(raw.processIdentities) ? raw.processIdentities.filter(identity => identity && Number.isInteger(identity.pid) && identity.pid > 0 && typeof identity.started === 'string' && typeof identity.commandLine === 'string') : [],
       reason: String(raw.reason || 'shutdown').trim() || 'shutdown',
       requestedAtMs,
     };

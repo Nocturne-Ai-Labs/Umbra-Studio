@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { isUmbraReleaseVersion } from '../shared/releaseVersion.mjs';
 import { resolveMigrationPath, isSameMigrationPath, isMigrationPathInside } from '../shared/migrationPaths';
 import {
   createPendingFirstRunState,
@@ -134,7 +135,7 @@ export class FirstRunService {
     }
     if (isMigrationPathInside(physicalRuntime, physicalSource)) {
       const [topLevelName = ''] = relative(physicalRuntime, physicalSource).split(/[\\/]/).filter(Boolean);
-      if (!/^v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/i.test(topLevelName)) {
+      if (!/^v/i.test(topLevelName) || !isUmbraReleaseVersion(topLevelName.slice(1))) {
         throw new Error('Only a previous version folder may be migrated from inside the current Umbra Studio root.');
       }
     }

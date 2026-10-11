@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeLegacyUpdaterCompatibility } from './legacy-updater-compatibility.mjs';
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
@@ -468,29 +469,6 @@ exit /b %EXIT_CODE%
   fs.writeFileSync(launcherPath, script, 'utf-8');
 }
 
-function writeUmbraUpdaterLauncher() {
-  const launcherPath = path.join(publishRoot, 'UmbraUpdater.bat');
-  const script = `@echo off
-setlocal
-cd /d "%~dp0"
-set "BUN_BIN=%CD%\\Runtime\\Bun\\win32\\bun.exe"
-set "UPDATER_BOOTSTRAP=%CD%\\resources\\app\\launcher\\UmbraUpdaterBootstrap.js"
-if not exist "%BUN_BIN%" (
-  echo [ERROR] Bundled Bun runtime is missing: %BUN_BIN%
-  pause
-  exit /b 1
-)
-if not exist "%UPDATER_BOOTSTRAP%" (
-  echo [ERROR] Umbra Setup launcher is missing: %UPDATER_BOOTSTRAP%
-  pause
-  exit /b 1
-)
-"%BUN_BIN%" "%UPDATER_BOOTSTRAP%" --root "%CD%" --tab updates %*
-if errorlevel 1 pause
-`;
-  fs.writeFileSync(launcherPath, script, 'utf-8');
-}
-
 function writeUmbraSetupLauncher() {
   const launcherPath = path.join(publishRoot, 'UmbraSetup.bat');
   const script = `@echo off
@@ -624,7 +602,7 @@ function verifyPublish() {
     'utf8',
   );
   const updaterApp = fs.readFileSync(
-    path.join(publishRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
+    path.join(publishRoot, 'resources', 'app', 'setup', 'UmbraSetupApp.js'),
     'utf8',
   );
   const updaterHtml = fs.readFileSync(
@@ -664,7 +642,7 @@ function publish() {
   run('bun', ['run', 'webapp:prepare-dependencies'], 'runtime dependency preparation');
   run('bun', ['run', 'build:frontend'], 'frontend build');
   run('bun', ['build', 'UmbraServer.ts', '--target=bun', '--outfile', path.join('dist-webapp', 'UmbraServer.js')], 'backend build');
-  run('bun', ['run', 'webapp:build-updater'], 'standalone updater build');
+  run('bun', ['run', 'webapp:build-update-runtime'], 'Setup update runtime build');
   run('bun', ['run', 'webapp:build-setup'], 'standalone setup build');
 
   for (const relativePath of ['public', path.join('resources', 'app', 'public')]) {
@@ -734,10 +712,6 @@ function publish() {
     path.join(packagedAppDir, 'launcher', 'UmbraUpdaterBootstrap.js'),
   );
   copyExplicitFile(
-    path.join(root, 'dist-webapp', 'UmbraUpdaterApp.js'),
-    path.join(packagedAppDir, 'updater', 'UmbraUpdaterApp.js'),
-  );
-  copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraRelaunchWorker.js'),
     path.join(packagedAppDir, 'updater', 'UmbraRelaunchWorker.js'),
   );
@@ -770,7 +744,7 @@ function publish() {
 
   writeUmbraStudioBatchLauncher();
   writeUmbraSetupLauncher();
-  writeUmbraUpdaterLauncher();
+  writeLegacyUpdaterCompatibility(publishRoot, 'win32');
   writePortableMarker();
   verifyPublish();
   if (isCleanRelease) verifyCleanPublishedUser();

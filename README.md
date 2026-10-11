@@ -53,8 +53,13 @@ its managed tools close cleanly during installation. Select a release, follow th
 download and installation progress, then use **Launch Umbra Studio** when the
 update finishes. Updates preserve `User/` and `Tools/`. Downloads, rollback
 backups, and logs use the root-local `User/Cache/UmbraUpdater` workspace.
-`UmbraUpdater.bat` and `umbra-updater.sh` remain compatibility shortcuts to the
-same app's Updates tab. An existing Setup session is reused.
+Use `UmbraSetup.bat` on Windows or `umbra-setup.sh` on Linux for all setup and
+updates. An existing Setup session is reused. Updated Setup automatically removes
+obsolete Umbra Updater launchers and UI files from this installation. Release
+archives contain small temporary compatibility stubs so older cached update
+workers can accept the new package; those stubs are removed after installation
+or the first successful Setup launch. `User/`, tools, models, settings, update
+logs and rollback data are preserved.
 
 Quick summary:
 
@@ -71,6 +76,20 @@ or Intel GPU support are welcome, but those platforms are not supported by the
 current releases.
 
 ## Feature Highlights
+
+Manga Studio is an experimental desktop/tablet editor under **Umbra UI > Extras**.
+Build pages from templates, import artwork or GIFs, and arrange panel-clipped
+backgrounds, character layers and editable dialogue. Gallery image menus offer
+**Add to Manga Studio**. Generation uses your managed ComfyUI and the existing
+image queue; no models are required for importing and editing artwork.
+
+Save editable books in `User/MangaStudio/Projects`; put your own font files in
+`User/Fonts` and refresh the font list. Comic Neue and Bangers ship with their
+OFL licenses. Page PNG and book PDF/PNG ZIP exports provide still editions;
+Manga HTML creates a self-contained scrollable reader with original GIFs,
+independent playback, optional lettering and zoom controls. Open the HTML in a
+browser; file/email previews may disable scripts. Physical mobile reader devices,
+complete localization and all-model generation remain unqualified.
 
 - Gallery and Filmstrip for output browsing, viewing, and organization
 - Power Prompter for prompt construction, grouped queues, and tracked batch workflows

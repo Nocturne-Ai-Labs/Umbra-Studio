@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { inspectLocalRequirements } from './LocalRequirements';
 
 // Use the same interpreter/config/parser as the install, without resolution or preparation.
 // Private pip APIs changing is an actionable hold, never permission to compile StringZilla.
@@ -83,11 +84,28 @@ export function ordinaryNodeRequirementsMarker(content: string, platform: string
   return Bun.hash(platform === 'win32' ? `${content}\numbra-windows-stringzilla-wheel-v2` : content).toString();
 }
 
+export function ordinaryNodeRequirementsReceipt(requirementsPath: string, platform: string = process.platform, constraint = process.env.PIP_CONSTRAINT || '', buildConstraint = process.env.PIP_BUILD_CONSTRAINT || ''): string {
+  const inputs = inspectLocalRequirements(requirementsPath);
+  // Pip accepts whitespace-separated constraint paths; managed Setup passes one file URL.
+  const inspectPolicy = (value: string) => value.trim() ? inspectLocalRequirements(requirementsPath, value.trim().split(/\s+/)).declarations : [];
+  const policies = constraint.trim() || buildConstraint.trim() ? Bun.hash(JSON.stringify([inspectPolicy(constraint), inspectPolicy(buildConstraint)])).toString() : '';
+  return JSON.stringify({ schema: 3, platform, inputs: inputs.fingerprint, policies });
+}
+
+export function ordinaryNodeRequirementsRecorded(requirementsPath: string, marker: string, platform: string = process.platform): boolean {
+  try {
+    const receipt = JSON.parse(marker);
+    return receipt.schema === 3 && receipt.platform === platform && receipt.inputs === inspectLocalRequirements(requirementsPath).fingerprint;
+  } catch { return false; }
+}
+
 export function installOrdinaryNodeRequirements(
   python: string, comfyRoot: string, requirementsPath: string, markerPath: string,
   nodeName: string, log: (message: string) => void, platform: string = process.platform, forceRequirements = false,
 ): boolean {
-  const marker = ordinaryNodeRequirementsMarker(readFileSync(requirementsPath, 'utf8'), platform);
+  let marker: string;
+  try { marker = ordinaryNodeRequirementsReceipt(requirementsPath, platform); }
+  catch (error) { log(`Requirements inspection held for ${nodeName}: ${error instanceof Error ? error.message : String(error)}`); return false; }
   let matchingMarker = false;
   try { matchingMarker = readFileSync(markerPath, 'utf8').trim() === marker; }
   catch { /* Missing or stale evidence needs requirements sync. */ }

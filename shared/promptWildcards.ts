@@ -36,6 +36,7 @@ export interface UmbraPromptWildcardSegment {
 export interface UmbraPromptWildcardSegmentExpansion {
   prompt: string;
   tokens: UmbraPromptWildcardSegment[];
+  resolved: UmbraPromptWildcardExpansion['resolved'];
 }
 
 const TOKEN_PATTERN = /__([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})__/g;
@@ -484,12 +485,11 @@ export function expandUmbraPromptWildcardSegments(
     ))
     : [];
   if (tokens.length <= 0) {
-    return {
-      prompt: expandUmbraPromptWildcards(rawPrompt, rawWildcards, baseSeed + promptIndex).prompt,
-      tokens,
-    };
+    const expanded = expandUmbraPromptWildcards(rawPrompt, rawWildcards, baseSeed + promptIndex);
+    return { prompt: expanded.prompt, tokens, resolved: expanded.resolved };
   }
 
+  const resolved: UmbraPromptWildcardExpansion['resolved'] = [];
   const descriptorsByName = new Map<string, UmbraPromptWildcardResolutionDescriptor[]>();
   const descriptorsByToken = new Map<number, UmbraPromptWildcardResolutionDescriptor[]>();
   for (const [tokenIndex, token] of tokens.entries()) {
@@ -510,10 +510,12 @@ export function expandUmbraPromptWildcardSegments(
         : hold
           ? `wildcard-hold-fallback|${slotIdentity}|${name}|${occurrenceIndex}`
           : `${baseSeed + promptIndex}|wildcard-reroll|${slotIdentity}|${occurrenceIndex}`;
+      const expanded = expandUmbraPromptWildcards(`__${name}__`, rawWildcards, seed, { heldChoiceIds });
+      resolved.push(...expanded.resolved);
       const descriptor: UmbraPromptWildcardResolutionDescriptor = {
         name,
         tokenIndex,
-        value: expandUmbraPromptWildcards(`__${name}__`, rawWildcards, seed, { heldChoiceIds }).prompt,
+        value: expanded.prompt,
       };
       const namedDescriptors = descriptorsByName.get(name) || [];
       namedDescriptors.push(descriptor);
@@ -535,11 +537,13 @@ export function expandUmbraPromptWildcardSegments(
       descriptorOffsets.set(name, offset + 1);
       const descriptor = descriptors[offset];
       if (descriptor) return descriptor.value;
-      return expandUmbraPromptWildcards(
+      const expanded = expandUmbraPromptWildcards(
         wildcardToken,
         rawWildcards,
         `${baseSeed + promptIndex}|wildcard-reroll|fallback|${name}|${offset}`,
-      ).prompt;
+      );
+      resolved.push(...expanded.resolved);
+      return expanded.prompt;
     },
   ).trim();
 
@@ -568,5 +572,5 @@ export function expandUmbraPromptWildcardSegments(
     }
   }
 
-  return { prompt, tokens: resolvedTokens };
+  return { prompt, tokens: resolvedTokens, resolved };
 }

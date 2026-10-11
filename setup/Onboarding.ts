@@ -5,7 +5,7 @@ import { modelSetupCatalog, modelSetupSelection, readModelSetupManifest, type Mo
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { readManagedToolRequirements } from './ManagedToolRequirements';
-import { ordinaryNodeRequirementsMarker } from './OrdinaryNodeRequirements';
+import { ordinaryNodeRequirementsRecorded } from './OrdinaryNodeRequirements';
 import { aiToolkitRequirementsVerified, aiToolkitRequirementsFingerprint } from './AIToolkitPython';
 import { inspectComfyPython, inspectAIToolkitPython } from './ComfyPythonRuntime';
 import { comfyPythonUpgradePending, toolPythonUpgradePending } from '../shared/toolMaintenanceLock';
@@ -189,7 +189,7 @@ export async function inspectOnboarding(source: string, root: string) {
     const requirementsFile = join(folder, 'requirements.txt'), markerFile = join(folder, '.umbra-requirements-installed');
     for (const target of [join(folder, '__init__.py'), requirementsFile, markerFile]) assertLocalPath(root, target);
     let requirementsVerified = !existsSync(requirementsFile);
-    try { if (!requirementsVerified) requirementsVerified = readFileSync(markerFile, 'utf8').trim() === ordinaryNodeRequirementsMarker(readFileSync(requirementsFile, 'utf8')); } catch { /* A missing/stale installer receipt holds this step. */ }
+    try { if (!requirementsVerified) requirementsVerified = ordinaryNodeRequirementsRecorded(requirementsFile, readFileSync(markerFile, 'utf8').trim()); } catch { /* A missing/stale installer receipt holds this step. */ }
     return { name, init: identity(join(folder, '__init__.py')), requirements: identity(markerFile), requirementsVerified };
   });
   const nodesFingerprint = createHash('sha256').update(JSON.stringify({ core: core.installedCommit, baseNodes })).digest('hex');
@@ -214,8 +214,8 @@ export async function inspectOnboarding(source: string, root: string) {
   const details = ['Save your preferred language.', 'Install and verify managed ComfyUI and its Python environment.', 'Install AI Toolkit for training, or skip it.', 'Install and verify custom nodes.', 'Install or verify selected support models.', 'Select a model family and a compatible generation checkpoint.', 'Verify the selected installation.'];
   const stages = ['language', 'comfyui', 'training', 'nodes', 'support', 'generation', 'ready'].map((id, index) => ({ id, complete: index === 6 ? ready : checks[index], detail: details[index] }));
   const issues = stages.slice(0, 6).filter(stage => !stage.complete).map(stage => stage.detail);
-  if (state.profiles.length && !checkpoint) issues.push('Add a compatible generation checkpoint in Umbra Model Manager; prerequisites alone do not include one.');
   const issueCodes = stages.slice(0, 6).filter(stage => !stage.complete).map(stage => stage.id);
+  if (state.profiles.length && !checkpoint) { issueCodes.push('checkpoint'); issues.push('Add a compatible generation checkpoint in Umbra Model Manager; prerequisites alone do not include one.'); }
   if (!media.ready) { issueCodes.push('media'); issues.push('Install or repair FFmpeg and ffprobe.'); }
   return { success: true, state, stages, issueCodes, media, trainingPython: { ...trainingPython, installed: existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py')), upgradeAvailable: trainingPython.upgradeAvailable || toolPythonUpgradePending(root, 'aitoolkit') }, python: { installed: core.installed, version: python.version, healthy: python.healthy, target: python.targetVersion, upgradeAvailable: python.upgradeAvailable || pythonPending }, selectedCheckpoint: checkpoint, checkpointIntegrity, catalog: { ...catalog, checkpoints, generationProfiles: [...generationProfiles] }, ready, issues, fingerprint, nodesFingerprint,
     qualification: 'Installation files and model integrity verified. Launch managed ComfyUI from Umbra; GPU execution and image quality have not been tested.' };

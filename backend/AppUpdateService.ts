@@ -1,4 +1,5 @@
 import { writeUpdateJsonAtomic as writeJsonAtomic } from '../shared/updateStateFile';
+import { isUmbraReleaseVersion } from '../shared/releaseVersion.mjs';
 import {
   createReadStream,
   existsSync,
@@ -98,7 +99,7 @@ export function normalizeGithubRelease(
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.draft === true) return null;
   const tag = String(value.tag_name || '').trim();
   const version = normalizeUmbraVersion(tag);
-  if (!tag || !/^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i.test(version)) return null;
+  if (!tag || !isUmbraReleaseVersion(version)) return null;
   const assets = Array.isArray(value.assets) ? value.assets as GithubAsset[] : [];
   const packagePattern = releaseAssetPattern(platform, arch, windowsLauncherFlavor);
   const asset = assets.find((entry) => {

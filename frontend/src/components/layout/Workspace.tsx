@@ -2206,7 +2206,16 @@ const LocalServerWorkspace = ({ isActive }: { isActive: boolean }) => {
 export const Workspace = () => {
   const activeWorkspace = useStore((state) => state.activeWorkspace);
   const setActiveWorkspace = useStore((state) => state.setActiveWorkspace);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('umbraSetup') !== 'models') return;
+    url.searchParams.delete('umbraSetup');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    if (!isUmbraRemoteClient()) setActiveWorkspace('modelmanager');
+  }, [setActiveWorkspace]);
   const showFilmstrip = useStore((state) => state.ui.showFilmstrip);
+  const [mangaActive, setMangaActive] = useState(() => typeof document !== 'undefined' && document.documentElement.dataset.umbraMangaActive === '1');
+  useEffect(() => { const listener = (event: Event) => setMangaActive((event as CustomEvent<boolean>).detail === true); window.addEventListener('umbra:manga:active', listener); return () => window.removeEventListener('umbra:manga:active', listener); }, []);
   const isAppBarCollapsed = useStore((state) => state.ui.isAppBarCollapsed);
   const [remoteMode, setRemoteMode] = useState<string>(() => {
     if (typeof document === 'undefined') return 'desktop';
@@ -2356,7 +2365,7 @@ export const Workspace = () => {
     return () => window.clearTimeout(timer);
   }, [isRemoteClient, remoteMode]);
 
-  const effectiveShowFilmstrip = showFilmstrip && remoteMode !== 'phone';
+  const effectiveShowFilmstrip = showFilmstrip && remoteMode !== 'phone' && !(activeWorkspace === 'umbraui' && mangaActive);
 
   const reservedFilmstripHeight = effectiveShowFilmstrip
     ? Math.max(120, Math.min(420, Math.round(filmstripDockHeight)))

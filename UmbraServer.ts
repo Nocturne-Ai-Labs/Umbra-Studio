@@ -1,4 +1,5 @@
 import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
+import { MangaStudioFiles } from './backend/MangaStudioFiles';
 import { resolveHostNodeRuntime, type HostNodeRuntime } from './shared/hostNodeRuntime';
 import { parseInstallerFailure } from './shared/installerFailure';
 import { inspectAIToolkitPython } from './setup/ComfyPythonRuntime';
@@ -140,6 +141,7 @@ import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
 import { UmbraUiCanvasWorkspaceProjectService } from './backend/UmbraUiCanvasWorkspaceProjectService';
 import { UmbraUiCanvasBackgroundRemovalService } from './backend/UmbraUiCanvasBackgroundRemovalService';
 import { replaceUmbraUiImageSource } from './backend/UmbraUiSourceReplacementService';
+import { UmbraImageOutputReceipts } from './backend/UmbraImageOutputReceipts';
 import { UmbraUiImg2ImgCompletionReceipts } from './backend/UmbraUiImg2ImgCompletionReceipts';
 import {
   concatenateUmbraExtendedVideoClips,
@@ -347,6 +349,7 @@ const USER_DIR = join(ROOT_DIR, 'User');
 const umbraStagedVideoPreviewGrants = new UmbraStagedVideoPreviewGrants(
   join(USER_DIR, 'UmbraUI', 'Queue', 'staged-video-previews.json'),
 );
+const umbraImageOutputReceipts = new UmbraImageOutputReceipts(join(USER_DIR, 'UmbraUI', 'ImageOutputReceipts'));
 const umbraUiImg2ImgCompletionReceipts = new UmbraUiImg2ImgCompletionReceipts(
   join(USER_DIR, 'UmbraUI', 'ImageCompletionReceipts'),
 );
@@ -499,6 +502,7 @@ const umbraUiInpaintService = new UmbraUiInpaintService({
 const umbraUiCanvasProjectService = new UmbraUiCanvasProjectService(USER_DIR);
 const umbraUiCanvasStudioProjectService = new UmbraUiCanvasStudioProjectService(USER_DIR);
 const umbraUiCanvasWorkspaceProjectService = new UmbraUiCanvasWorkspaceProjectService(USER_DIR);
+const mangaStudioFiles = new MangaStudioFiles(USER_DIR);
 void fsWorkerService.warmup();
 void galleryFsWorkerService.warmup();
 void galleryRefreshWorkerService.warmup();
@@ -7787,7 +7791,13 @@ function resolvePrompterPromptWildcards(
   );
   return {
     prompt: expanded.prompt,
-    entry: entry ? { ...entry, prompt: expanded.prompt, tokens: expanded.tokens } : entry,
+    entry: {
+      ...(entry || {}),
+      originalPrompt: String(rawPrompt || ''),
+      prompt: expanded.prompt,
+      tokens: expanded.tokens,
+      wildcardResolutions: expanded.resolved,
+    },
   };
 }
 
@@ -7815,9 +7825,7 @@ function resolvePrompterQueuePayloadWildcards(
       activePrompt: resolvedPrompts[0] || '',
       prompts: resolvedPrompts,
       joinedPrompt: resolvedPrompts.join(', '),
-      promptEntries: Array.isArray(state?.promptEntries)
-        ? resolved.map((entry) => entry.entry)
-        : state?.promptEntries,
+      promptEntries: resolved.map((entry) => entry.entry),
     },
   };
 }
@@ -10330,6 +10338,10 @@ async function emitBackendPowerPrompterSavedOutputs(
       umbra_power_prompter: outputPowerPrompterMetadata,
     };
   }));
+  if (generation?.outputOwner === 'umbra_ui' && ['txt2img','img2img'].includes(generation.outputMode)) {
+    try { umbraImageOutputReceipts.record(requestId, stampedOutputs.map(output => String(output.fullpath || ''))); }
+    catch (error) { appendPowerPrompterQueueLog('image_output_receipt_save_failed', {requestId,error:String(error)}); }
+  }
   const primaryPowerPrompterMetadata = stampedOutputs[0]?.umbra_power_prompter || basePowerPrompterMetadata;
   // Auxiliary continuity frames must not redirect the filmstrip's Latest folder.
   recordGeneratedMediaOutputs(stampedOutputs.filter(output => !output.lastFrameFor));
@@ -11977,6 +11989,8 @@ async function runBackendPowerPrompterPipelineQueue(
           sourceFile,
           source_file: sourceFile,
           segments,
+          originalPrompt: (task.promptEntries[index] as Record<string, unknown> | null)?.originalPrompt || prompt,
+          wildcardResolutions: (task.promptEntries[index] as Record<string, unknown> | null)?.wildcardResolutions || [],
           ...(restore ? { restore } : {}),
         },
         ...(sourceFile ? { source_file: sourceFile } : {}),
@@ -17204,7 +17218,6 @@ function isPortableAppUpdateAvailable(): boolean {
   return existsSync(join(ROOT_DIR, 'portable-mode'))
     && existsSync(join(SOURCE_DIR, 'launcher', 'UmbraUpdateWorker.js'))
     && existsSync(join(SOURCE_DIR, 'launcher', 'UmbraUpdaterBootstrap.js'))
-    && existsSync(join(SOURCE_DIR, 'updater', 'UmbraUpdaterApp.js'))
     && existsSync(join(SOURCE_DIR, 'updater', 'UmbraRelaunchWorker.js'))
     && existsSync(join(SOURCE_DIR, 'setup', 'UmbraSetupApp.js'))
     && existsSync(join(SOURCE_DIR, 'updater', 'update-panel.html'));
@@ -17215,10 +17228,10 @@ async function prepareStandaloneUpdaterLaunch(): Promise<StandaloneUpdaterLaunch
   const existing = await existingUpdaterUrl(ROOT_DIR, SOURCE_DIR);
   if (existing) {
     const url = new URL(existing); url.searchParams.set('tab', 'updates');
-    const statusUrl = new URL('/api/state', url); statusUrl.searchParams.set('token', url.searchParams.get('token') || '');
+    const statusUrl = new URL('/api/status', url); statusUrl.searchParams.set('token', url.searchParams.get('token') || '');
     const statusResponse = await fetch(statusUrl, { signal: AbortSignal.timeout(2000) });
-    const setupStatus = await statusResponse.json() as { job?: { phase?: string } };
-    if (!statusResponse.ok || setupStatus.job?.phase === 'running') throw new Error('Finish the current Setup job before opening updates.');
+    const setupStatus = await statusResponse.json() as { success?: boolean; busy?: boolean; needsReopen?: boolean; job?: { phase?: string } };
+    if (!statusResponse.ok || setupStatus.success !== true || setupStatus.busy || setupStatus.needsReopen || setupStatus.job?.phase === 'running') throw new Error('Finish the current Setup job before opening updates.');
     return { token: url.searchParams.get('token') || '', origin: url.origin, updaterUrl: url.toString(), reuse: true };
   }
   const token = randomBytes(24).toString('hex');
@@ -38810,6 +38823,14 @@ const server = Bun.serve<UmbraSocketData>({
         return handleUmbraUiReplaceImageSource(req);
       }
 
+      if (path === '/api/umbra-ui/image/outputs' && method === 'GET') {
+        const receipt = await umbraImageOutputReceipts.get(url.searchParams.get('requestId'), async outputPath => {
+          const allowed = await resolveAllowedGalleryPath(outputPath, getGalleryTransferAllowedRoots());
+          return allowed && (await fs.stat(allowed).catch(() => null))?.isFile() ? allowed : null;
+        }, Math.max(0, Number(url.searchParams.get('after')) || 0));
+        return receipt ? json({success:true,receipt}) : json({success:false,error:'No saved image outputs yet.'},404);
+      }
+
       if (path === '/api/umbra-ui/image/completion-receipt' && method === 'GET') {
         const receipt = await umbraUiImg2ImgCompletionReceipts.get(
           url.searchParams.get('requestId'),
@@ -38881,6 +38902,8 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/umbra-ui/canvas/projects' && method === 'GET') {
         return handleUmbraUiCanvasWorkspaceProjectList();
       }
+
+      if (path.startsWith('/api/manga/')) return (await mangaStudioFiles.handle(req))!;
 
       if (path.startsWith('/api/umbra-ui/canvas/projects/')) {
         const projectSuffix = path.slice('/api/umbra-ui/canvas/projects/'.length);
@@ -40499,6 +40522,7 @@ async function gracefulShutdown(signal: string) {
   try {
     writeUmbraShutdownMarker(ROOT_DIR, {
       serverPid: process.pid,
+      launcherPid: process.env.UMBRA_WEB_LAUNCHER === '1' ? process.ppid : 0,
       managedProcessPids: uniquePositivePids([
         comfyProcess?.pid,
         aitoolkitProcess?.pid,

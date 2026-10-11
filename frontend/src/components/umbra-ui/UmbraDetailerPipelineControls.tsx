@@ -178,10 +178,10 @@ export function UmbraDetailerPipelineControls({
   if (!showDetailer && !showOutputUpscale) return null;
 
   return (
-    <section className="rounded-md border border-white/10 bg-white/[0.02] p-2.5">
+    <section data-umbra-detailer-controls="" className="rounded-md border border-white/10 bg-white/[0.02] p-2.5">
       {showDetailer ? (
         <>
-      <div className="flex min-h-8 items-center gap-2">
+      <div data-umbra-detailer-header="" className="flex min-h-8 items-center gap-2">
         <button
           type="button"
           onClick={() => setPipelineExpanded((current) => !current)}
@@ -232,7 +232,7 @@ export function UmbraDetailerPipelineControls({
               'overflow-hidden rounded-md border transition-colors',
               stage.enabled ? 'border-emerald-300/20 bg-emerald-500/[0.045]' : 'border-white/10 bg-black/20',
             )}>
-              <div className="flex min-w-0 items-center gap-1.5 px-2 py-1.5">
+              <div data-umbra-detailer-stage-toolbar="" className="flex min-w-0 items-center gap-1.5 px-2 py-1.5">
                 {showStageControls ? (
                   <button
                     type="button"
@@ -246,6 +246,7 @@ export function UmbraDetailerPipelineControls({
                 <button
                   type="button"
                   onClick={() => showStageControls && setExpandedStageId(expanded ? null : stage.id)}
+                  data-umbra-detailer-stage-title=""
                   className="min-w-0 flex-1 text-left"
                   disabled={!showStageControls}
                 >

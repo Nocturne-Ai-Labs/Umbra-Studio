@@ -797,7 +797,7 @@
             "controllerNodeId": 3676,
             "controllerWidget": "enabled"
           },
-          "reason": "Only the enabled PatchTritonVAE branch requires Triton; this pinned LTX original enables that branch by default. It is not required for H3 or the declared Umbra API workflows. On Windows use triton-windows matched to the installed Torch minor and supported GPU; Linux uses the compatible triton distribution. Installation is held until that platform pin is reviewed. Native loading separately requires every original node class to remain registered, including bypassed stages."
+          "reason": "Only the enabled PatchTritonVAE branch requires Triton; this pinned LTX original enables that branch by default. It is not required for H3 or the declared Umbra API workflows. Windows uses reviewed triton-windows pins matched to Torch and managed Python 3.13: Torch 2.10/2.11 uses Triton 3.6, 2.12/2.13 uses 3.7, and 2.14 uses 3.8. The current source is https://github.com/triton-lang/triton-windows#3-pytorch; its published CPython 3.13 wheels are verified before pinning. Linux uses its installed Torch wheel's declared Triton requirement. Unknown combinations remain held. Supported GPU/native execution and registration of every original node class, including bypassed stages, remain separate readiness checks."
         }
       ]
     }

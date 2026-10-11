@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeLegacyUpdaterCompatibility } from './legacy-updater-compatibility.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -297,27 +298,6 @@ exec "$BUN_BIN" "$PWD/resources/app/launcher/UmbraWebLauncher.ts" --root "$PWD" 
   fs.chmodSync(launcherPath, 0o755);
 }
 
-function writeLinuxUpdaterLauncher() {
-  const launcherPath = path.join(publishRoot, 'umbra-updater.sh');
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-BUN_BIN="$PWD/Runtime/Bun/linux/bun"
-UPDATER_BOOTSTRAP="$PWD/resources/app/launcher/UmbraUpdaterBootstrap.js"
-if [ ! -x "$BUN_BIN" ]; then
-  echo "[ERROR] Bundled Bun runtime missing: $BUN_BIN"
-  exit 1
-fi
-if [ ! -f "$UPDATER_BOOTSTRAP" ]; then
-  echo "[ERROR] Umbra Setup launcher missing: $UPDATER_BOOTSTRAP"
-  exit 1
-fi
-exec "$BUN_BIN" "$UPDATER_BOOTSTRAP" --root "$PWD" --tab updates "$@"
-`;
-  fs.writeFileSync(launcherPath, script, 'utf-8');
-  fs.chmodSync(launcherPath, 0o755);
-}
-
 function writeLinuxSetupLauncher() {
   const launcherPath = path.join(publishRoot, 'umbra-setup.sh');
   const script = `#!/usr/bin/env bash
@@ -457,7 +437,7 @@ function verifyPublish() {
     'utf8',
   );
   const updaterApp = fs.readFileSync(
-    path.join(publishRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
+    path.join(publishRoot, 'resources', 'app', 'setup', 'UmbraSetupApp.js'),
     'utf8',
   );
   const updaterHtml = fs.readFileSync(
@@ -495,7 +475,7 @@ function publish() {
   run('bun', ['run', 'webapp:prepare-dependencies'], 'runtime dependency preparation');
   run('bun', ['run', 'build:frontend'], 'frontend build');
   run('bun', ['build', 'UmbraServer.ts', '--target=bun', '--outfile', path.join('dist-webapp', 'UmbraServer.js')], 'backend build');
-  run('bun', ['run', 'webapp:build-updater'], 'standalone updater build');
+  run('bun', ['run', 'webapp:build-update-runtime'], 'Setup update runtime build');
   run('bun', ['run', 'webapp:build-setup'], 'standalone setup build');
 
   const packagedAppDir = path.join(publishRoot, 'resources', 'app');
@@ -557,10 +537,6 @@ function publish() {
     path.join(packagedAppDir, 'launcher', 'UmbraUpdaterBootstrap.js'),
   );
   copyExplicitFile(
-    path.join(root, 'dist-webapp', 'UmbraUpdaterApp.js'),
-    path.join(packagedAppDir, 'updater', 'UmbraUpdaterApp.js'),
-  );
-  copyExplicitFile(
     path.join(root, 'dist-webapp', 'UmbraRelaunchWorker.js'),
     path.join(packagedAppDir, 'updater', 'UmbraRelaunchWorker.js'),
   );
@@ -601,7 +577,7 @@ function publish() {
 
   writeLinuxLauncher();
   writeLinuxSetupLauncher();
-  writeLinuxUpdaterLauncher();
+  writeLegacyUpdaterCompatibility(publishRoot, 'linux');
   writeDesktopFile();
   fs.writeFileSync(path.join(publishRoot, 'portable-mode'), 'portable linux webapp runtime enabled\n', 'utf-8');
   verifyPublish();

@@ -2550,6 +2550,7 @@ export function UmbraCanvasWorkspace({
       className="@container/canvas relative col-span-full flex min-h-0 min-w-0 flex-col bg-[#07090a]"
     >
       <header data-umbra-canvas-project-toolbar="" className="flex min-h-12 min-w-0 shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/25 px-3 py-1.5">
+        <a href="/?umbraPopout=manga" target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center rounded-md border border-[var(--umbra-accent)] px-2 text-[10px] font-bold text-[var(--umbra-text)]" title="Open private Manga Studio prototype">Manga Studio</a>
         <div role="group" aria-label="Canvas panels" className="flex shrink-0 items-center gap-1">
           {([
             { id: 'inpaint', label: 'Prompt', icon: Focus },

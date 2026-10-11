@@ -184,6 +184,15 @@ ComfyUI custom nodes, SageAttention and ComfyUI version switching. Stop the
 corresponding tool before maintenance and follow the progress and installer log
 in Setup. Launch, stop and connection checks remain in Umbra Studio.
 
+Optional SageAttention uses a checksum-pinned upstream Windows ABI3 wheel for
+reviewed x64 combinations: Python 3.10–3.14, PyTorch 2.10–2.14 and CUDA 12.8 or
+13.0. Other combinations use the pinned source build and require a compatible
+C++ compiler and CUDA development toolkit. Linux builds require those native
+tools; Setup selects an available compiler and supplies C++20 for PyTorch 2.14
+headers. It retains the installed PyTorch stack. Linux AI Toolkit installation
+also verifies its native SQLite addon and rebuilds that exact addon when its
+prebuilt binary requires a newer glibc than the host supplies.
+
 Umbra Setup also owns application updates under **Updates**. Guided setup starts
 with language, then ComfyUI, optional AI Toolkit, nodes, support models, generation
 resources and verification. The desktop wizard shows one step at a time; individual

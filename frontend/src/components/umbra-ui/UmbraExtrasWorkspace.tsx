@@ -4,8 +4,10 @@ import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraTransparencyWorkspace } from './UmbraTransparencyWorkspace';
 import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import React from 'react';
+const MangaStudio = React.lazy(() => import('@/features/manga/MangaStudio').then(module => ({ default: module.MangaStudio })));
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
+  BookOpen,
   AlertTriangle,
   CheckCircle2,
   Copy,
@@ -125,6 +127,7 @@ function ExtrasToolNavigation({
   const { language, t } = useI18n();
   const navigationRef = React.useRef<HTMLDivElement>(null);
   const tools: Array<{ id: UmbraExtrasToolMode; label: string; icon: React.ReactNode }> = [
+    ...(remoteMode === 'phone' ? [] : [{ id: 'manga' as const, label: 'Manga Studio', icon: <BookOpen size={12} /> }]),
     { id: 'upscale', label: t('extras.upscale'), icon: <ImageUp size={12} /> },
     { id: 'censor', label: t('extras.imageCensor'), icon: <EyeOff size={12} /> },
     { id: 'transparency', label: 'Transparency', icon: <Eraser size={12} /> },
@@ -694,7 +697,8 @@ export function UmbraExtrasWorkspace({
       <ExtrasToolNavigation value={activeTool} onChange={setActiveTool} remoteMode={remoteMode} />
       {visitedTools.filter((tool) => tool !== 'upscale').map((tool) => (
         <div key={tool} data-extras-tool={tool} data-umbra-ui-extras-inspector={tool === 'metadata-scanner' || tool === 'visual-analysis' ? '' : undefined} className={tool === activeTool ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'hidden'}>
-          {tool === 'metadata-scanner' ? <ScannerWorkspace hideHeader active={active && tool === activeTool} remoteMode={remoteMode} />
+          {tool === 'manga' ? <React.Suspense fallback={<div role="status">Loading Manga Studio…</div>}><MangaStudio embedded active={active && tool === activeTool} /></React.Suspense>
+            : tool === 'metadata-scanner' ? <ScannerWorkspace hideHeader active={active && tool === activeTool} remoteMode={remoteMode} />
             : tool === 'visual-analysis' ? <WaifuDiffusionWorkspace hideHeader active={active && tool === activeTool} remoteMode={remoteMode} />
               : tool === 'transparency' ? <UmbraTransparencyWorkspace active={active && tool === activeTool} />
                 : isMediaToolMode(tool) ? <UmbraExtrasMediaTools mode={tool} /> : null}
