@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
 import { managedChildPath, type ManagedNodeRequirement } from './ManagedToolRequirements';
+import { gitMaintenanceFailure, sameGitCheckout } from './GitMaintenance';
 
 type GitResult = { status: number | null; stdout: string; stderr?: string };
 type GitRunner = (args: string[], cwd: string) => GitResult;
@@ -36,7 +36,8 @@ export function repairManagedNodeCheckout(
     checked(['clone', '--no-checkout', '--', node.repo, node.name], nodesRoot);
   }
   const topLevel = git(['rev-parse', '--show-toplevel'], nodePath);
-  if (topLevel.status !== 0 || resolve(topLevel.stdout.trim()).toLowerCase() !== resolve(nodePath).toLowerCase()) {
+  if (topLevel.status !== 0) throw new Error(gitMaintenanceFailure(node.name, topLevel.stderr || ''));
+  if (!sameGitCheckout(topLevel.stdout.trim(), nodePath)) {
     throw new Error(`${node.name} is not an independent Git checkout. Its local files were preserved.`);
   }
   const head = checked(['rev-parse', 'HEAD']);

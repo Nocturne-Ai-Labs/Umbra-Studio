@@ -11,3 +11,6 @@
 *.sqlite binary
 setup/DaSiWaForgeCompute.patch text eol=lf whitespace=-blank-at-eol
 setup/DaSiWaForgeCompute.legacy.patch text eol=lf whitespace=-blank-at-eol
+# Preserve upstream OFL license whitespace without flagging it as source formatting.
+frontend/public/assets/manga-fonts/*-OFL.txt whitespace=-blank-at-eol
+defaults/ThirdPartyLicenses/*.txt whitespace=-blank-at-eol,-blank-at-eof

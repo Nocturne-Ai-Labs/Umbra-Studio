@@ -488,6 +488,10 @@ async function buildFrontend() {
   try {
     copyStaticPublic();
     const mainBundlePath = await buildJavaScript();
+    const reader=await Bun.build({entrypoints:[path.join(srcDir,'features/manga/mangaReaderRuntime.ts')],target:'browser',format:'iife',minify:true});
+    if(!reader.success)throw new Error('Manga reader build failed: '+reader.logs.join('\n'));
+    fs.writeFileSync(path.join(activePublicAssetsDir,'manga-reader.js'),await reader.outputs[0].text());
+    fs.writeFileSync(path.join(activePublicAssetsDir,'manga-reader-LICENSE.txt'),['gifuct-js','js-binary-schema-parser'].map(name=>`${name}\n${fs.readFileSync(path.join(root,'node_modules',name,'LICENSE'),'utf8')}`).join('\n\n'));
     await buildQueueWorker();
     await buildRasterFilterWorker();
     await buildCanvasEncodeWorker();

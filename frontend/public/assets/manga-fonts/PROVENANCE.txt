@@ -1,0 +1,12 @@
+# Manga Studio starter fonts
+
+Unmodified font files from google/fonts commit `5e8a3ba899557829a76cfdac30fa512bda91d7ca`:
+
+- `ofl/comicneue/ComicNeue-Regular.ttf`, SHA-256 `a0ee5a37c8b27c4db0700137d928598b1e23b0089e1546a8961909176b779360`
+- `ofl/comicneue/ComicNeue-Bold.ttf`, SHA-256 `3e7e5fccfd7e0788f317b43312151c1bd5cf058c9697a8d83eac3939050bd61e`
+- `ofl/bangers/Bangers-Regular.ttf`, SHA-256 `4160a7311de9342674cce9160cde9fcbb30f48190397d86ff1b70b455af65824`
+
+Copyright 2014 The Comic Neue Project Authors (https://github.com/crozynski/comicneue).
+Copyright 2010 The Bangers Project Authors (https://github.com/googlefonts/bangers).
+
+Both families use the SIL Open Font License 1.1. The corresponding unmodified licenses are included as `comicneue-OFL.txt` and `bangers-OFL.txt`. These are starter comic lettering choices, not a claim that either font is a manga publishing standard. Anime Ace or other preferred manga faces can be supplied by the user in `User/Fonts`.

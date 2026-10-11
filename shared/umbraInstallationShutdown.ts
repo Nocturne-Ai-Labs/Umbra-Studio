@@ -1,6 +1,7 @@
+import { readUmbraProcessIdentity, processIdentityMatches, processIdentityBelongsToRoot, type UmbraProcessIdentity } from './umbraProcessIdentity';
 import { createConnection } from 'node:net';
 import { inspectUmbraRuntimeHealth } from './umbraRuntimeHealth';
-import { readUmbraShutdownMarker } from './umbraShutdownMarker';
+import { readUmbraShutdownMarker, isUmbraShutdownMarkerForProcess } from './umbraShutdownMarker';
 
 function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
@@ -29,7 +30,17 @@ export async function shutdownUmbraForInstallation(options: {
   if (health === 'foreign') throw new Error('The Umbra listener belongs to another installation or cannot be verified. No installation started.');
   if (health === 'absent') {
     if (!await isUmbraInstallationListenerClosed(host, port)) throw new Error('The Umbra listener is still in use. No installation started.');
-    for (const pid of [options.serverPid, options.launcherPid]) if (pid && processAlive(pid)) throw new Error('Umbra is still releasing files. Wait for it to exit and retry installation.');
+    const marker = readUmbraShutdownMarker(options.runtimeRoot);
+    const pids = marker
+      ? [marker.serverPid, ...marker.managedProcessPids, marker.launcherPid || 0]
+      : [options.serverPid || 0, options.launcherPid || 0];
+    for (const pid of pids) {
+      if (!pid || !processAlive(pid)) continue;
+      const saved = marker?.processIdentities?.find(identity => identity.pid === pid);
+      if (saved && !processIdentityMatches(saved)) continue;
+      const identity = readUmbraProcessIdentity(pid);
+      if (!identity || processIdentityBelongsToRoot(identity, options.runtimeRoot) || marker?.managedProcessPids.includes(pid)) throw new Error('Umbra is still releasing files. Wait for it to exit and retry installation.');
+    }
     return;
   }
   const queueResponse = await fetch(`${options.origin}/api/powerprompter/backend-queue-debug`, { signal: AbortSignal.timeout(5000) });
@@ -41,14 +52,25 @@ export async function shutdownUmbraForInstallation(options: {
   const response = await fetch(`${options.origin}/api/app/updater/shutdown`, { method: 'POST', signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error('Umbra did not accept shutdown. No installation started.');
   const timeout = options.timeoutMs ?? 30_000;
-  let ownedPids: number[] | null = null;
+  let ownedProcesses: UmbraProcessIdentity[] | null = null;
   while (Date.now() - started < timeout) {
     const marker = readUmbraShutdownMarker(options.runtimeRoot);
-    if (marker && marker.requestedAtMs >= started && (!options.serverPid || marker.serverPid === options.serverPid)) {
-      ownedPids = [...new Set([marker.serverPid, ...marker.managedProcessPids, ...(options.launcherPid ? [options.launcherPid] : [])])];
-      if (ownedPids.includes(process.pid)) throw new Error('Setup cannot shut down its own process. No installation started.');
+    if (!ownedProcesses && marker && marker.requestedAtMs >= started && isUmbraShutdownMarkerForProcess(marker, marker.serverPid)) {
+      // Adopt this shutdown attempt; a reused Setup session may name an older server.
+      ownedProcesses = [];
+      const serverIdentity = marker.processIdentities?.find(identity => identity.pid === marker.serverPid) || readUmbraProcessIdentity(marker.serverPid);
+      if (serverIdentity && !processIdentityBelongsToRoot(serverIdentity, options.runtimeRoot)) throw new Error('The shutdown marker belongs to another installation. No installation started.');
+      const parent = !marker.launcherPid && serverIdentity ? readUmbraProcessIdentity(serverIdentity.parentPid) : null;
+      const legacyLauncherPid = parent && processIdentityBelongsToRoot(parent, options.runtimeRoot) && /UmbraWebLauncher|UmbraStudio\.bat|start-umbra\.sh/i.test(parent.commandLine) ? parent.pid : 0;
+      for (const pid of [...new Set([marker.serverPid, ...marker.managedProcessPids, marker.launcherPid || legacyLauncherPid])]) {
+        if (!pid) continue;
+        if (pid === process.pid) throw new Error('Setup cannot shut down its own process. No installation started.');
+        const identity = marker.processIdentities?.find(entry => entry.pid === pid) || readUmbraProcessIdentity(pid);
+        if (identity) ownedProcesses.push(identity);
+        else if (processAlive(pid)) throw new Error('Shutdown process identity could not be verified. No installation started.');
+      }
     }
-    if (ownedPids && ownedPids.every(pid => !processAlive(pid)) && await isUmbraInstallationListenerClosed(host, port)) {
+    if (ownedProcesses && ownedProcesses.every(identity => !processIdentityMatches(identity)) && await isUmbraInstallationListenerClosed(host, port)) {
       options.onProgress?.('Umbra Studio and managed tools are closed');
       return;
     }

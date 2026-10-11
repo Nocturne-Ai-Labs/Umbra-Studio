@@ -1,4 +1,5 @@
 export type UmbraUiExtrasToolId =
+  | 'manga'
   | 'upscale'
   | 'metadata-scanner'
   | 'visual-analysis'
@@ -13,6 +14,7 @@ export const UMBRA_UI_EXTRAS_TOOL_EVENT = 'umbra:umbra-ui-extras-tool';
 
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
 const VALID_EXTRAS_TOOLS = new Set<UmbraUiExtrasToolId>([
+  'manga',
   'upscale',
   'metadata-scanner',
   'visual-analysis',

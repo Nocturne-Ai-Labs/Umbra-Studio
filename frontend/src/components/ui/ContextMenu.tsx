@@ -20,6 +20,9 @@ interface ContextMenuProps {
 const MENU_MARGIN = 8;
 const SUBMENU_GAP = 4;
 
+// Native modal dialogs make body portals inert; keep their menus in the top layer.
+const menuPortalRoot = () => document.activeElement?.closest('dialog[open]') || document.body;
+
 function getMenuBoundary(selector?: string): DOMRect {
   if (typeof window === 'undefined') {
     return {
@@ -268,7 +271,8 @@ function MenuPanel({
                   event.stopPropagation();
                   if (!item.disabled) item.onContextMenu?.(event);
                 } : undefined}
-                onPointerEnter={() => {
+                onPointerEnter={(event) => {
+                  if (event.pointerType === 'touch') return;
                   setActiveIndex(index);
                   setOpenIndex(hasChildren ? index : -1);
                 }}
@@ -318,7 +322,7 @@ function MenuPanel({
                       }}
                       presentation="anchored"
                     />,
-                    document.body,
+                    menuPortalRoot(),
                   )
                 : null}
             </React.Fragment>
@@ -436,6 +440,6 @@ export function ContextMenu({
         presentation={presentation}
       />
     </>,
-    document.body,
+    menuPortalRoot(),
   );
 }

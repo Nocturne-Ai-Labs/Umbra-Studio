@@ -1,3 +1,4 @@
+import { cleanupLegacyUmbraUpdater } from '../shared/legacyUmbraUpdater';
 import { writeUpdateJsonAtomic as writeJsonAtomic } from '../shared/updateStateFile';
 import {
   chmodSync,
@@ -27,6 +28,7 @@ import {
 } from '../shared/appUpdate';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { inspectUmbraRuntimeHealth } from '../shared/umbraRuntimeHealth';
+import { readUmbraProcessIdentity, processIdentityMatches, processIdentityBelongsToRoot, type UmbraProcessIdentity } from '../shared/umbraProcessIdentity';
 import { isUmbraInstallationListenerClosed } from '../shared/umbraInstallationShutdown';
 import { verifyBundledMediaRuntime } from '../shared/bundledMediaRuntime';
 import { verifyBundledPythonHelpers } from '../shared/bundledPythonHelpers';
@@ -102,16 +104,6 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function collectRequestedProcessPids(request: UmbraUpdateWorkerRequest): number[] {
-  return [request.serverPid, request.launcherPid]
-    .filter((pid, index, all) => (
-      Number.isFinite(pid)
-      && pid > 0
-      && pid !== process.pid
-      && all.indexOf(pid) === index
-    ));
-}
-
 async function requestUmbraShutdown(request: UmbraUpdateWorkerRequest) {
   const host = request.bindHost === '::1' ? '[::1]' : '127.0.0.1';
   const controller = new AbortController();
@@ -154,118 +146,89 @@ async function waitForUmbraListenerToStop(
   return false;
 }
 
-async function waitForProcessesToExit(
-  pids: number[],
-  timeoutMs: number,
-  pollIntervalMs = 250,
-): Promise<boolean> {
-  const startedAt = Date.now();
-  while (pids.some(isProcessAlive)) {
-    if (Date.now() - startedAt > timeoutMs) return false;
-    await Bun.sleep(pollIntervalMs);
-  }
-  return true;
-}
-
-function forceStopExactProcess(pid: number, label: string) {
-  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid || !isProcessAlive(pid)) return;
-  try {
-    if (process.platform === 'win32') {
-      // Do not use /T for the server or launcher: the updater itself was
-      // intentionally spawned from Umbra and must survive this escalation.
-      spawnSync('taskkill.exe', ['/PID', String(pid), '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-        timeout: 10_000,
-      });
-      return;
-    }
-    process.kill(pid, 'SIGKILL');
-  } catch (error) {
-    console.warn(`[UmbraUpdater] Could not force-stop ${label} PID ${pid}:`, error);
-  }
-}
-
-function forceStopTrackedToolProcess(pid: number, label: string) {
-  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid || !isProcessAlive(pid)) return;
-  try {
-    if (process.platform === 'win32') {
-      spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-        timeout: 15_000,
-      });
-      return;
-    }
-    spawnSync('pkill', ['-KILL', '-P', String(pid)], { stdio: 'ignore', timeout: 5_000 });
-    process.kill(pid, 'SIGKILL');
-  } catch (error) {
-    console.warn(`[UmbraUpdater] Could not force-stop ${label} PID ${pid}:`, error);
-  }
-}
-
-function getTrackedShutdownToolPids(request: UmbraUpdateWorkerRequest): number[] {
-  const marker = readUmbraShutdownMarker(request.runtimeRoot);
-  if (!isUmbraShutdownMarkerForProcess(marker, request.serverPid)) return [];
-  return marker.managedProcessPids.filter((pid) => (
-    pid !== request.serverPid
-    && pid !== request.launcherPid
-    && pid !== process.pid
-  ));
-}
-
-async function forceStopOwnedUmbraProcesses(request: UmbraUpdateWorkerRequest, pids: number[]) {
-  const trackedToolPids = getTrackedShutdownToolPids(request);
-  for (const pid of trackedToolPids) {
-    forceStopTrackedToolProcess(pid, 'tracked Umbra tool');
-  }
-
-  // Stop the actual Bun server before its launcher. The launcher observes the
-  // child exit and then releases itself without needing an aggressive tree kill.
-  if (request.serverPid > 0) forceStopExactProcess(request.serverPid, 'Umbra server');
-  await Bun.sleep(750);
-  if (request.launcherPid > 0 && isProcessAlive(request.launcherPid)) {
-    forceStopExactProcess(request.launcherPid, 'Umbra launcher');
-  }
-
-  // Requests created by older updater sessions may carry only one PID.
-  for (const pid of pids) forceStopExactProcess(pid, 'Umbra process');
-}
-
 export type UmbraUpdateShutdownWaitOptions = {
   gracefulTimeoutMs?: number;
   forcedTimeoutMs?: number;
   pollIntervalMs?: number;
+  shutdownStartedAtMs?: number;
 };
 
-export async function waitForProcesses(
-  request: UmbraUpdateWorkerRequest,
-  options: UmbraUpdateShutdownWaitOptions = {},
-) {
-  const pids = [...new Set([...collectRequestedProcessPids(request), ...getTrackedShutdownToolPids(request)])];
-  if (pids.length === 0) return;
+const shutdownIdentities = new WeakMap<UmbraUpdateWorkerRequest, UmbraProcessIdentity[]>();
+
+export function adoptShutdownProcesses(request: UmbraUpdateWorkerRequest, startedAtMs: number): UmbraProcessIdentity[] {
+  const marker = readUmbraShutdownMarker(request.runtimeRoot);
+  if (!marker || marker.requestedAtMs < startedAtMs || !isUmbraShutdownMarkerForProcess(marker, marker.serverPid)) {
+    throw new Error('A fresh owned shutdown marker is required. Close Umbra Studio and retry; no application files were replaced.');
+  }
+  const saved = marker.processIdentities || [];
+  const serverIdentity = saved.find(identity => identity.pid === marker.serverPid) || readUmbraProcessIdentity(marker.serverPid);
+  if (serverIdentity ? !processIdentityBelongsToRoot(serverIdentity, request.runtimeRoot) : isProcessAlive(marker.serverPid)) {
+    throw new Error('The shutdown server identity could not be verified for this installation. No application files were replaced.');
+  }
+  const identities: UmbraProcessIdentity[] = [];
+  const parent = !marker.launcherPid && serverIdentity ? readUmbraProcessIdentity(serverIdentity.parentPid) : null;
+  const legacyLauncherPid = parent && processIdentityBelongsToRoot(parent, request.runtimeRoot) && /UmbraWebLauncher|UmbraStudio\.bat|start-umbra\.sh/i.test(parent.commandLine) ? parent.pid : 0;
+  for (const pid of [...new Set([marker.serverPid, ...marker.managedProcessPids, marker.launcherPid || legacyLauncherPid])]) {
+    if (!pid) continue;
+    if (pid === process.pid) throw new Error('The updater cannot stop its own process. No application files were replaced.');
+    const identity = saved.find(entry => entry.pid === pid) || readUmbraProcessIdentity(pid);
+    if (!identity) {
+      if (isProcessAlive(pid)) throw new Error(`Process ${pid} identity could not be verified. No application files were replaced.`);
+      continue;
+    }
+    // Old marker formats have no start identities. Capture only demonstrably
+    // owned processes; stale Setup PID fields never authorize a forced stop.
+    if (!saved.includes(identity) && !processIdentityBelongsToRoot(identity, request.runtimeRoot)
+      && identity.parentPid !== marker.serverPid) throw new Error(`Process ${pid} ownership could not be verified. No application files were replaced.`);
+    identities.push(identity);
+  }
+  shutdownIdentities.set(request, identities);
+  return identities;
+}
+
+export async function waitForProcesses(request: UmbraUpdateWorkerRequest, options: UmbraUpdateShutdownWaitOptions = {}) {
+  let identities = shutdownIdentities.get(request);
+  if (!identities) {
+    const marker = readUmbraShutdownMarker(request.runtimeRoot);
+    if (marker) {
+      const earliest = options.shutdownStartedAtMs ?? Date.parse(request.createdAt);
+      if (!Number.isFinite(earliest) || marker.requestedAtMs < earliest || !isUmbraShutdownMarkerForProcess(marker, marker.serverPid)) {
+        for (const pid of [marker.serverPid, ...marker.managedProcessPids, marker.launcherPid || 0]) {
+          const saved = marker.processIdentities?.find(identity => identity.pid === pid);
+          if (saved ? processIdentityMatches(saved) : isProcessAlive(pid)) throw new Error('An earlier Umbra shutdown is still releasing files. Close its tools and retry; no application files were replaced.');
+        }
+        return;
+      }
+      identities = adoptShutdownProcesses(request, earliest);
+    } else {
+      // A closed standalone installation can update without a marker. Any live
+      // recorded PID is uncertainty, never permission to kill a recycled PID.
+      if ([request.serverPid, request.launcherPid].some(isProcessAlive)) throw new Error('Umbra is still releasing files and has no verified shutdown marker. No application files were replaced.');
+      return;
+    }
+  }
   const gracefulTimeoutMs = Math.max(1, Number(options.gracefulTimeoutMs) || UPDATE_GRACEFUL_SHUTDOWN_TIMEOUT_MS);
   const forcedTimeoutMs = Math.max(1, Number(options.forcedTimeoutMs) || UPDATE_FORCED_SHUTDOWN_TIMEOUT_MS);
   const pollIntervalMs = Math.max(10, Number(options.pollIntervalMs) || 250);
-  const graceful = await waitForProcessesToExit(pids, gracefulTimeoutMs, pollIntervalMs);
-  if (graceful) {
-    await Bun.sleep(750);
-    return;
+  const wait = async (timeoutMs: number) => {
+    const deadline = Date.now() + timeoutMs;
+    while (identities!.some(processIdentityMatches)) {
+      if (Date.now() >= deadline) return false;
+      await Bun.sleep(pollIntervalMs);
+    }
+    return true;
+  };
+  if (await wait(gracefulTimeoutMs)) return;
+  log(request, 'Umbra did not exit gracefully. Stopping verified owned processes.');
+  await writeState(request, { phase: 'stopping', currentItem: 'Stopping a hung Umbra process' });
+  // Every force is preceded by a fresh start-identity check. Stop tools first,
+  // without broad descendants/PID trees that could include this updater.
+  for (const identity of [...identities].reverse()) {
+    if (!processIdentityMatches(identity)) continue;
+    if (process.platform === 'win32') spawnSync('taskkill.exe', ['/PID', String(identity.pid), '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10_000 });
+    else process.kill(identity.pid, 'SIGKILL');
   }
-
-  const remaining = pids.filter(isProcessAlive);
-  log(request, `Umbra did not exit gracefully. Force-stopping owned PID(s): ${remaining.join(', ')}.`);
-  await writeState(request, {
-    phase: 'stopping',
-    currentItem: 'Stopping a hung Umbra process',
-  });
-  await forceStopOwnedUmbraProcesses(request, remaining);
-  const forced = await waitForProcessesToExit(pids, forcedTimeoutMs, pollIntervalMs);
-  if (!forced) {
-    const stillRunning = pids.filter(isProcessAlive);
-    throw new Error(`Umbra process${stillRunning.length === 1 ? '' : 'es'} ${stillRunning.join(', ')} did not exit after the forced shutdown attempt. No application files were replaced.`);
-  }
-  await Bun.sleep(750);
+  if (!await wait(forcedTimeoutMs)) throw new Error('An owned Umbra process did not exit. No application files were replaced.');
 }
 
 export function safeArchiveEntryName(value: string): string {
@@ -420,15 +383,18 @@ function verifyPayload(payloadRoot: string, request: UmbraUpdateWorkerRequest) {
     join(payloadRoot, 'resources', 'app', 'UmbraServer.js'),
     join(payloadRoot, 'resources', 'app', 'launcher', 'UmbraUpdateWorker.js'),
     join(payloadRoot, 'resources', 'app', 'launcher', 'UmbraUpdaterBootstrap.js'),
-    join(payloadRoot, 'resources', 'app', 'updater', 'UmbraUpdaterApp.js'),
+    join(payloadRoot, 'resources', 'app', 'setup', 'UmbraSetupApp.js'),
+    join(payloadRoot, 'resources', 'app', 'setup', 'index.html'),
+    join(payloadRoot, 'resources', 'app', 'setup', 'models.js'),
+    join(payloadRoot, 'resources', 'app', 'setup', 'onboarding.js'),
+    ...['update-panel.html', 'update-panel.css', 'update-panel.js', 'update-panel.bundle.js'].map(name => join(payloadRoot, 'resources', 'app', 'updater', name)),
     join(payloadRoot, 'resources', 'app', 'updater', 'UmbraRelaunchWorker.js'),
-    join(payloadRoot, 'resources', 'app', 'updater', 'index.html'),
     process.platform === 'win32'
       ? join(payloadRoot, currentWindowsLauncher!.flavor === 'exe' ? 'UmbraStudio.exe' : 'UmbraStudio.bat')
       : join(payloadRoot, 'start-umbra.sh'),
     process.platform === 'win32'
-      ? join(payloadRoot, 'UmbraUpdater.bat')
-      : join(payloadRoot, 'umbra-updater.sh'),
+      ? join(payloadRoot, 'UmbraSetup.bat')
+      : join(payloadRoot, 'umbra-setup.sh'),
   ];
   const missing = required.filter((candidate) => {
     try { const entry = lstatSync(candidate); return !entry.isFile() || entry.isSymbolicLink(); }
@@ -616,20 +582,29 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
       throw new Error(`Port ${request.port} belongs to another or unverified installation. No shutdown was requested and no application files were replaced. Close the intended Umbra Studio and retry.`);
     }
     await writeState(request, { phase: 'stopping', currentItem: 'Closing Umbra Studio and managed tools' });
-    const trackedPids = collectRequestedProcessPids(request);
+    const shutdownStartedAtMs = Date.now();
     let listenerStoppedGracefully = true;
     if (health === 'owned') {
       log(request, `Requesting Umbra ${request.currentVersion} shutdown.`);
       await requestUmbraShutdown(request);
+      // The server records the marker before closing its listener. Never use
+      // stale session PID values when Setup was opened independently or reused.
+      const markerDeadline = Date.now() + UMBRA_LISTENER_STOP_TIMEOUT_MS;
+      while (Date.now() < markerDeadline) {
+        const marker = readUmbraShutdownMarker(request.runtimeRoot);
+        if (marker && marker.requestedAtMs >= shutdownStartedAtMs) break;
+        await Bun.sleep(100);
+      }
+      adoptShutdownProcesses(request, shutdownStartedAtMs);
       listenerStoppedGracefully = await waitForUmbraListenerToStop(request);
     } else {
       log(request, `Umbra ${request.currentVersion} already closed before the update worker started.`);
     }
-    if (!listenerStoppedGracefully && trackedPids.length === 0) {
+    if (!listenerStoppedGracefully && !shutdownIdentities.get(request)?.length) {
       throw new Error(`Umbra is still listening on port ${request.port}, but this standalone updater does not own that process. Close Umbra Studio and try again. No application files were replaced.`);
     }
     log(request, `Waiting for Umbra ${request.currentVersion} to close.`);
-    await waitForProcesses(request);
+    await waitForProcesses(request, { shutdownStartedAtMs: health === 'owned' ? shutdownStartedAtMs : Date.now() - 5 * 60 * 1000 });
     await writeState(request, {
       phase: 'stopping',
       currentItem: 'Allowing the previous Umbra server to finish releasing resources',
@@ -637,19 +612,21 @@ export async function runUpdateRequest(request: UmbraUpdateWorkerRequest) {
     await Bun.sleep(UMBRA_SHUTDOWN_SETTLE_MS);
     // Recheck after the settling delay: a tool may have survived the server or
     // an unrelated process may have taken the listener. Never replace live files.
-    await waitForProcesses(request);
+    await waitForProcesses(request, { shutdownStartedAtMs: health === 'owned' ? shutdownStartedAtMs : Date.now() - 5 * 60 * 1000 });
     if (!await isUmbraInstallationListenerClosed(request.bindHost === '::1' ? '::1' : '127.0.0.1', request.port)) {
       throw new Error(`Port ${request.port} is still in use after shutdown. No application files were replaced.`);
     }
     await writeState(request, { phase: 'applying', currentItem: 'Replacing application files' });
     ({ backupRoot, preservedRoot } = applyPayload(request, payloadRoot));
+    const retiredUpdater = cleanupLegacyUmbraUpdater(request.runtimeRoot);
+    for (const warning of retiredUpdater.warnings) log(request, warning);
     await writeState(request, { phase: 'updating_nodes', currentItem: 'Updating Umbra Nodes' });
     const nodeResult = updateUmbraNodes(request);
     await writeState(request, {
       phase: 'complete',
       currentVersion: request.targetVersion,
       nodeUpdate: nodeResult.status,
-      warning: nodeResult.warning,
+      warning: [...retiredUpdater.warnings, nodeResult.warning].filter(Boolean).join('\n'),
       completedAt: new Date().toISOString(),
       currentItem: '',
       error: '',

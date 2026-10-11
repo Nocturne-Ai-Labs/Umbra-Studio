@@ -731,6 +731,8 @@ and is not a user Gallery image or a bundled generation model output.
 
 ## Licenses
 
+Manga Studio includes unmodified Comic Neue and Bangers starter fonts under the SIL Open Font License 1.1. Copyright 2014 The Comic Neue Project Authors and copyright 2010 The Bangers Project Authors. Font files, source revision, hashes and complete license texts are in `frontend/public/assets/manga-fonts/`. User-imported fonts are separate runtime files and are not included in source exports.
+
 Umbra Studio is distributed under the MIT License, which keeps the project open
 to use, modification, forking, and redistribution while requiring preservation
 of the original copyright and license notice.
@@ -739,6 +741,16 @@ Umbra Studio also includes a `NOTICE` file that makes the attribution intent
 clear for public forks and redistributed modified builds: credit Nocturne AI Labs
 as the project owner and Minokai as the original developer, and link back to the Umbra Studio GitHub
 repository when redistributing a public fork.
+
+Manga Studio PDF export uses **pdf-lib 1.17.1** by Andrew Dillon and contributors,
+with **@pdf-lib/standard-fonts** and **@pdf-lib/upng** (MIT). Its compression
+dependency **pako** credits Vitaly Puzrin, Andrei Tuputcyn, Jean-loup Gailly and
+Mark Adler (MIT/zlib); **tslib 1.x** credits Microsoft (ISC). GIF decoding uses
+**gifuct-js** by Matthew Way and **js-binary-schema-parser** (MIT). Complete
+upstream license and copyright notices ship in `defaults/ThirdPartyLicenses`,
+or `resources/app/defaults/ThirdPartyLicenses` in portable packages. Animated
+HTML exports include their decoder notices and licenses for embedded bundled
+fonts. These libraries' licenses remain separate from Umbra Studio's license.
 
 All upstream tools, libraries, and repositories remain licensed by their
 respective authors.

@@ -35,11 +35,8 @@ export function aiToolkitRequirementsVerified(tool: string): boolean {
   return !!fingerprint && existsSync(marker) && readFileSync(marker, 'utf8').trim() === fingerprint && existsSync(join(tool, '.torch_installed'));
 }
 
-export function installAIToolkitPythonDependencies(tool: string, python: string, gpu: string, log: (line: string) => void): boolean {
+export function updateAIToolkitTorchStack(tool: string, python: string, gpu: string, log: (line: string) => void): { versions: Record<string, string>; backend: string } {
   const pins = aiToolkitTorchPins(tool, python);
-  const requirements = join(tool, 'requirements.txt');
-  if (!existsSync(requirements)) throw new Error('AI Toolkit requirements are missing. Repair its checkout in Setup.');
-  run(python, ['-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'], tool, log);
   const nvidia = /nvidia/i.test(gpu);
   const indexes = nvidia ? ['cu130', 'cu126'] : ['cpu'];
   let selected = '';
@@ -53,6 +50,15 @@ export function installAIToolkitPythonDependencies(tool: string, python: string,
   }
   if (!selected) throw new Error('No compatible AI Toolkit PyTorch runtime passed verification.');
   const versions = JSON.parse(run(python, ['-c', "import importlib.metadata as m,json; print(json.dumps({n:m.version(n) for n in ('torch','torchvision','torchaudio')}))"], tool, () => {}, 30_000));
+  writeFileSync(join(tool, '.torch_installed'), `${versions.torch}|${selected}`);
+  return { versions, backend: selected };
+}
+
+export function installAIToolkitPythonDependencies(tool: string, python: string, gpu: string, log: (line: string) => void): boolean {
+  const requirements = join(tool, 'requirements.txt');
+  if (!existsSync(requirements)) throw new Error('AI Toolkit requirements are missing. Repair its checkout in Setup.');
+  run(python, ['-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'], tool, log);
+  const { versions, backend: selected } = updateAIToolkitTorchStack(tool, python, gpu, log);
   const constraint = join(tool, '.umbra-torch-constraints.txt');
   writeFileSync(constraint, Object.entries(versions).map(([name, version]) => `${name}==${version}`).join('\n') + '\n');
   // Constraints and per-package wheel pages preserve CUDA without making the CUDA

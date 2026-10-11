@@ -111,7 +111,7 @@ function launchWindowsUmbraStudio(
   return { pid };
 }
 
-function launchUmbraStudio(request: UmbraRelaunchRequest): UmbraLaunchHandle {
+export function launchUmbraStudio(request: UmbraRelaunchRequest): UmbraLaunchHandle {
   const runtimeRoot = resolve(request.runtimeRoot);
   let command = '';
   let args: string[] = [];
@@ -124,7 +124,7 @@ function launchUmbraStudio(request: UmbraRelaunchRequest): UmbraLaunchHandle {
   } else {
     const launcherPath = join(runtimeRoot, 'start-umbra.sh');
     if (!existsSync(launcherPath)) throw new Error('Umbra Studio launcher is missing from the updated installation.');
-    command = '/bin/sh';
+    command = '/bin/bash';
     args = [launcherPath];
   }
 
@@ -147,7 +147,7 @@ function launchUmbraStudio(request: UmbraRelaunchRequest): UmbraLaunchHandle {
   return { pid: child.pid, child };
 }
 
-function stopOwnedLauncher(handle: UmbraLaunchHandle) {
+export async function stopOwnedLauncher(handle: UmbraLaunchHandle) {
   const pid = handle.pid || 0;
   if (pid <= 0) return;
   try {
@@ -158,7 +158,10 @@ function stopOwnedLauncher(handle: UmbraLaunchHandle) {
         timeout: 10_000,
       });
     } else {
-      handle.child?.kill('SIGTERM');
+      // detached creates a session/process group belonging only to this attempt.
+      process.kill(-pid, 'SIGTERM');
+      await Bun.sleep(250);
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* The owned group already exited. */ }
     }
   } catch {
     // A launcher that exited between readiness checks needs no further cleanup.
@@ -199,7 +202,6 @@ async function waitForLaunchReady(
     if (await fetchUmbraReady(request)) return { ready: true, detail: '' };
     await Bun.sleep(250);
   }
-  stopOwnedLauncher(handle);
   return { ready: false, detail: 'Umbra Studio did not report ready within 30 seconds' };
 }
 
@@ -215,6 +217,7 @@ async function launchWithRetry(request: UmbraRelaunchRequest): Promise<number> {
       handle.child?.unref();
       return handle.pid;
     }
+    await stopOwnedLauncher(handle);
     lastFailure = result.detail;
     log(request, `Launch attempt ${attempt}/${LAUNCH_ATTEMPTS} failed: ${result.detail}.`);
     if (attempt < LAUNCH_ATTEMPTS) await Bun.sleep(attempt * 5_000);

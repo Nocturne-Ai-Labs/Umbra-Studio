@@ -44,3 +44,13 @@ Setup release-note rendering:
 - Complete upstream licenses and notices are included under
   resources/app/defaults/ThirdPartyLicenses in portable packages, and under
   defaults/ThirdPartyLicenses in the source repository.
+
+Manga Studio rendering and exports:
+- pdf-lib 1.17.1 and its standard-fonts/upng dependencies use the MIT license.
+- Its pako dependency uses MIT and zlib notices; bundled tslib 1.x uses ISC.
+- gifuct-js and js-binary-schema-parser use MIT licenses.
+- Complete upstream license/copyright texts ship in defaults/ThirdPartyLicenses
+  (resources/app/defaults/ThirdPartyLicenses in portable builds).
+- Comic Neue and Bangers retain their SIL OFL license and provenance files in
+  frontend/public/assets/manga-fonts; those fonts are also embedded in readers
+  when used. The HTML reader includes its decoder and embedded font notices.

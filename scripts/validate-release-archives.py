@@ -8,6 +8,27 @@ import sys
 import zipfile
 
 
+def validate_legacy_updater_bridge(package, platform):
+    prefix = 'Umbra Studio/'
+    bridge = json.loads(package.read(prefix + 'resources/app/setup/legacy-updater-bridge.json'))
+    alias = 'UmbraUpdater.bat' if platform == 'Windows-x64-BAT' else 'umbra-updater.sh'
+    expected = {alias, 'resources/app/updater/UmbraUpdaterApp.js', 'resources/app/updater/index.html'}
+    marker = 'Umbra Setup legacy-updater migration bridge'
+    if (bridge.get('schemaVersion') != 1 or bridge.get('marker') != marker
+            or bridge.get('platform') != ('win32' if platform == 'Windows-x64-BAT' else 'linux')
+            or set(bridge.get('files', {})) != expected):
+        raise ValueError('Invalid legacy updater migration bridge inventory')
+    for name, entry in bridge['files'].items():
+        data = package.read(prefix + name)
+        if (len(data) != entry.get('bytes') or hashlib.sha256(data).hexdigest() != entry.get('sha256')
+                or marker.encode() not in data or len(data) > 1024):
+            raise ValueError(f'Real/changed legacy updater is still packaged: {name}')
+    for name in ['UmbraUpdater.exe', 'Umbra Updater.exe', 'umbra-updater.desktop',
+                 'resources/app/updater/UmbraUpdaterApp.ts']:
+        if prefix + name in package.namelist():
+            raise ValueError(f'Retired standalone updater is still packaged: {name}')
+
+
 def validate(archive, version, platform):
     if platform not in {'Windows-x64-BAT', 'Linux-x64'}:
         raise ValueError(f'Unsupported release platform: {platform}')
@@ -113,6 +134,7 @@ def validate(archive, version, platform):
                         'install-umbra-ui-support-models.sh', 'install-model-requirements.sh']:
             if f'Umbra Studio/{retired}' in names:
                 raise ValueError(f'Retired model shortcut is still packaged: {retired}')
+        validate_legacy_updater_bridge(package, platform)
         manifest = json.loads(package.read('Umbra Studio/resources/app/package.json'))
         if manifest['version'] != version:
             raise ValueError(f'{archive.name}: version mismatch')

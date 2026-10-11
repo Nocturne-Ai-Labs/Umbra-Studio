@@ -12,6 +12,12 @@ const PUBLIC_MARKDOWN = new Set([
   'defaults/PowerPrompter/Official Workflows/DaSiWa/PROVENANCE.md',
 ]);
 
+// Match the portable archive gate's unambiguous weight extensions. Python .pth
+// import configuration and legitimate non-model .bin assets are not weights.
+export function isModelWeightPath(relativePath) {
+  return /\.(?:onnx|pt|safetensors|ckpt)$/i.test(String(relativePath));
+}
+
 export function isPrivateDevelopmentSource(relativePath) {
   const normalized = String(relativePath).replace(/\\/g, '/').replace(/^\.\//, '');
   const parts = normalized.split('/');
@@ -30,7 +36,7 @@ export function findPrivatePackagedSource(appRoot, managedEntries) {
   const found = [];
   if (fs.existsSync(appRoot)) {
     for (const child of fs.readdirSync(appRoot, { withFileTypes: true })) {
-      if (isPrivateDevelopmentSource(child.name)) found.push(path.join(appRoot, child.name));
+      if (isPrivateDevelopmentSource(child.name) || isModelWeightPath(child.name)) found.push(path.join(appRoot, child.name));
     }
   }
   for (const entry of managedEntries) {
@@ -44,7 +50,7 @@ export function findPrivatePackagedSource(appRoot, managedEntries) {
         if (child.name === 'node_modules') continue;
         const fullPath = path.join(directory, child.name);
         const relativePath = path.relative(appRoot, fullPath);
-        if (isPrivateDevelopmentSource(relativePath)) found.push(fullPath);
+        if (isPrivateDevelopmentSource(relativePath) || isModelWeightPath(relativePath)) found.push(fullPath);
         else if (child.isDirectory()) pending.push(fullPath);
       }
     }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { isUmbraReleaseVersion } from '../shared/releaseVersion.mjs';
 
 // Called from the checked-out source before packaging and again before upload.
 // Fetch the named remote tag so a stale local tag cannot authorize publication.
@@ -8,7 +9,7 @@ try {
   const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
   const tag = process.env.RELEASE_TAG;
   const expectedCommit = process.env.GITHUB_SHA;
-  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[\da-z.-]+)?(?:\+[\da-z.-]+)?$/i.test(version)) {
+  if (!isUmbraReleaseVersion(version)) {
     throw new Error('package.json must contain a release version.');
   }
   if (tag !== `v${version}`) {

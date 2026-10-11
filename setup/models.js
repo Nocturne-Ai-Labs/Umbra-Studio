@@ -36,6 +36,15 @@ Object.assign(SETUP_TRANSLATIONS.de, {
 // Reviewed UI copy only. Product names, model licenses, paths and installer logs stay verbatim.
 const setupCopyRows = `
 standaloneService¦Standalone service¦独立サービス¦独立服务¦독립 서비스¦Eigenständiger Dienst
+openModelManager¦Open Model Manager¦Model Manager を開く¦打开 Model Manager¦Model Manager 열기¦Model Manager öffnen
+onboardingIssue_language¦Save your preferred language.¦使用する言語を保存してください。¦保存您的首选语言。¦사용할 언어를 저장하세요.¦Bevorzugte Sprache speichern.
+onboardingIssue_comfyui¦Install and verify managed ComfyUI and its Python environment.¦管理対象の ComfyUI と Python 環境をインストールして検証してください。¦安装并验证托管的 ComfyUI 及其 Python 环境。¦관리되는 ComfyUI와 Python 환경을 설치하고 검증하세요.¦Verwaltetes ComfyUI und seine Python-Umgebung installieren und prüfen.
+onboardingIssue_training¦Install AI Toolkit for training, or skip it.¦学習用の AI Toolkit をインストールするか、スキップしてください。¦安装 AI Toolkit 以训练模型，或跳过此步骤。¦학습용 AI Toolkit을 설치하거나 건너뛰세요.¦AI Toolkit für das Training installieren oder überspringen.
+onboardingIssue_nodes¦Install and verify custom nodes.¦カスタムノードをインストールして検証してください。¦安装并验证自定义节点。¦사용자 노드를 설치하고 검증하세요.¦Zusatz-Nodes installieren und prüfen.
+onboardingIssue_support¦Install or verify selected support models.¦選択した補助モデルをインストールまたは検証してください。¦安装或验证所选辅助模型。¦선택한 보조 모델을 설치하거나 검증하세요.¦Ausgewählte Hilfsmodelle installieren oder prüfen.
+onboardingIssue_generation¦Select a model family and a compatible generation checkpoint.¦モデル系列と互換性のある生成チェックポイントを選択してください。¦选择模型系列和兼容的生成检查点。¦모델 계열과 호환 생성 체크포인트를 선택하세요.¦Modellfamilie und kompatiblen Generierungs-Checkpoint auswählen.
+onboardingIssue_checkpoint¦Add a compatible generation checkpoint in Model Manager. Prerequisites alone do not include one.¦Model Manager で互換性のある生成チェックポイントを追加してください。前提ファイルだけでは含まれません。¦在 Model Manager 中添加兼容的生成检查点。仅安装前置文件不包含检查点。¦Model Manager에서 호환 생성 체크포인트를 추가하세요. 필수 파일만으로는 체크포인트가 포함되지 않습니다.¦Kompatiblen Generierungs-Checkpoint im Model Manager hinzufügen. Voraussetzungspakete enthalten allein keinen Checkpoint.
+onboardingIssue_media¦Install or repair FFmpeg and ffprobe.¦FFmpeg と ffprobe をインストールまたは修復してください。¦安装或修复 FFmpeg 和 ffprobe。¦FFmpeg와 ffprobe를 설치하거나 복구하세요.¦FFmpeg und ffprobe installieren oder reparieren.
 setupGuide¦Set up Umbra Studio¦Umbra Studio を設定¦设置 Umbra Studio¦Umbra Studio 설정¦Umbra Studio einrichten
 installAllDependencies¦Install all dependencies and support models¦すべての依存関係と補助モデルをインストール¦安装全部依赖和辅助模型¦모든 의존성과 보조 모델 설치¦Alle Abhängigkeiten und Hilfsmodelle installieren
 openTools¦Open Tools¦ツールを開く¦打开工具¦도구 열기¦Tools öffnen

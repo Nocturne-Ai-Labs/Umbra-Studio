@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { isPrivateDevelopmentSource } from './release-source-policy.mjs';
+import { isPrivateDevelopmentSource, isModelWeightPath } from './release-source-policy.mjs';
 
 const root = process.cwd();
 const outputArgIndex = process.argv.indexOf('--output');
@@ -54,9 +54,7 @@ const SOURCE_FILES = [
   'UmbraSetup.bat',
   'UmbraStudio',
   'UmbraStudio.bat',
-  'UmbraUpdater.bat',
   'umbra-setup.sh',
-  'umbra-updater.sh',
   'UMBRA_UI_TOUR.md',
 ];
 
@@ -129,6 +127,9 @@ function copyTree(source, target, allowGeneratedPublic = false) {
   const stat = fs.lstatSync(source);
   if (stat.isSymbolicLink()) throw new Error(`Refusing to copy symlink into repository source: ${source}`);
   if (stat.isFile()) {
+    if (isModelWeightPath(path.relative(root, source))) {
+      throw new Error(`Refusing model weights in repository source: ${path.relative(root, source)}`);
+    }
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
     return;

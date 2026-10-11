@@ -75,6 +75,11 @@ const ReactGalleryWorkspace = lazy(async () => {
   return { default: module.ReactGalleryWorkspace };
 });
 
+const MangaStudio = lazy(async () => {
+  const module = await importWithChunkRecovery('manga-studio', () => import('@/features/manga/MangaStudio'));
+  return { default: module.MangaStudio };
+});
+
 const AppLoadingFallback = ({ fullscreen = false }: { fullscreen?: boolean }) => (
   <div className={fullscreen ? 'h-screen w-screen bg-[var(--umbra-bg)]' : 'absolute inset-0 bg-[var(--umbra-bg)]'} />
 );
@@ -84,6 +89,20 @@ export function App() {
   const popoutMode = typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('umbraPopout')
     : null;
+
+  if (popoutMode === 'manga') {
+    return (
+      <ThemeProvider>
+        <DebugErrorBoundary>
+          <RemoteAuthGate>
+            <Suspense fallback={<AppLoadingFallback fullscreen />}>
+              <MangaStudio />
+            </Suspense>
+          </RemoteAuthGate>
+        </DebugErrorBoundary>
+      </ThemeProvider>
+    );
+  }
 
   if (popoutMode === 'powerprompter') {
     return (

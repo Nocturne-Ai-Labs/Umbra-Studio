@@ -16,11 +16,11 @@ const onboardingMediaCopy = {
 };
 for (const [locale, text] of Object.entries({ en: 'Installation verified. Launch managed ComfyUI from Umbra Studio.', ja: 'インストールを検証しました。Umbra Studio から管理対象の ComfyUI を起動してください。', 'zh-CN': '安装已验证。请从 Umbra Studio 启动托管的 ComfyUI。', ko: '설치가 검증되었습니다. Umbra Studio에서 관리되는 ComfyUI를 실행하세요.', de: 'Installation geprüft. Das verwaltete ComfyUI über Umbra Studio starten.' })) ONBOARDING_COPY[locale][35] = text;
 const onboardingDownloadCopy = {
-  en: 'Download or import a compatible generation checkpoint in Umbra Studio’s Model Manager, then reopen Setup. Checkpoint folder: Tools/ComfyUI/models/checkpoints/. Separate diffusion models: Tools/ComfyUI/models/diffusion_models/.',
-  ja: 'Umbra Studio の Model Manager で互換性のある生成チェックポイントをダウンロードまたはインポートし、Setup を開き直してください。チェックポイント: Tools/ComfyUI/models/checkpoints/。単独の拡散モデル: Tools/ComfyUI/models/diffusion_models/。',
-  'zh-CN': '请在 Umbra Studio 的 Model Manager 中下载或导入兼容的生成检查点，然后重新打开 Setup。检查点目录：Tools/ComfyUI/models/checkpoints/。独立扩散模型目录：Tools/ComfyUI/models/diffusion_models/。',
-  ko: 'Umbra Studio의 Model Manager에서 호환 생성 체크포인트를 다운로드하거나 가져온 뒤 Setup을 다시 여세요. 체크포인트: Tools/ComfyUI/models/checkpoints/. 별도 확산 모델: Tools/ComfyUI/models/diffusion_models/.',
-  de: 'Einen kompatiblen Generierungs-Checkpoint im Model Manager von Umbra Studio herunterladen oder importieren, danach Setup erneut öffnen. Checkpoints: Tools/ComfyUI/models/checkpoints/. Separate Diffusionsmodelle: Tools/ComfyUI/models/diffusion_models/.',
+  en: 'Download or import a compatible generation checkpoint in Umbra Studio’s Model Manager, then refresh status in Setup. Checkpoint folder: Tools/ComfyUI/models/checkpoints/. Separate diffusion models: Tools/ComfyUI/models/diffusion_models/.',
+  ja: 'Umbra Studio の Model Manager で互換性のある生成チェックポイントをダウンロードまたはインポートし、Setup の状態を更新してください。チェックポイント: Tools/ComfyUI/models/checkpoints/。単独の拡散モデル: Tools/ComfyUI/models/diffusion_models/。',
+  'zh-CN': '请在 Umbra Studio 的 Model Manager 中下载或导入兼容的生成检查点，然后在 Setup 中刷新状态。检查点目录：Tools/ComfyUI/models/checkpoints/。独立扩散模型目录：Tools/ComfyUI/models/diffusion_models/。',
+  ko: 'Umbra Studio의 Model Manager에서 호환 생성 체크포인트를 다운로드하거나 가져온 뒤 Setup에서 상태를 새로고침하세요. 체크포인트: Tools/ComfyUI/models/checkpoints/. 별도 확산 모델: Tools/ComfyUI/models/diffusion_models/.',
+  de: 'Einen kompatiblen Generierungs-Checkpoint im Model Manager von Umbra Studio herunterladen oder importieren, danach den Status in Setup aktualisieren. Checkpoints: Tools/ComfyUI/models/checkpoints/. Separate Diffusionsmodelle: Tools/ComfyUI/models/diffusion_models/.',
 };
 const onboardingCheckpointCopy = {
   en: 'Select a compatible generation checkpoint already installed in this Umbra folder. Only choose a checkpoint made for the selected model family.',
@@ -44,6 +44,11 @@ let onboardingBusy = false;
 let onboardingCompletedJob = '';
 let onboardingLoading = null;
 let onboardingToken = '';
+let onboardingRevision = 0;
+let onboardingSavedRevision = 0;
+let onboardingReadRevision = -1;
+let onboardingSaveQueue = Promise.resolve();
+let onboardingRenderedStage = null;
 const onboardingText = index => (ONBOARDING_COPY[document.getElementById('language')?.value] || ONBOARDING_COPY.en)[index];
 const onboardingElement = (tag, text, className) => {
   const node = document.createElement(tag);
@@ -53,14 +58,37 @@ const onboardingElement = (tag, text, className) => {
 };
 function onboardingButton(text, callback, disabled = false) {
   const node = onboardingElement('button', text, 'button'); node.type = 'button'; node.disabled = onboardingBusy || disabled;
+  node.dataset.onboardingKey = `button:${text}`;
   node.addEventListener('click', () => Promise.resolve().then(callback).catch(modelError)); return node;
 }
 async function saveOnboarding(patch) {
-  await api('/api/onboarding', { method: 'POST', body: JSON.stringify(patch) });
-  if (patch.stage !== undefined) onboardingFocusedStage = patch.stage;
-  await loadOnboarding();
+  const revision = ++onboardingRevision;
+  const previousState = { ...onboardingData.state };
+  Object.assign(onboardingData.state, patch);
+  const saved = onboardingSaveQueue.catch(() => {}).then(async () => {
+    try {
+      await api('/api/onboarding', { method: 'POST', body: JSON.stringify(patch) });
+      onboardingSavedRevision = revision;
+      if (patch.stage !== undefined) onboardingFocusedStage = patch.stage;
+    } catch (error) {
+      if (revision === onboardingRevision) { Object.assign(onboardingData.state, previousState); onboardingSavedRevision = revision; }
+      throw error;
+    }
+  });
+  onboardingSaveQueue = saved;
+  try { await saved; } catch (error) {
+    if (revision === onboardingRevision) {
+      await loadOnboarding();
+      // Only a successful authoritative reload releases this failed admission.
+      // Actions already awaiting saved still reject; a later save owns its queue.
+      if (onboardingSaveQueue === saved && revision === onboardingRevision) onboardingSaveQueue = Promise.resolve();
+    }
+    throw error;
+  }
+  if (revision === onboardingRevision) await loadOnboarding();
 }
 async function runOnboardingJob(path, body) {
+  await onboardingSaveQueue;
   setBusy(true);
   try {
     const result = await api(path, { method: 'POST', body: JSON.stringify(body) });
@@ -74,10 +102,11 @@ function onboardingPackSelection(packId, container, primary) {
   const key = packId === 'support' ? 'supportProfiles' : 'profiles';
   const selected = new Set(onboardingData.state[key] || []);
   const options = onboardingElement('div', undefined, 'model-families');
+  options.dataset.onboardingKey = 'profile-list';
   for (const profile of pack.profiles) {
     if (packId === 'requirements' && !onboardingData.catalog.generationProfiles.includes(profile.id)) continue;
     const label = onboardingElement('label', undefined, 'model-family');
-    const checkbox = document.createElement('input'); checkbox.type = packId === 'requirements' ? 'radio' : 'checkbox'; checkbox.name = `onboarding-${packId}`; checkbox.checked = selected.has(profile.id); checkbox.disabled = onboardingBusy;
+    const checkbox = document.createElement('input'); checkbox.type = packId === 'requirements' ? 'radio' : 'checkbox'; checkbox.name = `onboarding-${packId}`; checkbox.dataset.onboardingKey = `profile:${packId}:${profile.id}`; checkbox.checked = selected.has(profile.id); checkbox.disabled = onboardingBusy;
     checkbox.addEventListener('change', () => {
       if (packId === 'requirements') selected.clear();
       checkbox.checked ? selected.add(profile.id) : selected.delete(profile.id);
@@ -97,8 +126,9 @@ function onboardingPackSelection(packId, container, primary) {
   };
   [...required].forEach(include);
   const files = pack.files.filter(file => file.profiles.some(id => required.has(id)));
-  review.append(onboardingElement('p', `${onboardingText(29)}: ${files.length} · ${modelBytes(files.reduce((sum, file) => sum + file.bytes, 0))}`));
+  review.append(onboardingElement('p', selected.size && !files.length ? tr('noFiles') : `${onboardingText(29)}: ${files.length} · ${modelBytes(files.reduce((sum, file) => sum + file.bytes, 0))}`));
   const fileList = onboardingElement('div', undefined, 'model-files');
+  fileList.dataset.onboardingKey = 'file-list';
   for (const file of files) {
     const row = onboardingElement('div', file.destination, 'model-file');
     row.append(onboardingElement('small', `${modelBytes(file.bytes)} · ${tr(file.present ? 'presentFile' : 'missingFile')}`));
@@ -110,7 +140,7 @@ function onboardingPackSelection(packId, container, primary) {
     }
     fileList.append(row);
   }
-  const filesDetail = onboardingElement('details'); filesDetail.append(onboardingElement('summary', onboardingUx(8)), fileList); review.append(onboardingElement('p', onboardingText(34)), filesDetail);
+  const filesDetail = onboardingElement('details'); filesDetail.dataset.onboardingKey = 'files'; filesDetail.append(onboardingElement('summary', onboardingUx(8)), fileList); review.append(onboardingElement('p', onboardingText(34))); if (files.length) review.append(filesDetail);
   for (const model of pack.manualModels || []) {
     const row = onboardingElement('div', undefined, 'model-file');
     const link = onboardingElement('a', `${model.purpose} · ${onboardingText(32)}`); link.href = model.reference; link.target = '_blank'; link.rel = 'noopener noreferrer'; row.append(link);
@@ -118,7 +148,7 @@ function onboardingPackSelection(packId, container, primary) {
       const separator = destination.lastIndexOf('/');
       row.append(onboardingElement('small', onboardingText(33).replace('{file}', destination.slice(separator + 1)).replace('{folder}', `Tools/ComfyUI/models/${destination.slice(0, separator + 1)}`)));
     }
-    const manual = onboardingElement('details'); manual.append(onboardingElement('summary', `${model.purpose} · ${onboardingText(32)}`), row); review.append(manual);
+    const manual = onboardingElement('details'); manual.dataset.onboardingKey = `manual:${model.reference}`; manual.append(onboardingElement('summary', `${model.purpose} · ${onboardingText(32)}`), row); review.append(manual);
   }
   if (packId === 'requirements') {
     const checkpoints = onboardingData.catalog?.checkpoints || [];
@@ -126,32 +156,53 @@ function onboardingPackSelection(packId, container, primary) {
     if (checkpoints.length) {
       review.append(onboardingElement('p', onboardingCheckpointCopy[document.getElementById('language')?.value] || onboardingCheckpointCopy.en));
       const list = onboardingElement('div', undefined, 'model-families');
+      list.dataset.onboardingKey = 'checkpoint-list';
       for (const checkpoint of checkpoints) {
         const label = onboardingElement('label', undefined, 'model-family');
-        const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'onboarding-checkpoint'; radio.checked = onboardingData.state.checkpoint === checkpoint.path; radio.disabled = onboardingBusy;
+        const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'onboarding-checkpoint'; radio.dataset.onboardingKey = `checkpoint:${checkpoint.path}`; radio.checked = onboardingData.state.checkpoint === checkpoint.path; radio.disabled = onboardingBusy;
         radio.addEventListener('change', () => { if (radio.checked) void saveOnboarding({ checkpoint: checkpoint.path }).catch(modelError); });
         label.append(radio, onboardingElement('span', checkpoint.path)); list.append(label);
       }
       review.append(list);
     }
-    const label = onboardingElement('label', onboardingText(30)); label.htmlFor = 'onboarding-token';
-    const input = document.createElement('input'); input.id = 'onboarding-token'; input.type = 'password'; input.autocomplete = 'off'; input.value = onboardingToken;
-    input.addEventListener('input', () => { onboardingToken = input.value; });
-    const access = onboardingElement('details'); access.append(onboardingElement('summary', onboardingUx(9)), label, input, onboardingElement('p', onboardingText(31))); review.append(access);
+    if (files.length) {
+      const label = onboardingElement('label', onboardingText(30)); label.htmlFor = 'onboarding-token';
+      const input = document.createElement('input'); input.id = 'onboarding-token'; input.type = 'password'; input.autocomplete = 'off'; input.value = onboardingToken;
+      input.addEventListener('input', () => { onboardingToken = input.value; });
+      const access = onboardingElement('details'); access.dataset.onboardingKey = 'access'; access.append(onboardingElement('summary', onboardingUx(9)), label, input, onboardingElement('p', onboardingText(31))); review.append(access);
+    }
   }
+  if (packId === 'requirements' && selected.size && !files.length) {
+    primary(tr('openModelManager'), openOnboardingModelManager);
+    review.append(onboardingButton(onboardingText(37), () => loadOnboarding()));
+    return;
+  }
+  if (packId === 'requirements' && selected.size) review.append(onboardingButton(tr('openModelManager'), openOnboardingModelManager), onboardingButton(onboardingText(37), () => loadOnboarding()));
   const allPresent = files.length > 0 && files.every(file => file.present);
-  primary(onboardingText(allPresent ? 23 : 22), () => runOnboardingJob('/api/install', { kind: packId, profiles: [...selected], check: allPresent, ...(packId === 'requirements' && onboardingToken ? { hfToken: onboardingToken } : {}) }), !selected.size);
-  const checks = onboardingElement('details'); checks.append(onboardingElement('summary', onboardingUx(17)), onboardingButton(onboardingText(23), () => runOnboardingJob('/api/install', { kind: packId, profiles: [...selected], check: true }), !selected.size)); review.append(checks);
+  primary(onboardingText(allPresent ? 23 : 22), () => runOnboardingJob('/api/install', { kind: packId, profiles: [...selected], check: allPresent, ...(packId === 'requirements' && onboardingToken ? { hfToken: onboardingToken } : {}) }), !files.length);
+  const checks = onboardingElement('details'); checks.dataset.onboardingKey = 'check'; checks.append(onboardingElement('summary', onboardingUx(17)), onboardingButton(onboardingText(23), () => runOnboardingJob('/api/install', { kind: packId, profiles: [...selected], check: true }), !files.length)); review.append(checks);
+}
+async function openOnboardingModelManager() {
+  await onboardingSaveQueue;
+  await api('/api/launch', { method: 'POST', body: JSON.stringify({ destination: 'models' }) });
 }
 function renderOnboarding() {
   const host = document.getElementById('onboarding'); if (!host || !onboardingData) return;
+  const stage = onboardingFocusedStage ?? Math.max(0, Math.min(6, onboardingData.state.stage || 0));
+  const sameStage = onboardingRenderedStage === stage;
+  const focus = document.activeElement;
+  const focusKey = focus?.dataset.onboardingKey;
+  const focusId = focus?.id;
+  const focusSummary = focus?.tagName === 'SUMMARY' ? focus.parentElement?.dataset.onboardingKey : null;
+  const restoreFocus = host.contains(focus) || document.getElementById('setup-steps')?.contains(focus);
+  const details = new Set([...host.querySelectorAll('details[open][data-onboarding-key]')].map(node => node.dataset.onboardingKey));
+  const scroll = [...host.querySelectorAll('.model-files, .model-families'), document.getElementById('setup-content')].filter(Boolean).map(node => ({ key: node.dataset.onboardingKey, id: node.id, top: node.scrollTop, left: node.scrollLeft }));
   const languagePanel = document.getElementById('onboarding-language');
   const saveLanguage = document.getElementById('save-language');
   // Keep the original controls and listeners alive across wizard rerenders.
   if (languagePanel && host.contains(languagePanel)) host.before(languagePanel);
   if (saveLanguage && host.contains(saveLanguage)) languagePanel.append(saveLanguage);
   host.replaceChildren();
-  const stage = onboardingFocusedStage ?? Math.max(0, Math.min(6, onboardingData.state.stage || 0));
   const detail = onboardingData.stages.find(entry => entry.id === onboardingIds[stage]);
   const complete = !!detail?.complete;
   const list = document.getElementById('setup-steps'); list.replaceChildren(); list.setAttribute('aria-label', onboardingText(0));
@@ -163,6 +214,7 @@ function renderOnboarding() {
     const item = onboardingElement('li');
     const button = onboardingButton('', () => { showSetupTab('general'); return saveOnboarding({ stage: index }); }, blocked);
     button.className = 'setup-step'; button.dataset.complete = String(done); button.dataset.stage = String(index);
+    button.dataset.onboardingKey = `stage:${index}`;
     button.setAttribute('aria-current', index === stage ? 'step' : 'false');
     button.append(onboardingElement('span', done ? '✓' : String(index + 1), 'step-number'));
     const label = onboardingElement('span'); label.append(onboardingElement('strong', onboardingText(index + 2)), onboardingElement('small', onboardingText(done ? 26 : 27)));
@@ -170,13 +222,14 @@ function renderOnboarding() {
   });
   const heading = onboardingElement('div', undefined, 'wizard-heading');
   heading.append(onboardingElement('div', onboardingUx(1, { step: stage + 1 }), 'eyebrow'), onboardingElement('h2', onboardingText(stage + 2)), onboardingElement('p', onboardingText(stage + 9)));
+  heading.querySelector('h2').tabIndex = -1;
   host.append(heading);
   const content = onboardingElement('section'); content.id = 'onboarding-stage'; content.setAttribute('aria-label', onboardingText(stage + 2));
   const actions = onboardingElement('div', undefined, 'wizard-actions');
   const secondary = onboardingElement('div', undefined, 'secondary-actions');
   if (stage > 0) secondary.append(onboardingButton(onboardingText(16), () => saveOnboarding({ stage: stage - 1 })));
   actions.append(secondary);
-  const primary = (label, callback, disabled = false) => { const button = onboardingButton(label, callback, disabled); button.classList.add('primary'); button.dataset.wizardPrimary = 'true'; actions.append(button); return button; };
+  const primary = (label, callback, disabled = false) => { const button = onboardingButton(label, callback, disabled); button.classList.add('primary'); button.dataset.wizardPrimary = 'true'; button.dataset.onboardingKey = 'primary'; actions.append(button); return button; };
   if (languagePanel) { languagePanel.hidden = stage !== 0; if (stage === 0) content.append(languagePanel); }
   if (stage === 0) {
     saveLanguage.dataset.i18n = 'saveLanguageContinue'; saveLanguage.textContent = onboardingUx(14); saveLanguage.disabled = onboardingBusy; saveLanguage.dataset.wizardPrimary = 'true'; actions.append(saveLanguage);
@@ -187,7 +240,7 @@ function renderOnboarding() {
     const repair = onboardingData.python?.installed && onboardingData.python.upgradeAvailable;
     const card = onboardingElement('div', undefined, repair ? 'wizard-state pending' : 'wizard-card');
     card.append(onboardingElement('strong', repair ? onboardingUx(4) : onboardingText(3)), onboardingElement('p', repair ? onboardingUx(5) : onboardingText(10)));
-    const technical = onboardingElement('details'); technical.append(onboardingElement('summary', onboardingUx(10)), onboardingElement('p', `Python ${onboardingData.python?.version || tr('unavailable')} → ${onboardingData.python?.target || '3.13'}`)); card.append(technical); content.append(card);
+    const technical = onboardingElement('details'); technical.dataset.onboardingKey = 'python'; technical.append(onboardingElement('summary', onboardingUx(10)), onboardingElement('p', `Python ${onboardingData.python?.version || tr('unavailable')} → ${onboardingData.python?.target || '3.13'}`)); card.append(technical); content.append(card);
     primary(repair ? tr('updatePython') : onboardingData.python?.installed ? onboardingUx(6) : onboardingText(18), async () => {
       if (repair && !window.confirm(tr('pythonUpgradeWarning'))) return;
       await runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: repair ? 'update_python' : 'install_core' });
@@ -214,16 +267,35 @@ function renderOnboarding() {
     else if (onboardingData.ready) { content.append(onboardingElement('p', onboardingText(35))); primary(onboardingText(25), () => document.getElementById('launch').click()); }
     else { content.append(onboardingElement('p', onboardingUx(19))); primary(onboardingText(24), () => runOnboardingJob('/api/onboarding/verify', {})); }
     const diagnostics = onboardingElement('details'); diagnostics.append(onboardingElement('summary', onboardingUx(10)));
-    const issues = onboardingElement('ul'); for (const issue of onboardingData.issues || []) issues.append(onboardingElement('li', issue)); diagnostics.append(issues); content.append(diagnostics);
+    diagnostics.dataset.onboardingKey = 'diagnostics';
+    const issues = onboardingElement('ul'); for (const code of onboardingData.issueCodes || []) issues.append(onboardingElement('li', tr(`onboardingIssue_${code}`))); diagnostics.append(issues); content.append(diagnostics);
   }
   host.append(content, actions);
   host.setAttribute('aria-busy', String(onboardingBusy));
   document.getElementById('setup-footer-status').textContent = onboardingBusy ? onboardingText(28) : onboardingData.ready ? onboardingUx(23) : onboardingUx(13);
+  if (sameStage) {
+    for (const node of host.querySelectorAll('details[data-onboarding-key]')) node.open = details.has(node.dataset.onboardingKey);
+    if (restoreFocus) {
+      const keyed = [...document.querySelectorAll('[data-onboarding-key]')].find(node => node.dataset.onboardingKey === (focusKey || focusSummary));
+      const target = focusSummary ? keyed?.querySelector('summary') : keyed || (focusId && document.getElementById(focusId));
+      if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+    }
+    scroll.forEach(entry => {
+      const target = entry.id ? document.getElementById(entry.id) : [...host.querySelectorAll('[data-onboarding-key]')].find(node => node.dataset.onboardingKey === entry.key);
+      if (target) { target.scrollTop = entry.top; target.scrollLeft = entry.left; }
+    });
+  } else if (onboardingRenderedStage !== null) heading.querySelector('h2').focus({ preventScroll: true });
+  onboardingRenderedStage = stage;
 }
 function setOnboardingBusy(busy) { if (onboardingBusy !== busy) { onboardingBusy = busy; renderOnboarding(); } }
 function loadOnboarding() {
-  if (onboardingLoading) return onboardingLoading;
-  onboardingLoading = api('/api/onboarding').then(result => { onboardingData = result;
+  if (onboardingSavedRevision !== onboardingRevision) return onboardingSaveQueue.catch(() => {}).then(() => loadOnboarding());
+  if (onboardingLoading) return onboardingLoading.then(() => onboardingReadRevision !== onboardingRevision ? loadOnboarding() : undefined);
+  const revision = onboardingRevision;
+  onboardingLoading = api('/api/onboarding').then(result => {
+    if (revision !== onboardingRevision || onboardingSavedRevision !== onboardingRevision) return;
+    onboardingData = result;
+    onboardingReadRevision = revision;
     if (onboardingFocusedStage === null) {
       const firstPending = result.stages.findIndex(entry => !entry.complete);
       onboardingFocusedStage = !result.state.languageSaved ? 0 : firstPending < 0 ? 6 : firstPending;
@@ -237,4 +309,5 @@ function renderOnboardingProgress(job) {
   }
 }
 document.getElementById('language')?.addEventListener('change', renderOnboarding);
+window.addEventListener('focus', () => { if (onboardingFocusedStage === 5 && !onboardingBusy) void loadOnboarding().catch(modelError); });
 void loadOnboarding().catch(modelError);

@@ -43,14 +43,6 @@ type UpdaterSession = {
   relaunchPid?: number;
 };
 
-function readArg(name: string): string {
-  const args = Bun.argv.slice(2);
-  const index = args.indexOf(name);
-  if (index >= 0) return String(args[index + 1] || '');
-  const inline = args.find((entry) => entry.startsWith(`${name}=`));
-  return inline ? inline.slice(name.length + 1) : '';
-}
-
 function json(value: unknown, status = 200): Response {
   return Response.json(value, {
     status,
@@ -100,7 +92,7 @@ async function startExternalRelaunch(session: UpdaterSession, sessionPath: strin
   if (!child.pid) throw new Error('The external Umbra Studio relaunch worker did not start.');
   session.relaunchPid = child.pid;
   try { await writeJsonAtomic(sessionPath, session); }
-  catch { console.warn('[UmbraUpdaterApp] Relaunch started, but its session record could not be refreshed.'); }
+  catch { console.warn('[UmbraSetupUpdates] Relaunch started, but its session record could not be refreshed.'); }
   child.unref();
   return { child, completion };
 }
@@ -282,6 +274,7 @@ async function runUpdate(service: AppUpdateService, session: UpdaterSession, rel
 
 export type UmbraUpdateControllerOptions = {
   isSetupBusy?: () => boolean;
+  needsReopen?: () => boolean;
   onClose: () => void | Promise<void>;
 };
 
@@ -335,14 +328,14 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
     && updateCompletedAt <= sessionStartedAt
   ) {
     persistedState = await writeState(service, session, createIdleUmbraUpdateState(currentVersion));
-    console.log('[UmbraUpdaterApp] Cleared the completed state from an earlier updater session.');
+    console.log('[UmbraSetupUpdates] Cleared the completed state from an earlier updater session.');
   }
   if (
     isUmbraUpdateStateActive(persistedState)
     && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)
   ) {
     await writeState(service, session, recoverInterruptedUmbraUpdateState(persistedState, currentVersion));
-    console.warn(`[UmbraUpdaterApp] Recovered abandoned ${persistedState.phase} state from a previous updater session.`);
+    console.warn(`[UmbraSetupUpdates] Recovered abandoned ${persistedState.phase} state from a previous updater session.`);
   }
   let activeUpdate: Promise<void> | null = null;
   let activeRelaunch: Promise<void> | null = null;
@@ -354,9 +347,13 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
 
   const isBusy = () => Boolean(activeUpdate || activeRelaunch || admittingOperation);
   const setupBusy = () => options.isSetupBusy?.() === true;
+  const needsReopen = () => {
+    if (!activeUpdate) refreshInstalledVersion();
+    return !installedVersionVerified || currentVersion !== startupVersion || options.needsReopen?.() === true;
+  };
   return {
     isBusy,
-    needsReopen: () => currentVersion !== startupVersion,
+    needsReopen,
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api/updates/')) return null;
@@ -385,10 +382,10 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
           && !hasActiveUmbraUpdaterProcess(session.runtimeRoot, session.workspaceRoot)
           ? await writeState(service, session, recoverInterruptedUmbraUpdateState(persisted, currentVersion))
           : persisted;
-        return json({ success: true, currentVersion, installedVersionVerified, state: { ...state, currentVersion } });
+        return json({ success: true, currentVersion, installedVersionVerified, state: { ...state, currentVersion }, busy: isBusy(), needsReopen: needsReopen() });
       }
       if (url.pathname === '/api/update' && request.method === 'POST') {
-        if (currentVersion !== startupVersion) return json({ success: false, error: 'Close and reopen Setup before installing another Umbra Studio update.' }, 409);
+        if (needsReopen()) return json({ success: false, error: 'Close and reopen Setup before installing another Umbra Studio update.' }, 409);
         if (isBusy() || setupBusy()) return json({ success: false, error: 'Finish the current Setup or update operation first.' }, 409);
         admittingOperation = true;
         try {
@@ -412,6 +409,7 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
           if (setupBusy() || ['comfyui', 'aitoolkit'].some(tool => readToolMaintenance(session.runtimeRoot, tool))) {
             return json({ success: false, error: 'Finish tool maintenance before installing an update.' }, 409);
           }
+          if (needsReopen()) return json({ success: false, error: 'Close and reopen Setup before installing another Umbra Studio update.' }, 409);
           const releaseComfy = claimToolMaintenance(session.runtimeRoot, 'comfyui');
           let releaseToolkit: (() => void) | null = null;
           try { releaseToolkit = claimToolMaintenance(session.runtimeRoot, 'aitoolkit'); } catch (error) { releaseComfy(); throw error; }
@@ -421,7 +419,7 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
           try { initialState = await initializeUpdate(service, session, release); }
           catch (error) { releaseToolkit(); releaseComfy(); throw error; }
           activeUpdate = runUpdate(service, session, release, initialState)
-            .catch((error) => console.error('[UmbraUpdaterApp] Update failed:', error))
+            .catch((error) => console.error('[UmbraSetupUpdates] Update failed:', error))
             .finally(() => {
               releaseToolkit!(); releaseComfy();
               activeUpdate = null;
@@ -466,7 +464,7 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
         return json({ success: true, ...relaunchState, origin: localUmbraOrigin(session) });
       }
       if (url.pathname === '/api/close' && request.method === 'POST') {
-        if (isBusy() || setupBusy()) return json({ success: false, error: 'Wait for the current operation or model setup to finish before closing the updater.' }, 409);
+        if (isBusy() || setupBusy()) return json({ success: false, error: 'Wait for the current operation or model setup to finish before closing Setup.' }, 409);
         admittingOperation = true;
         setTimeout(() => { admittingOperation = false; void options.onClose(); }, 250);
         return json({ success: true });
@@ -480,17 +478,4 @@ export async function createUmbraUpdateController(sessionFile: string, options: 
       requestUmbraUpdaterWorkspaceCleanup(session.workspaceRoot);
     },
   };
-}
-
-// Old direct invocations use the same unified Setup page as the compatibility launcher.
-if (import.meta.main) {
-  const sessionFile = resolve(readArg('--session'));
-  const setupPath = join(sessionFile, '..', 'UmbraSetupApp.js');
-  if (!existsSync(setupPath)) throw new Error('Unified Umbra Setup is missing. Start UmbraSetup from the installation folder.');
-  const session = JSON.parse(readFileSync(sessionFile, 'utf8')) as UpdaterSession;
-  const child = spawn(process.execPath, [setupPath, '--root', session.runtimeRoot, '--source', session.sourceRoot,
-    '--ui-source', session.workspaceRoot, '--session', sessionFile, '--port', String(session.port), '--token', session.token,
-    '--tab', 'updates', '--no-open'], { cwd: session.workspaceRoot, windowsHide: true, stdio: 'inherit' });
-  child.once('error', () => process.exit(1));
-  child.once('exit', code => process.exit(code ?? 1));
 }

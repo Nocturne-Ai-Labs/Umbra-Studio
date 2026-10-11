@@ -27,11 +27,15 @@ import { assertManagedDependencyRepairIdle } from './updater/ManagedDependencyRe
 import { prepareManagedDependencyInstallPolicy } from './updater/ManagedDependencyInstallPolicy';
 import { pathToFileURL } from 'node:url';
 import { toNamespacedPath } from 'node:path';
-import { comfyPackageRoots, ensureComfyPython, ensureAIToolkitPython, ensureSetupGit, inspectAIToolkitPython, inspectComfyPython, ownedPath } from './setup/ComfyPythonRuntime';
+import { comfyPackageRoots, downloadPinnedRuntime, ensureComfyPython, ensureAIToolkitPython, ensureSetupGit, inspectAIToolkitPython, inspectComfyPython, ownedPath } from './setup/ComfyPythonRuntime';
+import { reviewedSageWindowsArtifact } from './setup/SageAttentionWindows';
+import { ensureAIToolkitSqlite } from './setup/AIToolkitSqlite';
 import { upgradeComfyPython } from './setup/ComfyPythonUpgrade';
 import { joinToolMaintenance } from './shared/toolMaintenanceLock';
 import { assertAIToolkitStopped } from './setup/ToolMaintenance';
-import { installAIToolkitPythonDependencies, verifyAIToolkitPython } from './setup/AIToolkitPython';
+import { gitMaintenanceFailure, sameGitCheckout } from './setup/GitMaintenance';
+import { REVIEWED_SAGE_SOURCE, reviewedSageTriton } from './updater/ManagedDependencyInstallPolicy';
+import { installAIToolkitPythonDependencies, updateAIToolkitTorchStack, verifyAIToolkitPython } from './setup/AIToolkitPython';
 import { restoreComfyAttention } from './setup/ComfyAttentionUpgrade';
 import { isComfyInstallScaffold } from './setup/ComfyInstallScaffold';
 import { resolveHostNodeRuntime } from './shared/hostNodeRuntime';
@@ -731,12 +735,9 @@ function isDirectoryEmpty(dir: string): boolean {
 
 function hasValidGitCheckout(dir: string): boolean {
     if (!existsSync(join(dir, '.git'))) return false;
-    try {
-        execSync('git rev-parse --verify HEAD', { cwd: dir, stdio: 'ignore' });
-        return true;
-    } catch {
-        return false;
-    }
+    const head = runCmdCapture('git rev-parse --verify HEAD', dir);
+    if (!head.ok) throw new Error(gitMaintenanceFailure('Existing repository', head.stderr));
+    return true;
 }
 
 function removeComfyModelPlaceholderCheckoutCollisions(dir: string): void {
@@ -976,6 +977,9 @@ function findVsDevCmdPath(): string | null {
         join(pf86, 'Microsoft Visual Studio', '2022', 'Enterprise', 'Common7', 'Tools', 'VsDevCmd.bat'),
         join(pf86, 'Microsoft Visual Studio', '2019', 'BuildTools', 'Common7', 'Tools', 'VsDevCmd.bat'),
         join(pf, 'Microsoft Visual Studio', '2022', 'BuildTools', 'Common7', 'Tools', 'VsDevCmd.bat'),
+        join(pf, 'Microsoft Visual Studio', '2022', 'Community', 'Common7', 'Tools', 'VsDevCmd.bat'),
+        join(pf, 'Microsoft Visual Studio', '2022', 'Professional', 'Common7', 'Tools', 'VsDevCmd.bat'),
+        join(pf, 'Microsoft Visual Studio', '2022', 'Enterprise', 'Common7', 'Tools', 'VsDevCmd.bat'),
     ];
 
     for (const candidate of candidates) {
@@ -1043,12 +1047,14 @@ function wrapWithVsDevCmd(cmd: string): string {
     const vsDevCmd = findVsDevCmdPath();
     const cudaToolkit = findPreferredCudaToolkitPath();
     const cudaEnvPrefix = cudaToolkit
-        ? `set "CUDA_PATH=${cudaToolkit}" && set "CUDA_HOME=${cudaToolkit}" && set "CUDACXX=${join(cudaToolkit, 'bin', 'nvcc.exe')}" && set "NVCC_PREPEND_FLAGS=-I${join(cudaToolkit, 'include', 'cccl')}" && `
+        ? `set "CUDA_PATH=${cudaToolkit}" && set "CUDA_HOME=${cudaToolkit}" && set "CUDACXX=${join(cudaToolkit, 'bin', 'nvcc.exe')}" && set "NVCC_PREPEND_FLAGS=-I"${join(cudaToolkit, 'include', 'cccl')}"" && `
         : '';
     if (!vsDevCmd) {
         return `${cudaEnvPrefix}${cmd}`;
     }
-    return `call "${vsDevCmd}" -no_logo -arch=x64 -host_arch=x64 >nul && ${cudaEnvPrefix}set DISTUTILS_USE_SDK=1 && set MSSdk=1 && set "CL=/Zc:preprocessor /std:c++17" && set "_CL_=/Zc:preprocessor /std:c++17" && ${cmd}`;
+    // PyTorch supplies its required C++ dialect. _CL_ is appended after command
+    // arguments, so forcing C++17 here overrides newer Torch's C++20 flag.
+    return `call "${vsDevCmd}" -no_logo -arch=x64 -host_arch=x64 >nul && ${cudaEnvPrefix}set DISTUTILS_USE_SDK=1 && set MSSdk=1 && set "CL=/Zc:preprocessor" && set "_CL_=/Zc:preprocessor" && ${cmd}`;
 }
 
 function runCmdCapture(cmd: string, cwd: string, useVsDevCmd = false): {
@@ -1058,8 +1064,17 @@ function runCmdCapture(cmd: string, cwd: string, useVsDevCmd = false): {
     stderr: string;
 } {
     const resolvedCommand = useVsDevCmd ? wrapWithVsDevCmd(cmd) : cmd;
+    const python = getVenvPython(cwd);
+    const environment = { ...process.env };
+    if (python) {
+        // Build backends discover ninja and similar entrypoints through PATH.
+        // Installing them into the tool's venv must make that venv authoritative.
+        for (const key of Object.keys(environment)) if (key.toLowerCase() === 'path') delete environment[key];
+        environment.PATH = `${dirname(python)}${IS_WINDOWS ? ';' : ':'}${process.env.PATH || ''}`;
+    }
     const result = spawnSync(resolvedCommand, {
         cwd,
+        env: environment,
         shell: IS_WINDOWS ? 'cmd.exe' : '/bin/bash',
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -1077,14 +1092,8 @@ function escapeShellDoubleQuotes(value: string): string {
     return String(value || '').replace(/"/g, '\\"');
 }
 
-function markGitSafeDirectory(dir: string): void {
-    const safeDir = escapeShellDoubleQuotes(dir);
-    runCmdAllowFailure(`git config --global --add safe.directory "${safeDir}"`, dir);
-}
-
 function configureGitRepoForPortableUpdates(dir: string): void {
     if (!existsSync(join(dir, '.git'))) return;
-    markGitSafeDirectory(dir);
     runCmdAllowFailure('git config --local core.fsmonitor false', dir);
     runCmdAllowFailure('git config --local core.untrackedCache false', dir);
 }
@@ -1093,30 +1102,13 @@ function pullRepoWithRecovery(dir: string, branch?: string): boolean {
     configureGitRepoForPortableUpdates(dir);
     removeComfyModelPlaceholderCheckoutCollisions(dir);
     const pullCmd = branch
-        ? `git pull --rebase --autostash origin "${branch}"`
-        : 'git pull --rebase --autostash';
-    if (runCmd(pullCmd, dir, true)) return true;
-    runCmdAllowFailure('git fetch --all --prune', dir);
-    removeComfyModelPlaceholderCheckoutCollisions(dir);
-    if (branch) {
-        const hasOriginBranch = runCmdCapture(`git rev-parse --verify "origin/${branch}"`, dir);
-        if (hasOriginBranch.ok) {
-            return runCmd(`git reset --hard "origin/${branch}"`, dir, true);
-        }
-        return false;
-    }
-    const upstream = runCmdCapture('git rev-parse --abbrev-ref --symbolic-full-name @{u}', dir);
-    if (upstream.ok) {
-        const upstreamRef = String(upstream.stdout || '').trim();
-        if (upstreamRef) return runCmd(`git reset --hard "${upstreamRef}"`, dir, true);
-    }
-    const remoteHead = runCmdCapture('git symbolic-ref --short refs/remotes/origin/HEAD', dir);
-    if (remoteHead.ok) {
-        const remoteHeadRef = String(remoteHead.stdout || '').trim();
-        if (remoteHeadRef.startsWith('origin/')) {
-            return runCmd(`git reset --hard "${remoteHeadRef}"`, dir, true);
-        }
-    }
+        ? `git pull --ff-only origin "${branch}"`
+        : 'git pull --ff-only';
+    const pull = runCmdCapture(pullCmd, dir);
+    if (pull.stdout.trim()) log('->', pull.stdout.trim());
+    if (pull.ok) return true;
+    // A failed network/merge operation is never permission to replace local source.
+    log('X', gitMaintenanceFailure('Tool update', pull.stderr));
     return false;
 }
 
@@ -1463,10 +1455,10 @@ function cloneRepo(url: string, targetDir: string, branch?: string) {
                 if (headRef.startsWith('origin/')) {
                     const defaultBranch = headRef.slice('origin/'.length);
                     removeComfyModelPlaceholderCheckoutCollisions(targetDir);
-                    execSync(`git checkout -B "${defaultBranch}" "origin/${defaultBranch}"`, { cwd: targetDir, stdio: 'inherit' });
+                    execSync(`git checkout -b "${defaultBranch}" "origin/${defaultBranch}"`, { cwd: targetDir, stdio: 'inherit' });
                 } else {
                     removeComfyModelPlaceholderCheckoutCollisions(targetDir);
-                    execSync('git checkout -f FETCH_HEAD', { cwd: targetDir, stdio: 'inherit' });
+                    execSync('git checkout --detach FETCH_HEAD', { cwd: targetDir, stdio: 'inherit' });
                 }
             }
         }
@@ -1681,6 +1673,14 @@ function setupAIToolkitUI(toolDir: string): boolean {
         log(`${c.green}OK${c.reset}`, 'AI-Toolkit UI dependencies installed');
     } else {
         log('OK', `AI-Toolkit UI dependencies already installed (Node ${nodeVersion})`);
+    }
+
+    if (!IS_WINDOWS) {
+        try { ensureAIToolkitSqlite(ROOT_DIR, uiDir, nodeRuntime, line => log('->', line)); }
+        catch (error) { return failWithVerify('aitoolkit-sqlite-runtime-failed',
+            'AI-Toolkit SQLite could not load on this Linux system.',
+            [error instanceof Error ? error.message : String(error)],
+            ['Install a C++ compiler, make, and Python 3, then retry AI-Toolkit installation in Setup.']); }
     }
 
     const buildFingerprint = getBuildFingerprint(manifestFingerprint);
@@ -1927,16 +1927,9 @@ function installComfyNodeRequirements(comfyDir: string, nodePath: string, nodeNa
 }
 
 function isOwnGitCheckout(nodePath: string): boolean {
-    try {
-        const topLevel = execSync('git rev-parse --show-toplevel', {
-            cwd: nodePath,
-            encoding: 'utf-8',
-            stdio: ['ignore', 'pipe', 'ignore']
-        }).trim();
-        return resolve(topLevel).toLowerCase() === resolve(nodePath).toLowerCase();
-    } catch {
-        return false;
-    }
+    const top = runCmdCapture('git rev-parse --show-toplevel', nodePath);
+    if (!top.ok) throw new Error(gitMaintenanceFailure('Checkout', top.stderr));
+    return sameGitCheckout(top.stdout.trim(), nodePath);
 }
 
 function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boolean {
@@ -2009,13 +2002,21 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
             }
         } else {
             // Check for updates
-            if (!isOwnGitCheckout(nodePath)) {
-                log(`${c.yellow}WARN${c.reset}`, `${node.name} is not an independent Git checkout; its files were left unchanged. Back it up outside custom_nodes and retry to install a managed checkout.`);
+            let ownCheckout = false;
+            try { ownCheckout = isOwnGitCheckout(nodePath); }
+            catch (error) {
+                log('X', error instanceof Error ? error.message : String(error));
+                requiredFailure = true;
+                continue;
+            }
+            if (!ownCheckout) {
+                log(`${c.yellow}WARN${c.reset}`, `${node.name} is not an independent Git checkout; its files were left unchanged. Review its checkout layout before retrying.`);
                 if (onlyNames) requiredFailure = true;
             } else {
                 try {
                     configureGitRepoForPortableUpdates(nodePath);
-                    execSync('git fetch', { cwd: nodePath, stdio: 'ignore' });
+                    const fetch = runCmdCapture('git fetch', nodePath);
+                    if (!fetch.ok) throw new Error(gitMaintenanceFailure(node.name, fetch.stderr));
                     const status = execSync('git status -uno', { cwd: nodePath, encoding: 'utf-8' });
                     if (status.includes('behind')) {
                         log('->', `Updating ${node.name}...`);
@@ -2027,17 +2028,15 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                                 ensureDaSiWaForgeComputePatch(nodePath);
                             }
                         } else {
-                            execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
+                            if (!pullRepoWithRecovery(nodePath)) throw new Error(`Git update failed for ${node.name}; review the preserved diagnostic above.`);
                         }
                         log(`${c.green}OK${c.reset}`, `${node.name} updated`);
                     } else {
                         log('OK', `${node.name} is up to date`);
                     }
-                } catch {
-                    if (onlyNames) {
-                        log(`${c.red}X${c.reset}`, `Failed to update ${node.name}`);
-                        requiredFailure = true;
-                    }
+                } catch (error) {
+                    log('X', error instanceof Error ? error.message : String(error));
+                    requiredFailure = true;
                 }
             }
         }
@@ -2283,7 +2282,7 @@ async function updateTool(key: keyof typeof CONFIG, coreOnly = false) {
             exitWithExistingVerifyFailure();
         }
         log('->', 'Updating ' + cfg.name + '...');
-        const pullCmd = cfg.branch ? `git pull --rebase --autostash origin "${cfg.branch}"` : 'git pull --rebase --autostash';
+        const pullCmd = cfg.branch ? `git pull --ff-only origin "${cfg.branch}"` : 'git pull --ff-only';
         const pullOk = pullRepoWithRecovery(toolDir, cfg.branch);
         if (!pullOk) {
             exitWithVerifyFailure(
@@ -2292,7 +2291,7 @@ async function updateTool(key: keyof typeof CONFIG, coreOnly = false) {
                 [`Tool path: ${toolDir}`, `Command: ${pullCmd}`],
                 [
                     'Confirm no process is locking repository files, then retry.',
-                    'If this persists, run a reinstall for this tool.'
+                    'Review Git ownership/access, branch divergence and local changes. Setup preserved the checkout; do not reinstall over local work.'
                 ]
             );
         }
@@ -2583,8 +2582,13 @@ function updatePyTorchForTool(key: keyof typeof CONFIG) {
         exitWithExistingVerifyFailure();
     }
 
+    const beforeTorch = getInstalledTorchInfo(py);
+    if (beforeTorch) log('->', `Before maintenance: torch ${beforeTorch.version} (CUDA ${beforeTorch.cuda})`);
     if (key === 'aitoolkit') {
-        if (!setupPythonEnv(toolDir, cfg.id)) exitWithExistingVerifyFailure();
+        updateAIToolkitTorchStack(toolDir, py, GPU_NAME, (line) => log('->', line));
+        const afterTorch = getInstalledTorchInfo(py);
+        log('OK', afterTorch?.version === beforeTorch?.version && afterTorch?.cuda === beforeTorch?.cuda
+            ? 'AI Toolkit already uses its reviewed PyTorch stack; no version change.' : `AI Toolkit now uses torch ${afterTorch?.version || 'unverified'} (CUDA ${afterTorch?.cuda || 'unverified'})`);
         return;
     }
     log('->', `Updating ${cfg.name} to latest available PyTorch...`);
@@ -2601,7 +2605,23 @@ function updatePyTorchForTool(key: keyof typeof CONFIG) {
     if (torchInfo) {
         log(`${c.green}OK${c.reset}`, `Now using torch ${torchInfo.version} (CUDA ${torchInfo.cuda})`);
     }
-    log(`${c.green}OK${c.reset}`, `${cfg.name} PyTorch stack updated`);
+    if (!torchInfo) exitWithVerifyFailure('pytorch-verify-failed', 'Updated PyTorch could not be imported.', [], ['Review the package log before launching ComfyUI.']);
+    const verify = spawnSync(py, ['-c', "import torch,torchvision,torchaudio; " + (GPU_NAME ? "assert torch.cuda.is_available(); x=torch.ones(1,device='cuda'); assert float((x+x).cpu()[0])==2; " : '') + "print('TORCH_STACK_OK')"], { cwd: toolDir, encoding: 'utf8', windowsHide: true, timeout: 90000 });
+    if (verify.status !== 0) exitWithVerifyFailure('pytorch-runtime-verify-failed', 'PyTorch package installation completed but its selected runtime failed verification.', [String(verify.stderr || verify.error || '').slice(-2000)], ['Review the runtime/CUDA error before launching ComfyUI.']);
+    log(`${c.green}OK${c.reset}`, torchInfo?.version === beforeTorch?.version && torchInfo?.cuda === beforeTorch?.cuda
+        ? `${cfg.name} already uses the available PyTorch stack; no version change.` : `${cfg.name} PyTorch stack updated`);
+}
+
+function sageTritonForEnvironment(py: string, toolDir: string): string {
+    const torch = getInstalledTorchInfo(py);
+    if (!torch || torch.cuda === 'cpu') throw new Error('SageAttention requires an installed CUDA PyTorch stack. Existing packages were preserved.');
+    let pin = '';
+    if (process.platform === 'linux') {
+        const result = spawnSync(py, ['-I', '-c', "import importlib.metadata as m\ntry:\n from packaging.requirements import Requirement\nexcept ImportError:\n from pip._vendor.packaging.requirements import Requirement\npins=[r.name+str(r.specifier) for text in m.requires('torch') or [] for r in [Requirement(text)] if r.name=='triton' and (not r.marker or r.marker.evaluate())]\nassert len(pins)==1\nprint(pins[0])"], { cwd: toolDir, encoding: 'utf8', windowsHide: true, timeout: 5000 });
+        if (result.status !== 0) throw new Error('Torch\'s Triton metadata could not be verified. Existing packages were preserved.');
+        pin = result.stdout.trim();
+    }
+    return reviewedSageTriton(torch.version, process.platform, pin);
 }
 
 function installSageAttentionForComfyUI() {
@@ -2628,6 +2648,10 @@ function installSageAttentionForComfyUI() {
         );
     }
 
+    const installedTorch = getInstalledTorchInfo(py);
+    const tritonSpec = sageTritonForEnvironment(py, toolDir);
+    log('->', `Retaining torch ${installedTorch?.version}; installing reviewed SageAttention 2.2.0 and ${tritonSpec}.`);
+
     if (!ensureVenvPip(py, toolDir, cfg.name)) {
         exitWithExistingVerifyFailure();
     }
@@ -2642,21 +2666,13 @@ function installSageAttentionForComfyUI() {
         );
     }
 
-    // Remove stale wheel installs first so fallback resolution doesn't leave old 1.x builds behind.
-    runCmdAllowFailure(`"${py}" -m pip uninstall -y sageattention`, toolDir);
+    // Pip replaces Sage only after resolution succeeds; never uninstall a working copy first.
 
-    // Always try latest upstream source first, then pre-release/latest wheel channels.
+    // Restrict source and version to the reviewed Sage contract.
     const candidates = [
-        `"${py}" -m pip install --upgrade --no-cache-dir --no-build-isolation git+https://github.com/thu-ml/SageAttention.git`,
-        `"${py}" -m pip install --upgrade --pre --no-cache-dir \"sageattention>=2.0.0\"`
+        `"${py}" -m pip install --upgrade --no-cache-dir --no-build-isolation ${REVIEWED_SAGE_SOURCE}`,
+        `"${py}" -m pip install --upgrade --pre --no-cache-dir \"sageattention==2.2.0\"`
     ];
-
-    const torchCudaResult = runCmdCapture(`"${py}" -c "import torch; print(torch.version.cuda or 'cpu')"`, toolDir);
-    const torchCuda = String(torchCudaResult.stdout || '').trim();
-    const wheelUrl = selectSageAttentionWindowsWheel(torchCuda);
-    if (wheelUrl) {
-        candidates.push(`"${py}" -m pip install --upgrade --no-cache-dir "${wheelUrl}"`);
-    }
 
     let installed = false;
     for (const cmd of candidates) {
@@ -2679,14 +2695,7 @@ function installSageAttentionForComfyUI() {
         );
     }
 
-    const tritonCandidates = IS_WINDOWS
-        ? [
-            `"${py}" -m pip install --upgrade triton-windows`,
-            `"${py}" -m pip install --upgrade triton-windows==3.6.0.post26`
-        ]
-        : [
-            `"${py}" -m pip install --upgrade triton`
-        ];
+    const tritonCandidates = [`"${py}" -m pip install --upgrade "${tritonSpec}"`];
     let tritonInstalled = false;
     for (const cmd of tritonCandidates) {
         log('->', `Trying Triton runtime: ${cmd}`);
@@ -2737,7 +2746,16 @@ function installSageAttentionForComfyUI() {
     log('->', 'Restart ComfyUI to apply SageAttention runtime changes.');
 }
 
-function installSageAttentionForComfyUIEnhanced() {
+async function installSageAttentionForComfyUIEnhanced() {
+    if (!IS_WINDOWS && !process.env.CXX?.trim()) {
+        for (const compiler of ['g++', 'clang++']) {
+            if (spawnSync(compiler, ['--version'], { stdio: 'ignore' }).status === 0) {
+                process.env.CXX = compiler;
+                log('->', `Using available C++ compiler: ${compiler}`);
+                break;
+            }
+        }
+    }
     const cfg = CONFIG.comfyui;
     const toolDir = findToolPath(cfg.search);
     if (!toolDir) {
@@ -2761,6 +2779,10 @@ function installSageAttentionForComfyUIEnhanced() {
         );
     }
 
+    const installedTorch = getInstalledTorchInfo(py);
+    const tritonSpec = sageTritonForEnvironment(py, toolDir);
+    log('->', `Retaining torch ${installedTorch?.version}; installing reviewed SageAttention 2.2.0 and ${tritonSpec}.`);
+
     if (!ensureVenvPip(py, toolDir, cfg.name)) {
         exitWithExistingVerifyFailure();
     }
@@ -2775,19 +2797,30 @@ function installSageAttentionForComfyUIEnhanced() {
         );
     }
 
-    runCmdAllowFailure(`"${py}" -m pip uninstall -y sageattention`, toolDir);
+    // Pip replaces Sage only after resolution succeeds; never uninstall a working copy first.
 
-    const candidates = [
-        `"${py}" -m pip install --upgrade --no-cache-dir --no-build-isolation git+https://github.com/thu-ml/SageAttention.git`,
-        `"${py}" -m pip install --upgrade --pre --no-cache-dir \"sageattention>=2.0.0\"`
-    ];
-
-    const torchCudaResult = runCmdCapture(`"${py}" -c "import torch; print(torch.version.cuda or 'cpu')"`, toolDir);
-    const torchCuda = String(torchCudaResult.stdout || '').trim();
-    const wheelUrl = selectSageAttentionWindowsWheel(torchCuda);
-    if (wheelUrl) {
-        candidates.push(`"${py}" -m pip install --upgrade --no-cache-dir "${wheelUrl}"`);
+    const pythonVersion = spawnSync(py, ['-I', '-c', 'import sys; print(sys.version.split()[0])'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+    if (pythonVersion.status !== 0) throw new Error('The managed Python version could not be verified before SageAttention installation.');
+    // The pinned upstream recipe exposes append hooks but still defaults to C++17.
+    // PyTorch 2.14 headers require C++20 for both host and CUDA compilation.
+    if (!IS_WINDOWS && /^2\.(?:1[4-9]|[2-9]\d)\./.test(installedTorch!.version)) {
+        for (const key of ['CXX_APPEND_FLAGS', 'NVCC_APPEND_FLAGS']) {
+            process.env[key] = `${process.env[key] || ''} -std=c++20`.trim();
+        }
+        log('->', 'Using C++20 required by the installed PyTorch headers.');
     }
+    const artifact = IS_WINDOWS ? reviewedSageWindowsArtifact(installedTorch!.version, installedTorch!.cuda, pythonVersion.stdout.trim()) : null;
+    let wheel = '';
+    if (artifact) {
+        wheel = ownedPath(ROOT_DIR, 'User', 'Cache', 'SageAttention', artifact.filename);
+        mkdirSync(dirname(wheel), { recursive: true });
+        log('->', 'Downloading reviewed Windows SageAttention stable-ABI wheel; retaining the installed PyTorch stack.');
+        await downloadPinnedRuntime(artifact, wheel, line => log('->', line));
+    }
+    const candidates = wheel ? [`"${py}" -m pip install --upgrade --no-deps "${wheel}"`] : [
+        `"${py}" -m pip install --upgrade --no-cache-dir --no-build-isolation ${REVIEWED_SAGE_SOURCE}`,
+        `"${py}" -m pip install --upgrade --pre --no-cache-dir \"sageattention==2.2.0\"`
+    ];
 
     let installed = false;
     let lastInstallFailure = '';
@@ -2809,9 +2842,11 @@ function installSageAttentionForComfyUIEnhanced() {
             `Tool path: ${toolDir}`,
             `Detected torch CUDA: ${diag.torchCuda}`,
             `Detected local CUDA toolkit: ${diag.cudaToolkit}`,
-            `MSVC compiler (cl.exe) available in current shell: ${diag.clAvailable ? 'yes' : 'no'}`,
-            `MSVC compiler (cl.exe) available via VsDevCmd: ${diag.clAvailableViaVsDevCmd ? 'yes' : 'no'}`,
-            `VsDevCmd path: ${diag.vsDevCmdPath}`
+            ...(IS_WINDOWS ? [
+                `MSVC compiler (cl.exe) available in current shell: ${diag.clAvailable ? 'yes' : 'no'}`,
+                `MSVC compiler (cl.exe) available via VsDevCmd: ${diag.clAvailableViaVsDevCmd ? 'yes' : 'no'}`,
+                `VsDevCmd path: ${diag.vsDevCmdPath}`
+            ] : [`C++ compiler: ${process.env.CXX || 'not configured'}`])
         ];
         const cudaMismatch =
             diag.torchCuda !== 'unknown'
@@ -2826,21 +2861,14 @@ function installSageAttentionForComfyUIEnhanced() {
             'Failed to install SageAttention package.',
             details,
             [
-                'Ensure Visual Studio Build Tools (Desktop C++) are installed so cl.exe is available.',
+                IS_WINDOWS ? 'Ensure Visual Studio Build Tools (Desktop C++) are installed so cl.exe is available.' : 'Install a supported C++ compiler and CUDA development toolkit, then retry.',
                 'Align local CUDA toolkit with the CUDA version used by ComfyUI torch (for example cu130 torch expects CUDA 13.x toolkit).',
                 'Then rerun Install SageAttention.'
             ]
         );
     }
 
-    const tritonCandidates = IS_WINDOWS
-        ? [
-            `"${py}" -m pip install --upgrade triton-windows`,
-            `"${py}" -m pip install --upgrade triton-windows==3.6.0.post26`
-        ]
-        : [
-            `"${py}" -m pip install --upgrade triton`
-        ];
+    const tritonCandidates = [`"${py}" -m pip install --upgrade "${tritonSpec}"`];
     let tritonInstalled = false;
     for (const cmd of tritonCandidates) {
         log('->', `Trying Triton runtime: ${cmd}`);
@@ -3029,14 +3057,14 @@ async function main() {
     } else if (arg === 'update-pytorch-aitoolkit') {
         updatePyTorchForTool('aitoolkit');
     } else if (arg === 'install-sageattention-comfyui' || arg === 'install-sage-attention-comfyui') {
-        installSageAttentionForComfyUIEnhanced();
+        await installSageAttentionForComfyUIEnhanced();
     } else if (arg && arg in CONFIG) {
         await runRequiredTool(arg as keyof typeof CONFIG, true, true);
     } else {
         await runRequiredTool('comfyui');
     }
 
-    if (arg !== 'background-compatibility' && arg !== 'update-python-comfyui' && (!arg || arg.includes('comfy') || arg === 'umbra-nodes')) {
+    if (arg !== 'background-compatibility' && !arg?.startsWith('update-pytorch-') && !arg?.startsWith('install-sage') && arg !== 'update-python-comfyui' && (!arg || arg.includes('comfy') || arg === 'umbra-nodes')) {
         await repairBackgroundPackages();
     }
     if (VERIFY_FAILURE) exitWithExistingVerifyFailure();

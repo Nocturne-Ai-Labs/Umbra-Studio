@@ -6,11 +6,13 @@ import { compareUmbraVersions } from '../shared/appUpdate';
 import { inspectBundledPythonHelpers } from '../backend/PythonHelpers';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
 import { daSiWaCoreRequirements } from '../setup/DaSiWaRequirements';
-import { ordinaryNodeRequirementsMarker } from '../setup/OrdinaryNodeRequirements';
+import { ordinaryNodeRequirementsRecorded } from '../setup/OrdinaryNodeRequirements';
+import { inspectLocalRequirements } from '../setup/LocalRequirements';
 import { inspectManagedNodeFrontend, managedChildPath, readManagedToolRequirements, type ManagedNodeRequirement, type ManagedRuntimePackage } from '../setup/ManagedToolRequirements';
 import { inspectBackgroundRemovalCompatibility } from '../setup/BackgroundRemovalCompatibility';
 import { inspectMediaTools } from '../setup/MediaTools';
 import { managedGitForTool } from '../setup/ComfyPythonRuntime';
+import { gitMaintenanceFailure, sameGitCheckout } from '../setup/GitMaintenance';
 
 export type ManagedNodeStatus = {
   name: string; minimumCommit: string; installedCommit: string;
@@ -67,7 +69,7 @@ function readComfyVersion(comfyRoot: string): string {
   return '';
 }
 
-type ManagedGitProbe = { status: number | null; stdout: string };
+type ManagedGitProbe = { status: number | null; stdout: string; stderr?: string };
 
 function probeManagedGit(root: string, args: string[], probes?: Map<string, ManagedGitProbe>): ManagedGitProbe {
   const key = JSON.stringify([root, args]);
@@ -80,7 +82,7 @@ function probeManagedGit(root: string, args: string[], probes?: Map<string, Mana
 
 function readCheckoutCommit(root: string, probes?: Map<string, ManagedGitProbe>): string {
   const top = probeManagedGit(root, ['rev-parse', '--show-toplevel'], probes);
-  if (top.status !== 0 || resolve(top.stdout.trim()).toLowerCase() !== resolve(root).toLowerCase()) return '';
+  if (top.status !== 0 || !sameGitCheckout(top.stdout.trim(), root)) return '';
   const head = probeManagedGit(root, ['rev-parse', 'HEAD'], probes);
   return head.status === 0 && /^[a-f0-9]{40}$/.test(head.stdout.trim()) ? head.stdout.trim() : '';
 }
@@ -106,15 +108,19 @@ try:
 except ImportError:
  from pip._vendor.packaging.requirements import Requirement
 issues=[]
-for line in sys.stdin.read().replace('\\\n','').splitlines():
- line=re.split(r'\s+#',line,1)[0].strip()
- if not line or line.startswith('#'): continue
+for entry in json.loads(sys.stdin.read()):
+ line=entry['text']
  try:
   requirement=Requirement(line)
   if requirement.marker and not requirement.marker.evaluate(): continue
-  distribution=m.distribution(requirement.name)
-  if requirement.url: issues.append(requirement.name+': direct-source revision needs separate verification')
-  elif not requirement.specifier.contains(distribution.version, prereleases=True): issues.append(requirement.name+': installed '+distribution.version+' does not satisfy '+str(requirement.specifier))
+  if requirement.url:
+   issues.append(requirement.name+': direct-source revision needs separate verification')
+   continue
+  try: distribution=m.distribution(requirement.name)
+  except m.PackageNotFoundError:
+   if entry['constraint']: continue
+   raise
+  if not requirement.specifier.contains(distribution.version, prereleases=True): issues.append(requirement.name+': installed '+distribution.version+' does not satisfy '+str(requirement.specifier))
  except m.PackageNotFoundError:
   issues.append(requirement.name+': missing from the managed environment')
  except Exception:
@@ -131,24 +137,30 @@ function inspectPythonDependencies(comfyRoot: string, dependencyRoot: string, no
     const content = readFileSync(requirementsPath, 'utf8');
     const installedContent = nodeName === 'ComfyUI-DaSiWa-Nodes' ? daSiWaCoreRequirements(content) : content;
     const marker = readFileSync(join(dependencyRoot, nodeName ? '.umbra-requirements-installed' : '.requirements_installed'), 'utf8').trim();
-    const expectedMarker = nodeName && nodeName !== 'ComfyUI-DaSiWa-Nodes'
-      ? ordinaryNodeRequirementsMarker(installedContent) : Bun.hash(installedContent).toString();
-    if (marker === expectedMarker) {
+    const receiptMatches = nodeName && nodeName !== 'ComfyUI-DaSiWa-Nodes'
+      ? ordinaryNodeRequirementsRecorded(requirementsPath, marker) : marker === Bun.hash(installedContent).toString();
+    const declarations = nodeName === 'ComfyUI-DaSiWa-Nodes'
+      ? installedContent.split(/\r?\n/).map(text => ({ text: text.replace(/\s+#.*$/, '').trim(), constraint: false })).filter(entry => entry.text && !entry.text.startsWith('#'))
+      : inspectLocalRequirements(requirementsPath).declarations;
+    if (receiptMatches) {
       const args = ['-I', '-c', PYTHON_REQUIREMENTS_PROBE];
-      const probe = options.runPython ? options.runPython(python, args, installedContent)
-        : spawnSync(python, args, { input: installedContent, encoding: 'utf8', windowsHide: true, timeout: 5_000 });
+      const input = JSON.stringify(declarations);
+      const probe = options.runPython ? options.runPython(python, args, input)
+        : spawnSync(python, args, { input, encoding: 'utf8', windowsHide: true, timeout: 5_000 });
       if (probe.status === 0 && !probe.error) {
         const result = JSON.parse(String(probe.stdout || '')) as { verified?: boolean; issues?: string[] };
         if (result.verified === true && Array.isArray(result.issues) && !result.issues.length) {
           return { verified: true, detail: 'Managed Setup recorded these requirements and installed distribution versions satisfy them. Imports, platform/GPU compatibility and runtime readiness remain separate checks.' };
         }
         if (Array.isArray(result.issues) && result.issues.every((issue) => typeof issue === 'string')) {
-          return { verified: false, detail: `Python requirements need managed Setup sync: ${result.issues.join('; ')}` };
+          return { verified: false, detail: `${result.issues.some(issue => /direct-source|Unverified requirement/.test(issue))
+            ? 'Python requirement sources need separate verification; repeating installation cannot establish their revision'
+            : 'Python requirements need managed Setup sync'}: ${result.issues.join('; ')}` };
         }
       }
       return { verified: false, detail: 'Managed Python requirement versions could not be verified. Review Setup and explicitly retry; runtime imports remain unchecked.' };
     }
-  } catch { /* Missing/stale setup evidence requires the existing managed installer. */ }
+  } catch (error) { return { verified: false, detail: `Python requirement verification is held: ${error instanceof Error ? error.message : String(error)}` }; }
   return { verified: false, detail: 'Python requirement installation is unverified or stale. Repair using the existing managed Setup installer.' };
 }
 
@@ -202,7 +214,8 @@ export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requir
   };
   if (!existsSync(join(nodePath, '__init__.py'))) return { ...base, installedCommit: '', status: 'missing', reason: 'Install the declared node suite in Setup.' };
   const topLevel = probeManagedGit(nodePath, ['rev-parse', '--show-toplevel'], gitProbes);
-  if (topLevel.status !== 0 || resolve(topLevel.stdout.trim()).toLowerCase() !== resolve(nodePath).toLowerCase()) {
+  if (topLevel.status !== 0) return { ...base, installedCommit: '', status: 'unknown', reason: gitMaintenanceFailure(requirement.name, topLevel.stderr || '') };
+  if (!sameGitCheckout(topLevel.stdout.trim(), nodePath)) {
     return { ...base, installedCommit: '', status: 'unknown', reason: 'The suite is not an independent Git checkout; local files were preserved.' };
   }
   const head = probeManagedGit(nodePath, ['rev-parse', 'HEAD'], gitProbes);

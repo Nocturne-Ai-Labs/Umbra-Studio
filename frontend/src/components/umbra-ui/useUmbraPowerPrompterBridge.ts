@@ -2314,6 +2314,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     inheritedGeneration,
     queueSummary,
     queueActivities,
+    imageRequestStates: queueSnapshot?.requests || [],
     queueErrors: Object.fromEntries((queueSnapshot?.requests || []).map(request => [request.requestId, request.prompts.map(prompt => prompt.error).filter(Boolean).join('\n')])),
     videoJobs,
     videoJobsLoading,
