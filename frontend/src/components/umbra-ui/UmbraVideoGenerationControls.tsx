@@ -1,4 +1,5 @@
 'use client';
+import { UmbraLoraEntryCard } from './UmbraLoraEntryCard';
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../../shared/umbra-ui/minimaxH3Defaults';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from '../../../../shared/umbra-ui/videoLoraStack';
 
@@ -2325,28 +2326,25 @@ export function UmbraVideoGenerationControls({
           summary={videoLoraIssue ? 'Needs attention' : `${videoLoras.filter((entry) => entry.enabled && entry.name && entry.strength !== 0).length} active`}
           accent="cyan"
         >
+          <div data-umbra-lora-stack="" className="space-y-2">
           {videoLoras.map((entry, index) => (
-            <div key={entry.id} className="space-y-2 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
-              <div className="flex items-center gap-2">
-                <label className="flex min-w-0 flex-1 items-center gap-2 text-[10px] text-zinc-300">
-                  <input type="checkbox" checked={entry.enabled} onChange={(event) => updateVideoLora(entry.id, { enabled: event.target.checked })} />
-                  LoRA {index + 1}
-                </label>
-                <button type="button" title="Remove video LoRA" aria-label={`Remove video LoRA ${index + 1}`} onClick={() => setVideo((current) => ({ ...current, loraStack: (current.loraStack || []).filter((item) => item.id !== entry.id) }))} className="inline-flex h-7 w-7 items-center justify-center border border-white/10 text-zinc-500 hover:text-red-300">
-                  <Trash2 size={12} />
-                </button>
-              </div>
-              <VideoResourceField label={`Video LoRA ${index + 1}`} value={entry.name} values={catalog.loras} kind="lora" onChange={(name) => updateVideoLora(entry.id, { name })} onChoose={setResourcePicker} />
-              <div className="grid grid-cols-2 gap-2">
-                <NumberField label="Model Strength" value={entry.strength} min={-10} max={10} step={0.05} onChange={(strength) => updateVideoLora(entry.id, { strength })} />
-                {video.family === 'wan22' ? <SelectField label="Wan Stage" value={entry.wanStage} values={['both', 'high', 'low']} onChange={(wanStage) => updateVideoLora(entry.id, { wanStage: wanStage as UmbraVideoLoraEntry['wanStage'] })} /> : null}
+            <UmbraLoraEntryCard key={entry.id}
+              lora={{id:entry.id,name:entry.name || `LoRA ${index+1}`,enabled:entry.enabled,strengthModel:entry.strength,strengthClip:0,trainedTags:[]}}
+              modelOnly syntax=""
+              onChange={patch=>updateVideoLora(entry.id,{...(patch.enabled!==undefined ? {enabled:patch.enabled} : {}),...(patch.strengthModel!==undefined ? {strength:patch.strengthModel} : {})})}
+              onRemove={()=>setVideo(current=>({...current,loraStack:(current.loraStack || []).filter(item=>item.id!==entry.id)}))}
+              beforeControls={<VideoResourceField label={`Video LoRA ${index + 1}`} value={entry.name} values={catalog.loras} kind="lora" onChange={name=>updateVideoLora(entry.id,{name})} onChoose={setResourcePicker} />}
+            >
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {video.family === 'wan22' ? <SelectField label="Wan Stage" value={entry.wanStage} values={['both', 'high', 'low']} onChange={wanStage=>updateVideoLora(entry.id,{wanStage:wanStage as UmbraVideoLoraEntry['wanStage']})} /> : null}
                 {omniForgeOpen ? <>
-                  <NumberField label="Video Multiplier" value={entry.visualStrength ?? 1} min={-10} max={10} step={0.05} onChange={(visualStrength) => updateVideoLora(entry.id, { visualStrength })} />
-                  <NumberField label="Audio Multiplier" value={entry.audioStrength ?? 1} min={-10} max={10} step={0.05} onChange={(audioStrength) => updateVideoLora(entry.id, { audioStrength })} />
+                  <NumberField label="Video Multiplier" value={entry.visualStrength ?? 1} min={-10} max={10} step={0.05} onChange={visualStrength=>updateVideoLora(entry.id,{visualStrength})} />
+                  <NumberField label="Audio Multiplier" value={entry.audioStrength ?? 1} min={-10} max={10} step={0.05} onChange={audioStrength=>updateVideoLora(entry.id,{audioStrength})} />
                 </> : null}
               </div>
-            </div>
+            </UmbraLoraEntryCard>
           ))}
+
           <button type="button" title="Add a model-only LoRA compatible with this video family" disabled={videoLoras.length >= 8} onClick={() => setVideo((current) => ({
             ...current,
             loraStack: [...(current.loraStack || []), {
@@ -2355,6 +2353,7 @@ export function UmbraVideoGenerationControls({
           }))} className="inline-flex h-8 items-center gap-1.5 border border-cyan-300/25 px-2.5 text-[10px] text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-40">
             <Plus size={12} /> Add LoRA
           </button>
+          </div>
         </VideoAccordion>
 
         {!omniForgeOpen ? <VideoAccordion

@@ -697,6 +697,44 @@ code.custom-scrollbar::-webkit-scrollbar {
   }
 }
 
+/* Shared LoRA controls use the same theme-aware spacing on every workspace. */
+[data-umbra-lora-stack] button,
+[data-umbra-lora-stack] a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--umbra-text) 15%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--umbra-panel) 80%, transparent);
+  color: var(--umbra-text);
+}
+[data-umbra-lora-stack] button:hover,
+[data-umbra-lora-stack] a:hover {
+  background: color-mix(in srgb, var(--umbra-text) 10%, var(--umbra-panel));
+}
+[data-umbra-lora-stack] button[aria-pressed="true"] {
+  border-color: var(--umbra-accent);
+  background: color-mix(in srgb, var(--umbra-accent) 15%, var(--umbra-panel));
+}
+[data-umbra-lora-stack] button:disabled { opacity: .35; cursor: default; }
+[data-umbra-lora-stack] input:not([type=checkbox]) {
+  color: var(--umbra-text);
+  background: var(--umbra-panel);
+  border: 1px solid color-mix(in srgb, var(--umbra-text) 18%, transparent);
+  border-radius: 4px;
+  padding: 7px 8px;
+  width: 100%;
+  min-width: 0;
+}
+[data-umbra-lora-entry] { color: var(--umbra-text); }
+[data-umbra-lora-entry] .umbra-lora-strength { width: 0; }
+[data-umbra-lora-entry] .umbra-lora-strength-row { height: auto; min-height: 34px; }
+@media (max-width: 999px) {
+  [data-umbra-lora-stack] button, [data-umbra-lora-stack] a { min-height: 44px; }
+}
 [data-umbra-lora-stack] .umbra-lora-strength {
   appearance: textfield;
   -moz-appearance: textfield;

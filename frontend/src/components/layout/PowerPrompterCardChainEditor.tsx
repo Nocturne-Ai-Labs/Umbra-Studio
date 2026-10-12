@@ -1,4 +1,5 @@
-import { isUmbraUiModelOnlyLoraFamily } from '@/lib/umbraUiModels';
+import { UmbraLoraEntryCard } from '@/components/umbra-ui/UmbraLoraEntryCard';
+import { extractUmbraUiLoraTriggerWords, isUmbraUiModelOnlyLoraFamily } from '@/lib/umbraUiModels';
 import { PowerPrompterWorkflowResources } from '@/components/power-prompter/PowerPrompterWorkflowResources';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from '../../../../shared/umbra-ui/animaTextEncoderDevice';
@@ -198,6 +199,7 @@ interface PowerPrompterModelInfoPayload {
 }
 
 interface PowerPrompterLoraCardMeta {
+  triggerWords: string[];
   civitaiUrl: string;
   thumbnailUrl: string;
   thumbnailUrls: string[];
@@ -1494,7 +1496,7 @@ function buildLoraCardMeta(payload: PowerPrompterLoraInfoPayload | null): PowerP
   const civitaiUrl = buildCivitaiUrlFromPayload(payload);
   const thumbnailUrls = extractCivitaiImageUrls(payload, 320).slice(0, 4);
   const thumbnailUrl = thumbnailUrls[0] || '';
-  return { civitaiUrl, thumbnailUrl, thumbnailUrls };
+  return { civitaiUrl, thumbnailUrl, thumbnailUrls, triggerWords: extractUmbraUiLoraTriggerWords(payload) };
 }
 
 function normalizeLoraCatalogPath(rawValue: unknown): string {
@@ -4391,6 +4393,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
       const everyAliasCurrent = aliasKeys.every((key) => {
         const aliasCurrent = prev[key];
         return aliasCurrent
+          && JSON.stringify(aliasCurrent.triggerWords) === JSON.stringify(nextMeta.triggerWords)
           && aliasCurrent.civitaiUrl === nextMeta.civitaiUrl
           && aliasCurrent.thumbnailUrl === nextMeta.thumbnailUrl
           && (Array.isArray(aliasCurrent.thumbnailUrls) ? aliasCurrent.thumbnailUrls : (aliasCurrent.thumbnailUrl ? [aliasCurrent.thumbnailUrl] : [])).length === nextThumbs.length
@@ -9659,9 +9662,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                 onChange={(outputFolder) => updateGeneration({ outputFolder })}
               />
 
-              <div className="pt-2 border-t border-white/10">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-cyan-200">LoRAs</span>
+              <div data-umbra-lora-stack="" onClick={event=>event.stopPropagation()} className="min-w-0 rounded-md border border-white/10 bg-white/[0.02] p-2.5">
+                <div className="flex min-h-10 items-center gap-2">
+                  <span className="min-w-0 flex-1 text-[11px] font-black uppercase text-[var(--umbra-text)]">LoRA Stack</span>
+                  <span title={`${loraEntries.filter(entry=>entry.enabled).length} enabled LoRAs`} className="shrink-0 rounded-sm border border-[var(--umbra-accent)] px-1.5 py-0.5 font-mono text-[9px]">{loraEntries.filter(entry=>entry.enabled).length}</span>
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
@@ -9671,10 +9675,11 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     }}
                     className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-white/15 bg-white/[0.04] text-[10px] uppercase tracking-wider text-zinc-300 hover:text-zinc-100 hover:border-white/30"
                     title="Refresh LoRA catalog"
+                    aria-label="Refresh LoRA catalog"
                   >
                     <RefreshCw size={10} />
-                    Refresh
                   </button>
+                  <button type="button" onClick={openLoraBrowser} disabled={loraEntries.length>=24} aria-label="Add LoRA" title="Add LoRA" className="inline-flex items-center justify-center"><Plus size={14}/></button>
                 </div>
 
                 <div className="mt-2 space-y-2">
@@ -9698,67 +9703,18 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       ...autoPreviewUrls,
                     ])).slice(0, 4);
                     const isCollapsed = loraCollapsedIds.includes(entry.id);
-                    const displayName = String(entry.name || '').trim() || 'Unselected LoRA';
                     return (
-                      <div
-                        key={entry.id}
-                        className="rounded-md border border-white/10 bg-black/30 p-2 space-y-1.5"
-                        title={entry.name ? `LoRA: ${entry.name}` : 'LoRA entry'}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleLoraCollapsed(entry.id);
-                            }}
-                            className="px-1.5 py-0.5 rounded border border-white/15 bg-white/[0.04] text-[10px] uppercase tracking-wider text-zinc-300 hover:text-zinc-100 hover:border-white/30"
-                            title={isCollapsed ? 'Expand LoRA card' : 'Minimize LoRA card'}
-                          >
-                            {isCollapsed ? 'Open' : 'Min'}
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[11px] font-semibold text-zinc-200 truncate">
-                              {displayName}
-                            </div>
-                          </div>
-                          {loraCardMeta?.civitaiUrl ? (
-                            <a
-                              href={loraCardMeta.civitaiUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(event) => event.stopPropagation()}
-                              className="px-1.5 py-1 rounded border border-cyan-400/35 bg-cyan-500/10 text-cyan-200 hover:text-cyan-100 hover:border-cyan-300/60 text-[10px] uppercase tracking-wider"
-                              title="Open this LoRA on Civitai"
-                            >
-                              Link
-                            </a>
-                          ) : null}
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void openLoraInfo(entry.name);
-                            }}
-                            className="p-1 rounded border border-white/15 text-zinc-300 hover:text-zinc-100 hover:border-white/30"
-                            title="View LoRA info"
-                          >
-                            <Info size={12} />
-                          </button>
-                          <button
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              removeLoraEntry(entry.id);
-                            }}
-                            className="p-1 rounded border border-red-400/30 text-red-300 hover:text-red-200 hover:border-red-400/50"
-                            title="Remove LoRA"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                        {!isCollapsed && (
-                          <>
-                            <div className="rounded-md border border-white/15 bg-black/45 px-2 py-1 text-[11px] text-zinc-200 break-all">
-                              {String(entry.name || '').trim() || 'No LoRA selected. Use Add LoRA browser.'}
-                            </div>
+                      <UmbraLoraEntryCard key={entry.id}
+                        lora={{...entry,trainedTags,triggerWords:loraCardMeta?.triggerWords || [],thumbnailUrls:previewUrls}}
+                        syntax={syntaxToken} modelOnly={isUmbraUiModelOnlyLoraFamily(selectedPipeline?.modelFamilyKey)} collapsed={isCollapsed}
+                        onChange={patch=>patchLoraEntry(entry.id,patch)} onRemove={()=>removeLoraEntry(entry.id)}
+                        onCopy={copyLoraToken} onPreview={()=>{void openLoraInfo(entry.name);}}
+                        headerActions={<>
+                          <button type="button" onClick={()=>toggleLoraCollapsed(entry.id)} title={isCollapsed?'Expand LoRA card':'Minimize LoRA card'} aria-expanded={!isCollapsed}>{isCollapsed?'Open':'Min'}</button>
+                          {loraCardMeta?.civitaiUrl && <a href={loraCardMeta.civitaiUrl} target="_blank" rel="noopener noreferrer" title="Open this LoRA on Civitai">Link</a>}
+                          <button type="button" onClick={()=>{void openLoraInfo(entry.name);}} title="View LoRA info"><Info size={12}/></button>
+                        </>}
+                        beforeControls={<>
                         {previewUrls.length > 0 ? (
                           <button
                             onClick={(event) => {
@@ -9798,100 +9754,14 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                             </div>
                           </button>
                         ) : null}
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="text-[10px] uppercase tracking-widest text-zinc-500">
-                            Model
-                            <input
-                              type="number"
-                              step={0.05}
-                              min={-10}
-                              max={10}
-                              value={entry.strengthModel}
-                              onChange={(event) => patchLoraEntry(entry.id, { strengthModel: parseFloatInput(event.target.value, entry.strengthModel) })}
-                              onClick={(event) => event.stopPropagation()}
-                              className="mt-1 w-full bg-black/40 border border-white/15 rounded px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300"
-                            />
-                          </label>
-                          {!isUmbraUiModelOnlyLoraFamily(selectedPipeline?.modelFamilyKey) ? (<label className="text-[10px] uppercase tracking-widest text-zinc-500">
-                            Clip
-                            <input
-                              type="number"
-                              step={0.05}
-                              min={-10}
-                              max={10}
-                              value={entry.strengthClip}
-                              onChange={(event) => patchLoraEntry(entry.id, { strengthClip: parseFloatInput(event.target.value, entry.strengthClip) })}
-                              onClick={(event) => event.stopPropagation()}
-                              className="mt-1 w-full bg-black/40 border border-white/15 rounded px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300"
-                            />
-                          </label>) : null}
-                        </div>
-                        <div className="pt-1 border-t border-white/10 space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] uppercase tracking-widest text-zinc-500">LoRA Variant Tokens</span>
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void loadLoraTags(entry.name);
-                              }}
-                              className="px-2 py-0.5 rounded border border-white/15 text-[10px] uppercase tracking-wider text-zinc-300 hover:text-zinc-100 hover:border-white/30"
-                              title="Load trained LoRA tokens"
-                            >
-                              Load Tags
-                            </button>
-                          </div>
-                          <div className="text-[10px] text-zinc-500">
-                            Click a token to copy it, then paste it wherever you need it.
-                          </div>
-                          {syntaxToken && (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void copyLoraToken(syntaxToken);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded border border-purple-400/45 bg-purple-500/15 text-purple-200 text-[10px] font-semibold hover:border-purple-300/70"
-                              title="Copy LoRA syntax"
-                            >
-                              <Copy size={10} className="shrink-0" />
-                              {syntaxToken}
-                            </button>
-                          )}
-                          {trainedTags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {trainedTags.slice(0, 28).map((tag) => (
-                                <button
-                                  type="button"
-                                  key={`${entry.id}-copy-tag-${tag}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void copyLoraToken(tag);
-                                  }}
-                                  className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded border border-cyan-400/35 bg-cyan-500/10 text-cyan-200 text-[10px] hover:border-cyan-300/60"
-                                  title={`Copy "${tag}"`}
-                                >
-                                  <Copy size={9} className="shrink-0" />
-                                  <span data-i18n-skip="">{tag}</span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                          </>
-                        )}
-                      </div>
+                        </>}
+                      >
+                        <button type="button" onClick={()=>{void loadLoraTags(entry.name);}} title="Load trained LoRA tokens" className="mt-2">Load Tags</button>
+                      </UmbraLoraEntryCard>
                     );
                   })}
 
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openLoraBrowser();
-                    }}
-                    className="w-full px-2 py-1.5 rounded-md border border-cyan-400/35 bg-cyan-500/10 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
-                  >
-                    Add LoRA
-                  </button>
+
                 </div>
               </div>
             </div>

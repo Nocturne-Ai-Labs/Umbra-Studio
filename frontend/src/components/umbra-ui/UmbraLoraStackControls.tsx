@@ -2,23 +2,14 @@
 
 import React from 'react';
 import {
-  Check,
   ChevronDown,
-  Copy,
   FolderOpen,
-  Image as ImageIcon,
   Library,
-  Minus,
   Plus,
-  Tags,
-  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import {
-  buildUmbraUiLoraSyntax,
-  type UmbraUiLoraEntry,
-} from '@/lib/umbraUiModels';
-import { useStore } from '@/store/useStore';
+import type { UmbraUiLoraEntry } from '@/lib/umbraUiModels';
+import { UmbraLoraEntryCard } from './UmbraLoraEntryCard';
 import { UmbraLoraPresetModal } from './UmbraLoraPresetModal';
 
 interface UmbraLoraStackControlsProps {
@@ -29,50 +20,6 @@ interface UmbraLoraStackControlsProps {
   modelOnly?: boolean;
 }
 
-const labelClass = 'text-[9px] font-black uppercase tracking-[0.11em] text-zinc-500';
-
-function clampStrength(value: string, fallback: number): number {
-  if (value.trim() === '' || value.trim() === '-' || value.trim() === '.') return fallback;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.max(-10, Math.min(10, numeric)) : fallback;
-}
-
-function adjustStrengthBy(value: number, delta: number): number {
-  return Math.max(-10, Math.min(10, Number((value + delta).toFixed(6))));
-}
-
-function formatStrength(value: number): string {
-  return String(value);
-}
-
-function UmbraLoraStrengthInput({ value, label, name, onChange }: {
-  value: number;
-  label: string;
-  name: string;
-  onChange: (value: number) => void;
-}) {
-  const [draft, setDraft] = React.useState<string | null>(null);
-  return (
-    <input
-      type="text"
-      value={draft ?? formatStrength(value)}
-      onChange={(event) => {
-        const next = event.target.value;
-        setDraft(next);
-        if (next.trim() && Number.isFinite(Number(next))) onChange(clampStrength(next, value));
-      }}
-      onBlur={() => {
-        if (draft !== null) onChange(clampStrength(draft, value));
-        setDraft(null);
-      }}
-      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-      inputMode="decimal"
-      aria-label={`${label} strength for ${name}`}
-      className="umbra-lora-strength min-w-0 flex-1 bg-transparent px-1 text-center font-mono text-xs text-zinc-100 outline-none"
-    />
-  );
-}
-
 export function UmbraLoraStackControls({
   loras,
   availableCount,
@@ -80,33 +27,9 @@ export function UmbraLoraStackControls({
   onOpenPicker,
   modelOnly = false,
 }: UmbraLoraStackControlsProps) {
-  const showToast = useStore((state) => state.showToast);
   const [expanded, setExpanded] = React.useState(false);
   const [presetsOpen, setPresetsOpen] = React.useState(false);
-  const [copiedToken, setCopiedToken] = React.useState('');
-  const copiedTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const enabledLoras = loras.filter((lora) => lora.enabled);
-
-  React.useEffect(() => () => {
-    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-  }, []);
-
-  const copyToken = React.useCallback(async (rawToken: string) => {
-    const token = String(rawToken || '').trim();
-    if (!token) return;
-    try {
-      await navigator.clipboard.writeText(token);
-      setCopiedToken(token);
-      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
-      copiedTimerRef.current = setTimeout(() => {
-        copiedTimerRef.current = null;
-        setCopiedToken((current) => current === token ? '' : current);
-      }, 1400);
-      showToast('LoRA token copied.', 'success');
-    } catch {
-      showToast('Failed to copy LoRA token.', 'error');
-    }
-  }, [showToast]);
 
   const updateLora = React.useCallback((id: string, patch: Partial<UmbraUiLoraEntry>) => {
     onChange(loras.map((lora) => lora.id === id ? { ...lora, ...patch } : lora));
@@ -116,15 +39,6 @@ export function UmbraLoraStackControls({
     onChange(loras.filter((lora) => lora.id !== id));
   }, [loras, onChange]);
 
-  const adjustStrength = React.useCallback((
-    id: string,
-    key: 'strengthModel' | 'strengthClip',
-    delta: number,
-  ) => {
-    const target = loras.find((lora) => lora.id === id);
-    if (!target) return;
-    updateLora(id, { [key]: adjustStrengthBy(target[key], delta) });
-  }, [loras, updateLora]);
 
   return (
     <section data-umbra-lora-stack="" className="min-w-0 rounded-md border border-white/10 bg-white/[0.02]">
@@ -164,142 +78,8 @@ export function UmbraLoraStackControls({
             >
               Choose a LoRA from the ComfyUI catalog
             </button>
-          ) : loras.map((lora) => {
-            const syntax = buildUmbraUiLoraSyntax(lora, modelOnly);
-            const thumbnail = String(lora.thumbnailUrls?.[0] || lora.thumbnailUrl || '').trim();
-            const triggerWords = Array.from(new Set(
-              (lora.triggerWords || []).map((word) => String(word || '').trim()).filter(Boolean),
-            ));
-            const triggerWordKeys = new Set(triggerWords.map((word) => word.toLowerCase()));
-            const trainingTags = lora.trainedTags.filter((tag) => !triggerWordKeys.has(tag.toLowerCase()));
-            return (
-              <div key={lora.id} className={cn('rounded-md border border-white/10 bg-black/25 p-2', !lora.enabled && 'opacity-55')}>
-                <div className="flex min-w-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => updateLora(lora.id, { enabled: !lora.enabled })}
-                    className={cn(
-                      'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm border',
-                      lora.enabled
-                        ? 'border-emerald-300/35 bg-emerald-500/[0.12] text-emerald-100'
-                        : 'border-white/10 text-zinc-700',
-                    )}
-                    title={lora.enabled ? 'Disable LoRA' : 'Enable LoRA'}
-                  >
-                    {lora.enabled ? <Check size={12} /> : null}
-                  </button>
-                  <div className="h-9 w-9 shrink-0 overflow-hidden rounded-sm border border-white/10 bg-black/45">
-                    {thumbnail ? (
-                      <img src={thumbnail} alt="" className="h-full w-full object-cover" loading="lazy" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-zinc-700">
-                        <ImageIcon size={13} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1 truncate font-mono text-[10px] text-zinc-100" title={lora.name}>{lora.name}</div>
-                  <button
-                    type="button"
-                    onClick={() => removeLora(lora.id)}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm border border-red-300/15 text-red-200/65 hover:border-red-300/35 hover:text-red-100"
-                    title="Remove LoRA"
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-
-                <div className="mt-2 space-y-1.5">
-                  <button
-                    type="button"
-                    onClick={() => { void copyToken(syntax); }}
-                    className="flex w-full min-w-0 max-w-full items-start gap-1.5 rounded-sm border border-cyan-300/18 bg-cyan-500/[0.05] px-2 py-1.5 text-left font-mono text-[10px] leading-relaxed text-cyan-100/90 hover:border-cyan-300/35"
-                    title={`Copy LoRA syntax: ${syntax}`}
-                    aria-label="Copy LoRA syntax"
-                  >
-                    {copiedToken === syntax ? <Check size={10} className="shrink-0 text-emerald-300" /> : <Copy size={10} className="shrink-0" />}
-                    <span className="min-w-0 break-all">{syntax}</span>
-                  </button>
-                  <div className={modelOnly ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
-                    {([['strengthModel', 'Model'], ...(!modelOnly ? [['strengthClip', 'CLIP']] : [])] as Array<['strengthModel' | 'strengthClip', string]>).map(([key, label]) => (
-                      <div key={key} className="min-w-0 space-y-1">
-                        <span className={labelClass}>{label}</span>
-                        <div className="flex h-8 overflow-hidden rounded-sm border border-white/10 bg-black/35 focus-within:border-emerald-300/35">
-                          <button
-                            type="button"
-                            onClick={() => adjustStrength(lora.id, key, -0.05)}
-                            className="flex w-7 shrink-0 items-center justify-center border-r border-white/10 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
-                            title={`Decrease ${label} strength by 0.05`}
-                            aria-label={`Decrease ${label} strength by 0.05`}
-                          >
-                            <Minus size={11} />
-                          </button>
-                          <UmbraLoraStrengthInput
-                            value={lora[key]}
-                            label={label}
-                            name={lora.name}
-                            onChange={(value) => updateLora(lora.id, { [key]: value })}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => adjustStrength(lora.id, key, 0.05)}
-                            className="flex w-7 shrink-0 items-center justify-center border-l border-white/10 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-100"
-                            title={`Increase ${label} strength by 0.05`}
-                            aria-label={`Increase ${label} strength by 0.05`}
-                          >
-                            <Plus size={11} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {triggerWords.length > 0 ? (
-                  <div className="mt-2">
-                    <div className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">
-                      <Tags size={10} /> Trigger Words
-                    </div>
-                    <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto custom-scrollbar">
-                      {triggerWords.map((tag) => (
-                        <button
-                          type="button"
-                          key={tag}
-                          onClick={() => { void copyToken(tag); }}
-                          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-sm border border-emerald-300/18 bg-emerald-500/[0.055] px-2 py-1.5 font-mono text-[9px] text-emerald-100/90 hover:border-emerald-300/40 hover:bg-emerald-500/[0.1]"
-                          title={`Copy "${tag}"`}
-                        >
-                          {copiedToken === tag ? <Check size={9} className="shrink-0" /> : <Copy size={9} className="shrink-0" />}
-                          <span data-i18n-skip="" className="truncate">{tag}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {trainingTags.length > 0 ? (
-                  <details className="mt-2 border-t border-white/[0.06] pt-2">
-                    <summary className="cursor-pointer select-none text-[9px] font-black uppercase tracking-[0.1em] text-zinc-600 hover:text-zinc-400">
-                      Trained Tokens ({trainingTags.length})
-                    </summary>
-                    <div className="mt-1 flex max-h-24 flex-wrap gap-1 overflow-y-auto custom-scrollbar">
-                      {trainingTags.map((tag) => (
-                        <button
-                          type="button"
-                          key={tag}
-                          onClick={() => { void copyToken(tag); }}
-                          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-sm border border-white/10 bg-white/[0.025] px-2 py-1.5 font-mono text-[9px] text-zinc-400 hover:border-white/20 hover:text-zinc-200"
-                          title={`Copy "${tag}"`}
-                        >
-                          {copiedToken === tag ? <Check size={9} className="shrink-0" /> : <Copy size={9} className="shrink-0" />}
-                          <span data-i18n-skip="" className="truncate">{tag}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </details>
-                ) : null}
-              </div>
-            );
-          })}
+          ) : loras.map(lora => <UmbraLoraEntryCard key={lora.id} lora={lora} modelOnly={modelOnly}
+            onChange={patch=>updateLora(lora.id,patch)} onRemove={()=>removeLora(lora.id)} />)}
         </div>
       ) : null}
       {presetsOpen && <UmbraLoraPresetModal loras={loras} onLoad={(next) => { onChange(next); setExpanded(true); }} onClose={() => setPresetsOpen(false)} />}
