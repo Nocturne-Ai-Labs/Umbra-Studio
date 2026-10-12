@@ -3,7 +3,7 @@ import {UmbraSelect} from '@/components/ui/UmbraSelect';
 import {useUmbraPowerPrompterBridge,type UmbraModelCatalog,type UmbraWorkflowResourceKind} from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 import {listUmbraUiPipelineFamilies,resolveUmbraUiPipeline} from '@/lib/umbraUiPipelines';
 import {normalizeUmbraUiPipelineCapabilities} from '../../../../shared/umbra-ui/pipelineTypes';
-import {buildMangaGenerationOptions,defaultMangaGeneration,mangaGenerationDimensions,type MangaGenerationSettings} from './mangaGeneration';
+import {buildMangaGenerationOptions,defaultMangaGeneration,mangaFamilySamplingDefaults,mangaGenerationDimensions,type MangaGenerationSettings} from './mangaGeneration';
 import type {MangaProject} from './mangaModel';
 import {MangaEnhancementControls} from './MangaEnhancementControls';
 const choices=(values:string[])=>values.map(value=>({value,label:value}));
@@ -55,7 +55,7 @@ export function MangaGenerationPanel({project,frame,hidden,disabled,onSubmitting
   return <div className="manga-generation-panel" hidden={hidden} aria-label="Manga scene generation">
     <p className="manga-hint">{frame?`Panel generation · ${dimensions.width} × ${dimensions.height}`:'Select a panel or one of its image layers.'}</p>
     <label className="manga-field"><span>Scene prompt</span><textarea aria-label="Manga scene prompt" rows={5} value={settings.prompt} onChange={event=>patch({prompt:event.target.value})} /></label>
-    <UmbraSelect ariaLabel="Manga model family" value={settings.modelFamily} options={choices(families)} onValueChange={modelFamily=>{const sources=bridge.workflows.flatMap(item=>item.umbraUiPipelines || []).filter(item=>item.feature==='txt2img' && item.modelFamily===modelFamily).flatMap(item=>item.modelSources);patch({modelFamily,modelType:sources[0] || 'checkpoint',checkpointName:'',workflowResources:{}});}} />
+    <UmbraSelect ariaLabel="Manga model family" value={settings.modelFamily} options={choices(families)} onValueChange={modelFamily=>{const sources=bridge.workflows.flatMap(item=>item.umbraUiPipelines || []).filter(item=>item.feature==='txt2img' && item.modelFamily===modelFamily).flatMap(item=>item.modelSources);const modelType=sources[0] || 'checkpoint';const next=resolveUmbraUiPipeline(bridge.workflows,'txt2img',modelFamily,modelType);patch({...mangaFamilySamplingDefaults(next.pipeline?.defaults),modelFamily,modelType,checkpointName:'',workflowResources:{}});}} />
     <UmbraSelect ariaLabel="Manga model source" value={settings.modelType} options={choices(sources)} onValueChange={value=>patch({modelType:value as MangaGenerationSettings['modelType'],checkpointName:'',workflowResources:{}})} />
     <UmbraSelect ariaLabel="Manga generation model" value={settings.checkpointName} placeholder="Choose a model" options={choices(catalogValues(bridge.modelCatalog,settings.modelType))} onValueChange={checkpointName=>patch({checkpointName})} />
     {(selection.workflow?.resources || []).map(resource=><label className="manga-field" key={resource.id}><span>{resource.label}{resource.required?' *':''}</span><UmbraSelect ariaLabel={`Manga ${resource.label}`} value={settings.workflowResources[resource.id] || resource.defaultValue || ''} options={choices(catalogValues(bridge.modelCatalog,resource.kind))} onValueChange={value=>patch({workflowResources:{...settings.workflowResources,[resource.id]:value}})} /></label>)}
