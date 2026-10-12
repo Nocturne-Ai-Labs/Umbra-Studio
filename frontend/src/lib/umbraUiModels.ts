@@ -72,6 +72,22 @@ export function extractUmbraUiLoraTriggerWords(info: unknown): string[] {
   return words.slice(0, 120);
 }
 
+export function hydrateUmbraUiLoraWords(lora: UmbraUiLoraEntry, info: unknown): UmbraUiLoraEntry {
+  if (!info || typeof info !== 'object' || Array.isArray(info)) return lora;
+  const record = info as UmbraUiMetadataRecord;
+  const words = (value: unknown) => Array.from(new Set((Array.isArray(value) ? value : [])
+    .filter((word): word is string => typeof word === 'string' && word.length <= 1000)
+    .map(word => word.trim()).filter(Boolean))).slice(0, 256);
+  const trainingTags = words(record.trainingTags);
+  const trainedTags = trainingTags.length ? trainingTags : words(record.trainedTags);
+  const triggerWords = extractUmbraUiLoraTriggerWords(info).filter(word => word.length <= 1000);
+  return {
+    ...lora,
+    trainedTags: trainedTags.length ? trainedTags : lora.trainedTags,
+    triggerWords: triggerWords.length ? triggerWords : lora.triggerWords,
+  };
+}
+
 function clampStrength(value: unknown, fallback = 1): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;

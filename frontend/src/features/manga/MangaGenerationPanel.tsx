@@ -3,7 +3,8 @@ import {UmbraSelect} from '@/components/ui/UmbraSelect';
 import {useUmbraPowerPrompterBridge,type UmbraModelCatalog,type UmbraWorkflowResourceKind} from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 import {listUmbraUiPipelineFamilies,resolveUmbraUiPipeline} from '@/lib/umbraUiPipelines';
 import {normalizeUmbraUiPipelineCapabilities} from '../../../../shared/umbra-ui/pipelineTypes';
-import {buildMangaGenerationOptions,defaultMangaGeneration,mangaFamilySamplingDefaults,mangaGenerationDimensions,type MangaGenerationSettings} from './mangaGeneration';
+import {buildMangaGenerationOptions,defaultMangaGeneration,mangaEnhancements,mangaFamilySamplingDefaults,mangaGenerationDimensions,type MangaGenerationSettings} from './mangaGeneration';
+import {applyMangaLoraMetadata} from './mangaLoraMetadata';
 import type {MangaProject} from './mangaModel';
 import {MangaEnhancementControls} from './MangaEnhancementControls';
 const choices=(values:string[])=>values.map(value=>({value,label:value}));
@@ -15,7 +16,27 @@ export function MangaGenerationPanel({project,frame,hidden,disabled,onSubmitting
   const [comfyConnected,setComfyConnected]=useState(false),[submitting,setSubmitting]=useState(false),[issue,setIssue]=useState(''),[recoveryIssue,setRecoveryIssue]=useState('');
   const recoveredVersions=useRef(new Map<string,number>());
   const bridge=useUmbraPowerPrompterBridge(comfyConnected);
-  const state=useRef({project,onOutputs});state.current={project,onOutputs};
+  const state=useRef({project,onOutputs,onSettings});state.current={project,onOutputs,onSettings};
+  const mounted=useRef(false),attemptedLoraInfo=useRef(new Set<string>());
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{
+    if(!project.generation)return;
+    for(const lora of mangaEnhancements(project.generation).loras){
+      if(lora.trainedTags.length && lora.triggerWords?.length)continue;
+      const key=JSON.stringify([project.id,lora.id,lora.name]);
+      if(attemptedLoraInfo.current.has(key))continue;
+      attemptedLoraInfo.current.add(key);
+      void bridge.requestLoraInfo(lora.name).then(info=>{
+        if(!mounted.current)return;
+        const current=state.current;
+        const generation=applyMangaLoraMetadata(current.project,project.id,lora.id,lora.name,info);
+        if(generation){
+          state.current={...current,project:{...current.project,generation}};
+          current.onSettings(generation);
+        }
+      }).catch(()=>{attemptedLoraInfo.current.delete(key);});
+    }
+  },[project.id,project.generation,bridge.requestLoraInfo]);
   useEffect(()=>{let live=true;const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;
     const poll=async()=>{try{const response=await fetch('/api/umbrabridge/status',{signal:controller.signal,cache:'no-store'});if(!response.ok)throw new Error();const status=await response.json();if(live)setComfyConnected(status.backends?.comfyui?.healthy===true);}catch{if(live)setComfyConnected(false);}finally{if(live)timer=setTimeout(poll,5000);}};void poll();return()=>{live=false;controller.abort();clearTimeout(timer);};
   },[]);
