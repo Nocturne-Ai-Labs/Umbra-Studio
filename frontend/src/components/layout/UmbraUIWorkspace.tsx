@@ -123,6 +123,7 @@ import {
 } from '@/lib/umbraUiMediaHandoff';
 import {
   createUmbraUiLoraEntry,
+  isUmbraUiModelOnlyLoraFamily,
   extractUmbraUiLoraTriggerWords,
   getUmbraUiLorasForFamily,
   replaceUmbraUiLorasForFamily,
@@ -3503,7 +3504,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                 availableCount={loraCatalog.length}
                 onChange={replaceActiveLoras}
                 onOpenPicker={openLoraPicker}
-                modelOnly={selectedImagePipeline?.modelFamilyKey === 'anima38b'}
+                modelOnly={isUmbraUiModelOnlyLoraFamily(selectedImagePipeline?.modelFamilyKey)}
               />
             ) : null}
 

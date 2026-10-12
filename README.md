@@ -450,7 +450,7 @@ Linux:
 ./umbra-setup.sh --tab models
 ```
 
-The menu covers Anima, FLUX.1, FLUX.2, Qwen Image, Krea 2, ERNIE Image,
+The menu covers Anima, FLUX.1, FLUX.2, Qwen Image, Krea 2, Wulver, ERNIE Image,
 Z-Image, Chroma 1, Ideogram 4, and the shared OmniGen 2/Ovis AE VAE. It also
 explains when a model family such as HiDream-O1 or checkpoint-based SD/SDXL
 needs no standalone prerequisite files. Use `--list` to review the menu,
@@ -458,6 +458,25 @@ needs no standalone prerequisite files. Use `--list` to review the menu,
 previous selection without downloading.
 Use `--test-downloads` to validate the selected remote files with tiny ranged
 requests without downloading the model weights.
+
+Wulver v0.5 has dedicated **Wulver Turbo** and **Wulver Non-Turbo** pipelines
+for text-to-image, image-to-image and masked inpainting/Canvas. The shared
+controls include model-only LoRAs, high-res fix, detailers, output upscaling,
+tiled VAE, Power Prompter, Manga generation and image metadata handoffs.
+Choose the Turbo FP8 pack in Setup for the recommended weights, or the optional
+Non-Turbo/BF16 packs. Both use `qwen3vl_4b_bf16.safetensors` in
+`Tools/ComfyUI/models/text_encoders/` and `qwen_image_vae.safetensors` in
+`Tools/ComfyUI/models/vae/`; diffusion weights go in
+`Tools/ComfyUI/models/diffusion_models/`. Existing files are reused after verification.
+
+Turbo defaults to 8 steps / CFG 1; Non-Turbo defaults to 52 steps / CFG 3.5,
+with Euler / simple for both. Negative prompts have no effect at CFG 1, but
+remain editable when using higher CFG. Resolution stays user-controlled.
+Wulver LoRAs patch the diffusion model, leaving its text encoder unchanged.
+W4A8 is a manual alternative requiring ComfyUI 0.31+, an SM 8.0+ GPU and
+PyTorch cu130+; INT8 and GGUF files are not qualified by these pipelines.
+Review [Wulver's model card and Krea 2 license](https://huggingface.co/Vaelico/Wulver)
+before downloading or using the model. Umbra packages contain no Wulver weights.
 
 During a download, press `Q` or `Ctrl+C` to cancel. Umbra deletes the incomplete
 file completely; a later run starts that file again from byte zero. Existing

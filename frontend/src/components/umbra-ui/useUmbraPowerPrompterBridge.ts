@@ -22,7 +22,7 @@ import {
   type PowerPrompterModelInfoPayload,
 } from '@/components/power-prompter/powerPrompterSupport';
 import {
-  composeUmbraUiPromptWithLoras,
+  composeUmbraUiPromptWithLoras, isUmbraUiModelOnlyLoraFamily,
   extractUmbraUiLoraTriggerWords,
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
@@ -1682,7 +1682,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
         return { ...lora, name: match.match };
       });
     const modelFamily = String(options.modelFamily || '').trim();
-    const promptWithLoras = composeUmbraUiPromptWithLoras(prompt, enabledLoras, modelFamily.toLowerCase() === 'anima 3.8b');
+    const promptWithLoras = composeUmbraUiPromptWithLoras(prompt, enabledLoras, isUmbraUiModelOnlyLoraFamily(modelFamily));
     const feature: UmbraUiPipelineFeature = options.outputMode === 'img2img' ? 'img2img' : 'txt2img';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, options.modelType);
     if (!pipelineMatch.workflow || !pipelineMatch.pipeline) {

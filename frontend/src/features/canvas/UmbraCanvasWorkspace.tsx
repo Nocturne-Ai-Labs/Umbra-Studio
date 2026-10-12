@@ -69,7 +69,7 @@ import { UmbraPositivePromptEditor } from '@/components/umbra-ui/UmbraPositivePr
 import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraTiledVaeControls } from '@/components/umbra-ui/UmbraTiledVaeControls';
 import { compileUmbraUiPromptSegments, type UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
-import { composeUmbraUiPromptWithLoras, type UmbraUiLoraEntry } from '@/lib/umbraUiModels';
+import { composeUmbraUiPromptWithLoras, isUmbraUiModelOnlyLoraFamily, type UmbraUiLoraEntry } from '@/lib/umbraUiModels';
 import { stageUmbraUiMediaHandoff, type UmbraUiMediaHandoff, type UmbraUiMediaHandoffMode } from '@/lib/umbraUiMediaHandoff';
 import { UmbraCanvasMediaImportGate } from '@/lib/umbraCanvasMediaImportGate';
 import { getUmbraCanvasPinnedCopyFailure } from '@/lib/umbraUiCanvasPinnedCopy';
@@ -1708,7 +1708,7 @@ export function UmbraCanvasWorkspace({
       }
       const queuedSeed = resolveUmbraUiQueueSeed(seed, seedMode);
       const promptWithLoras = capabilities.loras.support === 'adjustable'
-        ? composeUmbraUiPromptWithLoras(compiledPrompt, loras, modelFamily.trim().toLowerCase() === 'anima 3.8b')
+        ? composeUmbraUiPromptWithLoras(compiledPrompt, loras, isUmbraUiModelOnlyLoraFamily(modelFamily))
         : compiledPrompt;
       const enabledControlLayers = submissionProject.entities.filter(isUmbraCanvasControlEntity).filter((entity) => entity.generationEnabled);
       if (enabledControlLayers.length > 0 && !controlLayersAvailable) throw new Error(controlLayersReason || 'Control layers are unavailable for this pipeline.');
@@ -2620,7 +2620,7 @@ export function UmbraCanvasWorkspace({
             showClipSkip={capabilities.clipSkip.support === 'adjustable'}
           />
           {capabilities.loras.support === 'adjustable' ? (
-            <UmbraLoraStackControls loras={loras} availableCount={loraAvailableCount} onChange={onLorasChange} onOpenPicker={onOpenLoraPicker} modelOnly={modelFamily.trim().toLowerCase() === 'anima 3.8b'} />
+            <UmbraLoraStackControls loras={loras} availableCount={loraAvailableCount} onChange={onLorasChange} onOpenPicker={onOpenLoraPicker} modelOnly={isUmbraUiModelOnlyLoraFamily(modelFamily)} />
           ) : null}
           <UmbraSeedControls
             seed={seed}

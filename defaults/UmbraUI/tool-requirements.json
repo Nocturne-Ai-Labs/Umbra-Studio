@@ -281,7 +281,13 @@
         "[Umbra UI] Z-Image Base Pipeline",
         "[Umbra UI] Z-Image Turbo Image to Image Pipeline",
         "[Umbra UI] Z-Image Turbo Inpaint Pipeline",
-        "[Umbra UI] Z-Image Turbo Pipeline"
+        "[Umbra UI] Z-Image Turbo Pipeline",
+        "[Umbra UI] Wulver Turbo Image Pipeline",
+        "[Umbra UI] Wulver Turbo Image to Image Pipeline",
+        "[Umbra UI] Wulver Turbo Inpaint Pipeline",
+        "[Umbra UI] Wulver Non-Turbo Image Pipeline",
+        "[Umbra UI] Wulver Non-Turbo Image to Image Pipeline",
+        "[Umbra UI] Wulver Non-Turbo Inpaint Pipeline"
       ],
       "minimumComfyVersion": "0.38.0",
       "minimumFrontendVersion": "1.53.6",

@@ -97,7 +97,7 @@ import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetail
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { restoreUmbraUiInpaintProjectModels } from '@/lib/umbraUiInpaintProjectModelRestore';
 import {
-  composeUmbraUiPromptWithLoras,
+  composeUmbraUiPromptWithLoras, isUmbraUiModelOnlyLoraFamily,
   type UmbraUiLoraEntry,
 } from '@/lib/umbraUiModels';
 import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
@@ -9470,7 +9470,7 @@ export function UmbraInpaintWorkspace({
     setIsSubmitting(true);
     try {
       const promptWithLoras = capabilities.loras.support === 'adjustable'
-        ? composeUmbraUiPromptWithLoras(prompt, loras, modelFamily.trim().toLowerCase() === 'anima 3.8b')
+        ? composeUmbraUiPromptWithLoras(prompt, loras, isUmbraUiModelOnlyLoraFamily(modelFamily))
         : prompt;
       const inpaintDocument = {
         ...canvasDocument,
@@ -10004,7 +10004,7 @@ export function UmbraInpaintWorkspace({
               availableCount={loraAvailableCount}
               onChange={onLorasChange}
               onOpenPicker={onOpenLoraPicker}
-              modelOnly={modelFamily.trim().toLowerCase() === 'anima 3.8b'}
+              modelOnly={isUmbraUiModelOnlyLoraFamily(modelFamily)}
             />
           ) : null}
 

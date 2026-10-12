@@ -33,6 +33,31 @@
       "label": "Krea 2",
       "description": "Qwen 3 VL 4B FP8 text encoder and Qwen Image VAE."
     },
+    "wulver": {
+      "label": "Wulver - Shared Support",
+      "description": "Qwen3-VL 4B BF16 text encoder and shared Qwen Image VAE for Wulver Turbo and Non-Turbo. About 8.5 GiB; generation weights are separate."
+    },
+    "wulver-turbo": {
+      "label": "Wulver v0.5 Turbo (FP8)",
+      "description": "Recommended 12.8 GB Turbo diffusion model plus shared support files. Defaults to 8 steps, CFG 1, Euler/simple. Krea 2 Community License applies; review its terms before downloading.",
+      "requiresProfiles": [
+        "wulver"
+      ]
+    },
+    "wulver-non-turbo": {
+      "label": "Wulver v0.5 Non-Turbo (BF16)",
+      "description": "Optional 25.6 GB non-distilled diffusion model plus shared support files. Defaults to 52 steps, CFG 3.5, Euler/simple; negative prompts remain editable. Krea 2 Community License applies.",
+      "requiresProfiles": [
+        "wulver"
+      ]
+    },
+    "wulver-turbo-bf16": {
+      "label": "Wulver v0.5 Turbo (BF16, Optional)",
+      "description": "Optional full-precision 25.6 GB alternative to Turbo FP8, using the same Wulver Turbo pipelines. Krea 2 Community License applies.",
+      "requiresProfiles": [
+        "wulver"
+      ]
+    },
     "ernie-image": {
       "label": "ERNIE Image",
       "description": "Ministral 3 3B text encoder and FLUX.2 VAE. Large download."
@@ -287,7 +312,7 @@
     {
       "id": "qwen-image-vae",
       "installPolicy": "automatic",
-      "profiles": ["anima", "anima-2.9b", "anima-3.8b", "qwen-image", "krea-2"],
+      "profiles": ["anima", "anima-2.9b", "anima-3.8b", "qwen-image", "krea-2", "wulver"],
       "repository": "circlestone-labs/Anima",
       "revision": "f7382c4bf9d7ffe4ceea593a0adbb470c56dd79b",
       "files": [
@@ -906,6 +931,108 @@
           "sourcePath": "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
           "bytes": 1956193000,
           "sha256": "5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c"
+        }
+      ]
+    },
+    {
+      "id": "wulver-qwen3vl-bf16",
+      "installPolicy": "automatic",
+      "profiles": [
+        "wulver"
+      ],
+      "repository": "Comfy-Org/Krea-2",
+      "revision": "eb1eddd3983a54678545a9b2c178c5853b30f7be",
+      "license": "Krea 2 Community License; review the source model terms",
+      "licenseUrl": "https://krea.ai/krea-2-licensing",
+      "files": [
+        {
+          "destination": "text_encoders/qwen3vl_4b_bf16.safetensors",
+          "sourcePath": "text_encoders/qwen3vl_4b_bf16.safetensors",
+          "bytes": 8875719384,
+          "sha256": "36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34"
+        }
+      ]
+    },
+    {
+      "id": "wulver-turbo-v05",
+      "family": "Wulver Turbo",
+      "creator": "Vaelico / Krea",
+      "installPolicy": "automatic",
+      "profiles": [
+        "wulver-turbo"
+      ],
+      "repository": "Vaelico/Wulver",
+      "revision": "c77ac3a1d5e28522cfcbdd3c58e9c684da4a8b08",
+      "license": "Krea 2 Community License Agreement",
+      "licenseUrl": "https://huggingface.co/Vaelico/Wulver/blob/c77ac3a1d5e28522cfcbdd3c58e9c684da4a8b08/LICENSE.md",
+      "licenseNotice": "Wulver is a modified Krea 2 model by Vaelico. Review the Krea 2 Community License and Acceptable Use Policy before downloading or using it. Not affiliated with or endorsed by Krea.",
+      "files": [
+        {
+          "destination": "diffusion_models/Wulver_v0.5_fp8_e4m3fn.safetensors",
+          "sourcePath": "Wulver_v0.5_fp8_e4m3fn.safetensors",
+          "bytes": 12821599836,
+          "sha256": "ef8b8e1cf596e9564df79d9688af3c6faf85772b3226f1ba880db9970271619e"
+        }
+      ]
+    },
+    {
+      "id": "wulver-non-turbo-v05",
+      "family": "Wulver Non-Turbo",
+      "creator": "Vaelico / Krea",
+      "installPolicy": "automatic",
+      "profiles": [
+        "wulver-non-turbo"
+      ],
+      "repository": "Vaelico/Wulver",
+      "revision": "c77ac3a1d5e28522cfcbdd3c58e9c684da4a8b08",
+      "license": "Krea 2 Community License Agreement",
+      "licenseUrl": "https://huggingface.co/Vaelico/Wulver/blob/c77ac3a1d5e28522cfcbdd3c58e9c684da4a8b08/LICENSE.md",
+      "licenseNotice": "Wulver is a modified Krea 2 model by Vaelico. Review the Krea 2 Community License and Acceptable Use Policy before downloading or using it. Not affiliated with or endorsed by Krea.",
+      "files": [
+        {
+          "destination": "diffusion_models/Wulver_v0.5_non_turbo_bf16.safetensors",
+          "sourcePath": "Wulver_v0.5_non_turbo_bf16.safetensors",
+          "bytes": 25640191128,
+          "sha256": "84012bb362249e15efd18fa46034d98be74f180e8decaf858e127c07f8a6700f"
+        }
+      ]
+    },
+    {
+      "id": "wulver-turbo-bf16-v05",
+      "family": "Wulver Turbo",
+      "creator": "Vaelico / Krea",
+      "installPolicy": "automatic",
+      "profiles": [
+        "wulver-turbo-bf16"
+      ],
+      "repository": "Vaelico/Wulver",
+      "revision": "c77ac3a1d5e28522cfcbdd3c58e9c684da4a8b08",
+      "license": "Krea 2 Community License Agreement",
+      "licenseUrl": "https://huggingface.co/Vaelico/Wulver/blob/c77ac3a1d5e28522cfcbdd3c58e9c684da4a8b08/LICENSE.md",
+      "licenseNotice": "Wulver is a modified Krea 2 model by Vaelico. Review the Krea 2 Community License and Acceptable Use Policy before downloading or using it. Not affiliated with or endorsed by Krea.",
+      "files": [
+        {
+          "destination": "diffusion_models/Wulver_v0.5_bf16.safetensors",
+          "sourcePath": "Wulver_v0.5_bf16.safetensors",
+          "bytes": 25640191128,
+          "sha256": "c8f2b29749cee4386f2215033bca5e26af0cc8fd0fd0c49f4c1d55b35b3ebde3"
+        }
+      ]
+    },
+    {
+      "id": "wulver-w4a8-manual",
+      "installPolicy": "manual",
+      "profiles": [
+        "wulver"
+      ],
+      "reference": "https://huggingface.co/Vaelico/Wulver/tree/c77ac3a1d5e28522cfcbdd3c58e9c684da4a8b08",
+      "purpose": "Optional Wulver Turbo W4A8: requires ComfyUI 0.31+, NVIDIA SM 8.0+ and PyTorch cu130+. Review the Krea 2 Community License. Install in Tools/ComfyUI/models/diffusion_models, then select it in Wulver Turbo. INT8/GGUF variants are not qualified by these pipelines.",
+      "files": [
+        {
+          "destination": "diffusion_models/Wulver_v0.5_w4a8-convrot.safetensors",
+          "sourcePath": "Wulver_v0.5_w4a8-convrot.safetensors",
+          "bytes": 7681032568,
+          "sha256": "905af7686bb48d4f40dc80117f6839f6a9491b1af13e46b6242ecaadda6bf996"
         }
       ]
     }

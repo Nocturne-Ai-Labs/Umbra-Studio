@@ -59,7 +59,7 @@ function printFamilies(manifest) {
   console.log('Choose model-family prerequisites and optional Canvas Control / Reference resources.');
   console.log('Generation weights are downloaded only for profiles that explicitly include them.\n');
   Object.entries(manifest.profiles).forEach(([id, profile], index) => {
-    const models = manifest.models.filter(model => model.profiles.includes(id));
+    const models = manifest.models.filter(model => model.installPolicy === 'automatic' && model.profiles.includes(id));
     const bytes = models.flatMap(model => model.files).reduce((sum, file) => sum + Number(file.bytes || 0), 0);
     const suffix = profile.noDownload ? 'no separate download' : formatBytes(bytes);
     console.log(`  ${index + 1}. ${profile.label} (${suffix})`);
@@ -112,7 +112,7 @@ async function promptForFamilies(manifest) {
 }
 
 function selectedModels(manifest, families) {
-  return manifest.models.filter(model => model.profiles.some(profile => families.includes(profile)));
+  return manifest.models.filter(model => model.installPolicy === 'automatic' && model.profiles.some(profile => families.includes(profile)));
 }
 
 function uniqueFiles(models) {
