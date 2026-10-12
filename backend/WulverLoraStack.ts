@@ -67,9 +67,15 @@ export function resolveWulverLoraNames(graph: PromptGraph, objectInfo: Record<st
   const choices = readComfyInputChoices(loader?.input?.required?.lora_name)
     ?.filter((choice): choice is string => typeof choice === 'string');
   if (!choices) throw new Error('Native model-only LoRA loading is missing. Update managed ComfyUI through Umbra Setup, then restart it.');
+  const normalized = (name: string) => name.trim().replace(/\\/g, '/').toLowerCase();
+  const stem = (name: string) => normalized(name).replace(/\.(?:safetensors|ckpt|pt|pth|bin)$/i, '');
   for (const node of nodes) {
     const selected = String(node.inputs.lora_name || '');
-    const matches = choices.filter((choice) => choice.replace(/\\/g, '/').toLowerCase() === selected.toLowerCase());
+    const exact = choices.filter((choice) => normalized(choice) === normalized(selected));
+    const pathMatches = exact.length ? exact : choices.filter((choice) => stem(choice) === stem(selected));
+    // Power Prompter's copied tokens omit file extensions; never guess among duplicate basenames.
+    const matches = pathMatches.length || normalized(selected).includes('/') ? pathMatches
+      : choices.filter((choice) => stem(choice).split('/').pop() === stem(selected));
     if (matches.length !== 1) {
       throw new Error(matches.length > 1
         ? `Wulver LoRA "${selected}" is ambiguous in ComfyUI.`
