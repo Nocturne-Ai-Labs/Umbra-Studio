@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.90.13-beta - Wulver Image Pipelines
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**This update continues the massive refactor of Umbra Studio's setup flow. Use Umbra Setup for installation and updates.**
+
+- Save work and install through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux after the update completes.
+- For Wulver, open **Advanced > Models > Generation prerequisites**, select **Wulver Turbo v0.5**, and install the selection. The FP8 Turbo model, Qwen3-VL 4B BF16 encoder and shared Qwen Image VAE total about **21.95 GB (20.44 GiB)**. Existing matching files are verified and reused. Review the linked **Krea 2 Community License** before downloading or using the model.
+- **Wulver Non-Turbo v0.5** is optional: its BF16 model plus the same prerequisites total about **34.77 GB (32.38 GiB)**. The optional full-precision Turbo pack uses the same total. Choose the pipeline matching your weights; Turbo defaults to 8 steps/CFG 1, Non-Turbo to 52 steps/CFG 3.5, both Euler/simple. All controls remain editable.
+- Update managed ComfyUI and custom nodes through **Umbra Setup > Advanced > Tools**, then restart ComfyUI before generation. Select **Wulver Turbo** or **Wulver Non-Turbo** in Umbra UI, Power Prompter, Canvas or Manga Studio.
+- Manual W4A8 Turbo is an optional **7.68 GB** model download, requiring ComfyUI 0.31+, NVIDIA SM 8.0+ and PyTorch cu130+. Place it in `Tools/ComfyUI/models/diffusion_models` and select it explicitly. This quantization is not generation-qualified in this release; INT8 and GGUF variants are not advertised by the new pipelines.
+- Existing families need no new downloads. Models, outputs and installed tools remain preserved. Optional AI Toolkit still requires host Node.js 20+ with npm. Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Wulver Shared Image Controls
+
+- Six dedicated workflows cover text-to-image, image-to-image and masked inpainting for Turbo and Non-Turbo, with the shared queue, Power Prompter and Manga scene generation.
+- Model-only LoRA stacks preserve the text encoder, resolve extensionless tokens and qualified paths, and reject ambiguous filenames before dispatch. Image identifiers, prompt settings and generation metadata use the existing shared output and editing handoffs.
+- Sampling controls, high-res fix, ordered detailer stages, output upscaling and applicable tiled VAE processing follow the shared image pipeline contract. Native masked inpainting retains its standard masked encoder and supports tiled decoding; it does not claim tiled masked encoding.
+- Real negative text conditioning remains connected when CFG is raised. At CFG 1, negative prompts have no effect. There is no Wulver-specific resolution cap.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Manga Studio now loads the selected family's recommended sampling settings while preserving the chosen resolution, enhancements, seed and batch settings.
+- Improved: Wulver Turbo and Non-Turbo have separate workflows, defaults, model resources and metadata recognition across the shared image tools.
+- Improved: Setup resolves Wulver prerequisites, verifies pinned sizes and checksums, and deduplicates the shared VAE.
+
 ## v0.90.12-beta - Manga Studio And Setup Regression Repairs
 
 ### TL;DR - Setup After Updating

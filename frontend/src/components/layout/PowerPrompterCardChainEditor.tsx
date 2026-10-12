@@ -1,3 +1,4 @@
+import { isUmbraUiModelOnlyLoraFamily } from '@/lib/umbraUiModels';
 import { PowerPrompterWorkflowResources } from '@/components/power-prompter/PowerPrompterWorkflowResources';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from '../../../../shared/umbra-ui/animaTextEncoderDevice';
@@ -1053,11 +1054,11 @@ function normalizeLoraSyntaxName(rawName: string): string {
     .replace(/\.[^/.]+$/, '');
 }
 
-function formatLoraSyntaxToken(entry: PowerPrompterLoraEntry): string {
+function formatLoraSyntaxToken(entry: PowerPrompterLoraEntry, modelOnly = false): string {
   const name = normalizeLoraSyntaxName(entry.name);
   if (!name) return '';
   const model = Number.isFinite(entry.strengthModel) ? entry.strengthModel : 1;
-  const clip = Number.isFinite(entry.strengthClip) ? entry.strengthClip : model;
+  const clip = modelOnly ? 0 : Number.isFinite(entry.strengthClip) ? entry.strengthClip : model;
   return `<lora:${name}:${model}:${clip}>`;
 }
 
@@ -9684,7 +9685,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                   )}
 
                   {loraEntries.map((entry) => {
-                    const syntaxToken = formatLoraSyntaxToken(entry);
+                    const syntaxToken = formatLoraSyntaxToken(entry, isUmbraUiModelOnlyLoraFamily(selectedPipeline?.modelFamilyKey));
                     const normalizedEntryName = String(entry.name || '').trim().toLowerCase();
                     const trainedTags = loraTagBank[normalizedEntryName] || [];
                     const loraCardMeta = loraCardMetaByName[normalizedEntryName];
@@ -9811,7 +9812,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               className="mt-1 w-full bg-black/40 border border-white/15 rounded px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300"
                             />
                           </label>
-                          <label className="text-[10px] uppercase tracking-widest text-zinc-500">
+                          {!isUmbraUiModelOnlyLoraFamily(selectedPipeline?.modelFamilyKey) ? (<label className="text-[10px] uppercase tracking-widest text-zinc-500">
                             Clip
                             <input
                               type="number"
@@ -9823,7 +9824,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                               onClick={(event) => event.stopPropagation()}
                               className="mt-1 w-full bg-black/40 border border-white/15 rounded px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300"
                             />
-                          </label>
+                          </label>) : null}
                         </div>
                         <div className="pt-1 border-t border-white/10 space-y-1.5">
                           <div className="flex items-center justify-between gap-2">

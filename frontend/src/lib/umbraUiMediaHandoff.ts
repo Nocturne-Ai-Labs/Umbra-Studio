@@ -151,6 +151,7 @@ function normalizeModelKey(value: string): string {
 
 export function inferModelFamily(modelName: string): string {
   const value = normalizeModelKey(modelName);
+  if (value.includes('wulver')) return /non[-_ ]?turbo/i.test(value) ? 'Wulver Non-Turbo' : 'Wulver Turbo';
   if (value.includes('anima-3.8b') || value.includes('anima_3.8b') || value.includes('anima3.8b')) return 'Anima 3.8B';
   if (value.includes('anima-2.9b') || value.includes('anima_2.9b') || value.includes('anima2.9b')) return 'Anima 2.9B';
   if (value.includes('anima')) return 'Anima';
@@ -518,7 +519,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     positivePromptSegments,
     negativePrompt,
     modelFamily: String(generation.modelFamily || pipeline.modelFamily || inpaint.modelFamily || '').trim() || inferModelFamily(checkpointName),
-    modelType: String(generation.modelType || pipeline.modelSource || inpaint.modelSource || '').trim() || (checkpointName.toLowerCase().endsWith('.gguf') ? 'gguf' : 'checkpoint'),
+    modelType: String(generation.modelType || pipeline.modelSource || inpaint.modelSource || '').trim() || (checkpointName.toLowerCase().endsWith('.gguf') ? 'gguf' : /wulver/i.test(checkpointName) ? 'diffusion_model' : 'checkpoint'),
     checkpointName,
     vaeName: normalizePath(generation.vaeName || params.vae),
     seed: finiteNumber(generation.seed ?? inpaint.seed ?? params.seed),

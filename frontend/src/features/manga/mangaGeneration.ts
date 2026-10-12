@@ -1,5 +1,5 @@
 import {normalizePowerPrompterGenerationControls} from '../../../../shared/power-prompter/powerPrompter';
-import type {UmbraUiPipelineResolutionCapability} from '../../../../shared/umbra-ui/pipelineTypes';
+import type {UmbraUiPipelineDefaults,UmbraUiPipelineResolutionCapability} from '../../../../shared/umbra-ui/pipelineTypes';
 import type {UmbraImageQueueOptions} from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
 export type MangaEnhancements=Pick<UmbraImageQueueOptions,'hiresFix'|'detailerPipeline'|'outputUpscale'|'tiledVae'|'loras'|'clipSkip'>;
 export interface MangaGenerationSettings {
@@ -8,6 +8,15 @@ export interface MangaGenerationSettings {
 }
 export interface MangaGenerationRequest {requestId:string;received:string[]}
 export const defaultMangaGeneration = ():MangaGenerationSettings=>({prompt:'',negativePrompt:'',modelFamily:'',modelType:'checkpoint',checkpointName:'',workflowResources:{},steps:28,cfg:4,seed:0,samplerName:'euler',scheduler:'normal',baseResolution:1024,samples:1});
+// Apply sampling defaults only when the user chooses a family, never on catalog refresh or project hydration.
+export function mangaFamilySamplingDefaults(defaults:UmbraUiPipelineDefaults | undefined):Partial<MangaGenerationSettings>{
+  return {
+    ...(typeof defaults?.steps==='number' && Number.isFinite(defaults.steps) ? {steps:defaults.steps} : {}),
+    ...(typeof defaults?.cfg==='number' && Number.isFinite(defaults.cfg) ? {cfg:defaults.cfg} : {}),
+    ...(defaults?.samplerName ? {samplerName:defaults.samplerName} : {}),
+    ...(defaults?.scheduler ? {scheduler:defaults.scheduler} : {}),
+  };
+}
 export function parseMangaGeneration(value:unknown):MangaGenerationSettings{
   const fail=():never=>{throw new Error('Invalid Manga generation settings.');};
   if(!value || typeof value!=='object' || Array.isArray(value))return fail();const raw=value as Record<string,unknown>;

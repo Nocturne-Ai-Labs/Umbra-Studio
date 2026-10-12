@@ -1,3 +1,5 @@
+import { normalizeUmbraUiModelFamilyKey } from '../../../shared/umbra-ui/pipelineTypes';
+
 export interface UmbraUiLoraEntry {
   id: string;
   name: string;
@@ -78,6 +80,10 @@ function clampStrength(value: unknown, fallback = 1): number {
 
 function formatStrength(value: number): string {
   return Number(clampStrength(value).toFixed(3)).toString();
+}
+
+export function isUmbraUiModelOnlyLoraFamily(value: unknown): boolean {
+  return ['anima38b', 'wulverturbo', 'wulvernonturbo'].includes(normalizeUmbraUiModelFamilyKey(value));
 }
 
 export function buildUmbraUiLoraSyntax(lora: UmbraUiLoraEntry, modelOnly = false): string {

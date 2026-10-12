@@ -33,6 +33,7 @@ import { inspectManagedVideoModels } from './backend/VideoSetupReadiness';
 import { applyAnima38TextEncoderDevice, applyAnima38TextEncoderRetention, assertAnima38TextEncoderRetentionAvailable } from './backend/AnimaTextEncoderDevice';
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
 import { applyAnima38LoraStack, resolveAnima38LoraNames } from './backend/Anima38LoraStack';
+import { applyWulverLoraStack, resolveWulverLoraNames } from './backend/WulverLoraStack';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from './shared/umbra-ui/animaTextEncoderDevice';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
@@ -9198,7 +9199,7 @@ function compileUmbraUiPipelineWorkflow(
   const supportsClipSkip = !activeImageCapabilities
     || activeImageCapabilities.clipSkip.support === 'adjustable';
   const activePrompt = String(options.prompt || state?.activePrompt || '').trim();
-  const anima38Prompt = applyAnima38LoraStack(promptGraph, activePrompt);
+  const modelPrompt = applyWulverLoraStack(promptGraph, applyAnima38LoraStack(promptGraph, activePrompt));
   const promptSetId = clampPPQueueSetId(options.promptSetId ?? state?.activeQueueSet ?? state?.activeSetId ?? 1);
   const outputSubfolder = String(options.outputSubfolder || '').trim().replace(/\\/g, '/');
   const setLabel = `Set ${promptSetId}`;
@@ -9286,7 +9287,7 @@ function compileUmbraUiPipelineWorkflow(
     }
 
     if (classType === 'UmbraPowerPrompterReader') {
-      setPPApiNodeInput(node, 'prompt_text', anima38Prompt);
+      setPPApiNodeInput(node, 'prompt_text', modelPrompt);
       setPPApiNodeInput(node, 'negative_prompt', generation.negativePrompt || '');
       setPPApiNodeInput(node, 'seed', generation.seed);
       setPPApiNodeInput(node, 'control_after_generate', generation.controlAfterGenerate || 'fixed');
@@ -9557,7 +9558,7 @@ function compileUmbraUiPipelineWorkflow(
     }
 
     if (classType === 'UmbraA1111LoraSyntax') {
-      setPPApiNodeInput(node, 'prompt_text', activePrompt);
+      setPPApiNodeInput(node, 'prompt_text', modelPrompt);
       setPPApiNodeInput(node, 'lora_syntax_text', '');
       setPPApiNodeInput(node, 'lora_name', '[None]');
       continue;
@@ -11936,6 +11937,7 @@ async function runBackendPowerPrompterPipelineQueue(
       } else if (generation.mediaType !== 'video') {
         const objectInfo = await getPPComfyObjectInfoForValidation();
         resolveAnima38LoraNames(queuedWorkflow.promptGraph, objectInfo);
+        resolveWulverLoraNames(queuedWorkflow.promptGraph, objectInfo);
         assertAnima38TextEncoderRetentionAvailable(queuedWorkflow.promptGraph, objectInfo);
       }
       const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
@@ -21487,6 +21489,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   });
   const objectInfo = await getPPComfyObjectInfoForValidation();
   resolveAnima38LoraNames(compiled.promptGraph, objectInfo);
+  resolveWulverLoraNames(compiled.promptGraph, objectInfo);
   assertAnima38TextEncoderRetentionAvailable(compiled.promptGraph, objectInfo);
   return compiled;
 }

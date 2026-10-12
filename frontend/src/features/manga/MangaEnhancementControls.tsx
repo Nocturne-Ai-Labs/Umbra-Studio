@@ -2,6 +2,7 @@ import React,{useState} from 'react';
 import {UmbraHiresFixControls} from '@/components/umbra-ui/UmbraHiresFixControls';
 import {UmbraDetailerPipelineControls} from '@/components/umbra-ui/UmbraDetailerPipelineControls';
 import {UmbraTiledVaeControls} from '@/components/umbra-ui/UmbraTiledVaeControls';
+import {isUmbraUiModelOnlyLoraFamily} from '@/lib/umbraUiModels';
 import {UmbraLoraStackControls} from '@/components/umbra-ui/UmbraLoraStackControls';
 import {UmbraSelect} from '@/components/ui/UmbraSelect';
 import {DEFAULT_POWER_PROMPTER_DETAILER_PIPELINE} from '@/lib/powerPrompter';
@@ -23,7 +24,7 @@ export function MangaEnhancementControls({settings,capabilities,catalog,loras,wi
   };
   return <div className="manga-enhancement-controls space-y-3">
     {capabilities.loras.support==='adjustable' && <>
-      <UmbraLoraStackControls loras={value.loras} availableCount={loras.length} onChange={loras=>patch({loras})} onOpenPicker={()=>setPicker(!picker)} />
+      <UmbraLoraStackControls loras={value.loras} availableCount={loras.length} onChange={loras=>patch({loras})} onOpenPicker={()=>setPicker(!picker)} modelOnly={isUmbraUiModelOnlyLoraFamily(settings.modelFamily)} />
       {picker && <UmbraSelect ariaLabel="Add Manga LoRA" value="" placeholder="Choose a LoRA" options={loras.map(name=>({value:name,label:name}))} onValueChange={name=>{if(value.loras.length>=64)return;patch({loras:[...value.loras,{id:crypto.randomUUID(),name,enabled:true,strengthModel:1,strengthClip:1,trainedTags:[]}]});setPicker(false);}} />}
     </>}
     {capabilities.clipSkip.support==='adjustable' && <label className="manga-field"><span>CLIP skip</span><input aria-label="Manga CLIP skip" type="number" min={1} max={12} value={value.clipSkip} onChange={event=>patch({clipSkip:Math.max(1,Math.min(12,Math.round(number(event.target.value,value.clipSkip))))})} /></label>}

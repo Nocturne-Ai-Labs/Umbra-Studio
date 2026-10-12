@@ -1,6 +1,6 @@
 {
   "name": "umbra-studio",
-  "version": "0.90.12-beta",
+  "version": "0.90.13-beta",
   "description": "Umbra Studio - AI image generation, prompt tooling, and media workflow suite",
   "author": "Nocturne AI Labs",
   "homepage": "https://github.com/Nocturne-Ai-Labs/Umbra-Studio",
@@ -70,7 +70,8 @@
     "models:umbra-ui:download": "bun scripts/download-umbra-ui-models.mjs --profile core",
     "models:umbra-ui:reference": "bun scripts/download-umbra-model-requirements.mjs --profile canvas-reference-sdxl",
     "models:umbra-ui:check": "bun scripts/download-umbra-ui-models.mjs --profile core --check",
-    "models:umbra-ui:manifest": "bun scripts/download-umbra-ui-models.mjs --manifest-only"
+    "models:umbra-ui:manifest": "bun scripts/download-umbra-ui-models.mjs --manifest-only",
+    "generate:umbra-ui-wulver-workflows": "bun scripts/generate-wulver-workflows.ts"
   },
   "workspaces": [
     "frontend"
