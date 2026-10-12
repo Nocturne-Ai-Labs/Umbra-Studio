@@ -72,6 +72,8 @@ export function UmbraOfficialVideoLoraControls({
               disabled={disabled}
               modelOnly
               syntax=""
+              toggleAriaLabel={`${row.on ? 'Disable' : 'Enable'} LoRA slot ${index + 1}`}
+              removeAriaLabel={`Remove LoRA slot ${index + 1}`}
               lora={{
                 id: String(index),
                 name: row.lora,
@@ -86,6 +88,9 @@ export function UmbraOfficialVideoLoraControls({
               onRemove={() => onChange(rows.filter((_, i) => i !== index))}
               headerActions={
                 <>
+                  <span className="shrink-0 font-mono text-[10px]" title={`LoRA slot ${index + 1}`}>
+                    #{index + 1}
+                  </span>
                   <button
                     type="button"
                     className={iconClass}
@@ -145,7 +150,7 @@ export function UmbraOfficialVideoLoraControls({
                 </div>
               }
               strengths={
-                <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
+                <div data-umbra-lora-strengths="" className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
                   <UmbraLoraStrengthControl
                     ariaLabel={`Master strength for LoRA slot ${index + 1}`}
                     title="Master strength, -5 to 5"

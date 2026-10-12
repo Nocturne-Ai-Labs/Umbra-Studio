@@ -152,6 +152,8 @@ export function UmbraLoraEntryCard({
   children,
   onPreview,
   onCopy,
+  toggleAriaLabel,
+  removeAriaLabel,
 }: {
   lora: UmbraUiLoraEntry;
   onChange: (patch: Partial<UmbraUiLoraEntry>) => void;
@@ -166,6 +168,8 @@ export function UmbraLoraEntryCard({
   children?: React.ReactNode;
   onPreview?: () => void;
   onCopy?: (token: string) => void | Promise<void>;
+  toggleAriaLabel?: string;
+  removeAriaLabel?: string;
 }) {
   const showToast = useStore((state) => state.showToast);
   const [copiedToken, setCopiedToken] = React.useState('');
@@ -224,7 +228,7 @@ export function UmbraLoraEntryCard({
               : 'border-white/10 text-zinc-700',
           )}
           title={lora.enabled ? 'Disable LoRA' : 'Enable LoRA'}
-          aria-label={`${lora.enabled ? 'Disable' : 'Enable'} LoRA ${lora.name}`}
+          aria-label={toggleAriaLabel || `${lora.enabled ? 'Disable' : 'Enable'} LoRA ${lora.name}`}
           aria-pressed={lora.enabled}
         >
           {lora.enabled ? <Check size={12} /> : null}
@@ -259,10 +263,11 @@ export function UmbraLoraEntryCard({
         {headerActions}
         <button
           type="button"
+          data-umbra-lora-remove=""
           onClick={() => onRemove()}
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm border border-red-300/15 text-red-200/65 hover:border-red-300/35 hover:text-red-100"
           title="Remove LoRA"
-          aria-label={`Remove LoRA ${lora.name}`}
+          aria-label={removeAriaLabel || `Remove LoRA ${lora.name}`}
         >
           <Trash2 size={11} />
         </button>
@@ -291,7 +296,7 @@ export function UmbraLoraEntryCard({
               </button>
             )}
             {strengths ?? (
-              <div className={modelOnly ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
+              <div data-umbra-lora-strengths="" className={modelOnly ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
                 {(
                   [
                     ['strengthModel', 'Model'],

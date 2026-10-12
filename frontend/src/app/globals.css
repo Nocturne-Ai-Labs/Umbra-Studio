@@ -719,6 +719,15 @@ code.custom-scrollbar::-webkit-scrollbar {
   border-color: var(--umbra-accent);
   background: color-mix(in srgb, var(--umbra-accent) 15%, var(--umbra-panel));
 }
+[data-umbra-lora-stack] button[data-umbra-lora-remove] {
+  border-color: rgba(252, 165, 165, 0.25);
+  color: #fca5a5;
+}
+[data-umbra-lora-stack] button[data-umbra-lora-remove]:hover {
+  border-color: rgba(252, 165, 165, 0.45);
+  background: color-mix(in srgb, #ef4444 10%, var(--umbra-panel));
+  color: #fecaca;
+}
 [data-umbra-lora-stack] button:disabled { opacity: .35; cursor: default; }
 [data-umbra-lora-stack] input:not([type=checkbox]) {
   color: var(--umbra-text);
@@ -729,11 +738,20 @@ code.custom-scrollbar::-webkit-scrollbar {
   width: 100%;
   min-width: 0;
 }
-[data-umbra-lora-entry] { color: var(--umbra-text); }
+[data-umbra-lora-entry] {
+  color: var(--umbra-text);
+  container: umbra-lora-entry / inline-size;
+}
 [data-umbra-lora-entry] .umbra-lora-strength { width: 0; }
 [data-umbra-lora-entry] .umbra-lora-strength-row { height: auto; min-height: 34px; }
+@container umbra-lora-entry (max-width: 300px) {
+  [data-umbra-lora-strengths] { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 999px) {
-  [data-umbra-lora-stack] button, [data-umbra-lora-stack] a { min-height: 44px; }
+  [data-umbra-lora-stack] button, [data-umbra-lora-stack] a {
+    min-height: 44px;
+    min-width: 44px;
+  }
 }
 [data-umbra-lora-stack] .umbra-lora-strength {
   appearance: textfield;
