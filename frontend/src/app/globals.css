@@ -753,6 +753,9 @@ code.custom-scrollbar::-webkit-scrollbar {
     min-width: 44px;
   }
 }
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-lora-stack] [data-umbra-lora-entry] :is(button, a) {
+  min-height: 44px;
+}
 [data-umbra-lora-stack] .umbra-lora-strength {
   appearance: textfield;
   -moz-appearance: textfield;
