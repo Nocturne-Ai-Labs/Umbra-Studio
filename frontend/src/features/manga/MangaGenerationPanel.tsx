@@ -18,7 +18,10 @@ export function MangaGenerationPanel({project,frame,hidden,disabled,onSubmitting
   const bridge=useUmbraPowerPrompterBridge(comfyConnected);
   const state=useRef({project,onOutputs,onSettings});state.current={project,onOutputs,onSettings};
   const mounted=useRef(false),attemptedLoraInfo=useRef(new Set<string>());
+  const [loraInfoRevision,setLoraInfoRevision]=useState(0);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  // Retry unavailable metadata after readiness changes or an explicit catalog refresh, not on every prompt edit.
+  useEffect(()=>{attemptedLoraInfo.current.clear();},[bridge.connected,comfyConnected,loraInfoRevision]);
   useEffect(()=>{
     if(!project.generation)return;
     for(const lora of mangaEnhancements(project.generation).loras){
@@ -34,9 +37,9 @@ export function MangaGenerationPanel({project,frame,hidden,disabled,onSubmitting
           state.current={...current,project:{...current.project,generation}};
           current.onSettings(generation);
         }
-      }).catch(()=>{attemptedLoraInfo.current.delete(key);});
+      }).catch(()=>{});
     }
-  },[project.id,project.generation,bridge.requestLoraInfo]);
+  },[project.id,project.generation,bridge.requestLoraInfo,bridge.connected,comfyConnected,loraInfoRevision]);
   useEffect(()=>{let live=true;const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;
     const poll=async()=>{try{const response=await fetch('/api/umbrabridge/status',{signal:controller.signal,cache:'no-store'});if(!response.ok)throw new Error();const status=await response.json();if(live)setComfyConnected(status.backends?.comfyui?.healthy===true);}catch{if(live)setComfyConnected(false);}finally{if(live)timer=setTimeout(poll,5000);}};void poll();return()=>{live=false;controller.abort();clearTimeout(timer);};
   },[]);
@@ -91,7 +94,7 @@ export function MangaGenerationPanel({project,frame,hidden,disabled,onSubmitting
     {selection.pipeline && <MangaEnhancementControls settings={settings} capabilities={capability} catalog={bridge.modelCatalog} loras={bridge.loraCatalog} width={dimensions.width} height={dimensions.height} onChange={enhancements=>patch({enhancements})} />}
     <button className="manga-wide" disabled={!!blocked || submitting} title={blocked || 'Generate options into the image tray'} onClick={()=>void generate()}>{submitting?'Queueing scene…':'Generate panel options'}</button>
     {blocked && <p className="manga-hint" role="status">{blocked}</p>}
-    <button className="manga-wide" onClick={()=>bridge.refreshModelCatalog()}>Refresh generation models</button>
+    <button className="manga-wide" onClick={()=>{bridge.refreshModelCatalog();void bridge.refreshLoraCatalog().catch(()=>{}).finally(()=>{if(mounted.current)setLoraInfoRevision(revision=>revision+1);});}}>Refresh generation models</button>
     {preview && <div><img src={preview.imageDataUrl} alt="Generating Manga scene" style={{width:'100%',height:'auto'}} />{preview.maxStep > 0 && <><progress aria-label="Manga generation progress" max={preview.maxStep} value={preview.step} style={{width:'100%',accentColor:'var(--umbra-accent)'}} /><p className="manga-hint">Step {preview.step} / {preview.maxStep}</p></>}</div>}
     {(issue || recoveryIssue) && <p role="alert" className="manga-hint">{issue || recoveryIssue}</p>}
     {(project.generationRequests || []).slice(-8).reverse().map(request=>{const job=bridge.imageRequestStates.find(item=>item.requestId===request.requestId);return <div className="manga-hint" key={request.requestId}><span>{job?.status || (request.received.length ? 'Recovered results' : 'Waiting for saved results')} · {request.received.length} images in tray</span>{job?.prompts.some(item=>item.error) && <p role="alert">{job.prompts.map(item=>item.error).filter(Boolean).join('\n')}</p>}{(!job || job && ['completed','failed','canceled','interrupted'].includes(job.status)) && <button onClick={() => onForget(request.requestId)}>{job ? 'Remove finished job' : 'Stop recovering this job'}</button>}{job && ['queued','running','pending','staging'].includes(job.status) && <button onClick={()=>void bridge.cancelOwnedImage(request.requestId).catch(error=>setIssue(error.message))}>Cancel this scene</button>}</div>;})}
