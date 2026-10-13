@@ -7,6 +7,8 @@ import stat
 import sys
 import zipfile
 
+MODEL_WEIGHT_PATTERN = re.compile(r'\.(?:onnx|pt|safetensors|ckpt|gguf)(?:\.(?:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|part|partial|download|incomplete|tmp))*$', re.I)
+
 
 def validate_legacy_updater_bridge(package, platform):
     prefix = 'Umbra Studio/'
@@ -76,9 +78,9 @@ def validate(archive, version, platform):
                 files.add(key)
             relative = '/'.join(parts[1:])
             leaf = parts[-1].casefold()
-            if leaf.endswith(('.onnx', '.pt', '.safetensors', '.ckpt')):
+            if MODEL_WEIGHT_PATTERN.search(leaf):
                 raise ValueError(f'{archive.name}: model weights are excluded: {relative}')
-            if any(part.casefold() in {'.git', '.agents', '.codex', '.tmp'} for part in parts):
+            if any(part.casefold() in {'.git', '.agents', '.codex', '.tmp', '.snapshots'} for part in parts):
                 raise ValueError(f'{archive.name}: private directory: {relative}')
             if (leaf == '.env' or leaf.startswith('.env.') or leaf == 'skills.md'
                     or re.search(r'\.(?:db|sqlite3?)(?:-(?:wal|shm|journal))?$', leaf)):
@@ -224,7 +226,7 @@ def validate(archive, version, platform):
         for name, expected in helper_files.items():
             if (name.startswith('/') or '\\' in name or ':' in name
                     or any(part in {'', '.', '..'} for part in name.split('/'))
-                    or name.startswith('models/') or re.search(r'\.(?:onnx|safetensors|ckpt|pt)$', name, re.I)):
+                    or name.startswith('models/') or MODEL_WEIGHT_PATTERN.search(name)):
                 raise ValueError(f'{archive.name}: unsafe Python dependency file: {name}')
             member = package.getinfo(helper_root + name)
             if member.file_size != expected.get('bytes') or digest(member.filename).hex() != expected.get('sha256'):

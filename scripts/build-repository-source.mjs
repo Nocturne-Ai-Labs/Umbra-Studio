@@ -12,8 +12,37 @@ if (!outputValue) {
 }
 
 const outputRoot = path.resolve(outputValue);
-const relativeToRoot = path.relative(root, outputRoot);
-if (!relativeToRoot || (!relativeToRoot.startsWith('..') && !path.isAbsolute(relativeToRoot))) {
+function isInsideDirectory(directory, candidate) {
+  const relative = path.relative(directory, candidate);
+  return !relative || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+}
+
+function resolvePhysicalOutput(candidate) {
+  const missing = [];
+  let existing = candidate;
+  while (true) {
+    try {
+      const stat = fs.lstatSync(existing);
+      if (stat.isSymbolicLink() && existing === candidate) {
+        throw new Error('Repository output must not be a symlink.');
+      }
+      let physical;
+      try { physical = fs.realpathSync(existing); }
+      catch (error) {
+        if (stat.isSymbolicLink()) throw new Error('Repository output ancestor link cannot be resolved.');
+        throw error;
+      }
+      return path.resolve(physical, ...missing);
+    } catch (error) {
+      if (error.code !== 'ENOENT' || path.dirname(existing) === existing) throw error;
+      missing.unshift(path.basename(existing));
+      existing = path.dirname(existing);
+    }
+  }
+}
+
+if (isInsideDirectory(root, outputRoot)
+  || isInsideDirectory(fs.realpathSync(root), resolvePhysicalOutput(outputRoot))) {
   throw new Error('Repository output must be outside the development source folder.');
 }
 
@@ -142,7 +171,7 @@ function copyTree(source, target, allowGeneratedPublic = false) {
       environmentFile
       || isTestSourceName(entry.name)
       || isPrivateWildcardAuthoringScript(entry.name)
-      || (SKIP_NAMES.has(entry.name) && !(allowGeneratedPublic && entry.name === 'public'))
+      || (SKIP_NAMES.has(entry.name.toLowerCase()) && !(allowGeneratedPublic && entry.name.toLowerCase() === 'public'))
     ) continue;
     copyTree(path.join(source, entry.name), path.join(target, entry.name), allowGeneratedPublic);
   }
