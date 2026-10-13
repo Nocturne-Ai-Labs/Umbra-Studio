@@ -27,7 +27,8 @@ export function createRemoteFilesystemPolicy(runtimeRoot: string, sourceRoot: st
 }
 
 export function isRemoteFilesystemRoute(path: string): boolean {
-  return path.startsWith('/api/fs/') || path.startsWith('/api/gallery-bridge/fs/');
+  return path.startsWith('/api/fs/') || path.startsWith('/api/gallery-bridge/fs/')
+    || ['/api/comfy/copy-image', '/api/comfy/copy-media', '/api/comfy/ensure-media'].includes(path);
 }
 
 // Ancestors are navigation-only virtual folders, never writable/exportable roots.
