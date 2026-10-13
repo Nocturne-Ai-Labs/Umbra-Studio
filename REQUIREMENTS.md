@@ -131,6 +131,18 @@ inactive LTX TritonVAE branch do not require this probe. Native frontend export,
 installed model compatibility and real GPU output remain separate qualification
 checks. See [the official video walkthrough](README.md#official-h3-and-ltx-video-workflows).
 
+## Iris 3B And Official Turbo
+
+Choose **Iris 3B** or **Iris 3B Turbo** in **Umbra Setup > Advanced > Models > Generation prerequisites**. The guided node stage installs the pinned `ComfyUI-Iris` integration for selected Iris profiles; existing installations can repair it through Setup's managed dependencies. Restart ComfyUI after installing nodes. ComfyUI 0.37.0+ and Comfy Kitchen 0.2.35+ are required.
+
+- Base: the original 11.95 GB checkpoint and shared 8.88 GB Qwen3-VL text encoder, about 19.40 GiB together.
+- Turbo: the official 5.98 GB distilled checkpoint and the same encoder, about 13.83 GiB together. Selecting both reuses the encoder. This is a full checkpoint, not the community Turbo LoRA.
+- Iris generates RGB pixels directly and needs no VAE. Its pipelines support text-to-image, pixel-space image-to-image, shared output upscaling and compatible native LoRAs. Manga Studio uses these same pipelines and your chosen panel resolution.
+- Base defaults to 100 steps, CFG 3 and DPM++ 2M with the native Iris schedule. Official Turbo uses the released four-step deterministic Euler schedule; CFG and negative prompts are not adjustable because guidance is distilled into the weights.
+- These pixel pipelines do not expose the existing latent hires-fix, classic detailer or tiled-VAE stages, and do not advertise an Iris inpainting pipeline. Turbo image-to-image uses the native sampler's partial-schedule behavior and is experimental.
+
+The Iris checkpoints are Apache-2.0. The separately downloaded shared encoder retains the terms shown in its Setup catalog entry. Models are not included in portable release archives.
+
 ## Data Forge Model Pack
 
 The pinned caption pack is defined in
