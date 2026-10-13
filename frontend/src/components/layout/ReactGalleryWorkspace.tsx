@@ -3163,6 +3163,17 @@ function GalleryMediaViewer({
   const [positivePromptView, setPositivePromptView] = useState<'combined' | 'modular'>('combined');
   const [skipLivePreviewBusy, setSkipLivePreviewBusy] = useState(false);
   const [mobileSendMenuOpen, setMobileSendMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!mobileSendMenuOpen) return;
+    const closeSendMenu = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setMobileSendMenuOpen(false);
+    };
+    document.addEventListener('keydown', closeSendMenu, true);
+    return () => document.removeEventListener('keydown', closeSendMenu, true);
+  }, [mobileSendMenuOpen]);
   const touchStartRef = useRef<{ x: number; y: number; at: number; axis: 'x' | 'y' | null; cancelled: boolean } | null>(null);
   const touchLastRef = useRef<{ x: number; y: number } | null>(null);
   const lastViewerTapRef = useRef<GalleryTapSample | null>(null);
@@ -10557,6 +10568,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       if (!active || galleryModalOpen) return;
 
       if (viewerOpen) {
+        // The send sheet owns keyboard input until it is dismissed.
+        if (document.querySelector('[data-umbra-gallery-send-sheet]')) return;
         if (contextMenu) {
           if (key === 'Escape') {
             consumeGalleryKey();

@@ -6633,6 +6633,48 @@ html[data-umbra-remote-mode="phone"] [data-umbra-settings-save] {
   touch-action: manipulation;
 }
 
+/* Settings must remain usable on a narrow viewport before a Remote mode is chosen. */
+@media (max-width: 639px) {
+  [data-umbra-global-settings-shell] { padding: 0; align-items: stretch; }
+  [data-umbra-global-settings] { width: 100vw; height: 100dvh; max-width: none; border: 0; }
+  [data-umbra-settings-header] { padding: 0.5rem 0.75rem; }
+  [data-umbra-settings-header] h2 { font-size: 1rem; }
+  [data-umbra-settings-header] button { flex-shrink: 0; width: 2.75rem; height: 2.75rem; }
+  [data-umbra-settings-body] { flex-direction: column; min-height: 0; }
+  [data-umbra-settings-mobile-nav] {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--umbra-border);
+  }
+  [data-umbra-settings-mobile-nav] > span { font-size: 0.65rem; text-transform: uppercase; }
+  [data-umbra-settings-nav] { display: none; }
+  [data-umbra-settings-content] { min-width: 0; min-height: 0; padding: 0.875rem; }
+  [data-umbra-settings-footer] {
+    display: grid;
+    grid-template-columns: 2.75rem minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+  [data-umbra-settings-reset] { width: 2.75rem; height: 2.75rem; padding: 0; justify-content: center; }
+  [data-umbra-settings-reset] > span { display: none; }
+  [data-umbra-settings-footer-actions] {
+    display: grid;
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+    min-width: 0;
+  }
+  [data-umbra-settings-footer-actions] [role="alert"] { grid-column: 1 / -1; }
+  [data-umbra-settings-cancel], [data-umbra-settings-save] {
+    min-width: 0;
+    min-height: 2.75rem;
+    padding: 0 0.5rem;
+    justify-content: center;
+    font-size: 0.75rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .umbra-sidebar-shell {
     animation: none;
