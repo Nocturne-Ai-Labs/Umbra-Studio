@@ -1,6 +1,6 @@
 import {normalizePowerPrompterGenerationControls} from '../../../../shared/power-prompter/powerPrompter';
 import type {UmbraUiPipelineDefaults,UmbraUiPipelineResolutionCapability} from '../../../../shared/umbra-ui/pipelineTypes';
-import type {UmbraImageQueueOptions} from '@/components/umbra-ui/useUmbraPowerPrompterBridge';
+import type {UmbraImageQueueOptions} from '../../../../shared/umbra-ui/imageQueueTypes';
 export type MangaEnhancements=Pick<UmbraImageQueueOptions,'hiresFix'|'detailerPipeline'|'outputUpscale'|'tiledVae'|'loras'|'clipSkip'>;
 export interface MangaGenerationSettings {
   prompt:string;negativePrompt:string;modelFamily:string;modelType:'checkpoint'|'diffusers'|'diffusion_model'|'unet'|'gguf';checkpointName:string;
@@ -25,18 +25,31 @@ export function parseMangaGeneration(value:unknown):MangaGenerationSettings{
   const modelType=str('modelType');if(!['checkpoint','diffusers','diffusion_model','unet','gguf'].includes(modelType))fail();
   if(!raw.workflowResources || typeof raw.workflowResources!=='object' || Array.isArray(raw.workflowResources))fail();
   const resources=Object.entries(raw.workflowResources as Record<string,unknown>);if(resources.length>128 || resources.some(([key,value])=>key.length>240 || typeof value!=='string' || value.length>4096))fail();
-  return {...(raw.enhancements === undefined ? {} : {enhancements:parseMangaEnhancements(raw.enhancements)}),prompt:str('prompt',100000),negativePrompt:str('negativePrompt',100000),modelFamily:str('modelFamily',256),modelType:modelType as MangaGenerationSettings['modelType'],checkpointName:str('checkpointName'),workflowResources:Object.fromEntries(resources) as Record<string,string>,steps:num('steps',1,10000,true),cfg:num('cfg',0,100),seed:num('seed',0,Number.MAX_SAFE_INTEGER,true),samplerName:str('samplerName',256),scheduler:str('scheduler',256),baseResolution:num('baseResolution',64,8192,true),samples:num('samples',1,64,true)};
+  return {...(raw.enhancements === undefined ? {} : {enhancements:parseMangaEnhancements(raw.enhancements)}),prompt:str('prompt',100000),negativePrompt:str('negativePrompt',100000),modelFamily:str('modelFamily',256),modelType:modelType as MangaGenerationSettings['modelType'],checkpointName:str('checkpointName'),workflowResources:Object.fromEntries(resources) as Record<string,string>,steps:num('steps',1,10000,true),cfg:num('cfg',0,100),seed:num('seed',0,Number.MAX_SAFE_INTEGER,true),samplerName:str('samplerName',256),scheduler:str('scheduler',256),baseResolution:num('baseResolution',64,Number.MAX_SAFE_INTEGER,true),samples:num('samples',1,64,true)};
 }
 export function mangaGenerationDimensions(frame:{width:number;height:number},base:number,capability?:UmbraUiPipelineResolutionCapability){
-  if(capability && capability.support!=='adjustable')return {width:capability.defaultWidth || 1024,height:capability.defaultHeight || 1024};
+  if(!Number.isSafeInteger(base) || base<64 || !Number.isFinite(frame.width) || frame.width<=0 || !Number.isFinite(frame.height) || frame.height<=0)throw new Error('Invalid Manga generation dimensions.');
+  if(capability && capability.support!=='adjustable'){
+    const fixed={width:capability.defaultWidth || 1024,height:capability.defaultHeight || 1024};
+    if(!Number.isSafeInteger(fixed.width) || fixed.width<=0 || !Number.isSafeInteger(fixed.height) || fixed.height<=0)throw new Error('Invalid fixed Manga node dimensions.');
+    return fixed;
+  }
   const ratio=Math.max(.001,frame.width/frame.height),step=Math.max(1,capability?.step || 8);
-  const minW=capability?.minimumWidth || 64,minH=capability?.minimumHeight || 64,maxW=capability?.maximumWidth || 8192,maxH=capability?.maximumHeight || 8192;
+  const minW=capability?.minimumWidth || 64,minH=capability?.minimumHeight || 64;
+  if(!Number.isSafeInteger(step) || !Number.isSafeInteger(minW) || !Number.isSafeInteger(minH) || minW<=0 || minH<=0)throw new Error('Invalid Manga node alignment.');
   const target=base;
-  let width=ratio>=1 ? target : target*ratio,height=ratio>=1 ? target/ratio : target;
-  const shrink=Math.min(1,maxW/width,maxH/height);width*=shrink;height*=shrink;
-  // A minimum short edge must never inflate the long edge beyond the selected target.
-  const align=(value:number,min:number,max:number)=>Math.max(Math.ceil(min/step)*step,Math.min(Math.floor(Math.min(max,target)/step)*step,Math.round(value/step)*step));
-  return {width:align(width,minW,maxW),height:align(height,minH,maxH)};
+  const width=ratio>=1 ? target : target*ratio,height=ratio>=1 ? target/ratio : target;
+  // A larger node minimum is reported separately instead of shrinking the target.
+  const align=(value:number,min:number)=>Math.max(Math.ceil(min/step)*step,Math.min(Math.floor(target/step)*step,Math.round(value/step)*step));
+  const dimensions={width:align(width,minW),height:align(height,minH)};
+  if(!Number.isSafeInteger(dimensions.width) || !Number.isSafeInteger(dimensions.height))throw new Error('Invalid Manga generation dimensions.');
+  return dimensions;
+}
+export function mangaGenerationResolutionIssue(dimensions:{width:number;height:number},base:number,capability?:UmbraUiPipelineResolutionCapability):string{
+  if(capability?.support!=='adjustable')return '';
+  if(Math.max(dimensions.width,dimensions.height)>base)return 'Choose a long-side target large enough for this pipeline’s minimum size.';
+  if(capability.maximumWidth!==undefined && dimensions.width>capability.maximumWidth || capability.maximumHeight!==undefined && dimensions.height>capability.maximumHeight)return 'The chosen panel dimensions exceed this pipeline’s declared node limits. Choose a supported target or pipeline.';
+  return '';
 }
 export function buildMangaGenerationOptions(settings:MangaGenerationSettings,dimensions:{width:number;height:number}):UmbraImageQueueOptions{
   return {prompt:settings.prompt,negativePrompt:settings.negativePrompt,modelFamily:settings.modelFamily,modelType:settings.modelType,checkpointName:settings.checkpointName,workflowResources:{...settings.workflowResources},seed:settings.seed,seedMode:'fixed',seedIncrement:1,steps:settings.steps,cfg:settings.cfg,samplerName:settings.samplerName,scheduler:settings.scheduler,...dimensions,batchSize:settings.samples,outputMode:'txt2img',outputFolder:'',styleName:'Manga Studio',queuePlacement:'end',...mangaEnhancements(settings)};

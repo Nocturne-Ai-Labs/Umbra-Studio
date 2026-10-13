@@ -39,14 +39,7 @@ import {
   type UmbraUiPipelineFeature,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 import type {
-  PowerPrompterDetailerStage,
   PowerPrompterGenerationControls,
-  PowerPrompterHiresFixControls,
-  PowerPrompterModelType,
-  PowerPrompterOutputUpscaleControls,
-  PowerPrompterSeedControlMode,
-  PowerPrompterSeedIncrement,
-  PowerPrompterTiledVaeControls,
   PowerPrompterVideoControls,
 } from '@/types/powerPrompter';
 import { resolveUmbraVideoTargetDimensions } from '../../../../shared/umbra-ui/videoSizing';
@@ -63,7 +56,8 @@ import {
   type UmbraLtxExtendedSequenceMetadata,
 } from '../../../../shared/umbra-ui/videoExtension';
 import { resolveUmbraUiQueueControlTargets } from '@/lib/umbraUiQueueControls';
-import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
+import type { UmbraImageQueueOptions, UmbraQueuePlacement } from '../../../../shared/umbra-ui/imageQueueTypes';
+export type { UmbraImageQueueOptions, UmbraQueuePlacement } from '../../../../shared/umbra-ui/imageQueueTypes';
 import { buildUmbraQueueActivitiesFromControllerSnapshot } from '@/lib/umbraQueueActivity';
 import {
   isUmbraUiImageMediaEvent,
@@ -78,7 +72,6 @@ const CATALOG_REQUEST_TIMEOUT_MS = 30000;
 const SNAPSHOT_FAILURE_RECOVERY_MS = 60000;
 
 type QueuePromptStatus = 'pending' | 'submitting' | 'running' | 'completed' | 'canceled' | 'interrupted' | 'failed';
-export type UmbraQueuePlacement = 'next' | 'end' | 'interrupt';
 
 interface QueuePrompt {
   requestId: string;
@@ -291,38 +284,6 @@ export interface UmbraVideoReviewJob {
   completedAt?: number;
 }
 
-export interface UmbraImageQueueOptions {
-  prompt: string;
-  promptSegments?: UmbraUiPromptSegment[];
-  negativePrompt: string;
-  modelFamily: string;
-  modelType: PowerPrompterModelType;
-  checkpointName: string;
-  workflowResources: Record<string, string>;
-  clipSkip: number;
-  seed: number;
-  seedMode: PowerPrompterSeedControlMode;
-  seedIncrement: PowerPrompterSeedIncrement;
-  steps: number;
-  cfg: number;
-  samplerName: string;
-  scheduler: string;
-  width: number;
-  height: number;
-  batchSize: number;
-  hiresFix: PowerPrompterHiresFixControls;
-  detailerPipeline: PowerPrompterDetailerStage[];
-  outputUpscale: PowerPrompterOutputUpscaleControls;
-  tiledVae: PowerPrompterTiledVaeControls;
-  loras: UmbraUiLoraEntry[];
-  outputMode?: 'txt2img' | 'img2img';
-  outputFolder?: string;
-  sourceImagePath?: string;
-  sourceImageName?: string;
-  denoise?: number;
-  styleName?: string;
-  queuePlacement?: UmbraQueuePlacement;
-}
 
 export interface UmbraOfficialVideoQueueOptions {
   bindings?: OfficialVideoBinding[];
@@ -1774,8 +1735,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       workflowResources,
       aspectRatio: 'custom',
       swapDimensions: false,
-      width: toFiniteInteger(options.width, 896, 64, 8192),
-      height: toFiniteInteger(options.height, 1152, 64, 8192),
+      width: toFiniteInteger(options.width, 896, 64, Number.MAX_SAFE_INTEGER),
+      height: toFiniteInteger(options.height, 1152, 64, Number.MAX_SAFE_INTEGER),
       batchSize: toFiniteInteger(options.batchSize, 1, 1, 64),
       loras: enabledLoras.map((lora) => ({
         id: lora.id,
