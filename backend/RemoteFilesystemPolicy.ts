@@ -31,11 +31,13 @@ export function isRemoteFilesystemRoute(path: string): boolean {
 }
 
 // Ancestors are navigation-only virtual folders, never writable/exportable roots.
-export function remoteFilesystemNavigation(url: URL, resolveInput: (path: string) => string, toClientPath: (path: string) => string): Response | null {
+export async function remoteFilesystemNavigation(url: URL, resolveInput: (path: string) => string, toClientPath: (path: string) => string, readContentTree?: (url: URL) => Promise<Response>): Promise<Response | null> {
   const policy = currentGalleryPathPolicy();
   const endpoint = url.pathname.replace('/api/gallery-bridge/fs/', '/api/fs/');
   if (!policy || !['/api/fs/list', '/api/fs/list-progressive', '/api/fs/tree', '/api/fs/folder-summary'].includes(endpoint)) return null;
-  const input = url.searchParams.get('path');
+  // Empty list/tree paths mean the configured output folder in the real
+  // handlers, not the runtime root. Folder-summary requires an explicit path.
+  const input = (url.searchParams.get('path') || '').trim();
   if (!input) return null;
   const folder = resolveInput(input);
   const children = new Map<string, string>();
@@ -51,5 +53,40 @@ export function remoteFilesystemNavigation(url: URL, resolveInput: (path: string
     return !rel || !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
   })) return null;
   const folders = [...children.values()].map(path => ({ name: basename(path), path: toClientPath(path), relativePath: toClientPath(path), hasChildren: true, created: 0, modified: 0 }));
-  return Response.json({ path: input, folders, files: [], total: 0, done: true, nextCursor: null, counts: { image: 0, video: 0, audio: 0 }, subfolderCount: folders.length, imageCount: 0, videoCount: 0, totalMediaCount: 0 });
+  if (endpoint === '/api/fs/tree') {
+    const requestedDepth = Number.parseInt(url.searchParams.get('maxDepth') || '0', 10);
+    const maxDepth = Number.isFinite(requestedDepth) ? Math.max(0, Math.min(8, requestedDepth)) : 0;
+    const inside = (root: string, path: string) => {
+      const rel = relative(root, path);
+      return !rel || !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
+    };
+    const readBranch = async (directory: string, depth: number): Promise<Record<string, unknown>[]> => {
+      if (contentRoots.some(root => inside(root, directory))) {
+        if (!readContentTree) return [];
+        const childUrl = new URL(url);
+        childUrl.searchParams.set('path', directory);
+        childUrl.searchParams.set('maxDepth', String(maxDepth - depth));
+        const response = await readContentTree(childUrl);
+        if (!response.ok) throw new Error('Could not load an authorized content tree');
+        const payload = await response.json();
+        return Array.isArray(payload.folders) ? payload.folders : [];
+      }
+      const branches = new Set<string>();
+      for (const root of contentRoots) {
+        if (inside(directory, root) && directory !== root) branches.add(join(directory, relative(directory, root).split(sep)[0]));
+      }
+      return Promise.all([...branches].map(async path => {
+        const nested = depth < maxDepth ? await readBranch(path, depth + 1) : [];
+        return { name: basename(path), path: toClientPath(path), relativePath: toClientPath(path), hasChildren: nested.length > 0 || depth >= maxDepth, ...(nested.length ? { children: nested } : {}) };
+      }));
+    };
+    return Response.json({ folders: await readBranch(folder, 0) });
+  }
+  if (endpoint === '/api/fs/folder-summary') return Response.json({ path: input, subfolderCount: folders.length, imageCount: 0, videoCount: 0, totalMediaCount: 0 });
+  const filter = url.searchParams.get('filter');
+  return Response.json({
+    path: input, folders, files: [], total: 0,
+    ...(endpoint === '/api/fs/list-progressive' ? { done: true, nextCursor: null, sortBy: url.searchParams.get('sortBy') || 'created', sortOrder: url.searchParams.get('sortOrder') === 'desc' ? 'desc' : 'asc' } : {}),
+    ...(['text', 'font', 'all'].includes(filter || '') ? {} : { counts: { media: 0, image: 0, gif: 0, video: 0 } }),
+  });
 }

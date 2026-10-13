@@ -34537,7 +34537,9 @@ const server = Bun.serve<UmbraSocketData>({
         // ============================================
         // FILE SYSTEM API
         // ============================================
-      const remoteNavigation = remoteFilesystemNavigation(url, resolvePathCandidate, toClientPath);
+      const remoteNavigation = method === 'GET'
+        ? await remoteFilesystemNavigation(url, resolvePathCandidate, toClientPath, handleFsTree)
+        : null;
       if (method === 'GET' && remoteNavigation) return remoteNavigation;
       if (path === '/api/gallery-bridge/fs/list-progressive' && method === 'GET') {
         return proxyGalleryBridgeFsGet(
