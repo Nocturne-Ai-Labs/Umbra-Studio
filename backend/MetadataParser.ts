@@ -1,6 +1,6 @@
 /**
  * Metadata Parser - SIMPLIFIED
- * Extracts AI generation metadata from PNG images
+ * Extracts AI generation metadata from PNG and JPEG images
  * Supports: A1111, ComfyUI, Umbra Studio
  */
 
@@ -9,6 +9,7 @@ import { extname } from 'path';
 import { probeVideoMetadata } from './VideoMetadataProbe';
 import { metadataSidecarPath } from './metadataFileRevision';
 import { decodePngMetadataText, MAX_METADATA_TEXT_BYTES } from './PngMetadataText';
+import { readJpegMetadataText } from './JpegMetadataText';
 
 export interface ImageMetadata {
   positive_prompt?: string;
@@ -55,7 +56,8 @@ export class MetadataParser {
     }
 
     // Allow non-PNG media (e.g. GIF) to read metadata from sidecar PNG.
-    if (ext !== '.png') {
+    const jpeg = ext === '.jpg' || ext === '.jpeg';
+    if (ext !== '.png' && !jpeg) {
       const sidecarMeta = await this.parseSidecarPng(filePath, options);
       if (Object.keys(sidecarMeta).length > 0) {
         return sidecarMeta;
@@ -68,9 +70,17 @@ export class MetadataParser {
       const headerBuffer = Buffer.alloc(8);
       await readMetadataBytes(fileHandle, headerBuffer, 0);
 
-      // Only PNG supported for now
+      // Detect embedded image metadata before falling back to a sidecar.
       if (headerBuffer.toString('hex') === '89504e470d0a1a0a') {
         return await this.parsePNG(fileHandle, options);
+      }
+      if (jpeg && headerBuffer[0] === 0xff && headerBuffer[1] === 0xd8) {
+        const metadata = this.processChunks(await readJpegMetadataText(fileHandle));
+        return Object.keys(metadata).length ? metadata : await this.parseSidecarPng(filePath, options);
+      }
+      if (jpeg) {
+        if (options.throwOnReadError) throw new Error('Invalid JPEG signature');
+        return await this.parseSidecarPng(filePath, options);
       }
       if (ext === '.png' && options.throwOnReadError) throw new Error('Invalid PNG signature');
       return {};

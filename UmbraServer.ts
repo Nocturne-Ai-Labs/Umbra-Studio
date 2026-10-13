@@ -99,6 +99,7 @@ import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/Local
 import { getLocalServerProxyCookieHeader, getLocalServerProxyCookiePrefix, rewriteLocalServerProxySetCookies } from './backend/LocalServerProxyCookies';
 import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath, isGalleryPathPolicyAllowed, scopedGalleryRoots, withGalleryPathPolicy, currentGalleryPathPolicy } from './backend/GalleryPathAccess';
 import { createRemoteFilesystemPolicy, isRemoteFilesystemRoute, remoteFilesystemNavigation } from './backend/RemoteFilesystemPolicy';
+import { generationMetadataChunks, embedPngGenerationMetadata, embedJpegGenerationMetadata, jpegGenerationMetadataStream } from './backend/GenerationMetadataExport';
 import { resolvePowerPrompterBrowserPath } from './backend/PowerPrompterBrowserAccess';
 import { readRequestTextWithLimit, RequestBodyTooLargeError } from './backend/BoundedRequestBody';
 import { galleryFallbackSearchMediaType, inspectGalleryFallbackSearchMedia } from './backend/GalleryFallbackSearchMedia';
@@ -29738,7 +29739,10 @@ async function handleFsDownloadJpegZip(req: Request): Promise<Response> {
         open: () => {
           let image = sharp(physicalPath, { animated: false }).rotate();
           image = keepMetadata ? image.withMetadata() : image;
-          return image.jpeg({ quality: 94, mozjpeg: true, chromaSubsampling: '4:4:4' });
+          const encoded = image.jpeg({ quality: 94, mozjpeg: true, chromaSubsampling: '4:4:4' });
+          return keepMetadata
+            ? jpegGenerationMetadataStream(encoded, MetadataParser.parse(physicalPath, { throwOnReadError: /\.(png|jpe?g)$/i.test(physicalPath) }))
+            : encoded;
         },
       });
     }
@@ -33587,25 +33591,11 @@ async function embedMetadataIntoBuffer(buffer: Buffer, sourcePath: string, filen
       throw new Error('The source image for metadata was not found. Restore the source or turn off Embed Metadata.');
     }
 
-    const metadata = await MetadataParser.parse(fullSourcePath);
-    if (!metadata.positive_prompt && !metadata.negative_prompt && !metadata.model && metadata.seed == null) return buffer;
+    const metadata = await MetadataParser.parse(fullSourcePath, { throwOnReadError: /\.(png|jpe?g)$/i.test(fullSourcePath) });
+    const chunks = generationMetadataChunks(metadata);
+    if (!Object.keys(chunks).length) return buffer;
 
-    // Match the parameters format read by Umbra and other image-generation tools.
-    const controls = [
-      `Steps: ${metadata.steps ?? ''}`,
-      metadata.sampler ? `Sampler: ${metadata.sampler}` : '',
-      metadata.scheduler ? `Schedule type: ${metadata.scheduler}` : '',
-      metadata.cfg != null ? `CFG scale: ${metadata.cfg}` : '',
-      metadata.seed != null ? `Seed: ${metadata.seed}` : '',
-      metadata.model ? `Model: ${metadata.model}` : '',
-    ].filter(Boolean).join(', ');
-    const metaText = [
-      metadata.positive_prompt || '',
-      metadata.negative_prompt ? `Negative prompt: ${metadata.negative_prompt}` : '',
-      controls,
-    ].filter(Boolean).join('\n');
-
-    if (!metaText) return buffer;
+    const metaText = chunks.parameters || '';
 
     const sharp = (await import('sharp')).default;
     const ext = filename.split('.').pop()?.toLowerCase();
@@ -33617,10 +33607,17 @@ async function embedMetadataIntoBuffer(buffer: Buffer, sourcePath: string, filen
         .png()
         .toBuffer()
         .then(async (buf: Buffer) => {
-          return injectPngInternationalTextChunk(buf, 'parameters', metaText);
+          return embedPngGenerationMetadata(buf, chunks);
         });
+    } else if (ext === 'jpg' || ext === 'jpeg') {
+      const encoded = await sharp(buffer)
+        .withMetadata(metaText ? { exif: { IFD0: { ImageDescription: metaText } } } : {})
+        .jpeg()
+        .toBuffer();
+      return embedJpegGenerationMetadata(encoded, chunks);
     } else {
-      // For JPEG/WebP: embed in EXIF UserComment via sharp
+      if (!metaText) return buffer;
+      // Other formats retain the existing EXIF ImageDescription export.
       return await sharp(buffer)
         .withMetadata({
           exif: {
