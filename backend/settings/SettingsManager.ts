@@ -153,7 +153,7 @@ class SettingsManager {
             }
 
             const raw = readFileSync(this.settingsPath, 'utf-8');
-            const parsed = JSON.parse(raw);
+            const parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
                 throw new Error('Settings must contain a JSON object.');
             }
