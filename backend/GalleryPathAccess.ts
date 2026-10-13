@@ -1,6 +1,40 @@
 import * as fs from 'node:fs/promises';
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+export type GalleryPathPolicy = { runtimeRoot: string; builtinRoots: string[]; allowedRoots: string[]; protectedRoots: string[] };
+const galleryPathPolicy = new AsyncLocalStorage<GalleryPathPolicy | undefined>();
+export function withGalleryPathPolicy<T>(policy: GalleryPathPolicy | undefined, operation: () => T): T {
+  return galleryPathPolicy.run(policy, operation);
+}
+export function scopedGalleryRoots(fallback: string[]): string[] {
+  return galleryPathPolicy.getStore()?.allowedRoots || fallback;
+}
+export function currentGalleryPathPolicy(): GalleryPathPolicy | undefined { return galleryPathPolicy.getStore(); }
+export function isGalleryPathPolicyAllowed(path: string): boolean {
+  const policy = galleryPathPolicy.getStore();
+  if (!policy) return true;
+  try {
+    const candidate = canonicalCandidateSync(path);
+    const runtime = canonicalCandidateSync(policy.runtimeRoot);
+    // Folder mutations/exports cannot carry protected descendants along with them.
+    for (const root of policy.protectedRoots) {
+      const protectedPath = canonicalCandidateSync(root);
+      if (isInsidePhysicalRoot(protectedPath, candidate) || isInsidePhysicalRoot(candidate, protectedPath)) return false;
+    }
+    // Explicit content folders under User remain usable. Broad runtime/User
+    // grants cannot authorize code or folders created after this policy snapshot.
+    const userRoot = canonicalCandidateSync(resolve(policy.runtimeRoot, 'User'));
+    const roots = isInsidePhysicalRoot(runtime, candidate)
+      ? [...policy.builtinRoots, ...policy.allowedRoots.filter(root => {
+        const physicalRoot = canonicalCandidateSync(root);
+        return physicalRoot !== userRoot && isInsidePhysicalRoot(userRoot, physicalRoot);
+      })]
+      : policy.allowedRoots;
+    return roots.some(root => isInsidePhysicalRoot(canonicalCandidateSync(root), candidate));
+  } catch { return false; }
+}
 
 async function canonicalCandidate(path: string): Promise<string> {
   let parent = resolve(path);
@@ -48,6 +82,7 @@ export async function createGalleryPathAuthorizer(allowedRoots: string[]) {
   const physicalRoots = (await Promise.all(allowedRoots.map(root => canonicalCandidate(root).catch(() => null))))
     .filter((root): root is string => Boolean(root));
   return async (path: string): Promise<string | null> => {
+    if (!isGalleryPathPolicyAllowed(path)) return null;
     const candidate = await canonicalCandidate(path).catch(() => null);
     if (!candidate) return null;
     for (const physicalRoot of physicalRoots) {
@@ -58,6 +93,7 @@ export async function createGalleryPathAuthorizer(allowedRoots: string[]) {
 }
 
 export async function resolveAllowedGalleryPath(path: string, allowedRoots: string[]): Promise<string | null> {
+  if (!isGalleryPathPolicyAllowed(path)) return null;
   const candidate = await canonicalCandidate(path).catch(() => null);
   if (!candidate) return null;
   for (const root of allowedRoots) {
@@ -68,6 +104,7 @@ export async function resolveAllowedGalleryPath(path: string, allowedRoots: stri
 }
 
 export function resolveAllowedExistingGalleryPath(path: string, allowedRoots: string[]): string | null {
+  if (!isGalleryPathPolicyAllowed(path)) return null;
   let candidate: string;
   try { candidate = canonicalCandidateSync(path); }
   catch { return null; }

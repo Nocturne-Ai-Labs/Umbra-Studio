@@ -97,7 +97,8 @@ import { isCivitaiModelDownloadUrl } from './backend/ModelDownloadHttp';
 import { resolveGalleryPublicDir } from './gallery/GalleryRuntimePaths';
 import { fetchLocalServerProxy, readLocalServerProxyText } from './backend/LocalServerProxyTransfer';
 import { getLocalServerProxyCookieHeader, getLocalServerProxyCookiePrefix, rewriteLocalServerProxySetCookies } from './backend/LocalServerProxyCookies';
-import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath } from './backend/GalleryPathAccess';
+import { createGalleryPathAuthorizer, resolveAllowedExistingGalleryPath, resolveAllowedGalleryPath, isGalleryPathPolicyAllowed, scopedGalleryRoots, withGalleryPathPolicy, currentGalleryPathPolicy } from './backend/GalleryPathAccess';
+import { createRemoteFilesystemPolicy, isRemoteFilesystemRoute, remoteFilesystemNavigation } from './backend/RemoteFilesystemPolicy';
 import { resolvePowerPrompterBrowserPath } from './backend/PowerPrompterBrowserAccess';
 import { readRequestTextWithLimit, RequestBodyTooLargeError } from './backend/BoundedRequestBody';
 import { galleryFallbackSearchMediaType, inspectGalleryFallbackSearchMedia } from './backend/GalleryFallbackSearchMedia';
@@ -1198,7 +1199,7 @@ const {
   sanitizeDatasetSegment,
   sanitizeDatasetRelativePath,
   resolveDatasetPathSafe,
-  resolvePath,
+  resolvePath: resolveRuntimePath,
   isAbsolutePathInput,
 } = createRuntimePathHelpers({
   rootDir: ROOT_DIR,
@@ -1207,6 +1208,11 @@ const {
   trashRoot: TRASH_ROOT,
   datasetsRelativeRoot: 'User/Datasets',
 });
+
+function resolvePath(...args: Parameters<typeof resolveRuntimePath>): ReturnType<typeof resolveRuntimePath> {
+  const resolved = resolveRuntimePath(...args);
+  return resolved && isGalleryPathPolicyAllowed(resolved.fullPath) ? resolved : null;
+}
 
 const resolveDatasetConceptPathSafe = (dataset: string, concept: string) =>
   resolveDatasetConceptPath(dataset, concept, resolveDatasetPathSafe);
@@ -19155,7 +19161,7 @@ async function proxyGalleryBridgeFsGet(
 }
 
 function getGalleryBridgeAllowedRoots(): string[] {
-  return [ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)];
+  return scopedGalleryRoots([ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)]);
 }
 
 function getGalleryBridgeRequestPaths(sourceUrl: URL, targetPath: string): string[] {
@@ -29991,6 +29997,9 @@ async function handleFsWrite(req: Request): Promise<Response> {
       }
     }
 
+    if (currentGalleryPathPolicy() && ((await fs.stat(fullPath).catch(() => null))?.nlink || 0) > 1) {
+      return json({ error: 'Remote writes cannot overwrite a multiply linked file.' }, 403);
+    }
     await fsWorkerService.write({
       fullPath,
       content: content ?? '',
@@ -32778,7 +32787,7 @@ async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, un
 }
 
 function getGalleryTransferAllowedRoots(): string[] {
-  return [ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)];
+  return scopedGalleryRoots([ROOT_DIR, getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)]);
 }
 
 async function getGalleryTransferPathAuthorizer(): Promise<(fullPath: string) => Promise<boolean>> {
@@ -32794,11 +32803,12 @@ async function validateGalleryTransferRequest(paths: string[], destination: stri
   if (!(await isAllowed(destinationResolved.fullPath))) {
     return 'Transfer destination resolves outside allowed roots';
   }
-  if (!validateSources) return null;
+  // Background transfers need source authorization before enqueueing too.
+  if (!validateSources && !currentGalleryPathPolicy()) return null;
   for (const sourcePath of paths) {
     const sourceResolved = resolvePath(sourcePath);
-    // Keep ordinary missing/invalid-source reporting as a per-item transfer result.
-    if (sourceResolved && !(await isAllowed(sourceResolved.fullPath))) {
+    // Missing files inside an authorized root retain per-item failure reporting.
+    if ((currentGalleryPathPolicy() && !sourceResolved) || (sourceResolved && !(await isAllowed(sourceResolved.fullPath)))) {
       return 'A transfer source resolves outside allowed roots';
     }
   }
@@ -33676,7 +33686,11 @@ const server = Bun.serve<UmbraSocketData>({
   hostname: HOST,
   idleTimeout: 120,
 
-  fetch: mainActionLogger.wrap(async (req: Request, server: Bun.Server<UmbraSocketData>) => {
+  fetch: mainActionLogger.wrap((req: Request, server: Bun.Server<UmbraSocketData>) => withGalleryPathPolicy(
+    isRemoteFilesystemRoute(new URL(req.url).pathname) && !isHostRequest(req, new URL(req.url), server)
+      ? createRemoteFilesystemPolicy(ROOT_DIR, SOURCE_DIR, [getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)])
+      : undefined,
+    async () => {
     const requestStartedAt = Date.now();
     let responseStatus = 0;
     const url = new URL(req.url);
@@ -34523,6 +34537,8 @@ const server = Bun.serve<UmbraSocketData>({
         // ============================================
         // FILE SYSTEM API
         // ============================================
+      const remoteNavigation = remoteFilesystemNavigation(url, resolvePathCandidate, toClientPath);
+      if (method === 'GET' && remoteNavigation) return remoteNavigation;
       if (path === '/api/gallery-bridge/fs/list-progressive' && method === 'GET') {
         return proxyGalleryBridgeFsGet(
           req,
@@ -40238,7 +40254,7 @@ const server = Bun.serve<UmbraSocketData>({
     } finally {
       appendBackendRouteTimingLog(method, path, responseStatus, Date.now() - requestStartedAt);
     }
-  }),
+  })),
 
   websocket: {
     perMessageDeflate: {
