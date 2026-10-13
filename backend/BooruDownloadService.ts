@@ -37,6 +37,12 @@ function validateFilename(filename: string): void {
   }
 }
 
+function validateTags(tags: unknown): void {
+  if (tags != null && (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string'))) {
+    throw new Error('Dataset tags must be a list of strings.');
+  }
+}
+
 async function validateImage(path: string, extension = extname(path).slice(1).toLowerCase()): Promise<void> {
   // Video originals are verified by their source checksum; image originals also get a full decode.
   if (extension === 'mp4' || extension === 'webm') return;
@@ -90,8 +96,8 @@ async function fetchOriginal(url: URL, signal: AbortSignal): Promise<Response> {
 }
 
 async function ensureCaption(conceptPath: string, filename: string, tags?: string[]): Promise<void> {
+  validateTags(tags);
   if (!tags?.length) return;
-  if (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string')) throw new Error('Dataset tags must be a list of strings.');
   const destination = join(conceptPath, `${basename(filename, extname(filename))}.txt`);
   const existingCaption = async () => {
     let found = false;
@@ -136,6 +142,7 @@ export async function downloadBooruOriginal(options: {
   replace?: boolean; tags?: string[]; signal?: AbortSignal;
 }): Promise<{ filename: string; revision: number; alreadyExists: boolean }> {
   validateFilename(options.filename);
+  validateTags(options.tags);
   const md5 = String(options.source.md5 || '').toLowerCase();
   if (!MD5.test(md5)) throw new Error('The source did not provide a valid image checksum.');
   const url = normalizeBooruMediaUrl(options.source.url);
