@@ -520,7 +520,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     positivePromptSegments,
     negativePrompt,
     modelFamily: String(generation.modelFamily || pipeline.modelFamily || inpaint.modelFamily || '').trim() || inferModelFamily(checkpointName),
-    modelType: String(generation.modelType || pipeline.modelSource || inpaint.modelSource || '').trim() || (checkpointName.toLowerCase().endsWith('.gguf') ? 'gguf' : /wulver/i.test(checkpointName) ? 'diffusion_model' : 'checkpoint'),
+    modelType: String(generation.modelType || pipeline.modelSource || inpaint.modelSource || '').trim() || (checkpointName.toLowerCase().endsWith('.gguf') ? 'gguf' : /wulver|iris[-_ ]?3b/i.test(checkpointName) ? 'diffusion_model' : 'checkpoint'),
     checkpointName,
     vaeName: normalizePath(generation.vaeName || params.vae),
     seed: finiteNumber(generation.seed ?? inpaint.seed ?? params.seed),

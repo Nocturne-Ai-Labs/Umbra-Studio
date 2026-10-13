@@ -105,6 +105,8 @@ export const POWER_PROMPTER_SAMPLER_OPTIONS = [
   'uni_pc_bh2',
 ] as const;
 export const POWER_PROMPTER_SCHEDULER_OPTIONS = [
+  'iris',
+  'iris_turbo',
   'normal',
   'karras',
   'exponential',
