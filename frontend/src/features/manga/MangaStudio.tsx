@@ -68,9 +68,9 @@ export function MangaStudio({ embedded = false, active = true }: { embedded?: bo
   const [savedFilename, setSavedFilename] = useState('');
   const [savedToUser, setSavedToUser] = useState<MangaProject | null>(null);
   const savedTargets = useRef(new Map<string, MangaSavedTarget | null>());
-  const fontOptions = [...MANGA_FONTS, ...userFonts.map(font => ({ value: font.id, label: font.label })), ...(project.fonts || []).filter(font => !userFonts.some(item => item.id === font.id)).map(font => ({ value: font.id, label: `${font.filename} (missing)`, disabled: true }))];
+  const fontOptions = [...MANGA_FONTS, ...userFonts.map(font => ({ value: font.id, label: font.label, i18nSkip: true })), ...(project.fonts || []).filter(font => !userFonts.some(item => item.id === font.id)).map(font => ({ value: font.id, label: `${font.filename} (missing)`, i18nSkip: true, disabled: true }))];
   const systemFonts = [...new Set(project.pages.flatMap(page => page.layers.map(layer => layer.font)).filter(isMangaSystemFont))];
-  fontOptions.push(...systemFonts.map(value => ({ value, label: value.slice(12) })));
+  fontOptions.push(...systemFonts.map(value => ({ value, label: value.slice(12), i18nSkip: true })));
   const assets: MangaAsset[] = mangaProjectAssets(project);
   const [effectText, setEffectText] = useState('');
   const [effectFont, setEffectFont] = useState('bangers');
@@ -465,7 +465,7 @@ export function MangaStudio({ embedded = false, active = true }: { embedded?: bo
               <button className="manga-wide" disabled={!effectText.trim()} onClick={() => addEffect(effectText)}><Plus size={16} />Add sound effect</button>
             </> : libraryTab === 'projects' ? <>
               <p className="manga-hint">User/MangaStudio/Projects</p>
-              <UmbraSelect ariaLabel="Saved manga project" value={savedFilename} placeholder="Choose a saved project" disabled={!savedProjects.length} options={savedProjects.map(item => ({ value: item.filename, label: item.name, description: `${item.pages} pages · ${item.filename}` }))} onValueChange={setSavedFilename} />
+              <UmbraSelect ariaLabel="Saved manga project" value={savedFilename} placeholder="Choose a saved project" disabled={!savedProjects.length} options={savedProjects.map(item => ({ value: item.filename, label: item.name, i18nSkip: true, description: `${item.pages} pages · ${item.filename}` }))} onValueChange={setSavedFilename} />
               <button className="manga-wide" disabled={!savedFilename} onClick={() => void openUserProject()}>Open saved project</button>
               <button className="manga-wide" onClick={() => void refreshProjects()}>Refresh projects</button>
               <button className="manga-wide" onClick={() => projectInput.current?.click()}>Import project file</button>

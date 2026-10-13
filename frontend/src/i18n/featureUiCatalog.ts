@@ -3,6 +3,8 @@ import type { RecentUiLanguage } from './recentUiCatalog';
 // Maintained translations for feature workspaces. Columns: English, Japanese,
 // Simplified Chinese, Korean, German. Brand names and file formats stay intact.
 const FEATURE_UI_ENTRIES: Array<readonly [string, string, string, string, string]> = [
+  ['Loading editor…', 'エディターを読み込み中…', '正在加载编辑器…', '편집기 불러오는 중…', 'Editor wird geladen…'],
+  ['The editor could not load. Reopen Umbra Studio to try again.', 'エディターを読み込めませんでした。Umbra Studio を開き直して再試行してください。', '无法加载编辑器。请重新打开 Umbra Studio 后重试。', '편집기를 불러오지 못했습니다. Umbra Studio를 다시 열어 재시도하세요.', 'Der Editor konnte nicht geladen werden. Öffnen Sie Umbra Studio erneut und versuchen Sie es noch einmal.'],
   ['Add Manga LoRA', 'Manga LoRA を追加', '添加漫画 LoRA', '만화 LoRA 추가', 'Manga-LoRA hinzufügen'],
   ['Add TTF, OTF, WOFF or WOFF2 files to User/Fonts.', 'TTF、OTF、WOFF、WOFF2 ファイルを User/Fonts に追加してください。', '将 TTF、OTF、WOFF 或 WOFF2 文件添加到 User/Fonts。', 'TTF, OTF, WOFF 또는 WOFF2 파일을 User/Fonts에 추가하세요.', 'TTF-, OTF-, WOFF- oder WOFF2-Dateien unter User/Fonts hinzufügen.'],
   ['Add image layer to panel', 'コマに画像レイヤーを追加', '向分格添加图像图层', '칸에 이미지 레이어 추가', 'Bildebene zum Panel hinzufügen'],
