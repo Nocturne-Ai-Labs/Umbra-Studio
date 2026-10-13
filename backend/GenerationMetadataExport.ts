@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import type { ImageMetadata } from './MetadataParser';
 import { createJpegGenerationMetadata, JpegMetadataWireBudget } from './JpegMetadataText';
-import { MAX_METADATA_TEXT_BYTES } from './PngMetadataText';
+import { decodePngMetadataText, MAX_METADATA_TEXT_BYTES } from './PngMetadataText';
 import { upsertPngTextMetadataBuffer } from './PngTextMetadata';
 
 export function generationMetadataChunks(metadata: ImageMetadata): Record<string, string> {
@@ -30,6 +30,39 @@ export function generationMetadataChunks(metadata: ImageMetadata): Record<string
 }
 
 export function embedPngGenerationMetadata(buffer: Buffer, chunks: Record<string, string>): Buffer {
+  if (!Object.keys(chunks).length) return buffer;
+  if (!buffer.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) throw new Error('Invalid PNG export signature');
+  const replacements = new Set(Object.keys(chunks));
+  let wireBytes = 0, decodedBytes = 0;
+  for (const [key, value] of Object.entries(chunks)) {
+    const bytes = Buffer.byteLength(value);
+    wireBytes += Buffer.byteLength(key) + 5 + bytes;
+    decodedBytes += bytes;
+  }
+  const checkBudget = () => {
+    if (wireBytes > MAX_METADATA_TEXT_BYTES || decodedBytes > MAX_METADATA_TEXT_BYTES) throw new Error('PNG metadata exceeds the export limit');
+  };
+  checkBudget();
+  let offset = 8, foundEnd = false;
+  // Count unrelated retained text before allocating rewritten image buffers.
+  // Metadata replaced by this export is removed, so does not consume its budget.
+  for (let index = 0; index < 100_000; index++) {
+    if (offset + 12 > buffer.length) throw new Error('PNG export metadata is truncated');
+    const length = buffer.readUInt32BE(offset), type = buffer.toString('ascii', offset + 4, offset + 8);
+    const end = offset + 12 + length;
+    if (end > buffer.length) throw new Error('PNG export metadata is truncated');
+    if (type === 'tEXt' || type === 'zTXt' || type === 'iTXt') {
+      const data = buffer.subarray(offset + 8, end - 4), separator = data.indexOf(0);
+      if (!replacements.has(separator < 0 ? '' : data.toString('latin1', 0, separator))) {
+        wireBytes += length;
+        checkBudget();
+        decodedBytes += decodePngMetadataText(type, data, MAX_METADATA_TEXT_BYTES - decodedBytes).bytes;
+      }
+    }
+    offset = end;
+    if (type === 'IEND') { foundEnd = true; break; }
+  }
+  if (!foundEnd) throw new Error('PNG export is missing IEND or exceeds the chunk limit');
   for (const [key, value] of Object.entries(chunks)) buffer = upsertPngTextMetadataBuffer(buffer, key, value);
   return buffer;
 }
@@ -46,7 +79,10 @@ export function embedJpegGenerationMetadata(buffer: Buffer, chunks: Record<strin
 
 // Keep the JPEG archive encoder streaming; only metadata is assembled in memory.
 export function jpegGenerationMetadataStream(image: Readable, metadata: Promise<ImageMetadata>): Readable {
-  return Readable.from((async function* () {
+  // Cancellation can happen before Readable.from enters the generator. Observe
+  // metadata rejection immediately and close its encoder on either path.
+  void metadata.catch(() => {});
+  const output = Readable.from((async function* () {
     try {
       const chunks = generationMetadataChunks(await metadata);
       const segments = Object.keys(chunks).length ? createJpegGenerationMetadata(chunks) : [];
@@ -71,4 +107,6 @@ export function jpegGenerationMetadataStream(image: Readable, metadata: Promise<
       image.destroy();
     }
   })(), { objectMode: false });
+  output.once('close', () => image.destroy());
+  return output;
 }

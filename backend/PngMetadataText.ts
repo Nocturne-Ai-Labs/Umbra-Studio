@@ -13,7 +13,7 @@ export function decodePngMetadataText(type: string, data: Buffer, remainingBytes
     compressed = true;
   } else if (type === 'iTXt') {
     const flag = data[textStart++], method = data[textStart++];
-    if ((flag !== 0 && flag !== 1) || method !== 0) throw new Error('Invalid PNG metadata compression header');
+    if ((flag !== 0 && flag !== 1) || (flag === 1 && method !== 0)) throw new Error('Invalid PNG metadata compression header');
     compressed = flag === 1;
     for (let field = 0; field < 2; field++) {
       const end = data.indexOf(0, textStart);
@@ -23,9 +23,14 @@ export function decodePngMetadataText(type: string, data: Buffer, remainingBytes
   }
   if (textStart > data.length) throw new Error('PNG metadata header is truncated');
   const encoded = data.subarray(textStart);
-  const decoded = compressed
-    ? inflateSync(encoded, { maxOutputLength: Math.max(1, remainingBytes) })
-    : encoded;
+  let decoded = encoded;
+  if (compressed) {
+    const options = { maxOutputLength: Math.max(1, remainingBytes), info: true };
+    const result = inflateSync(encoded, options) as unknown as { buffer: Buffer; engine: { bytesWritten: number } };
+    // PNG text contains one complete zlib datastream, unlike concatenated gzip.
+    if (result.engine.bytesWritten !== encoded.length) throw new Error('PNG metadata compression contains trailing data');
+    decoded = result.buffer;
+  }
   if (decoded.length > remainingBytes) throw new Error('PNG metadata exceeds the decoded read limit');
   const text = type === 'iTXt'
     ? new TextDecoder('utf-8', { fatal: true }).decode(decoded)
