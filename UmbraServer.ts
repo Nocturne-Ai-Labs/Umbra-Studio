@@ -42,6 +42,7 @@ import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
+import { parseTaggerNumber } from './backend/TaggerNumericOptions';
 import { MAX_DATASET_CONCEPT_SETTINGS_REQUEST_BYTES, readDatasetConceptSettingsText, serializeDatasetConceptSettings } from './backend/DatasetConceptSettingsFile';
 import { isRecoverableUiSessionKey, readUiSessionConfigValue } from './backend/UiSessionConfigRecovery';
 import { checkDatasetCaptionSize, DatasetCaptionTooLargeError, MAX_DATASET_CAPTION_REQUEST_BYTES, readExistingDatasetCaption } from './backend/DatasetCaptionFile';
@@ -36660,16 +36661,8 @@ const server = Bun.serve<UmbraSocketData>({
             }
             return fallback;
           };
-          const parseNumber = (value: unknown, fallback: number, min: number, max: number): number => {
-            const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
-            if (!Number.isFinite(parsed)) return fallback;
-            return Math.max(min, Math.min(max, parsed));
-          };
-          const parseInteger = (value: unknown, fallback: number, min: number, max: number): number => {
-            const parsed = Number(String(value ?? '').trim());
-            if (!Number.isFinite(parsed)) return fallback;
-            return Math.max(min, Math.min(max, Math.floor(parsed)));
-          };
+          const parseNumber = parseTaggerNumber;
+          const parseInteger = (value: unknown, fallback: number, min: number, max: number): number => parseTaggerNumber(value, fallback, min, max, true);
           const normalizeCaptionTag = (value: unknown, useSpaces: boolean): string => {
             const text = String(value ?? '').trim();
             if (!text) return '';
@@ -39933,16 +39926,8 @@ const server = Bun.serve<UmbraSocketData>({
             }
             return fallback;
           };
-          const parseNumber = (value: unknown, fallback: number, min: number, max: number): number => {
-            const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
-            if (!Number.isFinite(parsed)) return fallback;
-            return Math.max(min, Math.min(max, parsed));
-          };
-          const parseInteger = (value: unknown, fallback: number, min: number, max: number): number => {
-            const parsed = Number(String(value ?? '').trim());
-            if (!Number.isFinite(parsed)) return fallback;
-            return Math.max(min, Math.min(max, Math.floor(parsed)));
-          };
+          const parseNumber = parseTaggerNumber;
+          const parseInteger = (value: unknown, fallback: number, min: number, max: number): number => parseTaggerNumber(value, fallback, min, max, true);
 
           let imagePath = '';
           let sourcePath = '';
