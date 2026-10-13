@@ -735,8 +735,9 @@ export class UmbraUiCanvasWorkspaceProjectService {
       const previousUrl = String(asRecord(previousById.get(entity.id)).imageUrl || '');
       if (uploadedFilename) return { ...entity, imageUrl: `${PROJECT_ASSET_PREFIX}${uploadedFilename}` };
       if (currentUrl.startsWith(PROJECT_ASSET_PREFIX)) return { ...entity, imageUrl: currentUrl };
-      if (previousUrl.startsWith(PROJECT_ASSET_PREFIX)) return { ...entity, imageUrl: previousUrl };
+      // Clearing an imported mask is an explicit edit; keep the asset only for undo.
       if (entity.kind === 'mask' && !currentUrl) return { ...entity, imageUrl: '' };
+      if (previousUrl.startsWith(PROJECT_ASSET_PREFIX)) return { ...entity, imageUrl: previousUrl };
       if (/^(blob:|data:)/i.test(currentUrl)) throw new Error(`Canvas layer ${entity.name} was not uploaded with the project.`);
       throw new Error(`Canvas layer ${entity.name} does not reference a saved image asset.`);
     });
