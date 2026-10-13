@@ -29777,11 +29777,11 @@ async function handleFsMetadata(req: Request, url: URL, server?: RequestIpServer
       name: basename(fullPath),
       size: stat.size,
       modified: stat.mtime.toISOString(),
-      width: imageMetadata.width ?? (parsed as any).width,
-      height: imageMetadata.height ?? (parsed as any).height,
       format: (parsed as any).format ?? imageMetadata.format,
       exif: imageMetadata.exif,
       ...parsed,
+      width: imageMetadata.width ?? (parsed as any).width,
+      height: imageMetadata.height ?? (parsed as any).height,
     });
   } catch (error: any) {
     console.error('[Metadata] Error:', error);
