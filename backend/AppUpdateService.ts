@@ -58,7 +58,7 @@ export function readUmbraAppVersion(runtimeRoot: string, sourceRoot: string): st
       if (!existsSync(candidate)) continue;
       const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as Record<string, unknown>;
       const version = normalizeUmbraVersion(parsed.version);
-      if (version) return version;
+      if (isUmbraReleaseVersion(version)) return version;
     } catch {
       // Try the next supported portable layout.
     }
