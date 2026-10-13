@@ -8167,3 +8167,87 @@ html[data-umbra-remote-mode="phone"] [data-video-workspace-settings] [data-umbra
   flex: 1 1 auto;
   overflow-y: auto;
 }
+
+/* The detailer switch owns its hit target so workspace button styles cannot move its thumb. */
+[data-umbra-detailer-controls] button[data-umbra-detailer-switch] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--umbra-text);
+  cursor: pointer;
+}
+[data-umbra-detailer-controls] button[data-umbra-detailer-switch]:hover {
+  background: color-mix(in srgb, var(--umbra-text) 6%, transparent);
+}
+[data-umbra-detailer-controls] button:focus-visible {
+  outline: 2px solid var(--umbra-accent);
+  outline-offset: 2px;
+}
+[data-umbra-detailer-switch-track] {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--umbra-text) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--umbra-text) 8%, var(--umbra-panel));
+  transition: background-color .16s, border-color .16s;
+}
+[data-umbra-detailer-switch-thumb] {
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--umbra-text) 25%, var(--umbra-panel));
+  color: var(--umbra-text);
+  transition: transform .16s, background-color .16s;
+}
+[data-umbra-detailer-switch][aria-checked="true"] [data-umbra-detailer-switch-track] {
+  border-color: var(--umbra-accent);
+  background: color-mix(in srgb, var(--umbra-accent) 28%, var(--umbra-panel));
+}
+[data-umbra-detailer-switch][aria-checked="true"] [data-umbra-detailer-switch-thumb] {
+  transform: translateX(16px);
+  background: var(--umbra-accent);
+  color: var(--umbra-panel);
+}
+[data-umbra-detailer-header] { flex-wrap: wrap; }
+[data-umbra-detailer-stage-toolbar] {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+[data-umbra-detailer-stage-toolbar] > button:first-child:not([data-umbra-detailer-stage-title]) { width: 44px; min-width: 44px; min-height: 44px; }
+[data-umbra-detailer-stage-toolbar] [data-umbra-detailer-stage-title] { grid-column: 2; grid-row: 1; }
+[data-umbra-detailer-stage-toolbar] [data-umbra-detailer-switch] { grid-column: 3; grid-row: 1; }
+[data-umbra-detailer-stage-actions] {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+[data-umbra-detailer-header] button[aria-pressed="true"] { color: var(--umbra-accent); }
+@media (max-width: 999px) {
+  [data-umbra-detailer-controls] button:not([data-umbra-detailer-stage-title]) { min-width: 44px; min-height: 44px; }
+  [data-umbra-detailer-stage-actions] button { width: 44px; min-width: 44px; }
+}
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-detailer-controls] button:not([data-umbra-detailer-stage-title]) { min-width: 44px; min-height: 44px; }
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-detailer-controls] [data-umbra-detailer-stage-actions] button,
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-detailer-stage-toolbar] > button:first-child:not([data-umbra-detailer-stage-title]) { width: 44px !important; min-width: 44px !important; }
+@media (prefers-reduced-motion: reduce) {
+  [data-umbra-detailer-switch-track], [data-umbra-detailer-switch-thumb] { transition: none; }
+}

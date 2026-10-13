@@ -89,8 +89,4 @@
 @media(max-width: 1100px) { .manga-body[data-generation-open=true] .manga-library { width: 240px; } }
 @media(max-width: 999px) { .manga-body[data-generation-open=true] .manga-library { width: 220px; } }
 .manga-enhancement-controls [data-umbra-detailer-header] { flex-wrap: wrap; }
-.manga-enhancement-controls [data-umbra-detailer-stage-toolbar] { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 4px; }
-.manga-enhancement-controls [data-umbra-detailer-stage-toolbar] button { padding: 4px; }
-.manga-enhancement-controls [data-umbra-detailer-stage-title] { grid-column: 2/6; display: block; text-align: left; }
-.manga-enhancement-controls [data-umbra-detailer-stage-toolbar] button[role=switch] { grid-column: 6; grid-row: 1; }
 .manga-enhancement-controls [data-umbra-detailer-controls] .grid-cols-3 { grid-template-columns: repeat(2,minmax(0,1fr)); }

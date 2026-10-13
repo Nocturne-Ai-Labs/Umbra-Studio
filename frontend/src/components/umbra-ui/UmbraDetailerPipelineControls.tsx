@@ -5,11 +5,13 @@ import React from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   ChevronDown,
   ChevronRight,
   Copy,
   Maximize2,
   Plus,
+  Power,
   Trash2,
   WandSparkles,
 } from 'lucide-react';
@@ -61,30 +63,25 @@ interface ToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   title: string;
-  color?: 'emerald' | 'cyan';
+  label: string;
 }
 
-function Toggle({ checked, onChange, title, color = 'emerald' }: ToggleProps) {
+export function UmbraDetailerSwitch({ checked, onChange, title, label }: ToggleProps) {
   return (
     <button
       type="button"
+      data-umbra-detailer-switch=""
       role="switch"
+      aria-label={label}
       aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className={cn(
-        'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
-        checked
-          ? color === 'cyan' ? 'border-cyan-300/40 bg-cyan-400/25' : 'border-emerald-300/40 bg-emerald-400/25'
-          : 'border-white/15 bg-black/35',
-      )}
       title={title}
     >
-      <span className={cn(
-        'absolute top-0.5 h-3.5 w-3.5 rounded-full transition-[left,background-color]',
-        checked
-          ? cn('left-[18px]', color === 'cyan' ? 'bg-cyan-200' : 'bg-emerald-200')
-          : 'left-0.5 bg-zinc-600',
-      )} />
+      <span data-umbra-detailer-switch-track="" aria-hidden="true">
+        <span data-umbra-detailer-switch-thumb="">
+          {checked ? <Check size={11} /> : <Power size={10} />}
+        </span>
+      </span>
     </button>
   );
 }
@@ -185,40 +182,30 @@ export function UmbraDetailerPipelineControls({
         <button
           type="button"
           onClick={() => setPipelineExpanded((current) => !current)}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-zinc-500 hover:text-zinc-100"
+          className="inline-flex min-h-8 min-w-0 items-center gap-2 text-zinc-400 hover:text-zinc-100"
           title={pipelineExpanded ? 'Collapse detailer pipeline' : 'Expand detailer pipeline'}
           aria-expanded={pipelineExpanded}
+          aria-label={pipelineExpanded ? 'Collapse detailers' : 'Expand detailers'}
         >
           {pipelineExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <WandSparkles size={13} className="shrink-0 text-emerald-300" />
+          <span className="text-[10px] font-black uppercase tracking-[0.12em]">Detailers</span>
         </button>
-        <WandSparkles size={13} className="text-emerald-300" />
-        <button
-          type="button"
-          onClick={() => setPipelineExpanded((current) => !current)}
-          className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-200 hover:text-white"
-        >
-          Detailer Pipeline
-        </button>
-        <span className="font-mono text-[10px] text-zinc-500">{activeCount}/{stages.length}</span>
-        {pipelineExpanded && activeCount > 0 ? (
+        <span className="font-mono text-[10px] text-zinc-500" title={`${activeCount} enabled of ${stages.length} detailer stages`}>{activeCount}/{stages.length}</span>
+        {pipelineExpanded && stages.length > 0 ? (
           <button
             type="button"
-            onClick={() => onStagesChange(stages.map((stage) => ({ ...stage, enabled: false })))}
-            className="ml-auto inline-flex h-7 items-center rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500 transition-colors hover:border-emerald-300/25 hover:text-zinc-200"
+            onClick={() => onStagesChange(stages.map(stage => ({ ...stage, enabled: activeCount === 0 })))}
+            className={cn(iconButtonClass, 'ml-auto')}
+            aria-label={activeCount > 0 ? 'Disable all detailers' : 'Enable all detailers'}
+            title={activeCount > 0 ? 'Disable all detailers' : 'Enable all detailers'}
+            aria-pressed={activeCount > 0}
           >
-            Disable all
-          </button>
-        ) : pipelineExpanded && stages.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => onStagesChange(stages.map((stage) => ({ ...stage, enabled: true })))}
-            className="ml-auto inline-flex h-7 items-center rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500 transition-colors hover:border-emerald-300/25 hover:text-zinc-200"
-          >
-            Enable all
+            <Power size={13} />
           </button>
         ) : <span className="ml-auto" />}
         {pipelineExpanded && allowCustomStages ? (
-          <button type="button" onClick={addStage} className={iconButtonClass} title="Add detailer stage">
+          <button type="button" onClick={addStage} className={iconButtonClass} title="Add detailer stage" aria-label="Add detailer stage">
             <Plus size={12} />
           </button>
         ) : null}
@@ -239,6 +226,8 @@ export function UmbraDetailerPipelineControls({
                     onClick={() => setExpandedStageId(expanded ? null : stage.id)}
                     className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100"
                     title={expanded ? 'Collapse detailer settings' : 'Expand detailer settings'}
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${stage.label} detailer stage ${index + 1} settings`}
+                    aria-expanded={expanded}
                   >
                     {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                   </button>
@@ -249,19 +238,21 @@ export function UmbraDetailerPipelineControls({
                   data-umbra-detailer-stage-title=""
                   className="min-w-0 flex-1 text-left"
                   disabled={!showStageControls}
+                  title={`${stage.label}: ${stage.detectorModel}`}
+                  aria-label={`${stage.label} detailer stage ${index + 1} settings`}
+                  aria-expanded={expanded}
                 >
                   <span className="block truncate text-[10px] font-black uppercase tracking-[0.1em] text-zinc-100">{stage.label}</span>
-                  <span className="block truncate font-mono text-[9px] text-zinc-500">{stage.detectorModel}</span>
                 </button>
                 {allowCustomStages ? (
-                  <>
-                    <button type="button" onClick={() => moveStage(index, -1)} disabled={index === 0} className={iconButtonClass} title="Move detailer up">
+                  <div data-umbra-detailer-stage-actions="">
+                    <button type="button" onClick={() => moveStage(index, -1)} disabled={index === 0} className={iconButtonClass} title="Move detailer up" aria-label={`Move ${stage.label} detailer stage ${index + 1} up`}>
                       <ArrowUp size={11} />
                     </button>
-                    <button type="button" onClick={() => moveStage(index, 1)} disabled={index === stages.length - 1} className={iconButtonClass} title="Move detailer down">
+                    <button type="button" onClick={() => moveStage(index, 1)} disabled={index === stages.length - 1} className={iconButtonClass} title="Move detailer down" aria-label={`Move ${stage.label} detailer stage ${index + 1} down`}>
                       <ArrowDown size={11} />
                     </button>
-                    <button type="button" onClick={() => duplicateStage(stage, index)} className={iconButtonClass} title="Duplicate detailer">
+                    <button type="button" onClick={() => duplicateStage(stage, index)} className={iconButtonClass} title="Duplicate detailer" aria-label={`Duplicate ${stage.label} detailer stage ${index + 1}`}>
                       <Copy size={11} />
                     </button>
                     <button
@@ -271,13 +262,13 @@ export function UmbraDetailerPipelineControls({
                         if (expanded) setExpandedStageId(null);
                       }}
                       className={cn(iconButtonClass, 'hover:border-red-300/30 hover:text-red-200')}
-                      title="Remove detailer"
+                      title="Remove detailer" aria-label={`Remove ${stage.label} detailer stage ${index + 1}`}
                     >
                       <Trash2 size={11} />
                     </button>
-                  </>
+                  </div>
                 ) : null}
-                <Toggle checked={stage.enabled} onChange={(enabled) => updateStage(stage.id, { enabled })} title={stage.enabled ? 'Disable detailer' : 'Enable detailer'} />
+                <UmbraDetailerSwitch label={`${stage.label} detailer stage ${index + 1}`} checked={stage.enabled} onChange={(enabled) => updateStage(stage.id, { enabled })} title={stage.enabled ? 'Disable detailer' : 'Enable detailer'} />
               </div>
 
               {expanded && showStageControls ? (
@@ -431,12 +422,12 @@ export function UmbraDetailerPipelineControls({
         <div className="flex items-center gap-2">
           <Maximize2 size={13} className={outputUpscale.enabled ? 'text-cyan-300' : 'text-zinc-600'} />
           <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Output Upscale</span>
-          <span className="ml-auto font-mono text-[10px] text-zinc-500">{outputUpscale.enabled ? 'MODEL' : 'OFF'}</span>
-          <Toggle
+          <span className="ml-auto" />
+          <UmbraDetailerSwitch
+            label="Output upscale"
             checked={outputUpscale.enabled}
             onChange={(enabled) => onOutputUpscaleChange({ ...outputUpscale, enabled })}
             title={outputUpscale.enabled ? 'Disable output upscale' : 'Enable output upscale'}
-            color="cyan"
           />
         </div>
         {outputUpscale.enabled && (showOutputModelSelection || showOutputMaxDimension) ? (
