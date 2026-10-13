@@ -75,7 +75,8 @@ export async function remoteFilesystemNavigation(url: URL, resolveInput: (path: 
         const response = await readContentTree(childUrl);
         if (!response.ok) throw new Error('Could not load an authorized content tree');
         const payload = await response.json();
-        return Array.isArray(payload.folders) ? payload.folders : [];
+        return payload && typeof payload === 'object' && !Array.isArray(payload)
+          && 'folders' in payload && Array.isArray(payload.folders) ? payload.folders : [];
       }
       const branches = new Set<string>();
       for (const root of contentRoots) {
