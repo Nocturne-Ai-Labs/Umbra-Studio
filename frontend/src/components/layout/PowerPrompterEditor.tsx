@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
+import { loadLocalMonaco } from '@/lib/localMonaco';
 import { Settings, Copy, Save, CheckSquare, Square, Shuffle } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { PowerPrompterSettingsModal } from '@/components/modals/PowerPrompterSettingsModal';
@@ -19,6 +20,14 @@ interface PowerPrompterEditorProps {
 }
 
 export const PowerPrompterEditor = forwardRef<PowerPrompterEditorRef, PowerPrompterEditorProps>(({ value, onChange, onSave, path, enabledCSVs, overlayMode = false }, ref) => {
+  const [editorRuntimeReady, setEditorRuntimeReady] = useState(false);
+  const [editorRuntimeIssue, setEditorRuntimeIssue] = useState('');
+  useEffect(() => {
+    let live = true;
+    void loadLocalMonaco().then(() => { if (live) setEditorRuntimeReady(true); })
+      .catch(() => { if (live) setEditorRuntimeIssue('The editor could not load. Reopen Umbra Studio to try again.'); });
+    return () => { live = false; };
+  }, []);
   const editorBackgroundColor = overlayMode ? '#050508EC' : '#050508';
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -760,7 +769,7 @@ export const PowerPrompterEditor = forwardRef<PowerPrompterEditorRef, PowerPromp
 
       {/* Editor */}
       <div className="flex-1 min-h-0">
-        <Editor
+        {editorRuntimeReady ? <Editor
           height="100%"
           defaultLanguage="power-prompt"
           theme="power-prompter-dark"
@@ -783,7 +792,7 @@ export const PowerPrompterEditor = forwardRef<PowerPrompterEditorRef, PowerPromp
             suggestOnTriggerCharacters: true,
             wordBasedSuggestions: 'off',
           }}
-        />
+        /> : <div role={editorRuntimeIssue ? 'alert' : 'status'} className="p-4 text-sm text-zinc-400">{editorRuntimeIssue || 'Loading editor…'}</div>}
       </div>
 
       <PowerPrompterSettingsModal
