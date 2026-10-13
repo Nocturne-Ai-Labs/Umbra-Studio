@@ -8,7 +8,7 @@ const MAX_SAVED_JOBS = 32;
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 export const MAX_SETUP_LOG_LINES = 500;
 export type SetupLogStatus = { available: boolean; bytes: number; truncated: boolean; error: string };
-export type LoggedSetupJob = { id: string; kind: string; phase: 'running' | 'complete' | 'failed' | 'cancelled'; step: string; lines: string[]; startedAt: string; completedAt: string | null; error: string; log?: SetupLogStatus };
+export type LoggedSetupJob = { id: string; kind: string; phase: 'running' | 'complete' | 'failed' | 'cancelled'; step: string; lines: string[]; startedAt: string; completedAt: string | null; error: string; log?: SetupLogStatus; ownerPid?: number };
 export function validSetupJobId(id: string): boolean { return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id); }
 
 export function redactSetupOutput(value: string, secrets: string[] = []): string {
@@ -22,6 +22,13 @@ export function redactSetupOutput(value: string, secrets: string[] = []): string
 }
 
 type OpenJob = { job: LoggedSetupJob; secrets: string[]; fd?: number };
+function hasLiveWriter(job: LoggedSetupJob): boolean {
+  if (job.phase !== 'running' || !Number.isSafeInteger(job.ownerPid) || Number(job.ownerPid) <= 0) return false;
+  // PID liveness is conservative: reuse or denied probes may delay recovery,
+  // but must not cause us to overwrite a live writer's state or unlink its log.
+  try { process.kill(job.ownerPid!, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+}
 export class SetupJobLogStore {
   private readonly root: string;
   private readonly jobs = new Map<string, LoggedSetupJob>();
@@ -41,7 +48,7 @@ export class SetupJobLogStore {
           job.lines = job.lines.filter(line => typeof line === 'string').slice(-MAX_SETUP_LOG_LINES).map(line => redactSetupOutput(line).slice(0, 2048));
           job.error = redactSetupOutput(String(job.error || '')); job.step = redactSetupOutput(String(job.step || ''));
           job.log = { available: this.exists(id, '.log'), bytes: Number(job.log?.bytes || 0), truncated: job.log?.truncated === true, error: redactSetupOutput(String(job.log?.error || '')) };
-          if (job.phase === 'running') { job.phase = 'failed'; job.completedAt = new Date().toISOString(); job.error = 'Setup stopped before this job completed; the installer result is unknown. Review the saved log.'; job.step = 'Installation interrupted'; }
+          if (job.phase === 'running' && !hasLiveWriter(job)) { job.phase = 'failed'; delete job.ownerPid; job.completedAt = new Date().toISOString(); job.error = 'Setup stopped before this job completed; the installer result is unknown. Review the saved log.'; job.step = 'Installation interrupted'; }
           this.jobs.set(id, job);
           if (job.step === 'Installation interrupted') this.save(job);
         } catch { /* Ignore malformed or linked manifests, never read arbitrary paths. */ }
@@ -68,6 +75,7 @@ export class SetupJobLogStore {
   }
   private exists(id: string, suffix: '.log' | '.json') { try { return existsSync(this.path(id, suffix)); } catch { return false; } }
   start(job: LoggedSetupJob, secrets: string[] = []) {
+    job.ownerPid = process.pid;
     job.log = { available: false, bytes: 0, truncated: false, error: '' };
     const entry: OpenJob = { job, secrets: [...secrets, String(process.env.HF_TOKEN || '')].filter(Boolean) };
     this.jobs.set(job.id, job); this.open.set(job.id, entry);
@@ -91,7 +99,7 @@ export class SetupJobLogStore {
   private save(job: LoggedSetupJob) {
     const path = this.path(job.id, '.json'), temporary = `${path}.tmp-${randomUUID()}`;
     const redactValue = (value: unknown): unknown => typeof value === 'string' ? this.sanitize(job, value) : Array.isArray(value) ? value.map(redactValue) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [this.sanitize(job, key), redactValue(item)])) : value;
-    const snapshot = { id: job.id, kind: job.kind, phase: job.phase, startedAt: job.startedAt, completedAt: job.completedAt, log: job.log, step: this.sanitize(job, job.step).slice(0, 2048), error: this.sanitize(job, job.error).slice(0, 16384), lines: job.lines.slice(-MAX_SETUP_LOG_LINES).map(line => this.sanitize(job, line).slice(0, 2048)), progress: redactValue((job as LoggedSetupJob & { progress?: unknown }).progress) };
+    const snapshot = { id: job.id, kind: job.kind, phase: job.phase, ownerPid: job.ownerPid, startedAt: job.startedAt, completedAt: job.completedAt, log: job.log, step: this.sanitize(job, job.step).slice(0, 2048), error: this.sanitize(job, job.error).slice(0, 16384), lines: job.lines.slice(-MAX_SETUP_LOG_LINES).map(line => this.sanitize(job, line).slice(0, 2048)), progress: redactValue((job as LoggedSetupJob & { progress?: unknown }).progress) };
     try { writeFileSync(temporary, JSON.stringify(snapshot), { encoding: 'utf8', flag: 'wx' }); renameSync(temporary, path); }
     finally { if (existsSync(temporary)) unlinkSync(temporary); }
   }
@@ -101,17 +109,41 @@ export class SetupJobLogStore {
     try { if (entry.fd !== undefined) { appendFileSync(entry.fd, `\n[Setup job ${job.phase}] ${job.step.slice(0, 2048)}\n${job.error.slice(0, 16384)}\n`); fsyncSync(entry.fd); if (job.log) job.log.bytes = fstatSync(entry.fd).size; } }
     catch (error) { this.failed(job, error); }
     finally { if (entry.fd !== undefined) { try { closeSync(entry.fd); } catch (error) { this.failed(job, error); } } }
+    delete job.ownerPid;
     try { this.save(job); } catch (error) { this.failed(job, error); }
     this.open.delete(job.id);
   }
   list() { return [...this.jobs.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map(job => ({ ...job, lines: [...job.lines] })); }
   history() { return this.list().map(({ id, kind, phase, startedAt, completedAt, log }) => ({ id, kind, phase, startedAt, completedAt, log })); }
-  latest() { return this.list()[0] || null; }
+  // Foreign live jobs belong in history, not this service's active installer state.
+  latest() { return this.list().find(job => !hasLiveWriter(job) || this.open.has(job.id)) || null; }
+  private storedJob(id: string): LoggedSetupJob | null {
+    const path = this.path(id, '.json');
+    if (lstatSync(path).size > MAX_MANIFEST_BYTES) return null;
+    const job = JSON.parse(readFileSync(path, 'utf8')) as LoggedSetupJob;
+    return job.id === id ? job : null;
+  }
+  hasLiveJobs() {
+    if (this.open.size) return true;
+    try {
+      this.ensureRoot();
+      for (const name of readdirSync(this.root)) {
+        const id = name.replace(/\.json$/, '');
+        if (name !== `${id}.json` || !validSetupJobId(id)) continue;
+        try { const job = this.storedJob(id); if (job && hasLiveWriter(job)) return true; }
+        catch { /* Unavailable log metadata cannot establish a live installer. */ }
+      }
+    } catch { /* Logging failure is separate from installer ownership. */ }
+    return false;
+  }
   download(id: string): Buffer | null { if (!this.jobs.has(id)) return null; const path = this.path(id, '.log'); if (!existsSync(path)) return null; const stat = lstatSync(path); if (stat.size > MAX_JOB_BYTES + 32768) throw new Error('Saved setup log exceeds its resource limit.'); return readFileSync(path); }
   close() { for (const { job } of this.open.values()) this.finish(job); }
   private prune() {
     for (const job of this.list().slice(MAX_SAVED_JOBS)) {
       if (this.open.has(job.id)) continue;
+      // Re-read ownership: another instance may still be writing this old record.
+      try { const stored = this.storedJob(job.id); if (stored && hasLiveWriter(stored)) continue; }
+      catch { continue; }
       for (const suffix of ['.log', '.json'] as const) { const path = this.path(job.id, suffix); if (existsSync(path)) unlinkSync(path); }
       this.jobs.delete(job.id);
     }

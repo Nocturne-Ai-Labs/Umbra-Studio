@@ -176,7 +176,7 @@ export async function runScript(runtimeRoot: string, scriptPath: string, args: s
   const attachOutput = (stream: typeof child.stdout) => {
     let pending = '';
     const line = (value: string) => {
-      value = redact(value);
+      value = jobLogStores.get(job)?.sanitize(job, value) ?? redact(value);
       if (parseInstallerFailure(value)) lastFailureLine = value;
       if (value.startsWith('UMBRA_MODEL_PROGRESS|')) {
         jobLogStores.get(job)?.append(job, value);
@@ -352,8 +352,8 @@ async function main() {
     } finally { installationPreparing = false; }
   };
   let updateController: Awaited<ReturnType<typeof createUmbraUpdateController>> | null = null;
-  const setupBusy = () => installationPreparing || activeJob?.phase === 'running' || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit');
-  const hasRunningInstaller = () => installationPreparing || activeJob?.phase === 'running' || updateController?.isBusy() === true;
+  const setupBusy = () => installationPreparing || activeJob?.phase === 'running' || jobLogs.hasLiveJobs() || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit');
+  const hasRunningInstaller = () => installationPreparing || activeJob?.phase === 'running' || jobLogs.hasLiveJobs() || updateController?.isBusy() === true;
   const closeSetup = () => { updateController?.close(); server.stop(true); process.exit(0); };
   const snapshotNeedsReopen = () => {
     try { return !!sourceFingerprint && sourceFingerprint !== setupSourceFingerprint(sourceRoot); }
