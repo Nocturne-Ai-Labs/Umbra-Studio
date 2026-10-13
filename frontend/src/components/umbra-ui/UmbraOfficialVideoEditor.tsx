@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, Film, Image as ImageIcon, Loader2, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { normalizePowerPrompterGenerationControls } from '@/lib/powerPrompter';
+import { readOfficialVideoReferenceDimensions } from '@/lib/umbraOfficialVideoMediaHandoff';
 import { UmbraH3PromptForgeModal } from './UmbraH3PromptForgeModal';
 import { UmbraOfficialH3DirectorControls } from './UmbraOfficialH3DirectorControls';
 import { UmbraOfficialLtxDirectorControls } from './UmbraOfficialLtxDirectorControls';
@@ -125,10 +126,13 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
       const result = await response.json();
       if (abort.signal.aborted) return;
       if (!response.ok || !result.filename) throw new Error(String(result.error || 'Media upload failed.'));
+      const dimensions = await readOfficialVideoReferenceDimensions(result.sourcePath, kind, abort.signal);
+      if (abort.signal.aborted) return;
       const current = latest.current;
       const startSeconds = current.references.reduce((end, reference) => Math.max(end, reference.startSeconds + reference.durationSeconds), 0);
       const endpoint = current.mode === 'FLF2V';
       const reference = { id: crypto.randomUUID(), kind, filename: String(result.filename), prompt: '',
+        ...dimensions,
         startSeconds: h3 ? 0 : endpoint ? (current.references.length ? current.durationSeconds - 1 / current.frameRate : 0) : startSeconds,
         durationSeconds: h3 ? kind === 'image' ? 1 : Math.min(2, current.durationSeconds) : endpoint ? 1 / current.frameRate : Math.min(1, current.durationSeconds - startSeconds) };
       onChange({ ...current, references: [...current.references, reference] });

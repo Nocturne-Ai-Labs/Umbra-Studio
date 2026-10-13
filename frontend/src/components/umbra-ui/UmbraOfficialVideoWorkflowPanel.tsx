@@ -15,7 +15,7 @@ import { UmbraOfficialVideoEditor } from './UmbraOfficialVideoEditor';
 import { configureOfficialH3DirectorSettings, hasOfficialH3Continuity } from '../../../../shared/umbra-ui/officialH3Director';
 import { configureOfficialLtxDirectorSettings } from '../../../../shared/umbra-ui/officialLtxDirector';
 import { serializeOfficialVideoLoraStack, validateOfficialVideoLoraChoices } from '../../../../shared/umbra-ui/officialVideoLora';
-import { applyOfficialVideoMediaHandoff, officialVideoHandoffWorkflow } from '@/lib/umbraOfficialVideoMediaHandoff';
+import { applyOfficialVideoMediaHandoff, officialVideoHandoffWorkflow, readOfficialVideoReferenceDimensions } from '@/lib/umbraOfficialVideoMediaHandoff';
 import { clearPendingUmbraUiMediaHandoff, normalizeUmbraUiMediaHandoff, UMBRA_UI_MEDIA_HANDOFF_EVENT, UMBRA_UI_MEDIA_HANDOFF_KEY, type UmbraUiMediaHandoff } from '@/lib/umbraUiMediaHandoff';
 
 type OfficialWorkflowId = UmbraOfficialVideoQueueOptions['workflowId'];
@@ -142,7 +142,9 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
       const result = await response.json();
       if (abort.signal.aborted || latestHandoffRef.current?.createdAt !== pendingHandoff.createdAt) return;
       if (!response.ok || result.success !== true || typeof result.filename !== 'string') throw new Error(String(result.error || 'The image could not be transferred to video.'));
-      const draft = applyOfficialVideoMediaHandoff(editor.draft, selectedId, pendingHandoff, result.filename);
+      const dimensions = await readOfficialVideoReferenceDimensions(result.destPath, kind, abort.signal);
+      if (abort.signal.aborted || latestHandoffRef.current?.createdAt !== pendingHandoff.createdAt) return;
+      const draft = applyOfficialVideoMediaHandoff(editor.draft, selectedId, pendingHandoff, result.filename, dimensions);
       setEditors(current => ({ ...current, [selectedId]: { ...editor, draft } }));
       try { window.localStorage.setItem(draftStorageKey(selected), JSON.stringify(draft)); } catch { /* In-memory editing still works. */ }
       clearPendingUmbraUiMediaHandoff(pendingHandoff);

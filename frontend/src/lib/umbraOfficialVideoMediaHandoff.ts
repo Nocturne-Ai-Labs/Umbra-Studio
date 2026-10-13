@@ -3,6 +3,26 @@ import type { OfficialVideoWorkflowId } from '../../../shared/umbra-ui/officialV
 import { hasOfficialH3Continuity } from '../../../shared/umbra-ui/officialH3Director';
 import type { UmbraUiMediaHandoff } from './umbraUiMediaHandoff';
 
+export async function readOfficialVideoReferenceDimensions(
+  sourcePath: unknown,
+  kind: 'image' | 'video' | 'audio',
+  signal?: AbortSignal,
+  fetchMetadata: typeof fetch = fetch,
+): Promise<{ sourceWidth?: number; sourceHeight?: number }> {
+  if (kind === 'audio') return {};
+  if (typeof sourcePath !== 'string' || !sourcePath.trim()) throw new Error('The transferred media did not return a source path.');
+  const response = await fetchMetadata(`/api/fs/metadata?${new URLSearchParams({ path: sourcePath })}`, {
+    cache: 'no-store', signal,
+  });
+  if (!response.ok) throw new Error('Could not read the reference media dimensions. Retry the transfer.');
+  const metadata = await response.json();
+  const sourceWidth = Number(metadata?.width), sourceHeight = Number(metadata?.height);
+  if (!Number.isSafeInteger(sourceWidth) || sourceWidth <= 0 || !Number.isSafeInteger(sourceHeight) || sourceHeight <= 0) {
+    throw new Error('The reference media has no valid source dimensions. Choose another file.');
+  }
+  return { sourceWidth, sourceHeight };
+}
+
 export function officialVideoHandoffWorkflow(current: OfficialVideoWorkflowId, handoff: UmbraUiMediaHandoff): OfficialVideoWorkflowId {
   if (handoff.h3DirectorRole) return 'h3-26';
   return handoff.videoFrameRole === 'middle' || handoff.videoFrameRole === 'source_video' ? 'ltx23-50' : current;
@@ -13,6 +33,7 @@ export function applyOfficialVideoMediaHandoff(
   workflowId: OfficialVideoWorkflowId,
   handoff: UmbraUiMediaHandoff,
   filename: string,
+  dimensions: { sourceWidth?: number; sourceHeight?: number } = {},
 ): OfficialVideoEditorDraft {
   if (!filename || /[\x00-\x1f:]|^[\\/]|(^|[\\/])\.\.?([\\/]|$)/.test(filename)) {
     throw new Error('The transferred media did not return a valid ComfyUI input filename.');
@@ -29,6 +50,7 @@ export function applyOfficialVideoMediaHandoff(
     id: crypto.randomUUID(), kind: video ? 'video' : 'image', filename, prompt: '',
     startSeconds: 0, durationSeconds: h3 ? video ? Math.min(2, current.durationSeconds) : 1 : frame,
     ...(video ? { mediaMode: 'video' as const } : {}),
+    ...dimensions,
   };
   let mode: string;
   let references: OfficialVideoEditorDraft['references'];
