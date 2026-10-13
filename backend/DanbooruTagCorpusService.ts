@@ -326,7 +326,7 @@ export class DanbooruTagCorpusService {
     let current = this.getStatus();
     const mode: CorpusMode = options.allPosts === true ? 'all' : options.allPosts === false ? 'sample' : current.mode;
     const minimumScore = clampInteger(options.minimumScore, current.minimumScore, 0, 1_000_000);
-    if (current.indexedPosts > 0 && minimumScore !== current.minimumScore) {
+    if ((current.indexedPosts > 0 || current.scannedPosts > 0) && minimumScore !== current.minimumScore) {
       throw new Error('The score floor cannot change for an existing corpus. Rebuild the corpus to use a different floor.');
     }
     if (mode === 'all') {
