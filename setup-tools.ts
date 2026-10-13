@@ -1291,8 +1291,8 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
             return true;
         }
         log(`${c.yellow}WARN${c.reset}`, 'Umbra-Nodes cloned, but required .py files were not found.');
-    } catch {
-        log(`${c.red}ERROR${c.reset}`, 'Failed to install Umbra-Nodes from the public repository.');
+    } catch (error) {
+        log(`${c.red}ERROR${c.reset}`, `Failed to install Umbra-Nodes from the public repository. ${error instanceof Error ? error.message : String(error)}`);
     }
     return false;
 }
@@ -2017,23 +2017,20 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                     configureGitRepoForPortableUpdates(nodePath);
                     const fetch = runCmdCapture('git fetch', nodePath);
                     if (!fetch.ok) throw new Error(gitMaintenanceFailure(node.name, fetch.stderr));
-                    const status = execSync('git status -uno', { cwd: nodePath, encoding: 'utf-8' });
-                    if (status.includes('behind')) {
-                        log('->', `Updating ${node.name}...`);
-                        if (node.name === 'ComfyUI-DaSiWa-Nodes') {
-                            removeDaSiWaForgeComputePatchForUpdate(nodePath);
-                            try {
-                                execSync('git pull --ff-only', { cwd: nodePath, stdio: 'ignore' });
-                            } finally {
-                                ensureDaSiWaForgeComputePatch(nodePath);
-                            }
-                        } else {
+                    // Human-readable status is localized and can omit "behind" for
+                    // divergent or detached checkouts. Let Git verify the update.
+                    log('->', `Updating ${node.name}...`);
+                    if (node.name === 'ComfyUI-DaSiWa-Nodes') {
+                        removeDaSiWaForgeComputePatchForUpdate(nodePath);
+                        try {
                             if (!pullRepoWithRecovery(nodePath)) throw new Error(`Git update failed for ${node.name}; review the preserved diagnostic above.`);
+                        } finally {
+                            ensureDaSiWaForgeComputePatch(nodePath);
                         }
-                        log(`${c.green}OK${c.reset}`, `${node.name} updated`);
                     } else {
-                        log('OK', `${node.name} is up to date`);
+                        if (!pullRepoWithRecovery(nodePath)) throw new Error(`Git update failed for ${node.name}; review the preserved diagnostic above.`);
                     }
+                    log(`${c.green}OK${c.reset}`, `${node.name} updated`);
                 } catch (error) {
                     log('X', error instanceof Error ? error.message : String(error));
                     requiredFailure = true;
