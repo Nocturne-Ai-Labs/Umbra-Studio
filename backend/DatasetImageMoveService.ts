@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { booruSourceSidecar } from './BooruDownloadService';
+import { copyFileExclusive } from './FsTransferCopy';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif']);
 
@@ -72,6 +73,12 @@ export async function moveDatasetImages(fromPath: string, toPath: string, filena
   const removed: MoveEntry[] = [];
   try {
     for (const entry of entries) {
+      // Shared sidecars left with a sibling image must remain independently editable.
+      if (entry.keepSource) {
+        await copyFileExclusive(entry.source, entry.destination);
+        created.push(entry);
+        continue;
+      }
       try {
         await fs.link(entry.source, entry.destination);
       } catch (error) {
