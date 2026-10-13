@@ -4858,7 +4858,7 @@ export function ModelManagerWorkspace() {
                         <div className="min-w-0">
                           <div className="font-semibold">Local metadata inspection</div>
                           <div className="mt-0.5 truncate text-[11px] text-violet-100/75">
-                            {selectedLocalInspection?.capturedAt ? formatDateTime(Number(selectedLocalInspection.capturedAt)) : 'Saved report'}
+                            {selectedLocalInspection?.capturedAt ? formatDateTime(Number(selectedLocalInspection.capturedAt)) : 'Saved inspection'}
                             {selectedLocalInspectionSummary.rawKeyCount ? ` | ${selectedLocalInspectionSummary.rawKeyCount} raw keys` : ''}
                           </div>
                         </div>
@@ -4877,6 +4877,11 @@ export function ModelManagerWorkspace() {
                           ) : null}
                         </div>
                       </div>
+                      {!selectedLocalInspection?.reportPath ? (
+                        <div className="mt-2 text-[11px] text-violet-100/75">
+                          Inspection report unavailable. Re-inspect this model to regenerate it.
+                        </div>
+                      ) : null}
                       <div className="mt-2 grid grid-cols-[92px_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]">
                         <div className="text-violet-100/60">Software</div>
                         <div className="min-w-0 break-words">{String(selectedLocalInspectionSummary.training?.software || selectedLocalInspectionSummary.settings?.format || '-')}</div>

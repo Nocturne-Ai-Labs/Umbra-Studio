@@ -64,6 +64,7 @@ const CACHE_TTL_MS = 7_500;
 const MAX_CACHE_ITEMS = 256;
 const MODEL_SNAPSHOT_SUFFIX = '.umbra-model.json';
 const MODEL_THUMB_PREFIX = '.umbra-model-thumb';
+const MODEL_INSPECTION_SUFFIX = '.umbra-model-inspection.txt';
 const MODEL_ARTIFACT_DIR = '.umbra';
 const folderFirstCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -203,6 +204,25 @@ async function readModelSnapshotSummary(fullPath: string, clientPath: string, di
     const file = toRecord(parsed.file);
 
     const thumbnailPath = directory.thumbnails.get(baseName) || '';
+
+    // Local identity and report links follow the current file, including portable copies.
+    if (readSnapshotValue(parsed, ['source']) === 'local') {
+      model.name = baseName.replace(/\.(safetensors|gguf)$/i, '');
+      file.name = baseName;
+      parsed.model = model;
+      parsed.file = file;
+    }
+    const inspection = toRecord(parsed.localInspection);
+    if (Object.keys(inspection).length > 0) {
+      const reportName = `${baseName}${MODEL_INSPECTION_SUFFIX}`;
+      const reportStat = directory.artifacts.has(reportName)
+        ? await fs.lstat(join(artifactDir, reportName)).catch(() => null) : null;
+      parsed.localInspection = {
+        ...inspection,
+        reportPath: reportStat?.isFile() && !reportStat.isSymbolicLink()
+          ? normalizeClientPath(join(dirname(clientPath), MODEL_ARTIFACT_DIR, reportName)) : '',
+      };
+    }
 
     const summary = {
       source: readSnapshotValue(parsed, ['source']) || 'civitai',
