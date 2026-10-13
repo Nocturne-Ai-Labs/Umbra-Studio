@@ -9,7 +9,7 @@ type TransferPair = { source: string; target: string };
 
 // Images have already moved when this runs. Group shared sidecars before moving
 // any of them so every successful image receives its associated data.
-export async function transferGalleryMediaSidecars(pairs: TransferPair[], mode: 'move' | 'copy'): Promise<string[]> {
+export async function transferGalleryMediaSidecars(pairs: TransferPair[], mode: 'move' | 'copy', authorize?: (path: string) => Promise<boolean>): Promise<string[]> {
   const groups = new Map<string, { source: string; extension: string; targets: Map<string, string> }>();
   const warnings: string[] = [];
   for (const pair of pairs) {
@@ -31,6 +31,10 @@ export async function transferGalleryMediaSidecars(pairs: TransferPair[], mode: 
   }
   for (const group of groups.values()) {
     try {
+      if (authorize && (!(await authorize(group.source))
+        || !(await Promise.all([...group.targets.values()].map(target => authorize(target)))).every(Boolean))) {
+        throw new Error('Sidecar resolves outside allowed roots');
+      }
       const sourceStat = await fs.lstat(group.source).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return null;
         throw error;

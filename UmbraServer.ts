@@ -32774,7 +32774,7 @@ async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, un
       target: resolvePath(normalizeFsTransferResultPath(entry.newPath))?.fullPath,
     }))
     .filter((pair): pair is { source: string; target: string } => Boolean(pair.source && pair.target && pair.source !== pair.target));
-  return transferGalleryMediaSidecars(pairs, mode);
+  return transferGalleryMediaSidecars(pairs, mode, await getGalleryTransferPathAuthorizer());
 }
 
 function getGalleryTransferAllowedRoots(): string[] {
