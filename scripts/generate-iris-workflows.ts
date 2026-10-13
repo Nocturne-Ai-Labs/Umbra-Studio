@@ -28,6 +28,7 @@ for (const turbo of [false, true]) for (const img2img of [false, true]) {
   };
   graph['4'].inputs.model = ['1', 0]; graph['4'].inputs.clip = ['3', 0];
   graph['7'].inputs.image = ['6', 0];
+  graph['8']._meta = { title: `Save ${family} Image` };
   Object.assign(graph['8'].inputs, { images: ['7', 0], positive_prompt: ['4', 2], positive: ['4', 3],
     negative: ['5', 0], model_name: model, ...{ steps: defaults.steps, cfg: defaults.cfg, sampler_name: defaults.samplerName, scheduler: defaults.scheduler } });
   if (turbo) {

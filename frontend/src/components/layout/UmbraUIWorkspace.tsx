@@ -3620,11 +3620,11 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               />
             ) : null}
 
-            <UmbraTiledVaeControls
+            {!['iris3b', 'iris3bturbo'].includes(activeLoraFamilyKey) ? <UmbraTiledVaeControls
               value={tiledVae}
               onChange={setTiledVae}
               mode={activeMode === 'img2img' ? 'img2img' : 'txt2img'}
-            />
+            /> : null}
 
             {imageCapabilities.detailerStages.support === 'adjustable'
               || imageCapabilities.finalModelUpscale.support === 'adjustable' ? (

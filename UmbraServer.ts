@@ -11921,6 +11921,7 @@ async function runBackendPowerPrompterPipelineQueue(
         };
         activePipeline = extendedImg2VideoPipeline!;
       }
+      normalizeIrisSamplingControls(extractPPApiPromptGraph(activePipeline.document) || {}, generation);
       let queuedWorkflow: ReturnType<typeof compileUmbraUiPipelineWorkflow> & { officialProvenance?: Record<string, unknown>; officialExecutionTarget?: ReturnType<typeof getOfficialComfyExecutionTarget> };
       while (true) {
         await waitForVideoPolicyEligibility(task, requestId, generation, activePipeline.document, sourceWs);
@@ -21506,6 +21507,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     activeSetId: 1,
     generation,
   };
+  normalizeIrisSamplingControls(extractPPApiPromptGraph(loaded.document) || {}, generation);
   await assertPPApiWorkflowExecutionReady(executionTarget, generation);
   const compiled = compileUmbraUiPipelineWorkflow(loaded.document, state, {
     prompt: settings.prompt,
@@ -25512,6 +25514,8 @@ function validatePPApiWorkflowDocument(
     if (!hasUnifiedPowerPrompter) {
       if (!classTypes.has('UmbraPowerPrompterReader')) graphIssues.push('UmbraPowerPrompterReader');
       const imageSamplerTypes = [
+        'IrisKSampler',
+        'IrisSamplerCustomAdvanced',
         'UmbraKSampler',
         'UmbraKSamplerNormal',
         'UmbraKSamplerHiResFix',

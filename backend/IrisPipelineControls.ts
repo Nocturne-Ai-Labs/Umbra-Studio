@@ -1,11 +1,15 @@
-type Graph = Record<string, any>;
-type Controls = { checkpointName: string; width: number; height: number; batchSize: number; seed: number; steps: number; cfg: number; samplerName: string; scheduler: string; negativePrompt?: string; img2img?: { denoise: number } };
+type Node = { class_type?: string; inputs: Record<string, unknown>; _meta?: Record<string, unknown> };
+type Graph = Record<string, Node>;
+type Controls = { checkpointName: string; width: number; height: number; batchSize: number; seed: number; steps: number; cfg: number; samplerName: string; scheduler: string; negativePrompt?: string; img2img?: { denoise: number }; tiledVae?: { enabled: boolean } };
 
 export function isOfficialIrisTurboGraph(graph: Graph): boolean {
   return Object.values(graph).some(node => node?.class_type === 'IrisSamplerCustomAdvanced')
     && Object.values(graph).some(node => node?._meta?.umbra_model_family === 'Iris 3B Turbo');
 }
 export function normalizeIrisSamplingControls(graph: Graph, controls: Controls): void {
+  const nodes = Object.values(graph);
+  if (nodes.some(node => node?.class_type === 'IrisModelLoader')
+    && !nodes.some(node => /^VAE/.test(node?.class_type || '')) && controls.tiledVae) controls.tiledVae.enabled = false;
   if (!isOfficialIrisTurboGraph(graph)) return;
   // CFG and the four-step schedule are distilled into the official checkpoint.
   controls.steps = 4; controls.cfg = 1; controls.samplerName = 'euler'; controls.scheduler = 'iris_turbo'; controls.negativePrompt = '';
