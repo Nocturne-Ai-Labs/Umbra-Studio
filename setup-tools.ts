@@ -18,6 +18,7 @@ import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
 import { readManagedToolRequirements, requirementsForManagedNode } from './setup/ManagedToolRequirements';
+import { readOnboarding } from './setup/Onboarding';
 import { repairManagedNodeCheckout } from './setup/ManagedNodeRepair';
 import { repairManagedComfyCheckout } from './setup/ManagedComfyCore';
 import { inspectManagedDependencies, inspectManagedNode } from './updater/ManagedDependencyStatus';
@@ -1946,9 +1947,13 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
         .flatMap((feature) => feature.customNodes.map((node) => node.name)));
     const enabledNodes = onlyNames ? new Set(onlyNames) : getEnabledNodes();
     if (!onlyNames) {
+        const selectedProfiles = new Set(readOnboarding(ROOT_DIR).profiles);
         // Supported workflow dependencies are installed even before their model files arrive.
         for (const feature of managedRequirements) {
-            if (feature.workflowIds?.length && !feature.optional) {
+            const selectedFamily = feature.modelProfiles.some(profile => selectedProfiles.has(profile));
+            const installedIris = feature.id.startsWith('iris-3b') && feature.activationFile
+                && existsSync(join(comfyDir, 'models', feature.activationFile));
+            if ((feature.workflowIds?.length && !feature.optional) || selectedFamily || installedIris) {
                 for (const node of feature.customNodes) enabledNodes.add(node.name);
             }
         }
