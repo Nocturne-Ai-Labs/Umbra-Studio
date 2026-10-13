@@ -3216,7 +3216,7 @@ export function UmbraCanvasWorkspace({
                 {projectSummaries.map((summary) => (
                   <button key={summary.id} type="button" disabled={mediaImportBusy} onClick={() => void importMediaHandoff(summary.id)} className={cn('overflow-hidden rounded-md border bg-black/30 text-left hover:border-cyan-300/35 disabled:opacity-40', summary.id === project.id ? 'border-cyan-300/30' : 'border-white/10')}>
                     <div className="aspect-video bg-black/50">{summary.thumbnailUrl ? <img src={summary.thumbnailUrl} alt="" className="h-full w-full object-cover" /> : null}</div>
-                    <div className="p-2.5"><strong className="block truncate text-[9px] font-black uppercase text-zinc-200">{summary.name}</strong><small className="mt-1 block font-mono text-[8px] uppercase text-zinc-600">{summary.entityCount} layers / {summary.generationWidth} x {summary.generationHeight}</small></div>
+                    <div className="p-2.5"><strong data-i18n-skip className="block truncate text-[9px] font-black uppercase text-zinc-200">{summary.name}</strong><small className="mt-1 block font-mono text-[8px] uppercase text-zinc-600">{summary.entityCount} layers / {summary.generationWidth} x {summary.generationHeight}</small></div>
                   </button>
                 ))}
               </div>
@@ -3247,7 +3247,7 @@ export function UmbraCanvasWorkspace({
                         {summary.thumbnailUrl ? <img src={summary.thumbnailUrl} alt="" className="h-full w-full object-cover" /> : null}
                       </div>
                       <div className="p-2.5">
-                        <strong className="block truncate text-[10px] font-black uppercase text-zinc-200">{summary.name}</strong>
+                        <strong data-i18n-skip className="block truncate text-[10px] font-black uppercase text-zinc-200">{summary.name}</strong>
                         <small className="mt-1 block font-mono text-[8px] uppercase text-zinc-600">{summary.entityCount} layers · {summary.generationWidth} x {summary.generationHeight}</small>
                       </div>
                     </button>
