@@ -134,7 +134,7 @@ export function normalizeJobProgressEvent(
   const progressMaxRaw = Number(payload.progressMax ?? payload.maxStep ?? payload.max ?? payload.total);
   if (!Number.isFinite(progressRaw)) return null;
   let normalizedProgress = progressRaw;
-  if (Number.isFinite(progressMaxRaw) && progressMaxRaw > 0 && progressRaw > 1) {
+  if (Number.isFinite(progressMaxRaw) && progressMaxRaw > 0) {
     normalizedProgress = progressRaw / progressMaxRaw;
   } else if (progressRaw > 1 && progressRaw <= 100) {
     normalizedProgress = progressRaw / 100;
