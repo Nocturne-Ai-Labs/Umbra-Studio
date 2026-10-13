@@ -1950,7 +1950,8 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
         const selectedProfiles = new Set(readOnboarding(ROOT_DIR).profiles);
         // Supported workflow dependencies are installed even before their model files arrive.
         for (const feature of managedRequirements) {
-            const selectedFamily = feature.modelProfiles.some(profile => selectedProfiles.has(profile));
+            const selectedFamily = feature.id.startsWith('iris-3b')
+                && feature.modelProfiles.some(profile => selectedProfiles.has(profile));
             const installedIris = feature.id.startsWith('iris-3b') && feature.activationFile
                 && existsSync(join(comfyDir, 'models', feature.activationFile));
             if ((feature.workflowIds?.length && !feature.optional) || selectedFamily || installedIris) {
