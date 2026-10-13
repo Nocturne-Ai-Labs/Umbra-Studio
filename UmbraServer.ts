@@ -224,7 +224,7 @@ import { getComfyHttpBaseUrl, getComfyWebSocketUrl, resolveComfyEndpoint } from 
 import { getTrackedComfyProcessPids } from './backend/comfyProcessOwnership';
 import { officialComfySessionFromEnvironment, officialComfySessionMutationIssue } from './backend/OfficialComfySession';
 import { inspectActiveManagedWorkflowRuntimePackages } from './updater/ManagedDependencyStatus';
-import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges } from './backend/hostOnlySettings';
+import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges, preserveRemoteComfyUrl } from './backend/hostOnlySettings';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 import {
   generateDataForgeWildcard,
@@ -38315,12 +38315,14 @@ const server = Bun.serve<UmbraSocketData>({
           if (!nextSettings || typeof nextSettings !== 'object' || Array.isArray(nextSettings)) {
             return json({ error: 'Invalid settings payload' }, 400);
           }
-          const mergedNextSettings = normalizeGalleryAppSettingsForStorage({
+          let mergedNextSettings = normalizeGalleryAppSettingsForStorage({
             ...nextSettings,
           } as Record<string, unknown>);
 
           const hostRequest = isHostRequest(req, url, server);
           const currentSettings = settingsManager.getAppSettings();
+          mergedNextSettings = preserveRemoteComfyUrl(mergedNextSettings, currentSettings, hostRequest,
+            process.env.UMBRA_COMFY_PORT?.trim() ? getComfyHttpBaseUrl(getComfyProxyTarget()) : undefined);
           const autoStartError = validateComfyAutoStartSetting(mergedNextSettings, currentSettings, hostRequest);
           if (autoStartError) return json({ error: autoStartError }, hostRequest ? 400 : 403);
           const comfySettingsError = validateHostOnlyServiceSettings(mergedNextSettings, currentSettings, hostRequest);
@@ -38366,9 +38368,11 @@ const server = Bun.serve<UmbraSocketData>({
             const currentBundle = await loadUserSettingsBundleSnapshot();
             const nextBundle = normalizeUmbraUserSettingsBundle(rawBundle, currentBundle);
 
-            const portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(nextBundle.appSettings);
+            let portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(nextBundle.appSettings);
             const hostRequest = isHostRequest(req, url, server);
             const currentSettings = settingsManager.getAppSettings();
+            portableBundleAppSettings = preserveRemoteComfyUrl(portableBundleAppSettings, currentSettings, hostRequest,
+              process.env.UMBRA_COMFY_PORT?.trim() ? getComfyHttpBaseUrl(getComfyProxyTarget()) : undefined);
             const autoStartError = validateComfyAutoStartSetting(portableBundleAppSettings, currentSettings, hostRequest);
             if (autoStartError) return json({ error: autoStartError }, hostRequest ? 400 : 403);
             const comfySettingsError = validateHostOnlyServiceSettings(portableBundleAppSettings, currentSettings, hostRequest);

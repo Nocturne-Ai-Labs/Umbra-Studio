@@ -1,5 +1,18 @@
 import { isDeepStrictEqual } from 'node:util';
 
+// The client receives an environment-selected Comfy endpoint. Echoing that
+// read-only value must retain the host's stored setting, not change it.
+export function preserveRemoteComfyUrl(
+  patch: Record<string, unknown>, current: Record<string, unknown>,
+  hostRequest: boolean, environmentUrl?: string,
+): Record<string, unknown> {
+  if (hostRequest || !environmentUrl || patch['comfyui.url'] !== environmentUrl) return patch;
+  const next = { ...patch };
+  if (Object.prototype.hasOwnProperty.call(current, 'comfyui.url')) next['comfyui.url'] = current['comfyui.url'];
+  else delete next['comfyui.url'];
+  return next;
+}
+
 export const HOST_ONLY_SERVICE_SETTING_DEFAULTS: Record<string, unknown> = {
   'comfyui.url': 'http://127.0.0.1:8188',
   'comfyui.path': '',
