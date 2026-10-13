@@ -21,7 +21,8 @@ export async function moveDatasetImages(fromPath: string, toPath: string, filena
   if (!Array.isArray(filenames) || !filenames.length || filenames.some(name => typeof name !== 'string')) {
     throw new Error('Select images to move.');
   }
-  if (resolve(fromPath).toLowerCase() === resolve(toPath).toLowerCase()) {
+  const comparablePath = (path: string) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
+  if (comparablePath(fromPath) === comparablePath(toPath)) {
     throw new Error('Select a different destination concept.');
   }
   const names = filenames as string[];
