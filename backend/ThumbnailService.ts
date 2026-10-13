@@ -81,7 +81,7 @@ function resolveDefaultThumbnailCacheDir(): string {
 
 export class ThumbnailService {
   private cacheDir: string;
-  private sharp: typeof import('sharp') | null = null;
+  private sharp: typeof import('sharp').default | null = null;
   private sharpLoadAttempted = false;
   private isPrecaching = false;
   private precacheProgress = { total: 0, completed: 0, skipped: 0 };
@@ -105,7 +105,7 @@ export class ThumbnailService {
   /**
    * Lazily load sharp to avoid startup crashes if not installed
    */
-  private async getSharp(): Promise<typeof import('sharp') | null> {
+  private async getSharp(): Promise<typeof import('sharp').default | null> {
     if (this.sharp) return this.sharp;
     if (this.sharpLoadAttempted) return null;
 

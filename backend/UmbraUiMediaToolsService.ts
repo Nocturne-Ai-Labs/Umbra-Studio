@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import { basename, dirname, extname } from 'path';
-import sharp from 'sharp';
+import sharp, { type OverlayOptions } from 'sharp';
 import { resolveUmbraExtendedVideoFfmpeg } from './UmbraUiExtendedVideoService';
 
 const VIDEO_EXTENSIONS = new Set(['.avi', '.m4v', '.mkv', '.mov', '.mp4', '.webm', '.wmv']);
@@ -329,7 +329,7 @@ export async function applyUmbraUiImageCensor(options: {
     await writeOutput(sharp(prepared));
     return false;
   }
-  const compositeLayers: sharp.OverlayOptions[] = [];
+  const compositeLayers: OverlayOptions[] = [];
   for (const region of regions) {
     const left = Math.max(0, Math.min(outputWidth - 1, Math.round(outputWidth * region.x)));
     const top = Math.max(0, Math.min(outputHeight - 1, Math.round(outputHeight * region.y)));
