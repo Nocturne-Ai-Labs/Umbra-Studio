@@ -150,13 +150,22 @@ function fetchPinnedImage(url: URL, address: string, init: RequestInit, maxBytes
   });
 }
 
+export class DatasetImportImageValidationError extends Error {}
+
 export async function detectDatasetImportImage(bytes: Buffer): Promise<{ contentType: string; extension: string }> {
   if (!bytes.length || bytes.length > MAX_DATASET_IMPORT_BYTES) {
     throw new Error(bytes.length ? 'Dropped image exceeds the 256 MB import limit' : 'Dropped image was empty');
   }
   const image = sharp(bytes, { failOn: 'warning', animated: true, limitInputPixels: 100_000_000 });
-  const metadata = await image.metadata();
-  if (!metadata.format || !metadata.width || !metadata.height) throw new Error('Dropped URL did not return an image');
+  const metadata = await image.metadata().catch((error: unknown) => {
+    // Sharp reports this exact error only when its buffer loader cannot identify an image.
+    // Keep decoder/resource failures as internal errors rather than guessing from their messages.
+    if (error instanceof Error && error.message === 'Input buffer contains unsupported image format') {
+      throw new DatasetImportImageValidationError('Uploaded file is not a supported image. Use JPEG, PNG, WebP, GIF, BMP, or AVIF.');
+    }
+    throw error;
+  });
+  if (!metadata.format || !metadata.width || !metadata.height) throw new DatasetImportImageValidationError('Dropped URL did not return an image');
   const formats: Record<string, { contentType: string; extension: string }> = {
     jpeg: { contentType: 'image/jpeg', extension: '.jpg' },
     png: { contentType: 'image/png', extension: '.png' },
@@ -166,9 +175,9 @@ export async function detectDatasetImportImage(bytes: Buffer): Promise<{ content
     heif: { contentType: 'image/avif', extension: '.avif' },
   };
   const detected = formats[metadata.format];
-  if (!detected) throw new Error('Only JPEG, PNG, WebP, GIF, BMP, and AVIF images can be imported');
+  if (!detected) throw new DatasetImportImageValidationError('Only JPEG, PNG, WebP, GIF, BMP, and AVIF images can be imported');
   if (metadata.format === 'heif' && metadata.compression !== 'av1') {
-    throw new Error('Only AVIF images are supported in this image format');
+    throw new DatasetImportImageValidationError('Only AVIF images are supported in this image format');
   }
   await image.stats();
   return detected;

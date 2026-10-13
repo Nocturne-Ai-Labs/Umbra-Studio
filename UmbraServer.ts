@@ -251,7 +251,7 @@ import { ModelManagerStateDb } from './backend/ModelManagerStateDb';
 import { isProtectedModelManagerRoot, planModelManagerTransferTarget } from './backend/ModelManagerTransferPlan';
 import { ModelManagerFsPathLimitError, readModelManagerFsRequest } from './backend/ModelManagerFsRequest';
 import { createDatasetArchive } from './backend/DatasetArchiveService';
-import { decodeDatasetImportDataUrl, detectDatasetImportImage, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
+import { DatasetImportImageValidationError, decodeDatasetImportDataUrl, detectDatasetImportImage, fetchDatasetImportImage } from './backend/DatasetImportUrlService';
 import { moveDatasetImages } from './backend/DatasetImageMoveService';
 import { saveDatasetImportedImage } from './backend/DatasetImageStore';
 import { listDatasetCatalog, mapBounded } from './backend/DatasetCatalog';
@@ -37017,7 +37017,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!filename) return json({ error: 'Concept not found' }, 404);
           return json({ success: true, filename });
         } catch (error: any) {
-          return json({ error: error.message }, error instanceof DatasetUploadTooLargeError ? 413 : 500);
+          return json({ error: error.message }, error instanceof DatasetUploadTooLargeError ? 413 : error instanceof DatasetImportImageValidationError ? 400 : 500);
         }
       }
 
