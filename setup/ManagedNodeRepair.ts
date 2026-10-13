@@ -33,7 +33,9 @@ export function repairManagedNodeCheckout(
   };
   const cloned = !existsSync(nodePath);
   if (cloned) {
-    checked(['clone', '--no-checkout', '--', node.repo, node.name], nodesRoot);
+    // Populate the initial checkout so a later fetch failure leaves a clean,
+    // retryable tree rather than tracked deletions that resemble user edits.
+    checked(['clone', '--', node.repo, node.name], nodesRoot);
   }
   const topLevel = git(['rev-parse', '--show-toplevel'], nodePath);
   if (topLevel.status !== 0) throw new Error(gitMaintenanceFailure(node.name, topLevel.stderr || ''));
