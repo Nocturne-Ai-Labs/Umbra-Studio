@@ -1858,6 +1858,7 @@ const COMFY_NODES = [
     { name: 'Umbra-Nodes', repo: 'https://github.com/Nocturne-Ai-Labs/Umbra-Nodes.git', required: true },
     { name: 'ComfyUI-Manager', repo: 'https://github.com/ltdrdata/ComfyUI-Manager.git', required: true },
     { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', required: true },
+    { name: 'ComfyUI-Iris', repo: 'https://github.com/envy-ai/ComfyUI-Iris.git', defaultEnabled: false },
     { name: 'comfyui-tooling-nodes', repo: 'https://github.com/Acly/comfyui-tooling-nodes.git', required: true },
     { name: 'comfyui-inpaint-nodes', repo: 'https://github.com/Acly/comfyui-inpaint-nodes.git', required: true },
     { name: 'comfyui_controlnet_aux', repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux.git', required: true },
@@ -1953,6 +1954,13 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
         }
     }
     const undeclaredInstallers = [...supportedRequiredNodes].filter((name) => !COMFY_NODES.some((node) => node.name === name));
+    if (enabledNodes.has('ComfyUI-Iris')) {
+        const conflicting = ['Iris-3B-Comfy-Nodes', 'Iris-3B-Comfy-Nodes-4steps'].filter(name => existsSync(join(nodesDir, name)));
+        if (conflicting.length) {
+            log('X', `Iris node classes conflict with ${conflicting.join(', ')}. Move the conflicting packs out of custom_nodes and restart ComfyUI before installing ComfyUI-Iris. Existing folders were preserved.`);
+            return false;
+        }
+    }
     if (undeclaredInstallers.length) {
         log('X', `Managed dependency installer is unavailable for: ${undeclaredInstallers.join(', ')}`);
         return false;

@@ -34,6 +34,7 @@ import { applyAnima38TextEncoderDevice, applyAnima38TextEncoderRetention, assert
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
 import { applyAnima38LoraStack, resolveAnima38LoraNames } from './backend/Anima38LoraStack';
 import { applyWulverLoraStack, resolveWulverLoraNames } from './backend/WulverLoraStack';
+import { applyIrisPipelineControls, normalizeIrisSamplingControls } from './backend/IrisPipelineControls';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from './shared/umbra-ui/animaTextEncoderDevice';
 import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resolveUmbraUiVideoLoraNames } from './backend/UmbraUiVideoLoraStack';
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
@@ -9207,6 +9208,7 @@ function compileUmbraUiPipelineWorkflow(
     return { promptGraph: graph, workflowPayload: extractPPApiWorkflowMetadataPayload(graph, graph) };
   }
   const activeImagePipeline = options.selectedPipeline;
+  normalizeIrisSamplingControls(promptGraph, generation);
   const activeImageCapabilities = activeImagePipeline?.capabilities;
   const optionalStagePolicy = resolveUmbraUiOptionalStagePolicy(
     activeImageCapabilities,
@@ -9632,6 +9634,8 @@ function compileUmbraUiPipelineWorkflow(
   if (pinnedOutputFolder && !pinnedOutputFolderApplied) {
     throw new Error('The selected TXT2IMG pipeline does not support pinned output folders.');
   }
+
+  applyIrisPipelineControls(promptGraph, generation);
 
   if (workflowDescriptor.mediaType === 'image') {
     bypassDisabledUmbraUiOutputUpscale(promptGraph);

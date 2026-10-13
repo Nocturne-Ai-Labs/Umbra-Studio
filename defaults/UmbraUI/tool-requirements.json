@@ -2,6 +2,61 @@
   "schemaVersion": 1,
   "features": [
     {
+      "id": "iris-3b",
+      "label": "Iris 3B",
+      "optional": true,
+      "activationFile": "diffusion_models/iris-3b/model.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": [
+        "iris-3b"
+      ],
+      "requiredBuiltinClasses": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Iris",
+          "repository": "https://github.com/envy-ai/ComfyUI-Iris",
+          "minimumCommit": "4f911f9b232f7a7d973b516548daebeb7ba3b32a",
+          "license": "Apache-2.0",
+          "requiredClasses": [
+            "IrisModelLoader",
+            "IrisCLIPLoader",
+            "IrisKSampler"
+          ]
+        }
+      ],
+      "notes": "Native pixel-space MODEL/CLIP integration. Requires Comfy Kitchen 0.2.35+ supplied by the reviewed ComfyUI floor. Turbo is the official checkpoint, never a Turbo LoRA. Node import/execution does not download models."
+    },
+    {
+      "id": "iris-3b-turbo",
+      "label": "Iris 3B Turbo",
+      "optional": true,
+      "activationFile": "diffusion_models/iris-3b/turbo/model.safetensors",
+      "minimumComfyVersion": "0.37.0",
+      "modelProfiles": [
+        "iris-3b-turbo"
+      ],
+      "requiredBuiltinClasses": [
+        "BasicGuider",
+        "RandomNoise",
+        "KSamplerSelect",
+        "ManualSigmas"
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Iris",
+          "repository": "https://github.com/envy-ai/ComfyUI-Iris",
+          "minimumCommit": "4f911f9b232f7a7d973b516548daebeb7ba3b32a",
+          "license": "Apache-2.0",
+          "requiredClasses": [
+            "IrisModelLoader",
+            "IrisCLIPLoader",
+            "IrisSamplerCustomAdvanced"
+          ]
+        }
+      ],
+      "notes": "Native pixel-space MODEL/CLIP integration. Requires Comfy Kitchen 0.2.35+ supplied by the reviewed ComfyUI floor. Turbo is the official checkpoint, never a Turbo LoRA. Node import/execution does not download models."
+    },
+    {
       "id": "anima-38-lora",
       "label": "Anima 3.8B LoRA support",
       "optional": true,

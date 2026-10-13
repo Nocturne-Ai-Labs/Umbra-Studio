@@ -151,6 +151,7 @@ function normalizeModelKey(value: string): string {
 
 export function inferModelFamily(modelName: string): string {
   const value = normalizeModelKey(modelName);
+  if (value.includes('iris-3b') || value.includes('iris3b')) return value.includes('turbo') ? 'Iris 3B Turbo' : 'Iris 3B';
   if (value.includes('wulver')) return /non[-_ ]?turbo/i.test(value) ? 'Wulver Non-Turbo' : 'Wulver Turbo';
   if (value.includes('anima-3.8b') || value.includes('anima_3.8b') || value.includes('anima3.8b')) return 'Anima 3.8B';
   if (value.includes('anima-2.9b') || value.includes('anima_2.9b') || value.includes('anima2.9b')) return 'Anima 2.9B';

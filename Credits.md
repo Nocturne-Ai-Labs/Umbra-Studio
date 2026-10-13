@@ -1,5 +1,12 @@
 # Credits
 
+## Iris 3B And Iris 3B Turbo
+
+- Models and original implementation: [Sperid Labs Iris 3B](https://github.com/speridlabs/iris-3b), Apache-2.0.
+- Native ComfyUI integration: [envy-ai ComfyUI-Iris](https://github.com/envy-ai/ComfyUI-Iris), Apache-2.0.
+- Text conditioning: Qwen3-VL-4B; downloaded separately through Setup. Models and custom nodes are managed installations, not bundled model binaries.
+- Turbo uses the official distilled checkpoint and released schedule; no community Turbo LoRA is included or required.
+
 Umbra Studio is original application software owned and published by Nocturne AI Labs,
 developed by Minokai, and it
 interoperates with a number of important open-source projects and upstream tool

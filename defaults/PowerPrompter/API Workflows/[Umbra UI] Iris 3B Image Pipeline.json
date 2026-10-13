@@ -1,0 +1,218 @@
+{
+  "1": {
+    "class_type": "IrisModelLoader",
+    "inputs": {
+      "model_name": "iris-3b/model.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Iris 3B",
+      "umbra_role": "model_loader",
+      "umbra_model_family": "Iris 3B",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "txt2img",
+          "model_family": "Iris 3B",
+          "model_sources": [
+            "diffusion_model"
+          ],
+          "priority": 100,
+          "defaults": {
+            "modelName": "iris-3b/model.safetensors",
+            "modelNamesBySource": {
+              "diffusion_model": "iris-3b/model.safetensors"
+            },
+            "steps": 100,
+            "cfg": 3,
+            "samplerName": "dpmpp_2m",
+            "scheduler": "iris",
+            "width": 1024,
+            "height": 1024,
+            "denoise": 0.65
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "masterpiece, best quality, detailed image",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "IrisCLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_4b_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "Iris Qwen3-VL Text Encoder",
+      "umbra_resources": [
+        {
+          "id": "iris.text_encoder",
+          "label": "Iris Text Encoder",
+          "kind": "text_encoder",
+          "input": "clip_name",
+          "required": true,
+          "order": 10
+        }
+      ]
+    }
+  },
+  "4": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "2",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 1,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "4",
+        1
+      ],
+      "text": [
+        "2",
+        8
+      ]
+    },
+    "_meta": {
+      "title": "Negative prompt",
+      "umbra_role": "negative_prompt"
+    }
+  },
+  "6": {
+    "class_type": "IrisKSampler",
+    "inputs": {
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "4",
+        3
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 100,
+      "cfg": 3,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "iris",
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "batch_size": [
+        "2",
+        6
+      ],
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "Iris Pixel Sampler",
+      "umbra_role": "iris_sampler"
+    }
+  },
+  "7": {
+    "class_type": "UmbraImageUpscale",
+    "inputs": {
+      "image": [
+        "6",
+        0
+      ],
+      "upscale_model": "RealESRGAN_x4plus.safetensors",
+      "max_dimension": 3840,
+      "enabled": false
+    },
+    "_meta": {
+      "title": "Optional Output Upscale"
+    }
+  },
+  "8": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "7",
+        0
+      ],
+      "filename_prefix": "UmbraUI_txt2img_%date%",
+      "positive_prompt": [
+        "4",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "4",
+        3
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "output_folder": "Umbra UI/txt2img",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": "iris-3b/model.safetensors",
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 100,
+      "cfg": 3,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "iris"
+    },
+    "_meta": {
+      "title": "Save Krea 2 Image"
+    }
+  }
+}

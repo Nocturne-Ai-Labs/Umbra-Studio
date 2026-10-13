@@ -282,6 +282,8 @@ export function normalizeUmbraUiModelFamilyKey(value: unknown): string {
     chroma: 'chroma1',
     chroma1hd: 'chroma1',
     ernie: 'ernieimage',
+    iris: 'iris3b',
+    iristurbo: 'iris3bturbo',
     flux: 'flux1',
     flux1dev: 'flux1',
     flux1schnell: 'flux1',

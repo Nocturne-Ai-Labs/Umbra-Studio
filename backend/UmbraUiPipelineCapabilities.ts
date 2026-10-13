@@ -63,6 +63,7 @@ const SAMPLER_CONTROL_CLASSES = new Set([
   'KSampler',
   'KSamplerAdvanced',
   'KSamplerSelect',
+  'IrisKSampler',
 ]);
 
 const SCHEDULER_CONTROL_CLASSES = new Set([
@@ -73,6 +74,7 @@ const SCHEDULER_CONTROL_CLASSES = new Set([
   'KSampler',
   'KSamplerAdvanced',
   'BasicScheduler',
+  'IrisKSampler',
 ]);
 
 const CLASSIC_DETAILER_INCOMPATIBLE_CLASSES = new Set([
@@ -284,10 +286,11 @@ export function listUmbraUiImg2ImgPipelineGraphIssues(
   const resizeNodes = nodes.filter((node) => hasNodeRole(node, 'img2img_resize'));
   const encodeNodes = nodes.filter((node) => hasNodeRole(node, 'img2img_encode'));
   const samplers = nodes.filter((node) => hasNodeRole(node, 'img2img_sampler'));
+  const pixelSampler = samplers[0]?.classType === 'IrisKSampler' || samplers[0]?.classType === 'IrisSamplerCustomAdvanced';
 
   if (sources.length !== 1) issues.push('exactly one img2img_source role');
   if (resizeNodes.length !== 1) issues.push('exactly one img2img_resize role');
-  if (encodeNodes.length !== 1) issues.push('exactly one img2img_encode role');
+  if (encodeNodes.length !== (pixelSampler ? 0 : 1)) issues.push(pixelSampler ? 'pixel IMG2IMG must not use a VAE encoder' : 'exactly one img2img_encode role');
   if (samplers.length !== 1) issues.push('exactly one img2img_sampler role');
 
   const source = sources[0];
@@ -306,6 +309,7 @@ export function listUmbraUiImg2ImgPipelineGraphIssues(
     if (!connectedNodeId(encode, 'vae')) issues.push('img2img VAE binding');
   }
   if (sampler) {
+    if (pixelSampler && resize && connectedNodeId(sampler, 'image') !== resize.id) issues.push('img2img pixels-to-sampler binding');
     if (encode && connectedNodeId(sampler, 'latent_image') !== encode.id) issues.push('img2img latent-to-sampler binding');
     const samplerHasDenoise = hasInput(sampler, 'denoise');
     const scheduler = nodes.find((node) => hasNodeRole(node, 'img2img_scheduler'));
@@ -681,7 +685,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
 
   const stepNodes = nodes.filter((node) => (
     ['UmbraPowerPrompter', 'UmbraKSamplerHiResFix', 'UmbraKSampler', 'UmbraKSamplerNormal',
-      'KSampler', 'KSamplerAdvanced', 'BasicScheduler', 'Ideogram4Scheduler', 'Flux2Scheduler'].includes(node.classType)
+      'KSampler', 'KSamplerAdvanced', 'BasicScheduler', 'Ideogram4Scheduler', 'Flux2Scheduler', 'IrisKSampler'].includes(node.classType)
     && hasInput(node, 'steps')
   ) || node.role === 'steps');
   const steps = stepNodes.length > 0
@@ -696,7 +700,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
     (
       ['UmbraPowerPrompter', 'UmbraKSamplerHiResFix', 'UmbraKSampler', 'UmbraKSamplerNormal',
         'KSampler', 'KSamplerAdvanced', 'SamplerCustom', 'CFGGuider', 'DualCFGGuider',
-        'DualModelGuider'].includes(node.classType)
+        'DualModelGuider', 'IrisKSampler'].includes(node.classType)
       || node.role === 'cfg'
     )
     && (hasInput(node, 'cfg') || hasInput(node, 'cfg_conds'))
@@ -798,6 +802,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
   const hasHiDreamPixelLatent = nodes.some((node) => node.classType === 'EmptyHiDreamO1LatentImage');
   const hasSixteenPixelLatent = nodes.some((node) => (
     node.classType === 'EmptyFlux2LatentImage' || node.classType === 'EmptySD3LatentImage'
+    || node.classType === 'IrisKSampler' || node.classType === 'IrisSamplerCustomAdvanced'
     || node.classType === 'TextEncodeQwenImage21'
   ));
   const resolutionStep = hasHiDreamPixelLatent ? 32 : hasSixteenPixelLatent ? 16 : 8;
@@ -934,11 +939,15 @@ export function deriveUmbraUiTxt2ImgCapabilities(
     negativePrompt,
     loras,
     seed,
-    steps,
-    guidance,
+    steps: normalizeUmbraUiModelFamilyKey(descriptor.modelFamilyKey || descriptor.modelFamily) === 'iris3bturbo'
+      ? control('fixed', 'The official Turbo checkpoint uses its released four-step schedule.', nodes.filter(node => node.classType === 'ManualSigmas'), 4) : steps,
+    guidance: normalizeUmbraUiModelFamilyKey(descriptor.modelFamilyKey || descriptor.modelFamily) === 'iris3bturbo'
+      ? { ...control('fixed', 'Guidance is distilled into the official Turbo checkpoint.', nodes.filter(node => node.classType === 'BasicGuider'), 1), mode: 'none', label: 'Guidance unavailable' } : guidance,
     clipSkip,
-    sampler,
-    scheduler,
+    sampler: normalizeUmbraUiModelFamilyKey(descriptor.modelFamilyKey || descriptor.modelFamily) === 'iris3bturbo'
+      ? control('fixed', 'Official Turbo uses deterministic flow Euler.', nodes.filter(node => node.classType === 'KSamplerSelect'), 'euler') : sampler,
+    scheduler: normalizeUmbraUiModelFamilyKey(descriptor.modelFamilyKey || descriptor.modelFamily) === 'iris3bturbo'
+      ? control('fixed', 'Released Turbo sigma schedule.', nodes.filter(node => node.classType === 'ManualSigmas'), 'iris_turbo') : scheduler,
     denoise,
     resolution,
     hiresFix,
