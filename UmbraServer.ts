@@ -70,6 +70,7 @@ import { probeVideoMetadata } from './backend/VideoMetadataProbe';
 import { galleryMediaCacheControl } from './gallery/GalleryMediaCache';
 import { galleryMediaSecurityHeaders } from './shared/galleryMediaResponse';
 import { isGalleryMediaReadPath } from './shared/galleryMediaPath';
+import { transferGalleryMediaSidecars } from './backend/GalleryTransferSidecars';
 import { createVariantEtag, matchesIfNoneMatch, permitsConditionalRange } from './shared/httpCache';
 import { compactQueueSnapshot } from './shared/power-prompter/queueSnapshotTransport';
 import { collectQueueSnapshotPromptRows } from './shared/power-prompter/queueSnapshotRows';
@@ -32765,51 +32766,15 @@ async function syncGalleryDbAfterRename(results: Array<Record<string, unknown>>)
   }
 }
 
-const GALLERY_MEDIA_SIDECAR_EXTENSIONS = ['.txt', '.json', '.caption', '.yaml', '.yml'];
-
 async function syncGallerySidecarsAfterTransfer(results: Array<Record<string, unknown>>, mode: 'move' | 'copy') {
-  const warnings: string[] = [];
   const pairs = (results || [])
     .filter((entry) => entry?.success === true)
     .map((entry) => ({
-      sourcePath: normalizeFsTransferResultPath(entry.path),
-      targetPath: normalizeFsTransferResultPath(entry.newPath),
+      source: resolvePath(normalizeFsTransferResultPath(entry.path))?.fullPath,
+      target: resolvePath(normalizeFsTransferResultPath(entry.newPath))?.fullPath,
     }))
-    .filter((pair) => pair.sourcePath && pair.targetPath && pair.sourcePath !== pair.targetPath);
-  for (const pair of pairs) {
-    try {
-      const sourceResolved = resolvePath(pair.sourcePath);
-      const targetResolved = resolvePath(pair.targetPath);
-      if (!sourceResolved || !targetResolved) continue;
-      const targetStat = await fs.stat(targetResolved.fullPath).catch(() => null);
-      if (!targetStat || !targetStat.isFile()) continue;
-
-      const sourceDir = dirname(sourceResolved.fullPath);
-      const targetDir = dirname(targetResolved.fullPath);
-      const sourceName = basename(sourceResolved.fullPath);
-      const targetName = basename(targetResolved.fullPath);
-      const sourceExt = extname(sourceName);
-      const sourceBase = sourceExt ? sourceName.slice(0, -sourceExt.length) : sourceName;
-      const targetExt = extname(targetName);
-      const targetBase = targetExt ? targetName.slice(0, -targetExt.length) : targetName;
-      for (const sidecarExt of GALLERY_MEDIA_SIDECAR_EXTENSIONS) {
-        for (const variant of [
-          { source: join(sourceDir, `${sourceBase}${sidecarExt}`), target: join(targetDir, `${targetBase}${sidecarExt}`) },
-          { source: join(sourceDir, `${sourceName}${sidecarExt}`), target: join(targetDir, `${targetName}${sidecarExt}`) },
-        ]) {
-          const sidecarStat = await fs.stat(variant.source).catch(() => null);
-          if (!sidecarStat || !sidecarStat.isFile()) continue;
-          await fs.mkdir(dirname(variant.target), { recursive: true });
-          if (mode === 'move') await moveTreeExclusive(variant.source, variant.target);
-          else await copyFileExclusive(variant.source, variant.target);
-        }
-      }
-    } catch (error) {
-      console.warn(`[Gallery] Failed to ${mode} sidecar for ${pair.sourcePath}:`, error);
-      warnings.push(`Sidecar for ${pair.sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  return warnings;
+    .filter((pair): pair is { source: string; target: string } => Boolean(pair.source && pair.target && pair.source !== pair.target));
+  return transferGalleryMediaSidecars(pairs, mode);
 }
 
 function getGalleryTransferAllowedRoots(): string[] {
