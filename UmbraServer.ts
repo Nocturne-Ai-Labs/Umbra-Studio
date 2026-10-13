@@ -3502,11 +3502,15 @@ function loadRemoteAuthConfig(): RemoteAuthConfig | null {
     if (!existsSync(REMOTE_AUTH_PATH)) return null;
     const parsed = JSON.parse(readFileSync(REMOTE_AUTH_PATH, 'utf-8').replace(/^\uFEFF/, '')) as RemoteAuthConfig;
     if (!parsed || parsed.version !== 1 || !parsed.username || !parsed.salt || !parsed.passwordHash) return null;
+    const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
     return {
       ...parsed,
-      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-      devices: Array.isArray(parsed.devices) ? parsed.devices : [],
-      pairTokens: Array.isArray((parsed as any).pairTokens) ? (parsed as any).pairTokens : [],
+      // Damaged entries must not crash admission for every host and Remote request.
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions.filter(session => isRecord(session) && typeof session.hash === 'string'
+        && (session.deviceId === undefined || typeof session.deviceId === 'string')) : [],
+      devices: Array.isArray(parsed.devices) ? parsed.devices.filter(device => isRecord(device) && typeof device.id === 'string')
+        .map(device => ({ ...device, trusted: device.trusted === true })) : [],
+      pairTokens: Array.isArray(parsed.pairTokens) ? parsed.pairTokens.filter(token => isRecord(token) && typeof token.hash === 'string') : [],
     };
   } catch (error) {
     console.warn('[UmbraRemote] Failed to load auth config:', error);
