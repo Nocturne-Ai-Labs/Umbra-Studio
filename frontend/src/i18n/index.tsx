@@ -11,6 +11,8 @@ import React, {
 import { useStore } from '@/store/useStore';
 import {
   APP_LANGUAGES,
+  fetchAppSettingsFromBackend,
+  saveAppSettings,
   type AppLanguage,
 } from '@/lib/appSettings';
 import { mountLegacyUiLocalization } from './legacyUiLocalization';
@@ -657,6 +659,23 @@ const I18nContext = createContext<I18nContextValue>({
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const language = useStore((state) => normalizeLanguage(state.appSettings['ui.language']));
+  useEffect(() => {
+    // Standalone workspaces do not mount StudioShell, which normally loads
+    // saved settings. Use the same backend source for their initial language.
+    const initialSettings = useStore.getState().appSettings;
+    let active = true;
+    void fetchAppSettingsFromBackend().then(settings => {
+      if (!settings) return;
+      const store = useStore.getState();
+      if (active && store.appSettings === initialSettings) store.applyAppSettings(settings);
+      else {
+        // The loader updates its memory cache. Preserve any settings the UI
+        // changed while that request was in flight instead of reverting them.
+        saveAppSettings(store.appSettings, { broadcast: false, replace: true });
+      }
+    });
+    return () => { active = false; };
+  }, []);
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
