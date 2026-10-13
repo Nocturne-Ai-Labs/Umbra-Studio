@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.90.14-beta - LoRA And Detailer Controls
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**Umbra Setup remains the home for installation and updates after the setup-flow refactor.**
+
+- Save work and install through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux after updating, then launch Studio. This patch requires no new models, ComfyUI installation, custom-node update or accelerator changes.
+- Existing LoRA stacks, detailer stages, model files and projects remain preserved. Optional AI Toolkit requires host Git and Node.js 20+ with npm. Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Shared Controls
+
+- Image tools and Power Prompter use a consistent LoRA row with clear strengths, metadata words, copy actions, enablement and removal. Video keeps its family-specific stage/audio controls and native slot ordering while using matching presentation. Narrow layouts retain reachable touch controls.
+- Detailer stages and output upscaling now have clearer on/off switches, stage headers and actions across the shared controls, including Manga Studio. Existing settings and processing order retain their established behavior.
+- Manga Studio retrieves LoRA trigger/trained-word metadata when a LoRA is selected and retries after catalog refresh or reconnect, while preserving newer project edits.
+
+### Validation
+
+Focused independent component, persistence and browser checks cover the changed controls. Source, TypeScript, lint, frontend build and pipeline audits pass; clean package startup and archive checks are recorded separately. No new GPU generation or managed-tool installation was run for this interface patch.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: delayed or refreshed LoRA metadata failing to reach Manga Studio's selected entries.
+- Fixed: cramped LoRA strengths and undersized touch actions in narrow layouts, unclear duplicate video slots and removal styling.
+- Improved: consistent LoRA presentation across shared image, Power Prompter and video controls.
+- Improved: clearer detailer and output-upscale switches and stage actions.
+
 ## v0.90.13-beta - Wulver Image Pipelines
 
 ### TL;DR - Setup After Updating
