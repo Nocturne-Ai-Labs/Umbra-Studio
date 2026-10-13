@@ -3503,14 +3503,17 @@ function loadRemoteAuthConfig(): RemoteAuthConfig | null {
     const parsed = JSON.parse(readFileSync(REMOTE_AUTH_PATH, 'utf-8').replace(/^\uFEFF/, '')) as RemoteAuthConfig;
     if (!parsed || parsed.version !== 1 || !parsed.username || !parsed.salt || !parsed.passwordHash) return null;
     const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+    // Buffer's hex decoder truncates malformed input. Saved identities must be
+    // complete SHA-256 values; only an absent binding denotes a legacy session.
+    const isIdentity = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
     return {
       ...parsed,
       // Damaged entries must not crash admission for every host and Remote request.
-      sessions: Array.isArray(parsed.sessions) ? parsed.sessions.filter(session => isRecord(session) && typeof session.hash === 'string'
-        && (session.deviceId === undefined || typeof session.deviceId === 'string')) : [],
-      devices: Array.isArray(parsed.devices) ? parsed.devices.filter(device => isRecord(device) && typeof device.id === 'string')
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions.filter(session => isRecord(session) && isIdentity(session.hash)
+        && (session.deviceId === undefined || isIdentity(session.deviceId))) : [],
+      devices: Array.isArray(parsed.devices) ? parsed.devices.filter(device => isRecord(device) && isIdentity(device.id))
         .map(device => ({ ...device, trusted: device.trusted === true })) : [],
-      pairTokens: Array.isArray(parsed.pairTokens) ? parsed.pairTokens.filter(token => isRecord(token) && typeof token.hash === 'string') : [],
+      pairTokens: Array.isArray(parsed.pairTokens) ? parsed.pairTokens.filter(token => isRecord(token) && isIdentity(token.hash)) : [],
     };
   } catch (error) {
     console.warn('[UmbraRemote] Failed to load auth config:', error);
