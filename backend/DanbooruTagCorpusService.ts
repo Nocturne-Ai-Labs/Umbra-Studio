@@ -439,14 +439,16 @@ export class DanbooruTagCorpusService {
     let inserted = 0;
     let lastPostId: number | null = null;
     const normalizedPosts = posts.map((post) => {
-      const id = clampInteger(post?.id, 0, 1, Number.MAX_SAFE_INTEGER);
-      return id ? {
+      // IDs identify source rows and pagination; clamping would invent another post.
+      const id = typeof post?.id === 'number' || typeof post?.id === 'string' ? Number(post.id) : NaN;
+      if (!Number.isSafeInteger(id) || id < 1) return null;
+      return {
         id,
         score: clampInteger(post?.score, 0, -1_000_000, 1_000_000),
         rating: String(post?.rating || '').slice(0, 2),
         createdAt: String(post?.created_at || ''),
         tags: normalizeTagString(post?.tag_string_general),
-      } : null;
+      };
     }).filter((post): post is NonNullable<typeof post> => Boolean(post));
 
     for (const post of normalizedPosts) lastPostId = lastPostId === null ? post.id : Math.min(lastPostId, post.id);
