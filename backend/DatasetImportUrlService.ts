@@ -3,6 +3,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { Readable } from 'node:stream';
+import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
 import sharp from 'sharp';
 
 const MAX_DATASET_IMPORT_BYTES = 256 * 1024 * 1024;
@@ -86,7 +87,7 @@ async function validateDatasetImportUrl(
   return { url, address: addresses[0].address };
 }
 
-function fetchPinnedImage(url: URL, address: string, init: RequestInit): Promise<Response> {
+function fetchPinnedImage(url: URL, address: string, init: RequestInit, maxBytes: number): Promise<Response> {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
       method: 'GET',
@@ -112,8 +113,36 @@ function fetchPinnedImage(url: URL, address: string, init: RequestInit): Promise
         reject(new Error(`Image server returned an unsupported HTTP status: ${status}`));
         return;
       }
-      const body = status === 204 || status === 205 || status === 304
-        ? null : Readable.toWeb(response) as ReadableStream<Uint8Array>;
+      let body: ReadableStream<Uint8Array> | null = null;
+      if (status !== 204 && status !== 205 && status !== 304) {
+        const encoding = headers.get('content-encoding')?.trim().toLowerCase();
+        const decoder = encoding === 'gzip' ? createGunzip()
+          : encoding === 'deflate' ? createInflate()
+          : encoding === 'br' ? createBrotliDecompress() : null;
+        if (decoder) {
+          // The pinned Node transport must match fetch's decoded-body contract.
+          // Bound compressed bytes here and decoded bytes in the import reader.
+          response.on('error', error => decoder.destroy(error));
+          decoder.on('close', () => response.destroy());
+          if (Number(headers.get('content-length') || 0) > maxBytes) {
+            response.destroy();
+            decoder.destroy();
+            reject(new Error('Dropped image exceeds the 256 MB import limit'));
+            return;
+          }
+          let wireBytes = 0;
+          response.on('data', (chunk: Buffer) => {
+            wireBytes += chunk.length;
+            if (wireBytes > maxBytes) response.destroy(new Error('Dropped image exceeds the 256 MB import limit'));
+          });
+          response.pipe(decoder);
+          headers.delete('content-encoding');
+          headers.delete('content-length');
+          body = Readable.toWeb(decoder) as ReadableStream<Uint8Array>;
+        } else {
+          body = Readable.toWeb(response) as ReadableStream<Uint8Array>;
+        }
+      }
       resolve(new Response(body, { status, headers }));
     });
     request.on('error', reject);
@@ -192,7 +221,7 @@ export async function fetchDatasetImportImage(
   let target = await validateDatasetImportUrl(value, options.allowPrivateNetwork, lookup);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     signal.throwIfAborted();
-    const response = await (options.fetch || ((url, init) => fetchPinnedImage(url, target.address, init)))(target.url, {
+    const response = await (options.fetch || ((url, init) => fetchPinnedImage(url, target.address, init, options.maxBytes ?? MAX_DATASET_IMPORT_BYTES)))(target.url, {
       signal,
       redirect: 'manual',
       headers: { 'User-Agent': 'UmbraStudio/1.0 (dataset-builder)', Accept: 'image/*;q=1,*/*;q=0.1', 'Accept-Encoding': 'identity' },
