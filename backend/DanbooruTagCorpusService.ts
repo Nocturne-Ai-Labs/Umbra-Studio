@@ -81,6 +81,11 @@ export type DanbooruCorpusStartOptions = {
 };
 
 
+function validCorpusPostId(value: unknown): number | null {
+  const id = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 function clampInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -440,8 +445,8 @@ export class DanbooruTagCorpusService {
     let lastPostId: number | null = null;
     const normalizedPosts = posts.map((post) => {
       // IDs identify source rows and pagination; clamping would invent another post.
-      const id = typeof post?.id === 'number' || typeof post?.id === 'string' ? Number(post.id) : NaN;
-      if (!Number.isSafeInteger(id) || id < 1) return null;
+      const id = validCorpusPostId(post?.id);
+      if (id === null) return null;
       return {
         id,
         score: clampInteger(post?.score, 0, -1_000_000, 1_000_000),
@@ -708,7 +713,8 @@ export class DanbooruTagCorpusService {
         }
 
         const remainingPosts = Math.max(0, options.targetPosts - progressPosts);
-        const ingestedBatch = data.slice(0, remainingPosts);
+        // Malformed source rows must not consume the remaining sample slots.
+        const ingestedBatch = data.filter((post) => validCorpusPostId(post?.id) !== null).slice(0, remainingPosts);
         this.ingestBatch(ingestedBatch, (nextCursor) => {
           if (!nextCursor || (status.lastPostId && nextCursor >= status.lastPostId)) {
             throw new Error('Danbooru corpus pagination stopped advancing. The partial corpus was preserved.');
