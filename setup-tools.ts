@@ -1954,7 +1954,10 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
             const installedIris = feature.id.startsWith('iris-3b') && feature.activationFile
                 && existsSync(join(comfyDir, 'models', feature.activationFile));
             if ((feature.workflowIds?.length && !feature.optional) || selectedFamily || installedIris) {
-                for (const node of feature.customNodes) enabledNodes.add(node.name);
+                for (const node of feature.customNodes) {
+                    enabledNodes.add(node.name);
+                    if (selectedFamily || installedIris) supportedRequiredNodes.add(node.name);
+                }
             }
         }
     }

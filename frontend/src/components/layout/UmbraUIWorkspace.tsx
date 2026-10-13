@@ -2614,7 +2614,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const samplerOptions = modelCatalog.samplers.length > 0
     ? modelCatalog.samplers
     : ['er_sde', 'euler', 'dpmpp_2m_sde'];
-  const schedulerOptions = Array.from(new Set([scheduler, ...(modelCatalog.schedulers.length > 0
+  const schedulerOptions = Array.from(new Set([scheduler, ...(activeLoraFamilyKey === 'iris3b' ? ['iris'] : []), ...(modelCatalog.schedulers.length > 0
     ? modelCatalog.schedulers
     : ['simple', 'normal', 'karras'])]));
 
