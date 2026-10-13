@@ -67,15 +67,20 @@ export function resolveWulverLoraNames(graph: PromptGraph, objectInfo: Record<st
   const choices = readComfyInputChoices(loader?.input?.required?.lora_name)
     ?.filter((choice): choice is string => typeof choice === 'string');
   if (!choices) throw new Error('Native model-only LoRA loading is missing. Update managed ComfyUI through Umbra Setup, then restart it.');
-  const normalized = (name: string) => name.trim().replace(/\\/g, '/').toLowerCase();
+  const normalized = (name: string) => name.trim().replace(/\\/g, '/');
   const stem = (name: string) => normalized(name).replace(/\.(?:safetensors|ckpt|pt|pth|bin)$/i, '');
   for (const node of nodes) {
     const selected = String(node.inputs.lora_name || '');
     const exact = choices.filter((choice) => normalized(choice) === normalized(selected));
-    const pathMatches = exact.length ? exact : choices.filter((choice) => stem(choice) === stem(selected));
+    const fullMatches = exact.length ? exact : choices.filter((choice) => normalized(choice).toLowerCase() === normalized(selected).toLowerCase());
+    const exactStem = choices.filter((choice) => stem(choice) === stem(selected));
+    const pathMatches = fullMatches.length ? fullMatches : exactStem.length ? exactStem
+      : choices.filter((choice) => stem(choice).toLowerCase() === stem(selected).toLowerCase());
     // Power Prompter's copied tokens omit file extensions; never guess among duplicate basenames.
+    const exactBasename = choices.filter((choice) => stem(choice).split('/').pop() === stem(selected));
     const matches = pathMatches.length || normalized(selected).includes('/') ? pathMatches
-      : choices.filter((choice) => stem(choice).split('/').pop() === stem(selected));
+      : exactBasename.length ? exactBasename
+        : choices.filter((choice) => stem(choice).split('/').pop()?.toLowerCase() === stem(selected).toLowerCase());
     if (matches.length !== 1) {
       throw new Error(matches.length > 1
         ? `Wulver LoRA "${selected}" is ambiguous in ComfyUI.`

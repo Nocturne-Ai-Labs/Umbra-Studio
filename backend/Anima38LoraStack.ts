@@ -67,9 +67,20 @@ export function resolveAnima38LoraNames(graph: PromptGraph, objectInfo: Record<s
   const choices = readComfyInputChoices(loader?.input?.required?.lora_name)
     ?.filter((choice): choice is string => typeof choice === 'string');
   if (!choices) throw new Error('Anima 3.8B LoRA bridge is missing. Install ComfyUI-Anima-3.8B-LoRA-Bridge through Umbra Setup, then restart managed ComfyUI.');
+  const normalized = (name: string) => name.trim().replace(/\\/g, '/');
+  const stem = (name: string) => normalized(name).replace(/\.(?:safetensors|ckpt|pt|pth|bin)$/i, '');
   for (const node of nodes) {
     const selected = String(node.inputs.lora_name || '');
-    const matches = choices.filter((choice) => choice.replace(/\\/g, '/').toLowerCase() === selected.toLowerCase());
+    // Prefer exact case on Linux, while accepting extensionless copied tokens.
+    const exact = choices.filter((choice) => normalized(choice) === normalized(selected));
+    const fullMatches = exact.length ? exact : choices.filter((choice) => normalized(choice).toLowerCase() === normalized(selected).toLowerCase());
+    const exactStem = choices.filter((choice) => stem(choice) === stem(selected));
+    const pathMatches = fullMatches.length ? fullMatches : exactStem.length ? exactStem
+      : choices.filter((choice) => stem(choice).toLowerCase() === stem(selected).toLowerCase());
+    const exactBasename = choices.filter((choice) => stem(choice).split('/').pop() === stem(selected));
+    const matches = pathMatches.length || normalized(selected).includes('/') ? pathMatches
+      : exactBasename.length ? exactBasename
+        : choices.filter((choice) => stem(choice).split('/').pop()?.toLowerCase() === stem(selected).toLowerCase());
     if (matches.length !== 1) {
       throw new Error(matches.length > 1
         ? `Anima 3.8B LoRA "${selected}" is ambiguous in ComfyUI.`
