@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { inspectLocalRequirements } from './LocalRequirements';
+import { linuxNodeCompilerEnvironment } from './LinuxNodeCompiler';
 
 // Use the same interpreter/config/parser as the install, without resolution or preparation.
 // Private pip APIs changing is an actionable hold, never permission to compile StringZilla.
@@ -122,7 +123,8 @@ export function installOrdinaryNodeRequirements(
   if (matchingMarker && forceRequirements) unlinkSync(markerPath);
   log(`Installing requirements for ${nodeName}...`);
   // Inherit pip configuration, indexes and constraints, and retain its raw failure output.
-  const result = spawnSync(python, ordinaryNodePipArgs(requirementsPath, platform), { cwd: comfyRoot, stdio: 'inherit' });
+  const env = linuxNodeCompilerEnvironment(python, process.env, platform, log);
+  const result = spawnSync(python, ordinaryNodePipArgs(requirementsPath, platform), { cwd: comfyRoot, stdio: 'inherit', env });
   if (result.status !== 0) {
     log(`Failed to install requirements for ${nodeName}${result.error ? `: ${result.error.message}` : ''}`);
     if (platform === 'win32') {
