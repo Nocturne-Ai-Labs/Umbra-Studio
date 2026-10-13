@@ -3,7 +3,7 @@ import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-export type GalleryPathPolicy = { runtimeRoot: string; builtinRoots: string[]; allowedRoots: string[]; protectedRoots: string[] };
+export type GalleryPathPolicy = { runtimeRoot: string; sourceRoot?: string; builtinRoots: string[]; allowedRoots: string[]; protectedRoots: string[] };
 const galleryPathPolicy = new AsyncLocalStorage<GalleryPathPolicy | undefined>();
 export function withGalleryPathPolicy<T>(policy: GalleryPathPolicy | undefined, operation: () => T): T {
   return galleryPathPolicy.run(policy, operation);
@@ -18,11 +18,6 @@ export function isGalleryPathPolicyAllowed(path: string): boolean {
   try {
     const candidate = canonicalCandidateSync(path);
     const runtime = canonicalCandidateSync(policy.runtimeRoot);
-    // Folder mutations/exports cannot carry protected descendants along with them.
-    for (const root of policy.protectedRoots) {
-      const protectedPath = canonicalCandidateSync(root);
-      if (isInsidePhysicalRoot(protectedPath, candidate) || isInsidePhysicalRoot(candidate, protectedPath)) return false;
-    }
     // Explicit content folders under User remain usable. Broad runtime/User
     // grants cannot authorize code or folders created after this policy snapshot.
     const userRoot = canonicalCandidateSync(resolve(policy.runtimeRoot, 'User'));
@@ -32,7 +27,20 @@ export function isGalleryPathPolicyAllowed(path: string): boolean {
         return physicalRoot !== userRoot && isInsidePhysicalRoot(userRoot, physicalRoot);
       })]
       : policy.allowedRoots;
-    return roots.some(root => isInsidePhysicalRoot(canonicalCandidateSync(root), candidate));
+    const physicalRoots = roots.map(canonicalCandidateSync);
+    const source = policy.sourceRoot ? canonicalCandidateSync(policy.sourceRoot) : null;
+    const declaredRuntimeContent = isInsidePhysicalRoot(runtime, candidate)
+      && physicalRoots.some(root => isInsidePhysicalRoot(runtime, root) && isInsidePhysicalRoot(root, candidate));
+    // A separate runtime may live beneath the source checkout. Only positively
+    // granted content physically inside that runtime can cross the source guard;
+    // all other protected roots and ancestor mutations remain denied.
+    for (const root of policy.protectedRoots) {
+      const protectedPath = canonicalCandidateSync(root);
+      if (source && policy.sourceRoot && !relative(resolve(policy.sourceRoot), resolve(root))
+        && relative(source, runtime) && isInsidePhysicalRoot(source, runtime) && declaredRuntimeContent) continue;
+      if (isInsidePhysicalRoot(protectedPath, candidate) || isInsidePhysicalRoot(candidate, protectedPath)) return false;
+    }
+    return physicalRoots.some(root => isInsidePhysicalRoot(root, candidate));
   } catch { return false; }
 }
 

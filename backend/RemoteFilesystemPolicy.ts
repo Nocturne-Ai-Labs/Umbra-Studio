@@ -23,7 +23,7 @@ export function createRemoteFilesystemPolicy(runtimeRoot: string, sourceRoot: st
   protectedRoots.push(join(runtimeRoot, 'Runtime'), join(comfy, 'models'), join(comfy, 'user'), join(comfy, 'custom_nodes'));
   const key = (path: string) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
   if (key(sourceRoot) !== key(runtimeRoot)) protectedRoots.push(sourceRoot);
-  return { runtimeRoot, builtinRoots, allowedRoots: [...builtinRoots, ...extraRoots], protectedRoots };
+  return { runtimeRoot, sourceRoot, builtinRoots, allowedRoots: [...builtinRoots, ...extraRoots], protectedRoots };
 }
 
 export function isRemoteFilesystemRoute(path: string): boolean {
