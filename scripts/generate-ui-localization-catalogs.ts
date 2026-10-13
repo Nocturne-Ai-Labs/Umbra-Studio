@@ -1,13 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { collectUiLocalizationPhrases, isTechnicalUiLiteral } from './ui-localization-phrases';
-import { translateLegacyUiText } from '../frontend/src/i18n/legacyUiLocalization';
+import { collectSourceUiLocalizationPhrases, isTechnicalUiLiteral } from './ui-localization-phrases';
+import { hasLegacyUiTranslation, translateLegacyUiText } from '../frontend/src/i18n/legacyUiLocalization';
 import {
   RECENT_UI_TEXT,
   type RecentUiLanguage,
 } from '../frontend/src/i18n/recentUiCatalog';
 
-const COMPONENT_ROOT = path.resolve('frontend/src/components');
 const OUTPUT_FILE = path.resolve('frontend/src/i18n/recentUiCatalog.ts');
 const CACHE_FILE = path.resolve('.tmp/ui-localization-translation-cache.json');
 const BATCH_LIMIT = 3_200;
@@ -781,14 +780,14 @@ function renderCatalog(entriesByLanguage: Record<RecentUiLanguage, Map<string, s
   fs.writeFileSync(OUTPUT_FILE, content);
 }
 
-const phrases = collectUiLocalizationPhrases(COMPONENT_ROOT);
+const phrases = collectSourceUiLocalizationPhrases();
 for (const phrase of [
   'Umbra Setup could not be launched.',
   'Unable to open Umbra Setup.',
   'Allow popups to open Umbra Setup, or run UmbraSetup.bat / umbra-setup.sh from your Umbra folder.',
 ]) addCandidate(phrases, phrase);
 const sources = [...phrases].sort((left, right) => left.localeCompare(right, 'en', { sensitivity: 'base' }));
-const missingByLanguage = Object.fromEntries((Object.keys(LANGUAGE_CONFIG) as RecentUiLanguage[]).map(language => [language, sources.filter(source => translateLegacyUiText(language, source) === source && !isStandaloneTechnicalName(source) && !RECENT_UI_TEXT[language].has(source.toLocaleLowerCase('en-US')))])) as Record<RecentUiLanguage, string[]>;
+const missingByLanguage = Object.fromEntries((Object.keys(LANGUAGE_CONFIG) as RecentUiLanguage[]).map(language => [language, sources.filter(source => !hasLegacyUiTranslation(language, source) && translateLegacyUiText(language, source) === source && !isStandaloneTechnicalName(source))])) as Record<RecentUiLanguage, string[]>;
 const exportIndex = Bun.argv.indexOf('--export-missing');
 if (exportIndex >= 0 && Bun.argv[exportIndex + 1]) {
   const payloadPath = path.resolve(Bun.argv[exportIndex + 1]);
@@ -811,7 +810,8 @@ for (const language of Object.keys(LANGUAGE_CONFIG) as RecentUiLanguage[]) {
   const languageCache = cache[language] || {};
   cache[language] = languageCache;
   const missing = sources.filter((source) => (
-    translateLegacyUiText(language, source) === source
+    !hasLegacyUiTranslation(language, source)
+    && translateLegacyUiText(language, source) === source
     && !isStandaloneTechnicalName(source)
     && !entriesByLanguage[language].has(source.toLocaleLowerCase('en-US'))
   ));

@@ -4,9 +4,6 @@
 export type RecentUiLanguage = 'ja' | 'zh-CN' | 'ko' | 'de';
 
 const JAPANESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
-  ["opening the updates tab in umbra setup.", "Umbra Setup の更新タブを開いています。"],
-  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup は別のタブで開きます。更新をインストールする前に作業内容を保存してください。"],
-
   ["- review only", "- レビューのみ"],
   ["- searching...", "- 検索中..."],
   ["- set", "- セット"],
@@ -1833,6 +1830,7 @@ const JAPANESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["opening file explorer is only available from the host pc.", "エクスプローラーを開く操作はホストPCからのみ利用できます。"],
   ["opening folder...", "フォルダーを開いています..."],
   ["opening official workflow…", "公式ワークフローを開いています…"],
+  ["opening the updates tab in umbra setup.", "Umbra Setup の更新タブを開いています。"],
   ["opening umbra setup", "Umbra Setup を開いています"],
   ["opening zip paths is only available from the host pc", "ZIPのパスを開く操作はホストPCからのみ利用できます"],
   ["opening...", "開いています..."],
@@ -2834,6 +2832,7 @@ const JAPANESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["umbra reuses one private hermes tool conversation. the override applies only to umbra requests and does not change hermes itself.", "Umbra は 1 つのプライベート Herme ツール会話を再利用します。オーバーライドは Umbra リクエストにのみ適用され、Hermes 自体は変更されません。"],
   ["umbra setup", "Umbra Setup"],
   ["umbra setup could not be launched.", "Umbra Setup を起動できませんでした。"],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup は別のタブで開きます。更新をインストールする前に作業内容を保存してください。"],
   ["umbra setup will open its updates tab after umbra studio and its managed tools close cleanly.", "Umbra Studio と管理ツールが正常に終了した後、Umbra Setup の「更新」タブが開きます。"],
   ["umbra structured", "Umbra 構造化形式"],
   ["umbra studio", "Umbra Studio"],
@@ -3129,9 +3128,6 @@ const JAPANESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
 ];
 
 const CHINESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
-  ["opening the updates tab in umbra setup.", "正在打开 Umbra Setup 的更新选项卡。"],
-  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup 会在单独的选项卡中打开。安装更新前请保存工作。"],
-
   ["- review only", "- 仅审阅"],
   ["- searching...", "- 正在搜索..."],
   ["- set", "- 设置"],
@@ -4789,6 +4785,7 @@ const CHINESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["opening file explorer is only available from the host pc.", "只能在主机电脑上打开文件资源管理器。"],
   ["opening folder...", "正在打开文件夹..."],
   ["opening official workflow…", "正在打开官方工作流…"],
+  ["opening the updates tab in umbra setup.", "正在打开 Umbra Setup 的更新选项卡。"],
   ["opening umbra setup", "正在打开 Umbra Setup"],
   ["opening zip paths is only available from the host pc", "只能在主机电脑上打开 ZIP 路径"],
   ["opening...", "正在打开..."],
@@ -5683,6 +5680,7 @@ const CHINESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["umbra reuses one private hermes tool conversation. the override applies only to umbra requests and does not change hermes itself.", "Umbra 重复使用了一种私人 Hermes 工具对话。该覆盖仅适用于 Umbra 请求，不会更改 Hermes 本身。"],
   ["umbra setup", "Umbra Setup"],
   ["umbra setup could not be launched.", "无法启动 Umbra Setup。"],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup 会在单独的选项卡中打开。安装更新前请保存工作。"],
   ["umbra setup will open its updates tab after umbra studio and its managed tools close cleanly.", "Umbra Studio 及其托管工具正常关闭后，Umbra Setup 将打开“更新”选项卡。"],
   ["umbra structured", "Umbra 结构化"],
   ["umbra studio", "Umbra Studio"],
@@ -5958,9 +5956,6 @@ const CHINESE_RECENT_UI_TEXT: Array<readonly [string, string]> = [
 ];
 
 const KOREAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
-  ["opening the updates tab in umbra setup.", "Umbra Setup의 업데이트 탭을 여는 중입니다."],
-  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup은 별도 탭에서 열립니다. 업데이트를 설치하기 전에 작업을 저장하세요."],
-
   ["- review only", "- 검토만"],
   ["- searching...", "- 검색 중..."],
   ["- set", "- 설정"],
@@ -7618,6 +7613,7 @@ const KOREAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["opening file explorer is only available from the host pc.", "파일 탐색기는 호스트 PC에서만 열 수 있습니다."],
   ["opening folder...", "폴더 여는 중..."],
   ["opening official workflow…", "공식 워크플로 여는 중…"],
+  ["opening the updates tab in umbra setup.", "Umbra Setup의 업데이트 탭을 여는 중입니다."],
   ["opening umbra setup", "Umbra Setup 여는 중"],
   ["opening zip paths is only available from the host pc", "ZIP 경로는 호스트 PC에서만 열 수 있습니다"],
   ["opening...", "여는 중..."],
@@ -8520,6 +8516,7 @@ const KOREAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["umbra reuses one private hermes tool conversation. the override applies only to umbra requests and does not change hermes itself.", "Umbra는 하나의 비공개 Hermes 도구 대화를 재사용합니다. 재정의는 Umbra 요청에만 적용되며 Hermes 자체는 변경되지 않습니다."],
   ["umbra setup", "Umbra Setup"],
   ["umbra setup could not be launched.", "Umbra Setup을 실행할 수 없습니다."],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup은 별도 탭에서 열립니다. 업데이트를 설치하기 전에 작업을 저장하세요."],
   ["umbra setup will open its updates tab after umbra studio and its managed tools close cleanly.", "Umbra Studio와 관리 도구가 정상적으로 종료된 후 Umbra Setup의 업데이트 탭이 열립니다."],
   ["umbra structured", "Umbra Structured"],
   ["umbra studio", "Umbra Studio"],
@@ -8793,9 +8790,6 @@ const KOREAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
 ];
 
 const GERMAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
-  ["opening the updates tab in umbra setup.", "Die Registerkarte Updates in Umbra Setup wird geöffnet."],
-  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup wird in einem separaten Tab geöffnet. Speichern Sie Ihre Arbeit vor der Installation eines Updates."],
-
   ["- review only", "- Nur prüfen"],
   ["- searching...", "- Suche läuft..."],
   ["- shuffle", "- Mischen"],
@@ -10345,6 +10339,7 @@ const GERMAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["opening file explorer is only available from the host pc.", "Der Datei-Explorer kann nur vom Host-PC aus geöffnet werden."],
   ["opening folder...", "Ordner wird geöffnet..."],
   ["opening official workflow…", "Offizieller Workflow wird geöffnet…"],
+  ["opening the updates tab in umbra setup.", "Die Registerkarte Updates in Umbra Setup wird geöffnet."],
   ["opening umbra setup", "Umbra Setup wird geöffnet"],
   ["opening zip paths is only available from the host pc", "ZIP-Pfade können nur vom Host-PC aus geöffnet werden"],
   ["opening...", "wird geöffnet..."],
@@ -11190,6 +11185,7 @@ const GERMAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["umbra remote is off", "Umbra Remote ist ausgeschaltet"],
   ["umbra setup", "Umbra Setup"],
   ["umbra setup could not be launched.", "Umbra Setup konnte nicht gestartet werden."],
+  ["umbra setup opens in a separate tab. save your work before installing an update.", "Umbra Setup wird in einem separaten Tab geöffnet. Speichern Sie Ihre Arbeit vor der Installation eines Updates."],
   ["umbra setup will open its updates tab after umbra studio and its managed tools close cleanly.", "Nachdem Umbra Studio und seine verwalteten Werkzeuge ordnungsgemäß geschlossen wurden, öffnet Umbra Setup den Tab „Updates“."],
   ["umbra structured", "Umbra Structured"],
   ["umbra studio", "Umbra Studio"],

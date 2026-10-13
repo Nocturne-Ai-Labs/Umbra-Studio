@@ -4,7 +4,7 @@ import ts from 'typescript';
 import { NUMERIC_UI_TEMPLATES } from '../frontend/src/i18n/numericUiTemplates';
 
 const skippedTags = new Set(['code', 'kbd', 'pre', 'samp', 'script', 'style', 'svg', 'textarea']);
-const uiAttributes = new Set(['alt', 'aria-label', 'placeholder', 'title', 'label', 'description', 'tooltip']);
+const uiAttributes = new Set(['alt', 'aria-label', 'ariaLabel', 'placeholder', 'title', 'label', 'description', 'tooltip']);
 function decodeJsxText(value: string) {
   return value.replace(/&(amp|quot|apos|lt|gt|nbsp);/g, (_, entity) => ({ amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ' })[entity]);
 }
@@ -88,7 +88,9 @@ export function collectUiLocalizationPhrases(componentRoot: string) {
         // Toast producers are known display boundaries even inside event handlers.
         // Arbitrary function arguments remain excluded.
         const feedback = (node: ts.Node) => {
-          if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'showToast' && node.arguments[0]) expressionText(node.arguments[0]);
+          if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
+            && ['showToast', 'setError', 'setIssue', 'setSaveStatus'].includes(node.expression.text)
+            && node.arguments[0]) expressionText(node.arguments[0]);
           ts.forEachChild(node, feedback);
         };
         feedback(source);
@@ -98,4 +100,9 @@ export function collectUiLocalizationPhrases(componentRoot: string) {
   walk(componentRoot);
   for (const template of NUMERIC_UI_TEMPLATES) add(template);
   return values;
+}
+
+/** Scan every source TSX surface, including feature workspaces and app shells. */
+export function collectSourceUiLocalizationPhrases(sourceRoot = path.resolve('frontend/src')) {
+  return collectUiLocalizationPhrases(sourceRoot);
 }

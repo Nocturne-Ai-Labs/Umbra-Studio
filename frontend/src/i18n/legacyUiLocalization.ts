@@ -4,6 +4,7 @@ import { GERMAN_UI_TEXT } from './germanUiCatalog';
 import { JAPANESE_UI_TEXT } from './japaneseUiCatalog';
 import { KOREAN_UI_TEXT } from './koreanUiCatalog';
 import { RECENT_UI_TEXT } from './recentUiCatalog';
+import { FEATURE_UI_TEXT } from './featureUiCatalog';
 import { NUMERIC_UI_PATTERNS } from './numericUiTemplates';
 
 const ORIGINAL_TEXT = new WeakMap<Text, string>();
@@ -238,10 +239,10 @@ const GERMAN_NOUN_SUFFIXES = new Map<string, string>([
 
 function lookupLocalized(language: AppLanguage, value: string): string | null {
   const key = value.trim().toLocaleLowerCase('en-US');
-  if (language === 'ja') return RECENT_UI_TEXT.ja.get(key) || JAPANESE_UI_TEXT.get(key) || null;
-  if (language === 'zh-CN') return RECENT_UI_TEXT['zh-CN'].get(key) || CHINESE_UI_TEXT.get(key) || null;
-  if (language === 'ko') return RECENT_UI_TEXT.ko.get(key) || KOREAN_UI_TEXT.get(key) || null;
-  if (language === 'de') return RECENT_UI_TEXT.de.get(key) || GERMAN_UI_TEXT.get(key) || null;
+  if (language === 'ja') return FEATURE_UI_TEXT.ja.get(key) || RECENT_UI_TEXT.ja.get(key) || JAPANESE_UI_TEXT.get(key) || null;
+  if (language === 'zh-CN') return FEATURE_UI_TEXT['zh-CN'].get(key) || RECENT_UI_TEXT['zh-CN'].get(key) || CHINESE_UI_TEXT.get(key) || null;
+  if (language === 'ko') return FEATURE_UI_TEXT.ko.get(key) || RECENT_UI_TEXT.ko.get(key) || KOREAN_UI_TEXT.get(key) || null;
+  if (language === 'de') return FEATURE_UI_TEXT.de.get(key) || RECENT_UI_TEXT.de.get(key) || GERMAN_UI_TEXT.get(key) || null;
   return null;
 }
 
