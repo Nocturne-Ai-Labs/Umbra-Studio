@@ -575,10 +575,10 @@ export function MangaStudio({ embedded = false, active = true }: { embedded?: bo
     {viewerId && <div onContextMenu={event=>{const asset=assets.find(item=>item.id===viewerId);if(asset){event.preventDefault();setImageMenu({asset,x:event.clientX,y:event.clientY});}}}><MediaViewerOverlay items={assets.map(asset=>({path:asset.id,name:asset.name,type:'image' as const,url:asset.imageUrl}))} currentPath={viewerId} onClose={()=>setViewerId(null)} onOpenPath={setViewerId} /></div>}
     <ContextMenu isOpen={!!imageMenu} position={imageMenu || {x:0,y:0}} title={imageMenu?.asset.name} onClose={()=>setImageMenu(null)} items={imageMenu ? [
       {label:'View image',disabled:busy,action:()=>{setViewerId(imageMenu.asset.id);setImageMenu(null);}},
-      {label:'Send parameters to TXT2IMG',disabled:busy || imageMenu.asset.imageUrl.startsWith('data:image/gif;'),action:()=>void editTrayImage(imageMenu.asset,'txt2img')},
-      {label:'Send to IMG2IMG',disabled:busy || imageMenu.asset.imageUrl.startsWith('data:image/gif;'),action:()=>void editTrayImage(imageMenu.asset,'img2img')},
-      {label:'Send to Inpainting',disabled:busy || imageMenu.asset.imageUrl.startsWith('data:image/gif;'),action:()=>void editTrayImage(imageMenu.asset,'inpaint')},
-      {label:'Send to Canvas',disabled:busy || imageMenu.asset.imageUrl.startsWith('data:image/gif;'),action:()=>void editTrayImage(imageMenu.asset,'canvas')},
+      {label:'Send parameters to TXT2IMG',disabled:busy,action:()=>void editTrayImage(imageMenu.asset,'txt2img')},
+      {label:'Send to IMG2IMG',disabled:busy,action:()=>void editTrayImage(imageMenu.asset,'img2img')},
+      {label:'Send to Inpainting',disabled:busy,action:()=>void editTrayImage(imageMenu.asset,'inpaint')},
+      {label:'Send to Canvas',disabled:busy,action:()=>void editTrayImage(imageMenu.asset,'canvas')},
       {separator:true},
       {label:'Download image',action:()=>{void fetch(imageMenu.asset.imageUrl).then(response=>response.blob()).then(blob=>downloadMangaBlob(blob,imageMenu.asset.name)).catch(error=>setError(message(error)));}},
     ] : []} />
