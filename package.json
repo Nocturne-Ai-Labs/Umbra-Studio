@@ -84,7 +84,7 @@
     "better-sqlite3": "^12.6.2",
     "chokidar": "^5.0.0",
     "qrcode": "^1.5.4",
-    "react-router-dom": "^7.12.0",
+    "react-router-dom": "7.18.4",
     "sharp": "0.35.5",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1"
@@ -101,5 +101,8 @@
   ],
   "ignoreScripts": [
     "unrs-resolver"
-  ]
+  ],
+  "overrides": {
+    "dompurify": "3.4.16"
+  }
 }
