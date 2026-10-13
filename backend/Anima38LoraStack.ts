@@ -71,16 +71,19 @@ export function resolveAnima38LoraNames(graph: PromptGraph, objectInfo: Record<s
   const stem = (name: string) => normalized(name).replace(/\.(?:safetensors|ckpt|pt|pth|bin)$/i, '');
   for (const node of nodes) {
     const selected = String(node.inputs.lora_name || '');
+    // An explicit file extension must not silently select another installed format.
+    const hasExtension = /\.(?:safetensors|ckpt|pt|pth|bin)$/i.test(normalized(selected));
+    const alias = hasExtension ? normalized : stem;
     // Prefer exact case on Linux, while accepting extensionless copied tokens.
     const exact = choices.filter((choice) => normalized(choice) === normalized(selected));
     const fullMatches = exact.length ? exact : choices.filter((choice) => normalized(choice).toLowerCase() === normalized(selected).toLowerCase());
     const exactStem = choices.filter((choice) => stem(choice) === stem(selected));
-    const pathMatches = fullMatches.length ? fullMatches : exactStem.length ? exactStem
+    const pathMatches = fullMatches.length || hasExtension ? fullMatches : exactStem.length ? exactStem
       : choices.filter((choice) => stem(choice).toLowerCase() === stem(selected).toLowerCase());
-    const exactBasename = choices.filter((choice) => stem(choice).split('/').pop() === stem(selected));
+    const exactBasename = choices.filter((choice) => alias(choice).split('/').pop() === alias(selected));
     const matches = pathMatches.length || normalized(selected).includes('/') ? pathMatches
       : exactBasename.length ? exactBasename
-        : choices.filter((choice) => stem(choice).split('/').pop()?.toLowerCase() === stem(selected).toLowerCase());
+        : choices.filter((choice) => alias(choice).split('/').pop()?.toLowerCase() === alias(selected).toLowerCase());
     if (matches.length !== 1) {
       throw new Error(matches.length > 1
         ? `Anima 3.8B LoRA "${selected}" is ambiguous in ComfyUI.`
