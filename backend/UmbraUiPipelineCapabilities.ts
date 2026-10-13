@@ -593,9 +593,10 @@ export function resolveUmbraUiResolutionNodeLimits(
   const result = { ...resolution };
   const positiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
   const gcd = (a: number, b: number): number => { while (b) { const remainder = a % b; a = b; b = remainder; } return a; };
-  for (const classType of resolution.nodeClassTypes) {
-    const input = toRecord(toRecord(objectInfo[classType]).input);
-    for (const axis of ['width', 'height'] as const) {
+  for (const axis of ['width', 'height'] as const) {
+    const classTypes = axis === 'width' ? resolution.widthNodeClassTypes : resolution.heightNodeClassTypes;
+    for (const classType of classTypes ?? resolution.nodeClassTypes) {
+      const input = toRecord(toRecord(objectInfo[classType]).input);
       const schema = toRecord(input.required)[axis] ?? toRecord(input.optional)[axis];
       if (!Array.isArray(schema) || schema[0] !== 'INT') continue;
       const options = toRecord(schema[1]);
@@ -801,14 +802,21 @@ export function deriveUmbraUiTxt2ImgCapabilities(
   ));
   const resolutionStep = hasHiDreamPixelLatent ? 32 : hasSixteenPixelLatent ? 16 : 8;
   const resolutionIds = new Set(resolutionNodes.map(node => node.id));
-  const dimensionConsumers = nodes.filter(node => ['width', 'height'].some(axis => {
+  const consumesDimension = (node: PipelineNode, axis: 'width' | 'height') => {
     const value = node.inputs[axis];
     return Array.isArray(value) && resolutionIds.has(String(value[0]));
-  }));
+  };
+  const dimensionConsumers = nodes.filter(node => (['width', 'height'] as const).some(axis => consumesDimension(node, axis)));
+  const axisClassTypes = (axis: 'width' | 'height') => Array.from(new Set([
+    ...resolutionNodes,
+    ...dimensionConsumers.filter(node => consumesDimension(node, axis)),
+  ].map(node => node.classType)));
   const resolution = resolutionNodes.length > 0
     ? {
       ...control('adjustable', 'Width and height are connected to the latent or family scheduler.', resolutionNodes),
       nodeClassTypes: Array.from(new Set([...resolutionNodes, ...dimensionConsumers].map(node => node.classType))),
+      widthNodeClassTypes: axisClassTypes('width'),
+      heightNodeClassTypes: axisClassTypes('height'),
       defaultWidth: Number(literalInput(resolutionNodes, ['width']) ?? defaults.width) || undefined,
       defaultHeight: Number(literalInput(resolutionNodes, ['height']) ?? defaults.height) || undefined,
       minimumWidth: 64,
