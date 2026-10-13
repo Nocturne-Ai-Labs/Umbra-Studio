@@ -2029,7 +2029,14 @@ async function inspectModelManagerModelFile(modelFullPath: string) {
     summary,
   };
   snapshot.localMetadata = metadata;
-  snapshot.metadata = snapshot.metadata ?? metadata;
+  if (snapshot.source === 'local') {
+    snapshot.metadata = metadata;
+    snapshot.model = { ...toRecord(snapshot.model), name: basename(modelFullPath).replace(/\.(safetensors|gguf)$/i, '') };
+    snapshot.version = { ...toRecord(snapshot.version), baseModel: summary.base.baseModel || summary.base.sdModelName || '' };
+    snapshot.file = { ...toRecord(snapshot.file), name: basename(modelFullPath) };
+  } else {
+    snapshot.metadata = snapshot.metadata ?? metadata;
+  }
   await fs.writeFile(preferredSnapshotPath, JSON.stringify(snapshot, null, 2), 'utf8');
   await modelIndexWorkerService.invalidatePaths([modelFullPath, dirname(modelFullPath), reportPath, preferredSnapshotPath]);
   return {
