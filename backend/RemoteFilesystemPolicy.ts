@@ -22,13 +22,13 @@ export function createRemoteFilesystemPolicy(runtimeRoot: string, sourceRoot: st
     try { for (const entry of readdirSync(directory)) if (!exceptions.some(name => name === entry || process.platform === 'win32' && name.toLowerCase() === entry.toLowerCase())) protectedRoots.push(join(directory, entry)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
-  protectedRoots.push(join(runtimeRoot, 'Runtime'), ...comfyRoots.flatMap(root => ['models', 'user', 'custom_nodes'].map(name => join(root, name))));
+  protectedRoots.push(join(runtimeRoot, 'Runtime'), ...comfyRoots.flatMap(root => ['models', 'user', 'custom_nodes', 'venv', '.venv'].map(name => join(root, name))));
   const toolRelative = relative(join(runtimeRoot, 'Tools'), comfy);
   const contentAncestorRoots = toolRelative && !isAbsolute(toolRelative) && toolRelative !== '..' && !toolRelative.startsWith(`..${sep}`)
     ? [join(runtimeRoot, 'Tools', toolRelative.split(sep)[0])] : [];
   const key = (path: string) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
   if (key(sourceRoot) !== key(runtimeRoot)) protectedRoots.push(sourceRoot);
-  return { runtimeRoot, sourceRoot, builtinRoots, allowedRoots: [...builtinRoots, ...extraRoots, ...(options.mediaPreviewRoots || [])], protectedRoots, contentAncestorRoots, mediaPreviewRoots: options.mediaPreviewRoots };
+  return { runtimeRoot, sourceRoot, builtinRoots, allowedRoots: [...builtinRoots, ...extraRoots, ...(options.mediaPreviewRoots || [])], protectedRoots, contentAncestorRoots, mediaPreviewRoots: options.mediaPreviewRoots, comfyRoots };
 }
 
 export function isRemoteFilesystemRoute(path: string): boolean {

@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { registeredModelPreviewRoot } from './ModelPreviewPathAccess';
 
-export type GalleryPathPolicy = { runtimeRoot: string; sourceRoot?: string; builtinRoots: string[]; allowedRoots: string[]; protectedRoots: string[]; contentAncestorRoots?: string[]; mediaPreviewRoots?: string[] };
+export type GalleryPathPolicy = { runtimeRoot: string; sourceRoot?: string; builtinRoots: string[]; allowedRoots: string[]; protectedRoots: string[]; contentAncestorRoots?: string[]; mediaPreviewRoots?: string[]; comfyRoots?: string[] };
 const galleryPathPolicy = new AsyncLocalStorage<GalleryPathPolicy | undefined>();
 export function withGalleryPathPolicy<T>(policy: GalleryPathPolicy | undefined, operation: () => T): T {
   return galleryPathPolicy.run(policy, operation);
@@ -30,6 +30,11 @@ export function isGalleryPathPolicyAllowed(path: string): boolean {
       : policy.allowedRoots;
     const physicalRoots = roots.map(canonicalCandidateSync);
     const previewRoot = policy.mediaPreviewRoots ? registeredModelPreviewRoot(path, policy.mediaPreviewRoots) : null;
+    // A broad Gallery grant cannot turn a configured tool's code (including
+    // later-created files) into data. Only its declared content is usable.
+    const tool = policy.comfyRoots?.find(root => isInsidePhysicalRoot(canonicalCandidateSync(root), candidate));
+    if (tool && !previewRoot && !['input', 'output', 'temp'].some(name =>
+      isInsidePhysicalRoot(canonicalCandidateSync(resolve(tool, name)), candidate))) return false;
     const source = policy.sourceRoot ? canonicalCandidateSync(policy.sourceRoot) : null;
     const declaredRuntimeContent = isInsidePhysicalRoot(runtime, candidate)
       && (Boolean(previewRoot) || physicalRoots.some(root => isInsidePhysicalRoot(runtime, root) && isInsidePhysicalRoot(root, candidate)));
