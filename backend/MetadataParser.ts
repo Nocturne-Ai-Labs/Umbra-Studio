@@ -8,6 +8,7 @@ import { open, type FileHandle } from 'fs/promises';
 import { extname } from 'path';
 import { probeVideoMetadata } from './VideoMetadataProbe';
 import { metadataSidecarPath } from './metadataFileRevision';
+import { decodePngMetadataText, MAX_METADATA_TEXT_BYTES } from './PngMetadataText';
 
 export interface ImageMetadata {
   positive_prompt?: string;
@@ -180,6 +181,7 @@ export class MetadataParser {
       if (buffer.toString('hex') !== '89504e470d0a1a0a') throw new Error('Invalid PNG signature');
       const { size } = await fileHandle.stat();
       let metadataBytes = 0;
+      let decodedMetadataBytes = 0;
       let foundEnd = false;
       for (let chunk = 0; chunk < 100_000; chunk++) {
         if (offset + 12 > size) throw new Error('PNG metadata is truncated');
@@ -190,35 +192,14 @@ export class MetadataParser {
         offset += 8;
         if (offset + length + 4 > size) throw new Error('PNG metadata is truncated');
 
-        if (type === 'tEXt' || type === 'iTXt') {
+        if (type === 'tEXt' || type === 'iTXt' || type === 'zTXt') {
           metadataBytes += length;
-          if (metadataBytes > 16 * 1024 * 1024) throw new Error('PNG metadata exceeds the read limit');
+          if (metadataBytes > MAX_METADATA_TEXT_BYTES) throw new Error('PNG metadata exceeds the read limit');
           const dataBuffer = Buffer.alloc(length);
           await readMetadataBytes(fileHandle, dataBuffer, offset);
 
-          let keyword = '', text = '';
-
-          if (type === 'tEXt') {
-            const nullIndex = dataBuffer.indexOf(0);
-            if (nullIndex > -1) {
-              keyword = dataBuffer.toString('latin1', 0, nullIndex);
-              text = dataBuffer.toString('latin1', nullIndex + 1);
-            }
-          } else if (type === 'iTXt') {
-            let ptr = 0;
-            const null1 = dataBuffer.indexOf(0, ptr);
-            if (null1 > -1) {
-              keyword = dataBuffer.toString('latin1', 0, null1);
-              ptr = null1 + 3; // Skip null, compFlag, compMethod
-              const null2 = dataBuffer.indexOf(0, ptr);
-              if (null2 > -1) {
-                ptr = null2 + 1;
-                const null3 = dataBuffer.indexOf(0, ptr);
-                if (null3 > -1) text = dataBuffer.toString('utf8', null3 + 1);
-              }
-            }
-          }
-
+          const { keyword, text, bytes } = decodePngMetadataText(type, dataBuffer, MAX_METADATA_TEXT_BYTES - decodedMetadataBytes);
+          decodedMetadataBytes += bytes;
           if (keyword && text) chunks[keyword] = text;
         }
 

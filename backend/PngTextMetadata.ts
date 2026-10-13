@@ -31,7 +31,7 @@ function crc32(bytes: Uint8Array): number {
 }
 
 function readKeyword(type: string, data: Buffer): string {
-  if (type !== 'tEXt' && type !== 'iTXt') return '';
+  if (type !== 'tEXt' && type !== 'iTXt' && type !== 'zTXt') return '';
   const separator = data.indexOf(0);
   if (separator <= 0) return '';
   return data.subarray(0, separator).toString('latin1');
@@ -91,7 +91,7 @@ export function upsertPngTextMetadataBuffer(
       break;
     }
 
-    if (!((type === 'tEXt' || type === 'iTXt') && readKeyword(type, data) === keyword)) {
+    if (!((type === 'tEXt' || type === 'iTXt' || type === 'zTXt') && readKeyword(type, data) === keyword)) {
       chunks.push(input.subarray(offset, chunkEnd));
     }
     offset = chunkEnd;
