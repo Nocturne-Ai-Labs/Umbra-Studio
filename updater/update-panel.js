@@ -23,6 +23,14 @@ import { compareUmbraVersions } from '../shared/appUpdate.ts';
     de: { versions:'Verfügbare Versionen', notes:'Versionshinweise', installedLabel:'Installiert', targetLabel:'Ausgewählte Version', github:'Auf GitHub ansehen', noNotes:'Keine Versionshinweise vorhanden.', select:'Version auswählen', installedTag:'Installiert', older:'Ältere Version', newerOnly:'Wählen Sie eine neuere Version zur Installation. Hinweise aller Versionen sind lesbar.' },
   };
   for (const [locale, values] of Object.entries(labels)) Object.assign(translations[locale], values);
+  const reopenMessages = {
+    en: 'Close and reopen Setup before installing another update.',
+    ja: '次の更新をインストールする前に Setup を閉じて開き直してください。',
+    'zh-CN': '安装另一个更新前，请关闭并重新打开 Setup。',
+    ko: '다른 업데이트를 설치하기 전에 Setup을 닫고 다시 여세요.',
+    de: 'Schließen und öffnen Sie Setup erneut, bevor Sie ein weiteres Update installieren.',
+  };
+  for (const [locale, reopen] of Object.entries(reopenMessages)) translations[locale].reopen = reopen;
   let language = 'en';
   const t = (key, values = {}) => {
     let result = (translations[language] || translations.en)[key] || translations.en[key] || key;
@@ -50,6 +58,7 @@ import { compareUmbraVersions } from '../shared/appUpdate.ts';
   let state = { phase: 'idle' };
 
   let canInstall = false;
+  let needsReopen = false;
   let currentVersion = '0.0.0';
   let releases = [];
   let releasesLoaded = false;
@@ -125,7 +134,7 @@ import { compareUmbraVersions } from '../shared/appUpdate.ts';
 
   function controls() {
 
-    el('install').disabled = !selected || !canInstall || compareUmbraVersions(selected.version, currentVersion) <= 0 || busy || setupBusy || releasesLoading;
+    el('install').disabled = !selected || !canInstall || needsReopen || compareUmbraVersions(selected.version, currentVersion) <= 0 || busy || setupBusy || releasesLoading;
 
     el('refresh').disabled = busy || setupBusy || releasesLoading;
 
@@ -184,7 +193,7 @@ import { compareUmbraVersions } from '../shared/appUpdate.ts';
       else { el('notes').textContent = t('none'); el('selected-name').textContent = t('select'); el('selected-meta').textContent = ''; el('selected-version').textContent = 'Umbra Studio'; el('target-version').textContent = '—'; el('github').hidden = true; updateReleaseLabels(); }
       releasesLoaded = true;
 
-      message(!canInstall ? t('metadata') : releases.length ? t('choose') : t('none'));
+      message(needsReopen ? t('reopen') : !canInstall ? t('metadata') : releases.length ? t('choose') : t('none'));
 
     } catch (error) { message(error.message, true); }
 
@@ -195,6 +204,8 @@ import { compareUmbraVersions } from '../shared/appUpdate.ts';
   function renderState(data) {
 
     state = data.state || { phase: 'idle' };
+    needsReopen = data.needsReopen === true;
+    if (typeof data.installedVersionVerified === 'boolean') canInstall = data.installedVersionVerified;
     currentVersion = data.currentVersion || state.currentVersion || currentVersion;
     updateReleaseLabels();
 
@@ -222,9 +233,9 @@ import { compareUmbraVersions } from '../shared/appUpdate.ts';
 
     el('warning').textContent = [state.error, state.warning].filter(Boolean).join(' ');
 
-    if (state.phase === 'complete') message(t('complete'));
-
-    if (state.phase === 'failed') message(state.error || t('failed'), true);
+    if (needsReopen) message(t('reopen'));
+    else if (state.phase === 'complete') message(t('complete'));
+    else if (state.phase === 'failed') message(state.error || t('failed'), true);
 
     document.dispatchEvent(new CustomEvent('umbra-update-busy', { detail: { busy } }));
 
