@@ -15,7 +15,7 @@ const PUBLIC_MARKDOWN = new Set([
 // Match the portable archive gate's unambiguous weight extensions. Python .pth
 // import configuration and legitimate non-model .bin assets are not weights.
 export function isModelWeightPath(relativePath) {
-  return /\.(?:onnx|pt|safetensors|ckpt)$/i.test(String(relativePath));
+  return /\.(?:onnx|pt|safetensors|ckpt|gguf)(?:\.(?:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|part|partial|download|incomplete|tmp))*$/i.test(String(relativePath));
 }
 
 export function isPrivateDevelopmentSource(relativePath) {
@@ -23,7 +23,7 @@ export function isPrivateDevelopmentSource(relativePath) {
   const parts = normalized.split('/');
   const name = parts.at(-1) || '';
   return (name.toLowerCase().endsWith('.md') && !PUBLIC_MARKDOWN.has(normalized))
-    || parts.some((part) => ['.agents', '.codex', '.git'].includes(part))
+    || parts.some((part) => ['.agents', '.codex', '.git', '.tmp', '.snapshots'].includes(part.toLowerCase()))
     || /^\.env(?:\.|$)/i.test(name)
     || /\.test\./i.test(name)
     || /^test-.*\.[cm]?[jt]sx?$/i.test(name)
