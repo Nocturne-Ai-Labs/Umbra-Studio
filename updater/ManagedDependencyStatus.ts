@@ -6,6 +6,7 @@ import { compareUmbraVersions } from '../shared/appUpdate';
 import { inspectBundledPythonHelpers } from '../backend/PythonHelpers';
 import { readModelSetupManifest } from '../setup/ModelSetupCatalog';
 import { daSiWaCoreRequirements } from '../setup/DaSiWaRequirements';
+import { reviewedDaSiWaForgePatchNames } from '../setup/DaSiWaForgeCompute';
 import { ordinaryNodeRequirementsRecorded } from '../setup/OrdinaryNodeRequirements';
 import { inspectLocalRequirements } from '../setup/LocalRequirements';
 import { inspectManagedNodeFrontend, managedChildPath, readManagedToolRequirements, type ManagedNodeRequirement, type ManagedRuntimePackage } from '../setup/ManagedToolRequirements';
@@ -231,8 +232,14 @@ export function inspectManagedNode(sourceRoot: string, comfyRoot: string, requir
       return { ...base, installedCommit, status: 'unknown', reason: 'Bundled compatibility patch is missing; repair the Umbra Studio installation.' };
     }
     // The upstream commit alone cannot establish readiness for Umbra's local integration.
-    const applied = probeManagedGit(nodePath, ['apply', '--reverse', '--check', patch], gitProbes);
-    if (applied.status !== 0) {
+    const patchNames = requirement.name === 'ComfyUI-DaSiWa-Nodes'
+      ? reviewedDaSiWaForgePatchNames(requirement.requiredPatch)
+      : [requirement.requiredPatch];
+    const applied = patchNames.some(name => {
+      const reviewedPatch = safeChild(join(sourceRoot, 'setup'), name);
+      return existsSync(reviewedPatch) && probeManagedGit(nodePath, ['apply', '--reverse', '--check', reviewedPatch], gitProbes).status === 0;
+    });
+    if (!applied) {
       return { ...base, installedCommit, status: 'outdated', reason: 'Umbra compatibility patch needs to be installed or refreshed.' };
     }
   }
