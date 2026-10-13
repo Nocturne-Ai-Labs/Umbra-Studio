@@ -2930,6 +2930,18 @@ async function main() {
     console.log(`${c.cyan}+------------------------------------------------+${c.reset}\n`);
 
     const arg = process.argv[2]?.toLowerCase();
+    const aiToolkitActions = new Set(['aitoolkit', 'update-aitoolkit', 'update-python-aitoolkit', 'update-pytorch-aitoolkit']);
+    const independentActions = new Set(['python-helpers', 'waifu-tagger', 'shortcuts', 'umbra-ui-models']);
+    // Direct install-tools callers need the same admission as Setup's UI, before
+    // even preparing runtimes. Unknown actions fall back to ComfyUI below.
+    if (aiToolkitActions.has(arg || '')) {
+        await assertAIToolkitStopped(ROOT_DIR);
+    } else if (!independentActions.has(arg || '')) {
+        const settingsFile = join(ROOT_DIR, 'User', 'Config', 'settings.json');
+        const settings = existsSync(settingsFile) ? JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^\uFEFF/, '')) : {};
+        const port = Number(process.env.UMBRA_PORT || settings.servers?.umbra?.port || 8212);
+        await assertManagedDependencyRepairIdle({ runtimeRoot: ROOT_DIR, origin: `http://127.0.0.1:${port}` });
+    }
     const pythonNotRequiredActions = new Set([
         'umbra-ui-models',
         'umbra-nodes'
