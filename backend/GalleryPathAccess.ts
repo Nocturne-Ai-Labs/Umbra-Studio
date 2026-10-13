@@ -2,8 +2,9 @@ import * as fs from 'node:fs/promises';
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { registeredModelPreviewRoot } from './ModelPreviewPathAccess';
 
-export type GalleryPathPolicy = { runtimeRoot: string; sourceRoot?: string; builtinRoots: string[]; allowedRoots: string[]; protectedRoots: string[] };
+export type GalleryPathPolicy = { runtimeRoot: string; sourceRoot?: string; builtinRoots: string[]; allowedRoots: string[]; protectedRoots: string[]; contentAncestorRoots?: string[]; mediaPreviewRoots?: string[] };
 const galleryPathPolicy = new AsyncLocalStorage<GalleryPathPolicy | undefined>();
 export function withGalleryPathPolicy<T>(policy: GalleryPathPolicy | undefined, operation: () => T): T {
   return galleryPathPolicy.run(policy, operation);
@@ -28,19 +29,23 @@ export function isGalleryPathPolicyAllowed(path: string): boolean {
       })]
       : policy.allowedRoots;
     const physicalRoots = roots.map(canonicalCandidateSync);
+    const previewRoot = policy.mediaPreviewRoots ? registeredModelPreviewRoot(path, policy.mediaPreviewRoots) : null;
     const source = policy.sourceRoot ? canonicalCandidateSync(policy.sourceRoot) : null;
     const declaredRuntimeContent = isInsidePhysicalRoot(runtime, candidate)
-      && physicalRoots.some(root => isInsidePhysicalRoot(runtime, root) && isInsidePhysicalRoot(root, candidate));
+      && (Boolean(previewRoot) || physicalRoots.some(root => isInsidePhysicalRoot(runtime, root) && isInsidePhysicalRoot(root, candidate)));
     // A separate runtime may live beneath the source checkout. Only positively
     // granted content physically inside that runtime can cross the source guard;
     // all other protected roots and ancestor mutations remain denied.
     for (const root of policy.protectedRoots) {
       const protectedPath = canonicalCandidateSync(root);
+      if (declaredRuntimeContent && policy.contentAncestorRoots?.some(ancestor => !relative(resolve(ancestor), resolve(root)))) continue;
+      if (previewRoot && (!relative(resolve(root), resolve(previewRoot))
+        || isInsidePhysicalRoot(resolve(policy.runtimeRoot, 'Tools'), resolve(root)) && isInsidePhysicalRoot(resolve(root), resolve(previewRoot)))) continue;
       if (source && policy.sourceRoot && !relative(resolve(policy.sourceRoot), resolve(root))
         && relative(source, runtime) && isInsidePhysicalRoot(source, runtime) && declaredRuntimeContent) continue;
       if (isInsidePhysicalRoot(protectedPath, candidate) || isInsidePhysicalRoot(candidate, protectedPath)) return false;
     }
-    return physicalRoots.some(root => isInsidePhysicalRoot(root, candidate));
+    return Boolean(previewRoot) || physicalRoots.some(root => isInsidePhysicalRoot(root, candidate));
   } catch { return false; }
 }
 

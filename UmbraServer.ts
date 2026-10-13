@@ -33695,7 +33695,12 @@ const server = Bun.serve<UmbraSocketData>({
 
   fetch: mainActionLogger.wrap((req: Request, server: Bun.Server<UmbraSocketData>) => withGalleryPathPolicy(
     isRemoteFilesystemRoute(new URL(req.url).pathname) && !isHostRequest(req, new URL(req.url), server)
-      ? createRemoteFilesystemPolicy(ROOT_DIR, SOURCE_DIR, [getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)])
+      ? createRemoteFilesystemPolicy(ROOT_DIR, SOURCE_DIR, [getResolvedTrashStorageDir(), ...getConfiguredExternalRoots().map(resolvePathCandidate)], {
+        comfyRoot: getComfyToolRootFast(),
+        mediaPreviewRoots: (req.method === 'GET' && ['/api/fs/image', '/api/fs/thumbnail', '/api/gallery-bridge/fs/image', '/api/gallery-bridge/fs/thumbnail'].includes(new URL(req.url).pathname)
+          || req.method === 'POST' && ['/api/comfy/copy-image', '/api/comfy/copy-media', '/api/comfy/ensure-media'].includes(new URL(req.url).pathname))
+          ? getModelManagerRootsResolved().map(root => root.fullPath) : undefined,
+      })
       : undefined,
     async () => {
     const requestStartedAt = Date.now();

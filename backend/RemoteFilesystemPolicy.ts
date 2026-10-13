@@ -2,28 +2,33 @@ import { readdirSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { currentGalleryPathPolicy, isGalleryPathPolicyAllowed, type GalleryPathPolicy } from './GalleryPathAccess';
 
-export function createRemoteFilesystemPolicy(runtimeRoot: string, sourceRoot: string, extraRoots: string[]): GalleryPathPolicy {
+export function createRemoteFilesystemPolicy(runtimeRoot: string, sourceRoot: string, extraRoots: string[], options: { comfyRoot?: string; mediaPreviewRoots?: string[] } = {}): GalleryPathPolicy {
   const user = join(runtimeRoot, 'User');
-  const comfy = join(runtimeRoot, 'Tools', 'ComfyUI');
+  const bundledComfy = join(runtimeRoot, 'Tools', 'ComfyUI');
+  const comfy = resolve(options.comfyRoot || bundledComfy);
+  const comfyRoots = [...new Set([bundledComfy, comfy])];
   const builtinRoots = [
     ...['Outputs', 'Output', 'PowerPrompter', 'MangaStudio', 'Fonts', 'UmbraUI', 'Datasets', 'Trash', 'FontforWatermark'].map(name => join(user, name)),
     join(user, 'Temp', 'ImageInspector'), join(user, 'ComfyUI', 'input'),
-    ...['output', 'input', 'temp'].map(name => join(comfy, name)),
+    ...comfyRoots.flatMap(root => ['output', 'input', 'temp'].map(name => join(root, name))),
   ];
   const protectedRoots = ['Config', 'Cache', 'Logs', 'Models'].map(name => join(user, name));
   // Source and installed tools stay protected regardless of a configured root or alias.
   for (const [directory, exceptions] of [
     [runtimeRoot, ['User', 'Tools']],
     [join(runtimeRoot, 'Tools'), ['ComfyUI']],
-    [comfy, ['output', 'input', 'temp']],
+    ...comfyRoots.map(root => [root, ['output', 'input', 'temp']] as const),
   ] as const) {
     try { for (const entry of readdirSync(directory)) if (!exceptions.some(name => name === entry || process.platform === 'win32' && name.toLowerCase() === entry.toLowerCase())) protectedRoots.push(join(directory, entry)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
-  protectedRoots.push(join(runtimeRoot, 'Runtime'), join(comfy, 'models'), join(comfy, 'user'), join(comfy, 'custom_nodes'));
+  protectedRoots.push(join(runtimeRoot, 'Runtime'), ...comfyRoots.flatMap(root => ['models', 'user', 'custom_nodes'].map(name => join(root, name))));
+  const toolRelative = relative(join(runtimeRoot, 'Tools'), comfy);
+  const contentAncestorRoots = toolRelative && !isAbsolute(toolRelative) && toolRelative !== '..' && !toolRelative.startsWith(`..${sep}`)
+    ? [join(runtimeRoot, 'Tools', toolRelative.split(sep)[0])] : [];
   const key = (path: string) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
   if (key(sourceRoot) !== key(runtimeRoot)) protectedRoots.push(sourceRoot);
-  return { runtimeRoot, sourceRoot, builtinRoots, allowedRoots: [...builtinRoots, ...extraRoots], protectedRoots };
+  return { runtimeRoot, sourceRoot, builtinRoots, allowedRoots: [...builtinRoots, ...extraRoots, ...(options.mediaPreviewRoots || [])], protectedRoots, contentAncestorRoots, mediaPreviewRoots: options.mediaPreviewRoots };
 }
 
 export function isRemoteFilesystemRoute(path: string): boolean {
