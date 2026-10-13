@@ -120,6 +120,9 @@ export interface UmbraUiPipelineGuidanceCapability extends UmbraUiPipelineContro
 }
 
 export interface UmbraUiPipelineResolutionCapability extends UmbraUiPipelineControlCapability {
+  // Consumer schemas constrain only the dimension wired to the resolution node.
+  widthNodeClassTypes?: string[];
+  heightNodeClassTypes?: string[];
   defaultWidth?: number;
   defaultHeight?: number;
   minimumWidth?: number;
@@ -768,6 +771,12 @@ export function normalizeUmbraUiPipelineCapabilities(
     denoise: normalizeControlCapability(raw.denoise, fallback.denoise),
     resolution: {
       ...normalizeControlCapability(resolutionRaw, fallback.resolution),
+      ...(Array.isArray(resolutionRaw.widthNodeClassTypes)
+        ? { widthNodeClassTypes: normalizePipelineStringList(resolutionRaw.widthNodeClassTypes, 50) }
+        : {}),
+      ...(Array.isArray(resolutionRaw.heightNodeClassTypes)
+        ? { heightNodeClassTypes: normalizePipelineStringList(resolutionRaw.heightNodeClassTypes, 50) }
+        : {}),
       ...(normalizePipelineFiniteNumber(resolutionRaw.defaultWidth) !== undefined
         ? { defaultWidth: normalizePipelineFiniteNumber(resolutionRaw.defaultWidth) }
         : {}),
