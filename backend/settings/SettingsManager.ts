@@ -75,7 +75,7 @@ class SettingsManager {
     private toPortableVariables(obj: any): any {
         if (typeof obj === 'string') {
             // Only replace the root itself or a descendant, never a sibling prefix.
-            const rootPattern = new RegExp(`${this.escapeRegExp(this.projectRoot)}(?=$|[\\\\/])`, process.platform === 'win32' ? 'gi' : 'g');
+            const rootPattern = new RegExp(`^${this.escapeRegExp(this.projectRoot)}(?=$|[\\\\/])`, process.platform === 'win32' ? 'i' : '');
             return obj.replace(rootPattern, '${PROJECT_ROOT}');
         }
         if (Array.isArray(obj)) {
