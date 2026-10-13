@@ -33,7 +33,10 @@ export class MangaStudioFiles {
     for (const part of ['', ...relative.split(sep).filter(Boolean)]) {
       if (part) current = join(current, part);
       let info = await lstat(current).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-      if (!info) { await mkdir(current); info = await lstat(current); }
+      if (!info) {
+        await mkdir(current).catch(error => { if (error.code !== 'EEXIST') throw error; });
+        info = await lstat(current);
+      }
       if (info.isSymbolicLink() || !info.isDirectory()) throw new MangaFileError('Manga storage folders must not be links.', 403);
     }
     const physicalUser = await realpath(this.userRoot), physicalTarget = await realpath(target);
@@ -51,9 +54,11 @@ export class MangaStudioFiles {
     return data;
   }
   private async locked<T>(name: string, action: () => Promise<T>): Promise<T> {
-    const next = (this.gates.get(name) || Promise.resolve()).catch(() => undefined).then(action);
-    const done = next.then(() => undefined, () => undefined); this.gates.set(name, done);
-    try { return await next; } finally { if (this.gates.get(name) === done) this.gates.delete(name); }
+    // Windows filenames are case-insensitive; aliases must share one revision gate.
+    const key = process.platform === 'win32' ? name.toLowerCase() : name;
+    const next = (this.gates.get(key) || Promise.resolve()).catch(() => undefined).then(action);
+    const done = next.then(() => undefined, () => undefined); this.gates.set(key, done);
+    try { return await next; } finally { if (this.gates.get(key) === done) this.gates.delete(key); }
   }
   async fonts() {
     await this.directory(this.fontRoot);
@@ -135,20 +140,26 @@ export class MangaStudioFiles {
 
   async stageImage(imageUrl: unknown, rawProvenance?: unknown) {
     if (typeof imageUrl !== 'string' || imageUrl.length > 30_000_000) throw new MangaFileError('Use an embedded Manga image up to 20 MB.', 413);
-    const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(imageUrl);
-    if (!match) throw new MangaFileError('Only embedded PNG, JPEG and WebP images can be sent to editing tools.');
-    let bytes = Buffer.from(match[2], 'base64');
+    const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/.exec(imageUrl);
+    if (!match) throw new MangaFileError('Only embedded PNG, JPEG, WebP and GIF images can be sent to editing tools.');
+    let bytes: Buffer = Buffer.from(match[2], 'base64');
     if (bytes.length > 20_000_000 || bytes.toString('base64') !== match[2]) throw new MangaFileError('Invalid or oversized Manga image.');
     const info = await sharp(bytes, { limitInputPixels: 40_000_000 }).metadata();
     if (info.format !== match[1] || !info.width || !info.height || info.width * info.height > 40_000_000) throw new MangaFileError('Invalid Manga image data.');
-    if (rawProvenance !== undefined && match[1] === 'png') {
+    // Image editors consume still images; stage the GIF's first frame as PNG.
+    const format = match[1] === 'gif' ? 'png' : match[1];
+    if (match[1] === 'gif') {
+      bytes = await sharp(bytes, { limitInputPixels: 40_000_000 }).png().toBuffer();
+      if (bytes.length > 20_000_000) throw new MangaFileError('The GIF first frame exceeds the 20 MB editing limit.', 413);
+    }
+    if (rawProvenance !== undefined && format === 'png') {
       const metadata = JSON.parse(parseMangaImageProvenance(rawProvenance).metadataJson);
       for (const key of ['workflow','prompt','umbra_api_workflow','umbra_power_prompter','umbra_inpaint','umbra_metadata','positive_prompt','negative_prompt','parameters']) {
         if (metadata[key] !== undefined && metadata[key] !== null) bytes = upsertPngTextMetadataBuffer(bytes,key,typeof metadata[key] === 'string' ? metadata[key] : JSON.stringify(metadata[key]));
       }
     }
     const root = join(this.userRoot, 'MangaStudio', 'Transfers');
-    const name = `${sha(bytes)}.${match[1] === 'jpeg' ? 'jpg' : match[1]}`;
+    const name = `${sha(bytes)}.${format === 'jpeg' ? 'jpg' : format}`;
     await this.locked('transfer:'+name, async () => {
       await this.directory(root);
       const existing = await this.file(root, name, 32_100_000);
