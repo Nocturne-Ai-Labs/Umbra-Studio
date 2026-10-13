@@ -23,7 +23,7 @@ export async function exportMangaReader(project:MangaProject):Promise<Blob> {
   for(const [font,file] of [['comic-neue','comicneue-OFL.txt'],['bangers','bangers-OFL.txt']])if(fonts.has(font)) {
     const notice=await fetch(`/assets/manga-fonts/${file}`);if(!notice.ok)throw new Error('Bundled font license notice is missing.');notices+='\n'+await notice.text();
   }
-  for(const font of fonts)if(isMangaUserFont(font))fontSources.push({family:`UmbraManga_${font.slice(10)}`,url:`/api/manga/fonts/${font.slice(10)}`,weight:'100 1000'});
+  for(const font of fonts)if(isMangaUserFont(font))fontSources.push({family:`UmbraManga_${font.slice(10)}`,url:`/api/manga/fonts/${font.slice(10)}`,weight:'400'});
   let fontCss='';
   for(const font of fontSources)fontCss+=`@font-face{font-family:'${font.family}';src:url('${await embeddedFile(font.url)}');font-weight:${font.weight};font-display:block}`;
   const pages:string[]=[];
