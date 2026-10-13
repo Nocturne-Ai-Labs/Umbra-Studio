@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.90.15-beta - Reliability And Application Audit
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**Umbra Setup remains the home for installation and updates after the major setup-flow refactor.**
+
+- Save your work and update through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux when installation finishes, then launch Studio. A stale Setup session now asks you to reopen it before another installation.
+- This patch requires no new generation models or accelerator changes. Existing models, outputs and projects remain preserved. If an installed custom node needs repair, use **Umbra Setup > Advanced > Tools** and restart ComfyUI afterward. Locally modified or divergent node repositories are held for review rather than overwritten.
+- Optional AI Toolkit requires host Git and Node.js 20+ with npm. Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Setup And Editing Reliability
+
+- Setup keeps bounded, redacted job logs and history across restarts, improves custom-node repair and Linux compiler detection, and handles interrupted upgrades and obsolete sessions more clearly.
+- Gallery transfers and exported images retain generation identifiers, wildcard choices, Unicode prompts and supported PNG/JPEG metadata. Canvas mask edits persist, and dataset moves preserve shared captions and recover cleanly from collisions.
+- Manga generation uses your chosen long-side target and the selected workflow's actual dimension requirements. Model recommendations do not impose a separate Manga resolution cap; unsupported workflow dimensions produce an actionable error.
+- Phone settings and Gallery menus behave more consistently. Closing a context menu preserves the surrounding editor or viewer, and model reinspection refreshes the visible results.
+
+### Security And Localization
+
+- Tightened authenticated filesystem and settings access, external-root permissions, session handling, bounded metadata decoding and remote dataset downloads. Runtime image processing, routing and HTML sanitization dependencies have been updated.
+- Japanese, Simplified Chinese, Korean and German catalogs now cover additional Manga, Canvas and shared controls; standalone Manga windows hydrate the saved language. User project and font names remain unchanged by translation.
+- Localization remains incomplete for some dynamic labels and errors. Nine development/build dependency packages remain flagged for follow-up; this release does not claim a complete dependency-security clearance.
+
+### Validation
+
+The reviewed source passed focused API, persistence, security, metadata, localization, generation-contract, source-export, TypeScript, lint and frontend build checks. Native Linux first-use and Anima generation, enhancements and cancellation were exercised. Windows GPU generation remains blocked in the test environment by operating-system application control; security protection was kept enabled. Broader model-family, training, video and physical-device testing remain outstanding. Exact packaged startup and upgrade qualification is recorded separately before publication.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: lost image metadata during editing transfers and exports, stale Canvas masks, caption move collisions and numeric tagger defaults.
+- Fixed: stale Setup installation attempts, fragile node repair, incomplete progress and refreshed model-state handling.
+- Fixed: filesystem permission gaps, malformed authentication settings, oversized metadata and unsafe remote import edge cases.
+- Improved: uncapped Manga long-side targets with workflow-aware validation, persistent Setup logs and safer release-source filtering.
+- Improved: narrow-screen settings, menu dismissal and translated Manga/Canvas controls.
+
 ## v0.90.14-beta - LoRA And Detailer Controls
 
 ### TL;DR - Setup After Updating
