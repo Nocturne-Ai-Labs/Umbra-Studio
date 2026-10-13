@@ -1958,6 +1958,7 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
         return false;
     }
     const nodes = onlyNames ? COMFY_NODES.filter((node) => enabledNodes.has(node.name)) : COMFY_NODES;
+    const failedCheckouts = new Set<string>();
     let requiredFailure = false;
 
     for (const node of nodes) {
@@ -1985,6 +1986,7 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                 configureGitRepoForPortableUpdates(nodePath);
             } catch (error) {
                 log('X', error instanceof Error ? error.message : String(error));
+                failedCheckouts.add(node.name);
                 requiredFailure = true;
             }
             continue;
@@ -1998,6 +2000,7 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                 log(`${c.green}OK${c.reset}`, `${node.name} installed`);
             } catch {
                 log(`${c.red}X${c.reset}`, `Failed to install ${node.name}`);
+                failedCheckouts.add(node.name);
                 if (onlyNames) requiredFailure = true;
             }
         } else {
@@ -2006,11 +2009,13 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
             try { ownCheckout = isOwnGitCheckout(nodePath); }
             catch (error) {
                 log('X', error instanceof Error ? error.message : String(error));
+                failedCheckouts.add(node.name);
                 requiredFailure = true;
                 continue;
             }
             if (!ownCheckout) {
                 log(`${c.yellow}WARN${c.reset}`, `${node.name} is not an independent Git checkout; its files were left unchanged. Review its checkout layout before retrying.`);
+                failedCheckouts.add(node.name);
                 if (onlyNames) requiredFailure = true;
             } else {
                 try {
@@ -2033,6 +2038,7 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                     log(`${c.green}OK${c.reset}`, `${node.name} updated`);
                 } catch (error) {
                     log('X', error instanceof Error ? error.message : String(error));
+                    failedCheckouts.add(node.name);
                     requiredFailure = true;
                 }
             }
@@ -2041,9 +2047,14 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
 
     for (const node of nodes) {
         if ('nvidiaOnly' in node && node.nvidiaOnly && !GPU_NAME) continue;
-
         const required = Boolean(onlyNames) || supportedRequiredNodes.has(node.name) || ('required' in node && node.required);
         if (!enabledNodes.has(node.name) && !required) continue;
+        // A checkout hold must also preserve the environment; do not install
+        // dependencies or apply patches from source that failed verification.
+        if (failedCheckouts.has(node.name)) {
+            if (required) requiredFailure = true;
+            continue;
+        }
 
         const nodePath = join(nodesDir, node.name);
         if (!existsSync(nodePath)) {
