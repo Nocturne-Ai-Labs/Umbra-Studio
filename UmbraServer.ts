@@ -29780,8 +29780,8 @@ async function handleFsMetadata(req: Request, url: URL, server?: RequestIpServer
       format: (parsed as any).format ?? imageMetadata.format,
       exif: imageMetadata.exif,
       ...parsed,
-      width: imageMetadata.width ?? (parsed as any).width,
-      height: imageMetadata.height ?? (parsed as any).height,
+      width: imageMetadata.autoOrient?.width ?? imageMetadata.width ?? (parsed as any).width,
+      height: imageMetadata.autoOrient?.height ?? imageMetadata.height ?? (parsed as any).height,
     });
   } catch (error: any) {
     console.error('[Metadata] Error:', error);
