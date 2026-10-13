@@ -7,6 +7,7 @@ import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:z
 import postcss from 'postcss';
 import tailwindPostcss from '@tailwindcss/postcss';
 import * as esbuild from 'esbuild';
+import { buildMonacoAssets } from './build-monaco-assets.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, '..');
@@ -488,6 +489,7 @@ async function buildFrontend() {
   try {
     copyStaticPublic();
     const mainBundlePath = await buildJavaScript();
+    await buildMonacoAssets(root, activePublicDir, isDevelopmentBuild);
     const reader=await Bun.build({entrypoints:[path.join(srcDir,'features/manga/mangaReaderRuntime.ts')],target:'browser',format:'iife',minify:true});
     if(!reader.success)throw new Error('Manga reader build failed: '+reader.logs.join('\n'));
     fs.writeFileSync(path.join(activePublicAssetsDir,'manga-reader.js'),await reader.outputs[0].text());
