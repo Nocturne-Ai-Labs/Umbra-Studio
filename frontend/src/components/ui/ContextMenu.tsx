@@ -400,7 +400,11 @@ export function ContextMenu({
       onClose();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }
     };
     const handleContextMenu = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target : null;
