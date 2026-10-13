@@ -7,6 +7,7 @@ import {
   type UmbraUiPipelineCapabilities,
   type UmbraUiPipelineCapabilitySupport,
   type UmbraUiPipelineControlCapability,
+  type UmbraUiPipelineResolutionCapability,
   type UmbraUiPipelineDefaults,
   type UmbraUiPipelineFeature,
   type UmbraUiInpaintAdapter,
@@ -584,6 +585,34 @@ export function getUmbraUiRuntimeNodeExecutionError(
   return '';
 }
 
+export function resolveUmbraUiResolutionNodeLimits(
+  resolution: UmbraUiPipelineResolutionCapability,
+  objectInfo: Record<string, unknown> | null,
+): UmbraUiPipelineResolutionCapability {
+  if (!objectInfo || resolution.support !== 'adjustable') return resolution;
+  const result = { ...resolution };
+  const positiveInteger = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+  const gcd = (a: number, b: number): number => { while (b) { const remainder = a % b; a = b; b = remainder; } return a; };
+  for (const classType of resolution.nodeClassTypes) {
+    const input = toRecord(toRecord(objectInfo[classType]).input);
+    for (const axis of ['width', 'height'] as const) {
+      const schema = toRecord(input.required)[axis] ?? toRecord(input.optional)[axis];
+      if (!Array.isArray(schema) || schema[0] !== 'INT') continue;
+      const options = toRecord(schema[1]);
+      const minimum = axis === 'width' ? 'minimumWidth' : 'minimumHeight';
+      const maximum = axis === 'width' ? 'maximumWidth' : 'maximumHeight';
+      if (positiveInteger(options.min)) result[minimum] = Math.max(result[minimum] || 1, options.min);
+      if (positiveInteger(options.max)) result[maximum] = result[maximum] === undefined ? options.max : Math.min(result[maximum]!, options.max);
+      if (positiveInteger(options.step)) {
+        const step = (result.step || 1) / gcd(result.step || 1, options.step) * options.step;
+        if (!Number.isSafeInteger(step)) throw new Error('Resolution node alignment exceeds integer representation.');
+        result.step = step;
+      }
+    }
+  }
+  return result;
+}
+
 export function deriveUmbraUiTxt2ImgCapabilities(
   promptGraph: Record<string, unknown>,
   descriptor: UmbraUiInpaintCapabilityDescriptorInput,
@@ -771,16 +800,19 @@ export function deriveUmbraUiTxt2ImgCapabilities(
     || node.classType === 'TextEncodeQwenImage21'
   ));
   const resolutionStep = hasHiDreamPixelLatent ? 32 : hasSixteenPixelLatent ? 16 : 8;
-  const maximumResolution = hasHiDreamPixelLatent ? 4096 : 16384;
+  const resolutionIds = new Set(resolutionNodes.map(node => node.id));
+  const dimensionConsumers = nodes.filter(node => ['width', 'height'].some(axis => {
+    const value = node.inputs[axis];
+    return Array.isArray(value) && resolutionIds.has(String(value[0]));
+  }));
   const resolution = resolutionNodes.length > 0
     ? {
       ...control('adjustable', 'Width and height are connected to the latent or family scheduler.', resolutionNodes),
+      nodeClassTypes: Array.from(new Set([...resolutionNodes, ...dimensionConsumers].map(node => node.classType))),
       defaultWidth: Number(literalInput(resolutionNodes, ['width']) ?? defaults.width) || undefined,
       defaultHeight: Number(literalInput(resolutionNodes, ['height']) ?? defaults.height) || undefined,
       minimumWidth: 64,
       minimumHeight: 64,
-      maximumWidth: maximumResolution,
-      maximumHeight: maximumResolution,
       step: resolutionStep,
     }
     : {
@@ -789,8 +821,6 @@ export function deriveUmbraUiTxt2ImgCapabilities(
       defaultHeight: defaults.height,
       minimumWidth: 64,
       minimumHeight: 64,
-      maximumWidth: maximumResolution,
-      maximumHeight: maximumResolution,
       step: resolutionStep,
     };
 

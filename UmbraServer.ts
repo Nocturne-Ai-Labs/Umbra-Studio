@@ -278,6 +278,7 @@ import {
 import {
   deriveUmbraUiInpaintCanvasCapabilities,
   deriveUmbraUiTxt2ImgCapabilities,
+  resolveUmbraUiResolutionNodeLimits,
   listUmbraUiImg2ImgPipelineGraphIssues,
   listUmbraUiInpaintPipelineGraphIssues,
   listUmbraUiVid2VidPipelineGraphIssues,
@@ -21376,8 +21377,8 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
     workflowResources: normalizePPWorkflowResources((controls as any).workflowResources),
     aspectRatio: normalizePPAspectRatio(controls.aspectRatio),
     swapDimensions,
-    width: clampPPInteger(controls.width, PP_DEFAULT_GENERATION_CONTROLS.width, 64, 8192),
-    height: clampPPInteger(controls.height, PP_DEFAULT_GENERATION_CONTROLS.height, 64, 8192),
+    width: clampPPInteger(controls.width, PP_DEFAULT_GENERATION_CONTROLS.width, 64, Number.MAX_SAFE_INTEGER),
+    height: clampPPInteger(controls.height, PP_DEFAULT_GENERATION_CONTROLS.height, 64, Number.MAX_SAFE_INTEGER),
     batchSize: clampPPInteger(controls.batchSize, PP_DEFAULT_GENERATION_CONTROLS.batchSize, 1, 64),
     loras: normalizePPLoras(controls.loras),
     thumbnailOverrides: normalizePPThumbnailOverrides((controls as any).thumbnailOverrides),
@@ -25855,10 +25856,14 @@ function attachUmbraUiPipelineReadiness(
   return {
     ...descriptor,
     umbraUiPipelines: descriptor.umbraUiPipelines.map((pipeline) => {
-      const capabilities = pipeline.capabilities
+      const graphCapabilities = pipeline.capabilities
         || (pipeline.feature === 'txt2img' || pipeline.feature === 'img2img'
           ? deriveUmbraUiTxt2ImgCapabilities({}, pipeline)
           : undefined);
+      const capabilities = graphCapabilities ? {
+        ...graphCapabilities,
+        resolution: resolveUmbraUiResolutionNodeLimits(graphCapabilities.resolution, objectInfo),
+      } : undefined;
       if (!capabilities) return pipeline;
       const pipelineIssues = validation.pipelineGraphIssues[getUmbraUiPipelineValidationKey(pipeline)] || [];
       const graphIssues = Array.from(new Set([

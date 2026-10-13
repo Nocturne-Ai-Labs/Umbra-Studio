@@ -776,8 +776,12 @@ export function normalizeUmbraUiPipelineCapabilities(
         : {}),
       minimumWidth: Math.max(1, normalizePipelineFiniteNumber(resolutionRaw.minimumWidth) ?? fallback.resolution.minimumWidth ?? 64),
       minimumHeight: Math.max(1, normalizePipelineFiniteNumber(resolutionRaw.minimumHeight) ?? fallback.resolution.minimumHeight ?? 64),
-      maximumWidth: Math.max(1, normalizePipelineFiniteNumber(resolutionRaw.maximumWidth) ?? fallback.resolution.maximumWidth ?? 16384),
-      maximumHeight: Math.max(1, normalizePipelineFiniteNumber(resolutionRaw.maximumHeight) ?? fallback.resolution.maximumHeight ?? 16384),
+      ...(normalizePipelineFiniteNumber(resolutionRaw.maximumWidth) !== undefined
+        ? { maximumWidth: Math.max(1, normalizePipelineFiniteNumber(resolutionRaw.maximumWidth)!) }
+        : {}),
+      ...(normalizePipelineFiniteNumber(resolutionRaw.maximumHeight) !== undefined
+        ? { maximumHeight: Math.max(1, normalizePipelineFiniteNumber(resolutionRaw.maximumHeight)!) }
+        : {}),
       step: Math.max(1, Math.round(normalizePipelineFiniteNumber(resolutionRaw.step) ?? fallback.resolution.step ?? 8)),
     },
     hiresFix: {
