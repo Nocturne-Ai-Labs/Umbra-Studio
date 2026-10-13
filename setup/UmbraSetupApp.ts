@@ -1,3 +1,4 @@
+import { SetupJobLogStore, redactSetupOutput, validSetupJobId, MAX_SETUP_LOG_LINES, type SetupLogStatus } from './SetupJobLogs';
 import { cleanupLegacyUmbraUpdater } from '../shared/legacyUmbraUpdater';
 import {
   existsSync,
@@ -19,7 +20,7 @@ import { assertAIToolkitStopped, inspectToolMaintenance, toolMaintenanceArgs } f
 import { claimToolMaintenance, readToolMaintenance, trackToolMaintenanceChild } from '../shared/toolMaintenanceLock';
 import { createUmbraUpdateController } from '../updater/UmbraUpdateController';
 import { setupSourceFingerprint } from '../launcher/UmbraUpdaterBootstrap';
-import { installerFailureMessage } from '../shared/installerFailure';
+import { installerFailureMessage, parseInstallerFailure } from '../shared/installerFailure';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { installMediaTools, inspectMediaTools } from './MediaTools';
 import { ensureUmbraRuntimeReady } from '../shared/umbraRuntimeLaunch';
@@ -28,10 +29,10 @@ import { assertManagedDependencyRepairIdle, createManagedWorkflowRepairPlan, man
 
 const DEFAULT_SETUP_PORT = 8215;
 const SUPPORTED_LANGUAGES = new Set(['en', 'ja', 'zh-CN', 'ko', 'de']);
-const MAX_LOG_LINES = 500;
+const MAX_LOG_LINES = MAX_SETUP_LOG_LINES;
 
 type SetupJobKind = 'data-forge' | 'data-forge-pixai' | 'umbra-ui' | 'requirements' | 'support' | 'managed-tools' | 'media-tools' | 'python-helpers' | 'readiness';
-type SetupJobState = {
+export type SetupJobState = {
   id: string;
   kind: SetupJobKind;
   phase: 'running' | 'complete' | 'failed' | 'cancelled';
@@ -40,12 +41,16 @@ type SetupJobState = {
   startedAt: string;
   completedAt: string | null;
   error: string;
+  log?: SetupLogStatus;
   cancellable?: boolean;
   maintenanceTool?: 'comfyui' | 'aitoolkit';
   cancelRequested?: boolean;
   progress?: { stage?: string; file?: string; bytes?: number; totalBytes?: number; completedFiles?: number; totalFiles?: number };
 };
 const jobChildren = new Map<string, ReturnType<typeof spawn>>();
+const jobLogStores = new WeakMap<SetupJobState, SetupJobLogStore>();
+export function attachSetupJobLog(job: SetupJobState, store: SetupJobLogStore, secrets: string[] = []) { jobLogStores.set(job, store); store.start(job, secrets); }
+export function finishSetupJobLog(job: SetupJobState) { jobLogStores.get(job)?.finish(job); }
 
 function readArg(name: string, fallback = ''): string {
   const args = Bun.argv.slice(2);
@@ -130,19 +135,20 @@ function openBrowser(url: string) {
   browser.unref();
 }
 
-function appendOutput(job: SetupJobState, value: string) {
-  const normalized = value.replace(/\r/g, '\n');
+export function appendOutput(job: SetupJobState, value: string) {
+  const safe = jobLogStores.get(job)?.append(job, value) ?? redactSetupOutput(value);
+  const normalized = safe.replace(/\r/g, '\n');
   for (const line of normalized.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    job.lines.push(trimmed);
+    job.lines.push(trimmed.slice(0, 2048));
   }
   if (job.lines.length > MAX_LOG_LINES) {
     job.lines.splice(0, job.lines.length - MAX_LOG_LINES);
   }
 }
 
-async function runScript(runtimeRoot: string, scriptPath: string, args: string[], job: SetupJobState, hfToken = '', sourceRoot = '', installEnv: Record<string, string> = {}) {
+export async function runScript(runtimeRoot: string, scriptPath: string, args: string[], job: SetupJobState, hfToken = '', sourceRoot = '', installEnv: Record<string, string> = {}) {
   if (!existsSync(scriptPath)) throw new Error(`Required installer script is missing: ${scriptPath}`);
   const child = spawn(process.execPath, [scriptPath, ...args], {
     cwd: runtimeRoot,
@@ -161,14 +167,19 @@ async function runScript(runtimeRoot: string, scriptPath: string, args: string[]
     try { trackToolMaintenanceChild(runtimeRoot, job.maintenanceTool, child.pid); }
     catch (error) { child.kill(); child.on('error', () => {}); jobChildren.delete(job.id); throw error; }
   }
-  const redact = (value: string) => hfToken ? value.split(hfToken).join('[redacted]') : value;
+  jobLogStores.get(job)?.addSecrets(job, [hfToken]);
+  const redact = (value: string) => redactSetupOutput(value, [hfToken]);
   child.stdin?.on('error', (error) => {
     appendOutput(job, redact(`Installer input pipe failed: ${error.message}`));
   });
+  let lastFailureLine = '';
   const attachOutput = (stream: typeof child.stdout) => {
     let pending = '';
     const line = (value: string) => {
+      value = redact(value);
+      if (parseInstallerFailure(value)) lastFailureLine = value;
       if (value.startsWith('UMBRA_MODEL_PROGRESS|')) {
+        jobLogStores.get(job)?.append(job, value);
         try { job.progress = { ...job.progress, ...JSON.parse(value.slice('UMBRA_MODEL_PROGRESS|'.length)) }; } catch { /* Ignore incomplete worker messages. */ }
       } else appendOutput(job, redact(value));
     };
@@ -188,7 +199,7 @@ async function runScript(runtimeRoot: string, scriptPath: string, args: string[]
     child.once('close', (value) => resolveExit(value ?? 1));
   }).finally(() => jobChildren.delete(job.id));
   if (job.cancelRequested) throw new Error('Installation cancelled.');
-  if (code !== 0) throw new Error(installerFailureMessage(job.lines, code));
+  if (code !== 0) throw new Error(installerFailureMessage(lastFailureLine ? [lastFailureLine] : job.lines, code));
 }
 
 async function runManagedToolScript(runtimeRoot: string, sourceRoot: string, args: string[], job: SetupJobState) {
@@ -314,7 +325,10 @@ async function main() {
     .replace('<!-- UPDATE_PANEL -->', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.html'), 'utf8'))
     .replace('/* UPDATE_STYLE */', () => readFileSync(join(uiSourceRoot, 'updater', 'update-panel.css'), 'utf8'))
     .replace('/* UPDATE_SCRIPT */', () => updatePanelScript);
-  let activeJob: SetupJobState | null = null;
+  const jobLogs = new SetupJobLogStore(runtimeRoot);
+  let activeJob = jobLogs.latest() as SetupJobState | null;
+  const startJob = (job: SetupJobState) => { attachSetupJobLog(job, jobLogs, [token]); activeJob = job; };
+  process.once('exit', () => jobLogs.close());
   let appLaunch: Promise<void> | null = null;
   let managedRepairState = readManagedRepairState(runtimeRoot);
   const persistManagedRepair = async (state: ManagedRepairState) => { managedRepairState = state; writeJsonAtomic(managedRepairStatePath(runtimeRoot), state); };
@@ -368,6 +382,16 @@ async function main() {
         return json({ success: false, error: 'Close and reopen Setup after updating Umbra Studio.' }, 409);
       }
 
+      if (url.pathname === '/api/logs' && request.method === 'GET') return json({ success: true, jobs: jobLogs.history() });
+      if (url.pathname.startsWith('/api/logs/') && request.method === 'GET') {
+        const id = url.pathname.slice('/api/logs/'.length);
+        if (!validSetupJobId(id)) return json({ success: false, error: 'Invalid setup job ID.' }, 400);
+        try {
+          const log = jobLogs.download(id);
+          return log ? new Response(log, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename=setup-${id}.log`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
+            : json({ success: false, error: 'Saved installer log not found.' }, 404);
+        } catch (error) { return json({ success: false, error: redactSetupOutput(error instanceof Error ? error.message : String(error), [token]) }, 500); }
+      }
       if (url.pathname === '/api/health') {
         return json({ success: true, port: server.port, runtimeRoot, sourceFingerprint, needsReopen: needsReopen() });
       }
@@ -393,7 +417,7 @@ async function main() {
         const state = readOnboarding(runtimeRoot);
         if (!state.languageSaved || !state.profiles.length) return json({ success: false, error: 'Save your language and select a generation model family first.' }, 400);
         const job: SetupJobState = { id: randomUUID(), kind: 'readiness', phase: 'running', step: 'Verifying installation', lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: true };
-        activeJob = job;
+        startJob(job);
         void (async () => {
           await runModelInstall(runtimeRoot, sourceRoot, 'support', job, modelSetupSelection(sourceRoot, 'support', state.supportProfiles), true);
           await runModelInstall(runtimeRoot, sourceRoot, 'requirements', job, modelSetupSelection(sourceRoot, 'requirements', state.profiles), true);
@@ -406,7 +430,7 @@ async function main() {
           writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), verificationFingerprint: result.fingerprint, verifiedAt: new Date().toISOString() });
           appendOutput(job, result.qualification);
           job.phase = 'complete'; job.step = 'Installation verified'; job.completedAt = new Date().toISOString();
-        })().catch(error => { job.phase = job.cancelRequested ? 'cancelled' : 'failed'; job.step = 'Verification held'; job.error = (error as Error).message; job.completedAt = new Date().toISOString(); appendOutput(job, job.error); });
+        })().catch(error => { job.phase = job.cancelRequested ? 'cancelled' : 'failed'; job.step = 'Verification held'; job.error = (error as Error).message; job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(() => finishSetupJobLog(job));
         return json({ success: true, accepted: true, job }, 202);
       }
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
@@ -445,7 +469,7 @@ async function main() {
           if (!['install', 'install_core', 'set_comfyui_version'].includes(String(body.action)) && !tool.installed) { release(); return json({ success: false, error: `Install ${tool.name} first.` }, 400); }
           const job: SetupJobState = { id: randomUUID(), kind: 'managed-tools', maintenanceTool: tool.id, phase: 'running', step: `${tool.name}: ${String(body.action).replaceAll('_', ' ')}`,
             lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false };
-          activeJob = job;
+          startJob(job);
           // The wrapper selects this tool's own environment and action-specific policy.
           void runManagedToolScript(runtimeRoot, sourceRoot, args, job)
             .then(async () => {
@@ -457,7 +481,7 @@ async function main() {
               }
               appendOutput(job, 'Maintenance verified. Launch the tool from Umbra Studio to check runtime readiness.');
               job.phase = 'complete'; job.step = `${tool.name} maintenance complete`; job.completedAt = new Date().toISOString();
-            }).catch(error => { job.phase = 'failed'; job.step = `${tool.name} maintenance failed`; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(release);
+            }).catch(error => { job.phase = 'failed'; job.step = `${tool.name} maintenance failed`; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(() => { finishSetupJobLog(job); release(); });
           return json({ success: true, accepted: true, job }, 202);
         } catch (error) { releaseMaintenance?.(); return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
@@ -481,7 +505,7 @@ async function main() {
             id: randomUUID(), kind: media ? 'media-tools' : 'managed-tools', phase: 'running', step: `Installing ${target}`,
             lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false,
           };
-          activeJob = job;
+          startJob(job);
           void (media ? installMediaTools(runtimeRoot, (line) => appendOutput(job, line))
             : runManagedToolScript(runtimeRoot, sourceRoot, args, job))
             .then(() => {
@@ -508,7 +532,7 @@ async function main() {
             .catch((error) => {
               job.phase = 'failed'; job.step = 'Managed tool repair failed'; job.completedAt = new Date().toISOString();
               job.error = error instanceof Error ? error.message : String(error); appendOutput(job, job.error);
-            });
+            }).finally(() => finishSetupJobLog(job));
           return json({ success: true, accepted: true, job }, 202);
         } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
       }
@@ -528,7 +552,7 @@ async function main() {
             : { schemaVersion: 1, planId: plan.id, featureId: plan.featureId, phase: 'held', completedTargets: [], priorVersions: {}, lines: [], error: '', updatedAt: new Date().toISOString() };
           const job: SetupJobState = { id: randomUUID(), kind: 'managed-tools', phase: 'running', step: `Preparing ${plan.label}`,
             lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false };
-          activeJob = job;
+          startJob(job);
           void (async () => {
             if (plan.featureId === 'all-managed-dependencies') {
               await runModelInstall(runtimeRoot, sourceRoot, 'python-helpers', job);
@@ -559,7 +583,7 @@ async function main() {
             },
             });
           })().then(() => { job.phase = 'complete'; job.step = 'Restart required; runtime preflight pending'; job.completedAt = new Date().toISOString(); })
-            .catch((error) => { job.phase = 'failed'; job.step = 'Managed repair held'; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); });
+            .catch((error) => { job.phase = 'failed'; job.step = 'Managed repair held'; job.error = error instanceof Error ? error.message : String(error); job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(() => finishSetupJobLog(job));
           return json({ success: true, accepted: true, job, repairState: state }, 202);
         } catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 409); }
       }
@@ -603,7 +627,7 @@ async function main() {
         } catch {
           // The save endpoint reports malformed settings without blocking this page.
         }
-        return json({ success: true, language, job: activeJob, busy: hasRunningInstaller(), needsReopen: needsReopen() });
+        return json({ success: true, language, job: activeJob, savedLogs: jobLogs.history(), busy: hasRunningInstaller(), needsReopen: needsReopen() });
       }
       if (url.pathname === '/api/language' && request.method === 'POST') {
         if (hasRunningInstaller()) return json({ success: false, error: 'Wait for the current operation to finish.' }, 409);
@@ -653,7 +677,8 @@ async function main() {
           error: '',
           cancellable: kind !== 'data-forge' && kind !== 'data-forge-pixai' && kind !== 'python-helpers',
         };
-        activeJob = job;
+        startJob(job);
+        jobLogs.addSecrets(job, [String(body.hfToken || '')]);
         void (body.check === true ? Promise.resolve() : prepareForInstallation(job))
           .then(() => runModelInstall(runtimeRoot, sourceRoot, kind, job, profiles, body.check === true, String(body.hfToken || '').trim()))
           .then(() => {
@@ -667,7 +692,7 @@ async function main() {
             job.completedAt = new Date().toISOString();
             job.error = error instanceof Error ? error.message : String(error);
             appendOutput(job, job.error);
-          });
+          }).finally(() => finishSetupJobLog(job));
         return json({ success: true, accepted: true, job }, 202);
       }
       if (url.pathname === '/api/launch' && request.method === 'POST') {

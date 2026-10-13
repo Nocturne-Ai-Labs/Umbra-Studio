@@ -227,6 +227,9 @@
     .setup-dock footer { border: 0; padding: 12px 28px; min-height: 64px; }
     .setup-dock .progress { border: 0; border-bottom: 1px solid var(--line); padding: 14px 28px; }
     .setup-dock .progress pre { max-height: 140px; }
+    #saved-job-logs { max-height: 140px; overflow: auto; }
+    #saved-job-logs p { margin: 6px 0; }
+    #saved-job-logs a { color: var(--accent); overflow-wrap: anywhere; }
     .setup-dock .progress details { margin-top: 4px; }
     .setup-dock .progress .track { margin-top: 8px; height: 5px; }
     #job-error { color: var(--danger); max-width: 100ch; padding-top: 8px; }
@@ -360,6 +363,9 @@
         <p id="model-transfer" aria-live="polite"></p>
         <button id="model-cancel" class="button" type="button" hidden data-i18n="cancelDownload">Cancel download</button>
         <details><summary data-i18n="installerLog">Installer log</summary><pre id="job-log">Waiting for installer output...</pre></details>
+        <p id="job-log-status" role="status"></p>
+        <a id="job-log-download" class="button" hidden>Download saved installer log</a>
+        <details><summary>Saved installer logs</summary><p>Up to 32 jobs are retained. Logs larger than 8 MiB are marked truncated.</p><div id="saved-job-logs"></div></details>
       </section>
     <footer>
       <div><div id="setup-footer-status" class="status" data-i18n="setupProgressSaved">Setup progress is saved automatically.</div><p data-i18n="installationNotice">Save your work: installations close Umbra Studio and its managed tools. Your files and models are preserved.</p></div>
@@ -601,6 +607,11 @@
       jobError.textContent = job.phase === 'failed' ? String(job.error || job.lines?.at(-1) || tr('installationFailed')).split(/\r?\n/).find(line => line.trim())?.slice(0, 300) || tr('installationFailed') : '';
       jobLog.textContent = (job.lines || []).join('\n') || tr('waitingForInstallerOutput');
       jobLog.scrollTop = jobLog.scrollHeight;
+      document.getElementById('job-log-status').textContent = job.log?.error || (job.log?.truncated ? 'Saved log reached its size limit; the final job summary is retained.' : '');
+      const download = document.getElementById('job-log-download');
+      download.hidden = !job.log?.available;
+      download.textContent = job.log?.error || job.log?.truncated ? 'Download saved installer log (partial)' : 'Download saved installer log';
+      download.href = '/api/logs/' + encodeURIComponent(job.id) + '?token=' + encodeURIComponent(token);
       setBusy(job.phase === 'running');
       renderModelProgress(job);
       renderToolsProgress(job);
@@ -609,6 +620,24 @@
       status.classList.toggle('error', job.phase === 'failed');
     }
 
+    let savedLogSignature = '';
+    function renderSavedLogs(jobs) {
+      const signature = JSON.stringify(jobs);
+      if (signature === savedLogSignature) return;
+      savedLogSignature = signature;
+      const container = document.getElementById('saved-job-logs');
+      container.replaceChildren();
+      for (const job of jobs.slice(0, 32)) {
+        const row = document.createElement('p');
+        if (job.log?.available) {
+          const link = document.createElement('a');
+          link.textContent = job.startedAt + ' — ' + job.kind + ' — ' + job.phase + (job.log.error || job.log.truncated ? ' — partial log' : '');
+          link.href = '/api/logs/' + encodeURIComponent(job.id) + '?token=' + encodeURIComponent(token);
+          row.append(link);
+        } else row.textContent = job.startedAt + ' — ' + job.phase + ' — saved log unavailable';
+        container.append(row);
+      }
+    }
     async function poll() {
       if (polling || setupClosed) return;
       clearTimeout(pollTimer);
@@ -617,6 +646,7 @@
         const result = await api('/api/status');
         if (!languageDirty) setSetupLanguage(result.language || language.value);
         renderJob(result.job);
+        renderSavedLogs(result.savedLogs || []);
       } catch (error) {
         status.textContent = error.message;
         status.classList.add('error');
