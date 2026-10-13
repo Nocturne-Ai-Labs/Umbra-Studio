@@ -10541,6 +10541,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
   }, [contextMenu]);
 
+  const galleryModalOpen = Boolean(renameModal || tagModal || folderNameModal || deleteWarningModal || emptyFolderCleanupModal || datasetPicker);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = String(event.key || '');
@@ -10552,7 +10554,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       };
 
       if (isEditableKeyboardTarget(event.target)) return;
-      if (!active) return;
+      if (!active || galleryModalOpen) return;
 
       if (viewerOpen) {
         if (contextMenu) {
@@ -10597,7 +10599,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [active, closeViewer, contextMenu, deleteTrashPathsForever, deleteViewerSelection, loading, movePathsToTrash, stepViewer, transferInProgress, viewerPath]);
+  }, [active, closeViewer, contextMenu, deleteTrashPathsForever, deleteViewerSelection, galleryModalOpen, loading, movePathsToTrash, stepViewer, transferInProgress, viewerPath]);
 
   const reorderContextTargetPath = contextMenu?.kind === 'media' && (contextMenu.reorderPaths?.length || 0) > 0
     ? normalizePath(contextMenu.targetPath)
@@ -11809,7 +11811,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         </div>
       </main>
 
-      {viewerFile ? (
+      {viewerFile && !galleryModalOpen ? (
         <GalleryMediaViewer
           file={viewerFile}
           files={viewerFilesForRender}
