@@ -559,7 +559,7 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
   - MiniMax H3 Director, Director Guide, Prompt Forge, references, and continuity tools
   - LTX-2.3 Advanced LoRA Loader, Enhanced Video Combine, and optional workflow helpers
 - Earlier adapted routes use DaSiWa / darksidewalker's H3 Director and OmniForge concepts; those Umbra adapters remain available through explicit All video routes.
-- Official workflow repository: https://github.com/darksidewalker/dasiwa-comfyui-workflows. Original `C-MMH3-26` and `C-LTX23-50` UI JSON files are redistributed under GPL-3.0 in `defaults/PowerPrompter/Official Workflows/DaSiWa`, with the complete upstream license, pinned revision, exact hashes, and source links in `PROVENANCE.md`. These files retain their own license separately from Umbra's MIT code. Node extensions and model weights are installed separately and retain their respective terms.
+- Official workflow repository: https://github.com/darksidewalker/dasiwa-comfyui-workflows. Original `C-MMH3-32` and `C-LTX23-50` UI JSON files are redistributed under GPL-3.0 in `defaults/PowerPrompter/Official Workflows/DaSiWa`, with the complete upstream license, pinned revision, exact hashes, and source links in `PROVENANCE.md`. These files retain their own license separately from Umbra's MIT code. Node extensions and model weights are installed separately and retain their respective terms.
 
 ### whatdreamscost-comfyui
 - Managed install source: https://github.com/PodJamz/whatdreamscost-comfyui (fork)
@@ -764,3 +764,18 @@ respective authors.
 
 Please review each upstream project directly for full license text, terms, and
 obligations.
+## Longshot Studio
+
+[Longshot Studio](https://github.com/r34vtraining/Longshot_Studio),
+[H3 Long Shot](https://github.com/r34vtraining/H3_Longshot), and
+[H3 Prompt Compiler](https://github.com/r34vtraining/H3_Prompt_Compiler)
+are created and maintained by **r34vtraining and contributors**.
+Umbra provides an optional Setup installation and embeds their original interface.
+Their source is downloaded directly from upstream on request, not bundled with Umbra;
+their interface and code remain unmodified. No license to their code is asserted by Umbra.
+
+## Optional H3 Latent Upscaler
+
+[LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler)
+provides the optional MiniMax H3 latent upscaler used by DaSiWa's enhanced upscale node.
+Setup downloads the Apache-2.0 model only when selected; weights are not bundled.

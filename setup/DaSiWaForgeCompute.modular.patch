@@ -1,6 +1,7 @@
 # Umbra adapted Prompt Forge compute patch (modular upstream).
 # Upstream: https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes
 # Reviewed commit: bdb62d4c561bbed30351974844e0168ad471331a
+# Rechecked against 0.5.16 / c99e9c4dab652010a6e051e94dc51bd8b60ee20b.
 # Upstream license: GPL-3.0; upstream notices and LICENSE remain unchanged.
 
 diff --git a/nodes/h3_forge.py b/nodes/h3_forge.py

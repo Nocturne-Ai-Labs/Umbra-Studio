@@ -19,6 +19,7 @@ export type ManagedFeatureRequirement = {
   id: string;
   label: string;
   optional?: boolean;
+  optIn?: boolean;
   activationFile?: string;
   minimumComfyVersion: string;
   minimumFrontendVersion?: string;
@@ -69,6 +70,7 @@ export function readManagedToolRequirements(sourceRoot: string): ManagedFeatureR
       || (feature.minimumFrontendVersion !== undefined && !/^\d+\.\d+\.\d+$/.test(feature.minimumFrontendVersion))
       || (feature.activationFile !== undefined && !relativePath(feature.activationFile))
       || (!feature.activationFile && !feature.workflowIds?.length)
+      || (feature.optIn !== undefined && typeof feature.optIn !== 'boolean')
       || !stringList(feature.modelProfiles, 64) || !Array.isArray(feature.customNodes) || feature.customNodes.length > 64
       || (feature.workflowIds !== undefined && !stringList(feature.workflowIds, 128))
       || (feature.requiredBuiltinClasses !== undefined && !stringList(feature.requiredBuiltinClasses))) {

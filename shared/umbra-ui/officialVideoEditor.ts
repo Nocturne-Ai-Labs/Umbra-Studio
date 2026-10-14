@@ -100,7 +100,7 @@ const PINNED_SETTING_CATEGORIES: Record<number, Record<string, OfficialVideoSett
     sampler_name: 'sampling', scheduler: 'sampling', steps: 'sampling', shift_video: 'sampling', shift_audio: 'sampling',
     enabled: 'performance', enabled_1: 'performance', enabled_7: 'performance',
     enabled_2: 'upscaling', enabled_3: 'upscaling', enabled_4: 'upscaling', enabled_5: 'upscaling', enabled_8: 'upscaling', model_name: 'upscaling', model_name_1: 'upscaling',
-    enabled_6: 'post-processing', watermark_path: 'post-processing',
+    enabled_6: 'post-processing', enabled_9: 'post-processing', watermark_path: 'post-processing',
     unet_name: 'models', unet_name_1: 'models', clip_name: 'models', vae_name: 'models', vae_name_1: 'models',
   },
   3319: {
@@ -123,6 +123,8 @@ function settingCategory(setting: Setting): OfficialVideoSettingsCategory {
   if (setting.node.type === 'DaSiWa_ResolutionScaleCalculator') return 'resolution';
   if (setting.node.type === 'DaSiWa_LTX2LoraLoader') return 'performance';
   if (setting.node.type === 'ModelPreviewOverrideKJ') return 'preview';
+  if (['DaSiWaH3TiledUpscale', 'DaSiWa_RTX_UpscalerRefiner'].includes(setting.node.type)) return 'upscaling';
+  if (setting.node.type === 'DaSiWa_RTX_FrameGeneration') return 'post-processing';
   if (setting.node.type === 'LTXDirectorGuide') return 'sampling';
   if (setting.node.type === 'DaSiWa_EnhancedVideoCombine') {
     return ['audio_codec', 'audio_bitrate', 'crop_to_audio'].includes(setting.name) ? 'audio-output' : 'video-output';
@@ -145,6 +147,11 @@ const VAE_FIELDS: Record<string, string[]> = {
   VAELoaderKJ: ['vae_name', 'device', 'weight_dtype'],
 };
 const RESOLUTION_FIELDS = ['no_scale', 'aspect_preset_when_not_image', 'custom_aspect_width', 'custom_aspect_height', 'mode', 'custom_divisor'];
+const H3_NESTED_SETTINGS: Record<number, string> = {
+  2810: 'DaSiWaH3TiledUpscale',
+  2814: 'DaSiWa_RTX_FrameGeneration',
+  2528: 'DaSiWa_RTX_UpscalerRefiner',
+};
 const LTX_GUIDE_FIELDS = ['ic_lora_name', 'ic_lora_strength'];
 const record = (value: unknown): value is Ui => !!value && typeof value === 'object' && !Array.isArray(value);
 const scalar = (value: unknown): value is Scalar => typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
@@ -158,7 +165,19 @@ function workflow(source: unknown, id: OfficialVideoWorkflowId): OfficialVideoEd
   const directorId = id === 'h3-26' ? 2730 : 3678;
   const directorType = id === 'h3-26' ? 'MiniMaxH3Director' : 'LTXDirector';
   if (value.nodes.find((node: Ui) => node.id === directorId)?.type !== directorType) fail('the source does not match this pinned workflow.');
-  return value as OfficialVideoEditorWorkflow;
+  const result = structuredClone(value) as OfficialVideoEditorWorkflow;
+  // C-MMH3-32 predates the two appended 0.5.16 memory widgets. Match the
+  // reviewed native migration on a working copy; the upstream file stays exact.
+  for (const node of allNodes(result)) {
+    if (node.id !== 2810 || node.type !== 'DaSiWaH3TiledUpscale') continue;
+    for (const [name, fallback] of Object.entries({ enforce_memory_budget: true, memory_reserve_pct: 5 })) {
+      if (!Object.hasOwn(node.widgets_values_named || {}, name)) {
+        node.widgets_values_named[name] = fallback;
+        node.widgets_values.push(fallback);
+      }
+    }
+  }
+  return result;
 }
 
 function allNodes(graph: Ui): Ui[] {
@@ -215,14 +234,20 @@ function settings(graph: Ui): Setting[] {
     const definition = isRoot ? definitions.get(node.type) : undefined;
     // Only VAE resources and the pinned resolution calculator expose direct
     // nested controls. Linked widgets stay owned by their promoted boundary.
-    const names = VAE_FIELDS[node.type] || (node.id === 3600 && node.type === 'DaSiWa_ResolutionScaleCalculator' ? RESOLUTION_FIELDS
+    const names = (H3_NESTED_SETTINGS[node.id] === node.type
+      ? Object.keys(node.widgets_values_named || {}).filter(name => !['seed', 'control_after_generate', 'memory_budget_mb'].includes(name)) : null)
+      || VAE_FIELDS[node.type] || (node.id === 3600 && node.type === 'DaSiWa_ResolutionScaleCalculator' ? RESOLUTION_FIELDS
       : [3652, 3651, 3663].includes(node.id) && node.type === 'LTXDirectorGuide' ? LTX_GUIDE_FIELDS : isRoot ? TOP_FIELDS[node.type] || [] : []);
     for (const name of definition ? Object.keys(node.widgets_values_named || {}) : names) {
       const input = node.inputs?.find((port: Ui) => port.widget?.name === name);
-      const type = input?.type || (node.type === 'LTXDirector' ? ({ epsilon: 'FLOAT', display_mode: 'COMBO', resize_method: 'COMBO', img_compression: 'INT' } as Ui)[name] : undefined);
-      if (!type || (input && input.link != null) || !['STRING', 'INT', 'FLOAT', 'BOOLEAN', 'COMBO'].includes(type)) continue;
-      let targets: Binding[] = [];
       const boundary = definition?.inputs?.find((port: Ui) => port.name === name);
+      // New native exports omit ordinary unconnected widget input slots.
+      // Their live object_info schema still decides which controls are exposed.
+      const type = input?.type || boundary?.type
+        || (node.type === 'DaSiWaH3TiledUpscale' && ['sampler_name', 'scheduler'].includes(name) ? 'COMBO'
+          : Object.hasOwn(node.widgets_values_named || {}, name) ? 'AUTO' : undefined);
+      if (!type || (input && input.link != null) || !['STRING', 'INT', 'FLOAT', 'BOOLEAN', 'COMBO', 'AUTO'].includes(type)) continue;
+      let targets: Binding[] = [];
       if (definition) {
         if (!boundary || !Array.isArray(boundary.linkIds) || !boundary.linkIds.length) fail(`promoted widget ${node.id}.${name} has no native destination.`);
         targets = boundary.linkIds.map((id: unknown) => {
@@ -246,7 +271,7 @@ function settings(graph: Ui): Setting[] {
 
 /** Fields require an installed object_info schema; absent/incompatible fields
  * are omitted, never guessed. Keys are exact pinned node/widget names; nested
- * controls are limited to unlinked native VAE resource inputs. */
+ * controls are limited to reviewed unlinked native resource and H3 post-processing inputs. */
 export function getOfficialVideoEditorFields(source: unknown, id: OfficialVideoWorkflowId, objectInfo: unknown): OfficialVideoEditorField[] {
   const graph = workflow(source, id);
   if (!record(objectInfo)) return [];
@@ -261,8 +286,8 @@ export function getOfficialVideoEditorFields(source: unknown, id: OfficialVideoW
     const type = choices.every(Boolean) ? 'select' : first[0] === 'STRING' ? 'text'
       : first[0] === 'BOOLEAN' ? 'boolean' : ['INT', 'FLOAT'].includes(first[0]) ? 'number' : null;
     if (!type || (type !== 'select' && descriptors.some(entry => entry[0] !== first[0]))
-      || (type === 'select' && setting.inputType !== 'COMBO')
-      || (type !== 'select' && first[0] !== setting.inputType)) return [];
+      || (type === 'select' && !['COMBO', 'AUTO'].includes(setting.inputType))
+      || (type !== 'select' && setting.inputType !== 'AUTO' && first[0] !== setting.inputType)) return [];
     const field: OfficialVideoEditorField = { key: setting.key, label: setting.label, group: setting.group, category: settingCategory(setting), type, value: readWidget(setting.node, setting.name) };
     if (type === 'select') {
       const options = choices[0]!.filter((value): value is string => typeof value === 'string' && choices.every(list => list!.includes(value)));

@@ -148,7 +148,9 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
   const renderField = (field: (typeof fields)[number]) => {
     const fixedLtxResize = !h3 && !workflowSizing && field.key === '3678.resize_method';
     const selectedValue = draft.values[field.key] ?? field.value;
-    const value = fixedLtxResize && selectedValue === 'maintain aspect ratio' ? 'crop' : selectedValue;
+    const nativeValue = field.type === 'select' && typeof selectedValue === 'number' && Number.isInteger(selectedValue)
+      ? field.options?.[selectedValue] ?? selectedValue : selectedValue;
+    const value = fixedLtxResize && nativeValue === 'maintain aspect ratio' ? 'crop' : nativeValue;
     const setValue = (next: string | number | boolean) => change({ values: { ...latest.current.values, [field.key]: next } });
     const fieldDisabled = disabled || (!h3 && workflowSizing && draft.resolution?.followSourceAspect === true
       && ['3600.aspect_preset_when_not_image', '3600.custom_aspect_width', '3600.custom_aspect_height'].includes(field.key));

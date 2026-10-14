@@ -115,13 +115,26 @@ requiring a host Node installation.
 | Umbra Remote | Tailscale installed and signed in on the host and client; Tailscale Serve is recommended for HTTPS. |
 | Video generation | ComfyUI, compatible video models/custom nodes, sufficient VRAM, and video encode/decode support. |
 
-The default official H3 C-MMH3-26 and LTX C-LTX23-50 workflows have explicit
+The default official H3 C-MMH3-32 and LTX C-LTX23-50 workflows have explicit
 dependencies in `defaults/UmbraUI/tool-requirements.json`. Their reviewed baseline
-is ComfyUI 0.38.0 with frontend 1.53.6 and DaSiWa 0.4.73, plus the declared
+is ComfyUI 0.38.0 with frontend 1.53.6 and DaSiWa 0.5.16, plus the declared
 provider suites and frontend assets. Setup repairs these through
 the existing managed installer after a dependency-plan review. Local conflicts,
 busy runtimes and unverified shutdowns hold the repair; generation models remain
 a separate user selection/setup step.
+
+H3 C-MMH3-32 uses DaSiWa Enhanced Upscale and optional RTX frame generation.
+Learned latent upscaling can use the optional **MiniMax H3 Latent Upscaler**
+selection in Setup's generation prerequisites (about 691 MB); interpolation
+does not need that model. RTX features require supported NVIDIA hardware and
+the corresponding SDK capabilities. Existing H3 captures must be recreated
+against C-MMH3-32; LTX-50 keeps its previous source revision.
+
+Longshot Studio is opt-in. Its Setup bundle installs `Longshot_Studio`,
+`H3_Longshot`, and `H3_Prompt_Compiler` from their upstream repositories.
+After installation, normal custom-node updates also include this bundle.
+Restart ComfyUI to load the interface and nodes. Missing components are reported
+in the Video tab; the iframe uses Umbra's configured ComfyUI connection.
 
 Triton is required only when the native LTX API graph contains the active
 TritonVAE branch. Capture and queue compilation check module availability in that

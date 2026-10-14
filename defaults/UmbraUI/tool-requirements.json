@@ -2,6 +2,49 @@
   "schemaVersion": 1,
   "features": [
     {
+      "id": "longshot-studio",
+      "label": "Longshot Studio (optional) — r34vtraining",
+      "optional": true,
+      "optIn": true,
+      "workflowIds": [
+        "longshot-studio"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": [
+        "MiniMaxH3SigmaShift",
+        "VAEDecode",
+        "VAEDecodeAudio"
+      ],
+      "customNodes": [
+        {
+          "name": "H3_Prompt_Compiler",
+          "minimumCommit": "5c73430781c9153fb7a55d3f0a9c4ef6fd7863c4",
+          "requiredClasses": [
+            "MiniMaxH3Subject",
+            "MiniMaxH3RefPromptBuilder"
+          ]
+        },
+        {
+          "name": "H3_Longshot",
+          "minimumCommit": "644432cb01eecda7c35b4f1c488580a52d4e64ce",
+          "requiredClasses": [
+            "MiniMaxH3LongShot",
+            "MiniMaxH3TimelineShot",
+            "MiniMaxH3Take",
+            "MiniMaxH3SaveVideo",
+            "MiniMaxH3LoadVideo"
+          ]
+        },
+        {
+          "name": "Longshot_Studio",
+          "minimumCommit": "6b9dce6ed6d85e762efc14416f9936780488442a",
+          "requiredClasses": []
+        }
+      ],
+      "notes": "Optional upstream application by r34vtraining. Setup downloads the original repositories on request; no upstream code is bundled or patched. Restart ComfyUI after installation. H3 model files and FFmpeg are also required; Turbo, RTX VSR and RefMods are upstream optional extensions."
+    },
+    {
       "id": "iris-3b",
       "label": "Iris 3B",
       "optional": true,
@@ -101,9 +144,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.4.73",
+          "version": "0.5.16",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -144,9 +187,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.4.73",
+          "version": "0.5.16",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -187,9 +230,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.4.73",
+          "version": "0.5.16",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -451,9 +494,9 @@
         },
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.4.73",
+          "version": "0.5.16",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -551,7 +594,7 @@
     },
     {
       "id": "official-dasiwa-h3-26",
-      "label": "Official DaSiWa H3 MythicAlchemy C-MMH3-26",
+      "label": "Official DaSiWa H3 MythicAlchemy C-MMH3-32",
       "workflowIds": [
         "h3-26"
       ],
@@ -581,9 +624,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.4.73",
+          "version": "0.5.16",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -610,6 +653,10 @@
             {
               "path": "js/minimax_h3_director.js",
               "registration": "DaSiWa.MiniMaxH3Director"
+            },
+            {
+              "path": "js/minimax_h3_tiled_upscale.js",
+              "registration": "DaSiWa.H3TiledUpscaleMemoryPlanning"
             }
           ],
           "requiredFrontendClasses": [
@@ -628,27 +675,9 @@
             "DaSiWa_Watermark",
             "MiniMaxH3Cache",
             "MiniMaxH3Director",
-            "MiniMaxH3DirectorGuide"
-          ]
-        },
-        {
-          "name": "Comfyui-MMH3-UltimateUpscale",
-          "minimumCommit": "fe6658f6d144066f14150d3526247b417683ff2b",
-          "repository": "https://github.com/bbaudio-2025/Comfyui-MMH3-UltimateUpscale",
-          "version": "0.0.7",
-          "license": "MIT",
-          "webDirectory": "./web",
-          "frontendAssets": [
-            {
-              "path": "web/mmh3_spatial_params.js",
-              "registration": "MMH3UltimateUpscale.SpatialTileSizeMode"
-            }
-          ],
-          "requiredClasses": [
-            "MMH3LatentUpscaleWithModelParams",
-            "MMH3SpatialSplitParams",
-            "MMH3TemporalSplitParams",
-            "MMH3UltimateUpscale"
+            "MiniMaxH3DirectorGuide",
+            "DaSiWaH3TiledUpscale",
+            "DaSiWa_RTX_FrameGeneration"
           ]
         },
         {
@@ -665,9 +694,9 @@
           ]
         }
       ],
-      "sourceSha256": "d13b404cc77860fb8284cd4276c8057f1714583304ed6b03357bda799d83ca0d",
-      "sourceCommit": "143bd6a47d844ddd7a68175db5c5ff3867f5febb",
-      "notes": "Load the pinned original in native ComfyUI. All serialized classes and frontend assets remain required even for currently bypassed stages; no adapted fallback. Model assets and GPU execution are separate readiness gates."
+      "sourceSha256": "cc43599cc5e430b8af778cd0bdd48e367e4e55098e94d760d31b95501f830458",
+      "sourceCommit": "1d3621410a9a1599d006dc252573de85b481461a",
+      "notes": "Load the pinned original in native ComfyUI. All serialized classes and frontend assets remain required even for currently bypassed stages; no adapted fallback. Model assets and GPU execution are separate readiness gates. C-MMH3-32 replaces the older Ultimate Upscale stage with DaSiWa Enhanced Upscale and adds optional RTX frame generation. The h3-26 storage key is retained for existing UI selections; source hashes distinguish revisions."
     },
     {
       "id": "official-dasiwa-ltx23-50",
@@ -726,9 +755,9 @@
         },
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "87096db297585657507bb626a37b6a30b1955082",
+          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.4.73",
+          "version": "0.5.16",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [

@@ -37,6 +37,7 @@ export type ManagedFeatureStatus = {
   id: string;
   label: string;
   optional: boolean;
+  optIn?: boolean;
   active: boolean;
   minimumComfyVersion: string;
   minimumFrontendVersion: string;
@@ -289,6 +290,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       id: feature.id,
       label: feature.label,
       optional: feature.optional === true,
+      optIn: feature.optIn === true,
       active: feature.workflowIds?.length ? true : Boolean(feature.activationFile && existsSync(safeChild(modelsRoot, feature.activationFile))),
       minimumComfyVersion: feature.minimumComfyVersion,
       minimumFrontendVersion: feature.minimumFrontendVersion || '',

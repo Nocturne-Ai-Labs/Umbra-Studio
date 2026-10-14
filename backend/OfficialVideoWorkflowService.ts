@@ -10,8 +10,8 @@ type Node = { class_type: string; inputs: Record<string, unknown>; _meta?: Recor
 export type OfficialApiGraph = Record<string, Node>;
 const SOURCE_COMMIT = '143bd6a47d844ddd7a68175db5c5ff3867f5febb';
 export const OFFICIAL_VIDEO_SOURCES = {
-  'h3-26': { name: 'DaSiWa H3 MythicAlchemy C-MMH3-26', family: 'minimax_h3', sha256: 'd13b404cc77860fb8284cd4276c8057f1714583304ed6b03357bda799d83ca0d', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-26.json' },
-  'ltx23-50': { name: 'DaSiWa LTX OmniForge C-LTX23-50', family: 'ltx23', sha256: 'f4a9e0c3abfff2c4e94525b312c463981090da7e5cb8a41cd479bb9779ab6933', path: 'C-LTX23/DaSiWa LTX OmniForge C-LTX23-50.json' },
+  'h3-26': { name: 'DaSiWa H3 MythicAlchemy C-MMH3-32', sourceCommit: '1d3621410a9a1599d006dc252573de85b481461a', family: 'minimax_h3', sha256: 'cc43599cc5e430b8af778cd0bdd48e367e4e55098e94d760d31b95501f830458', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-32.json' },
+  'ltx23-50': { name: 'DaSiWa LTX OmniForge C-LTX23-50', sourceCommit: SOURCE_COMMIT, family: 'ltx23', sha256: 'f4a9e0c3abfff2c4e94525b312c463981090da7e5cb8a41cd479bb9779ab6933', path: 'C-LTX23/DaSiWa LTX OmniForge C-LTX23-50.json' },
 } as const;
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 export const officialGraphSha256 = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -140,7 +140,7 @@ export function parseNativeExportText(text: unknown, label: string): unknown {
 }
 export function officialCaptureMetadata(document: unknown): OfficialWorkflowCapture | null {
   const meta = record(record(document).umbra_official_workflow);
-  if (!isOfficialVideoWorkflowId(meta.workflowId) || meta.sourceCommit !== SOURCE_COMMIT
+  if (!isOfficialVideoWorkflowId(meta.workflowId) || meta.sourceCommit !== OFFICIAL_VIDEO_SOURCES[meta.workflowId].sourceCommit
     || meta.sourceSha256 !== OFFICIAL_VIDEO_SOURCES[meta.workflowId].sha256
     || meta.serializer !== 'comfy-native-v1' || !/^[a-f0-9]{64}$/.test(meta.graphSha256) || !/^[a-f0-9]{64}$/.test(meta.workflowSha256)) return null;
   return meta as OfficialWorkflowCapture;
@@ -323,7 +323,7 @@ export class OfficialVideoWorkflowService {
       if (!objectInfo) issues.push('Managed ComfyUI catalogs are unavailable. Open its workspace, then refresh readiness.');
       const runtimeTypes = nodeTypes.filter(type => !['Note', 'MarkdownNote', 'Reroute', 'Lable (DaSiWa)'].includes(type));
       if (objectInfo) for (const type of runtimeTypes) if (!objectInfo[type]) issues.push(`Missing installed node: ${type}. This workflow is held; no adapted fallback.`);
-      return { id, ...definition, sourceUrl: `https://github.com/darksidewalker/dasiwa-comfyui-workflows/blob/${SOURCE_COMMIT}/${encodeURI(definition.path)}`, sourceCommit: SOURCE_COMMIT, license: 'GPL-3.0', nodeTypes, requiredRuntimeNodes: runtimeTypes, readiness: { ready: issues.length === 0, issues }, qualification: 'GPU execution and quality are unverified.' };
+      return { id, ...definition, sourceUrl: `https://github.com/darksidewalker/dasiwa-comfyui-workflows/blob/${definition.sourceCommit}/${encodeURI(definition.path)}`, sourceCommit: definition.sourceCommit, license: 'GPL-3.0', nodeTypes, requiredRuntimeNodes: runtimeTypes, readiness: { ready: issues.length === 0, issues }, qualification: 'GPU execution and quality are unverified.' };
     }));
   }
   async importNativeExports(id: OfficialVideoWorkflowId, payload: any, objectInfo: Record<string, any> | null) {
@@ -343,7 +343,7 @@ export class OfficialVideoWorkflowService {
     if (this.runtimePackages) await this.runtimePackages(graph, id);
     if (this.inputRoot) await assertOfficialStagedMedia(graph, this.inputRoot());
     const captureId = `official-dasiwa-${id}-${randomUUID()}`;
-    const metadata: OfficialWorkflowCapture = { workflowId: id, sourceCommit: SOURCE_COMMIT, sourceSha256: OFFICIAL_VIDEO_SOURCES[id].sha256, serializer: 'comfy-native-v1', graphSha256: officialGraphSha256(graph), workflowSha256: officialGraphSha256(payload.workflow), capturedAt: Date.now() };
+    const metadata: OfficialWorkflowCapture = { workflowId: id, sourceCommit: OFFICIAL_VIDEO_SOURCES[id].sourceCommit, sourceSha256: OFFICIAL_VIDEO_SOURCES[id].sha256, serializer: 'comfy-native-v1', graphSha256: officialGraphSha256(graph), workflowSha256: officialGraphSha256(payload.workflow), capturedAt: Date.now() };
     if (payload.saveLastFrame !== undefined) metadata.saveLastFrame = payload.saveLastFrame;
     if (nativeExports) metadata.nativeExport = { workflowTextSha256: createHash('sha256').update(nativeExports.workflowText).digest('hex'), apiTextSha256: createHash('sha256').update(nativeExports.apiText).digest('hex') };
     const document = { prompt: graph, workflow: payload.workflow, umbra_official_workflow: metadata };

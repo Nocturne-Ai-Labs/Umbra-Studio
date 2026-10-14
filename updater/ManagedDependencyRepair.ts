@@ -34,7 +34,8 @@ export function managedRepairStepArgs(step: Pick<ManagedRepairStep, 'kind' | 'ta
 }
 
 function repairFeatures(status: DependencyStatus, featureId: string) {
-  return ['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId) ? status.features
+  return ['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId)
+    ? status.features.filter((entry) => !entry.optIn || entry.customNodes.some((node) => node.status !== 'missing'))
     : featureId === 'official-video-workflows' ? status.features.filter((entry) => ['official-dasiwa-h3-26', 'official-dasiwa-ltx23-50'].includes(entry.id))
     : status.features.filter((entry) => entry.id === featureId && entry.workflowIds.length);
 }

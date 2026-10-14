@@ -40,6 +40,7 @@ import { applyUmbraUiVideoLoraStack, assertUmbraUiVideoLoraStackInstalled, resol
 import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGenerationBinding';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
 import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
+import { isLongshotPath, isLongshotSubmission } from './shared/umbra-ui/longshotStudio';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -4606,6 +4607,7 @@ function logComfyProxyWsError(error: unknown, targetUrl?: string) {
 }
 
 function isComfyRootProxyPath(path: string): boolean {
+  if (isLongshotPath(path)) return true;
   if (path === '/ws') return true;
   return COMFY_PROXY_ROOT_PATHS.some((prefix) => path === prefix || path.startsWith(prefix));
 }
@@ -4898,7 +4900,7 @@ async function proxyComfyHttp(req: Request, sourceUrl: URL, targetPath: string):
       ? getComfyProxyWsUrl()
       : '';
     responseHeaders.set('content-type', 'text/html; charset=utf-8');
-    return createProxyTextResponse(req, sourceUrl, rewriteComfyHtml(html, directExternalWsUrl), upstream.status, responseHeaders);
+    return createProxyTextResponse(req, sourceUrl, isLongshotPath(targetPath) ? html : rewriteComfyHtml(html, directExternalWsUrl), upstream.status, responseHeaders);
   }
 
   const contentLength = Number(responseHeaders.get('content-length') || 0);
@@ -34240,7 +34242,8 @@ const server = Bun.serve<UmbraSocketData>({
             let body: any;
             try { body = await req.clone().json(); }
             catch { return json({ error: 'Invalid generation prompt JSON.' }, 400); }
-            const policyHold = videoGraphPolicyIssue(body?.prompt, getVideoRoutePolicy());
+            const policyHold = isLongshotSubmission(req.url, req.headers.get('referer'), body?.prompt)
+              ? null : videoGraphPolicyIssue(body?.prompt, getVideoRoutePolicy());
             if (policyHold) return json({ error: policyHold, policyHold, policy: getVideoRoutePolicy() }, 409);
           }
           const staticResponse = method === 'GET' || method === 'HEAD'

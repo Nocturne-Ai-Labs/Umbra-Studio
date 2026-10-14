@@ -6,6 +6,7 @@ import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
 import { normalizeUmbraUiPinnedFolder } from '@/lib/pinnedOutputFolders';
 import { isSameUmbraCanvasImportHandoff } from '@/lib/umbraCanvasMediaImportGate';
 import React from 'react';
+import { UmbraCommunityVideo } from '@/components/umbra-ui/UmbraCommunityVideo';
 import comfyLogo from '@/assets/comfy-logo-single.svg';
 import { formatMissingUmbraUiNodes } from '../../../../shared/umbra-ui/runtimeNodeMessages';
 import { ANIMA38_TEXT_ENCODER_DEVICE_RESOURCE, normalizeAnima38TextEncoderDevice } from '../../../../shared/umbra-ui/animaTextEncoderDevice';
@@ -3832,6 +3833,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         ) : null}
         {modeIsMounted('video') ? (
           <div className={activeMode === 'video' ? 'flex min-h-0 min-w-0 flex-col' : 'hidden'} aria-hidden={activeMode !== 'video'}>
+            <UmbraCommunityVideo>
             {videoRoutePolicy === 'dasiwa-only' ? <UmbraOfficialVideoWorkflowPanel
               queueConnected={queueConnected}
               comfyConnected={comfyConnected}
@@ -3856,6 +3858,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               reviewPanel={videoReviewPanel}
             />
             </>}
+            </UmbraCommunityVideo>
           </div>
         ) : null}
 

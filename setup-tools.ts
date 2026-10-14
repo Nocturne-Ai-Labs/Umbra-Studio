@@ -1860,6 +1860,9 @@ const COMFY_NODES = [
     { name: 'ComfyUI-Manager', repo: 'https://github.com/ltdrdata/ComfyUI-Manager.git', required: true },
     { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', required: true },
     { name: 'ComfyUI-Iris', repo: 'https://github.com/envy-ai/ComfyUI-Iris.git', defaultEnabled: false },
+    { name: 'Longshot_Studio', repo: 'https://github.com/r34vtraining/Longshot_Studio.git', defaultEnabled: false },
+    { name: 'H3_Longshot', repo: 'https://github.com/r34vtraining/H3_Longshot.git', defaultEnabled: false },
+    { name: 'H3_Prompt_Compiler', repo: 'https://github.com/r34vtraining/H3_Prompt_Compiler.git', defaultEnabled: false },
     { name: 'comfyui-tooling-nodes', repo: 'https://github.com/Acly/comfyui-tooling-nodes.git', required: true },
     { name: 'comfyui-inpaint-nodes', repo: 'https://github.com/Acly/comfyui-inpaint-nodes.git', required: true },
     { name: 'comfyui_controlnet_aux', repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux.git', required: true },
@@ -1954,7 +1957,8 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                 && feature.modelProfiles.some(profile => selectedProfiles.has(profile));
             const installedIris = feature.id.startsWith('iris-3b') && feature.activationFile
                 && existsSync(join(comfyDir, 'models', feature.activationFile));
-            if ((feature.workflowIds?.length && !feature.optional) || selectedFamily || installedIris) {
+            const installedOptIn = feature.optIn && feature.customNodes.some(node => existsSync(join(nodesDir, node.name)));
+            if ((feature.workflowIds?.length && !feature.optional) || selectedFamily || installedIris || installedOptIn) {
                 for (const node of feature.customNodes) {
                     enabledNodes.add(node.name);
                     if (selectedFamily || installedIris) supportedRequiredNodes.add(node.name);
@@ -3053,7 +3057,7 @@ async function main() {
         if (!comfyDir) {
             exitWithVerifyFailure(
                 'comfyui-not-found',
-                'ComfyUI must be installed before DaSiWa H3 nodes.',
+                'ComfyUI must be installed before custom nodes.',
                 [`Expected directory under: ${TOOLS_DIR}`],
                 ['Install ComfyUI first.']
             );

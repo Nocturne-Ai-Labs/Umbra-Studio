@@ -107,10 +107,17 @@ complete localization and all-model generation remain unqualified.
 ### Official H3 and LTX video workflows
 
 Video defaults to **DaSiWa only**, using the bundled, pinned originals
-**MiniMax H3 MythicAlchemy C-MMH3-26** and **LTX OmniForge C-LTX23-50**.
+**MiniMax H3 MythicAlchemy C-MMH3-32** and **LTX OmniForge C-LTX23-50**.
 The original files and their GPL provenance are under
 [`defaults/PowerPrompter/Official Workflows/DaSiWa`](defaults/PowerPrompter/Official%20Workflows/DaSiWa/PROVENANCE.md).
 Umbra does not substitute an adapted graph when an official workflow is held.
+
+The separate **Longshot Studio** option embeds the original interface by
+[r34vtraining and contributors](https://github.com/r34vtraining/Longshot_Studio).
+Install its optional three-pack bundle through **Umbra Setup > Advanced > Tools**,
+then restart ComfyUI. MiniMax H3 models and FFmpeg are also needed. The bundle
+is downloaded directly from upstream and is not included in Umbra's packages.
+The existing Umbra / DaSiWa workspace remains available alongside it.
 
 1. Review the workflow dependency repair in Umbra Setup > Advanced > Tools. It
    uses the existing managed installer for compatible ComfyUI/frontend and node
