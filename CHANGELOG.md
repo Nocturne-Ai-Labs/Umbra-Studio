@@ -34,6 +34,7 @@ Five focused control/persistence tests (98 assertions), eighteen native-node tes
 - Fixed: Iris schedules being replaced by generic scheduler defaults during settings normalization.
 - Fixed: pixel-space Iris samplers being rejected by generation-readiness checks.
 - Fixed: conflicting Turbo settings leaking into saved generation metadata.
+- Fixed: Windows release staging failing immediately when a transient file lock follows FFmpeg verification.
 - Improved: shared encoder download deduplication, Iris-specific node onboarding and preserved conflicting community node installations.
 - Improved: Iris model and sampling controls across shared workflows and Manga Studio.
 

@@ -71,7 +71,17 @@ export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = resol
     if (existsSync(target)) { previous = `${target}.previous-${randomUUID()}`; renameSync(target, previous); }
     let installed = false;
     try {
-      renameSync(stage, target); installed = true;
+      // Windows scanners can briefly retain the executables just probed above.
+      // Keep the verified stage intact while the transient file handle clears.
+      for (let attempt = 0; ; attempt++) {
+        try { renameSync(stage, target); break; }
+        catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(code || '') || attempt >= 20) throw error;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+      }
+      installed = true;
       verifyBundledMediaRuntime(root);
     } catch (error) {
       if (installed) { assertLocal(root, target); rmSync(target, { recursive: true, force: true }); }
