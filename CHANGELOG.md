@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.90.16-beta - Iris 3B And Official Turbo
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+**Umbra Setup remains the home for installation and updates after the major setup-flow refactor.**
+
+- Save your work and install through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux after updating.
+- Iris is optional. In Setup, select **Iris 3B** or **Iris 3B Turbo** under model prerequisites, install the matching custom nodes and models, then restart ComfyUI. Existing installs can repair the native Iris node pack through **Advanced > Tools**. The reviewed native integration requires ComfyUI 0.37+ and Comfy Kitchen 0.2.35+; update ComfyUI through Setup if necessary.
+- Base needs approximately **19.40 GiB (20.83 GB)** including its shared encoder; Turbo needs **13.83 GiB (14.85 GB)**. Both together use **24.96 GiB (26.80 GB)** because the encoder is shared. Model weights are downloaded separately. Checkpoints use Apache 2.0; the shared encoder retains the catalog's Krea 2 Community License terms.
+- Official Turbo uses its dedicated checkpoint, four Euler steps and the released sigma schedule. **No Turbo LoRA is required or installed.** If an older community Iris node pack conflicts, Setup holds it for review; move that pack out of `custom_nodes` before installing the native integration.
+- Optional AI Toolkit requires host Git and Node.js 20+ with npm. Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Iris Workflows
+
+- Added separate base and official Turbo text-to-image and image-to-image pipelines, available through the shared generation controls and Manga Studio.
+- Base exposes its native sampler and Iris schedule. Turbo preserves the official four-step, CFG-1, empty-negative contract in execution and saved generation metadata, even when older settings contain conflicting values.
+- Pixel-space image-to-image preserves source sizing and denoise controls. Turbo image-to-image uses an experimental partial schedule. Manga keeps the user-selected long-side target with native dimension alignment and no model-specific resolution cap.
+- Shared compatible style-LoRA controls and output upscaling remain available. These pixel pipelines do not support latent high-res fix, classic detailers, tiled VAE or Iris inpainting; unsupported controls are not advertised.
+
+### Validation
+
+Five focused control/persistence tests (98 assertions), eighteen native-node tests, and four real Linux GPU queue jobs passed: base and Turbo text-to-image and image-to-image. Output identifiers and Turbo generation metadata were verified. Source, type, lint, frontend build and pipeline audits pass. Packaged startup, archive and upgrade qualification is recorded separately before publication. Windows GPU generation remains unqualified because operating-system application control blocks the test environment; no new Iris style-LoRA or output-upscale GPU run is claimed.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Iris schedules being replaced by generic scheduler defaults during settings normalization.
+- Fixed: pixel-space Iris samplers being rejected by generation-readiness checks.
+- Fixed: conflicting Turbo settings leaking into saved generation metadata.
+- Improved: shared encoder download deduplication, Iris-specific node onboarding and preserved conflicting community node installations.
+- Improved: Iris model and sampling controls across shared workflows and Manga Studio.
+
 ## v0.90.15-beta - Reliability And Application Audit
 
 ### TL;DR - Setup After Updating
