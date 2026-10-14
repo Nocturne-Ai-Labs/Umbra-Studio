@@ -16,6 +16,7 @@ import { invalidateManagedPythonSetupEvidence, managedMaintenanceAction, prepare
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
 import { MODEL_MANIFESTS, SHARED_VISION_PROFILES, sharedSupportCatalog, readModelSetupManifest, modelSetupCatalog, modelSetupSelection, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
+import { inspectFrameForge, installFrameForge } from './FrameForge';
 import { assertAIToolkitStopped, inspectToolMaintenance, toolMaintenanceArgs } from './ToolMaintenance';
 import { claimToolMaintenance, readToolMaintenance, trackToolMaintenanceChild } from '../shared/toolMaintenanceLock';
 import { createUmbraUpdateController } from '../updater/UmbraUpdateController';
@@ -436,10 +437,26 @@ async function main() {
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
         try {
           const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
-          return json({ success: true, ...status, maintenanceTools: inspectToolMaintenance(runtimeRoot), sharedSupport: sharedSupportCatalog(sourceRoot), repairState: managedRepairState,
+          return json({ success: true, ...status, frameforge: inspectFrameForge(runtimeRoot), maintenanceTools: inspectToolMaintenance(runtimeRoot), sharedSupport: sharedSupportCatalog(sourceRoot), repairState: managedRepairState,
             repairPlans: managedWorkflowRepairPlans(status) });
         }
         catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
+      if (url.pathname === '/api/frameforge/install' && request.method === 'POST') {
+        if (hasRunningInstaller()) return json({ error: 'Finish the current installation first.' }, 409);
+        let release: (() => void) | undefined;
+        try {
+          release = claimToolMaintenance(runtimeRoot, 'frameforge');
+          await prepareForInstallation();
+          const job: SetupJobState = { id: randomUUID(), kind: 'managed-tools', phase: 'running', step: 'Installing Frame Forge', lines: [], startedAt: new Date().toISOString(), completedAt: null, error: '', cancellable: false };
+          startJob(job);
+          const unlock = release;
+          void installFrameForge(runtimeRoot, line => appendOutput(job, line), pid => trackToolMaintenanceChild(runtimeRoot, 'frameforge', pid)).then(() => {
+            job.phase = 'complete'; job.step = 'Frame Forge installation verified'; job.completedAt = new Date().toISOString();
+          }).catch(error => { job.phase = 'failed'; job.error = String(error.message || error); job.step = 'Frame Forge installation failed'; job.completedAt = new Date().toISOString(); appendOutput(job, job.error); })
+            .finally(() => { finishSetupJobLog(job); unlock(); });
+          return json({ success: true, accepted: true, job }, 202);
+        } catch (error) { release?.(); return json({ error: String((error as Error).message) }, 409); }
       }
       if (url.pathname === '/api/tools/action' && request.method === 'POST') {
         if (hasRunningInstaller()) return json({ success: false, error: 'Finish the current installation first.' }, 409);

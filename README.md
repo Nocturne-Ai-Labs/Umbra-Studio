@@ -119,6 +119,16 @@ then restart ComfyUI. MiniMax H3 models and FFmpeg are also needed. The bundle
 is downloaded directly from upstream and is not included in Umbra's packages.
 The existing Umbra / DaSiWa workspace remains available alongside it.
 
+**Frame Forge** is another optional Video workspace, by
+[spacesimeco-hue and contributors](https://github.com/spacesimeco-hue/Chain-Motion-AI-Video-Editor).
+Install the editor and its H3 video-node bundle in **Setup > Advanced > Tools**,
+then use **Video > Frame Forge > Launch** on the host PC. Umbra opens its unchanged
+browser interface and seeds new libraries with the configured ComfyUI address.
+Existing Frame Forge settings are preserved. Speech/Qwen and heavy WorldMirror 3D
+dependencies are separate choices. Select installed models in Frame Forge settings.
+Projects live in `User/FrameForge`; its separate Python environment lives in
+`Tools/FrameForge`. Stopping Umbra also closes its owned Frame Forge service.
+
 1. Review the workflow dependency repair in Umbra Setup > Advanced > Tools. It
    uses the existing managed installer for compatible ComfyUI/frontend and node
    suites. Finish queued work and stop managed ComfyUI before repair. Conflicting

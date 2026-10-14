@@ -41,6 +41,7 @@ import { bindPPGenerationToWorkflowVideo } from './backend/UmbraUiVideoGeneratio
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from './shared/umbra-ui/videoLoraStack';
 import { readComfyInputChoices } from './shared/umbra-ui/comfyInputChoices';
 import { isLongshotPath, isLongshotSubmission } from './shared/umbra-ui/longshotStudio';
+import { FrameForgeService } from './backend/FrameForgeService';
 import { join, basename, extname, relative, dirname, resolve, isAbsolute, sep } from 'path';
 import { configureGeneratedMediaActivity, recordGeneratedMediaOutputs } from './backend/GeneratedMediaActivity';
 import { createCaptionCategoryFilter } from './backend/DatasetCaptionCategories';
@@ -347,6 +348,7 @@ const gzipAsync = promisify(gzip);
 
 const SOURCE_DIR = import.meta.dir;
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
+const frameForgeService = new FrameForgeService(ROOT_DIR);
 const officialComfySession = officialComfySessionFromEnvironment(ROOT_DIR, SOURCE_DIR);
 const canvasBackgroundRemoval = new UmbraUiCanvasBackgroundRemovalService(ROOT_DIR, SOURCE_DIR);
 const censorReviewService = new UmbraUiCensorReviewService(ROOT_DIR, SOURCE_DIR);
@@ -35529,6 +35531,14 @@ const server = Bun.serve<UmbraSocketData>({
         } finally { if (!transferred) claim.release(); }
       }
 
+      if (path === '/api/frameforge' && ['GET', 'POST', 'DELETE'].includes(method)) {
+        if (!isHostRequest(req, url, server)) return json({ error: 'Frame Forge is available on the host PC.' }, 403);
+        try {
+          if (method === 'POST') return json({ ...frameForgeService.status(), url: await frameForgeService.start(getComfyHttpBaseUrl(getComfyProxyTarget())) });
+          if (method === 'DELETE') await frameForgeService.stop();
+          return json(frameForgeService.status());
+        } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
+      }
       if (path === '/api/setup/open' && method === 'POST') {
         if (!isHostRequest(req, url, server)) return json({ error: 'Umbra Setup is only available from the host PC.' }, 403);
         try {
@@ -40524,6 +40534,7 @@ async function gracefulShutdown(signal: string) {
     return;
   }
   isShuttingDown = true;
+  await frameForgeService.stop();
   await animaModelMergeService.shutdown().catch(error => console.warn('[Shutdown] Merge cancellation failed:', error));
 
   try {

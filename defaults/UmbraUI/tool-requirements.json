@@ -2,6 +2,92 @@
   "schemaVersion": 1,
   "features": [
     {
+      "id": "frameforge-video",
+      "label": "Frame Forge — H3 video nodes",
+      "optional": true,
+      "optIn": true,
+      "workflowIds": [
+        "frameforge-video"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": [
+        "MiniMaxH3ReferenceToVideo",
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "CreateVideo",
+        "SaveVideo",
+        "SamplerCustomAdvanced"
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-H3-Motion-Context",
+          "minimumCommit": "5335715abe54c1a9bfbe3494da29aae3e8635ce3",
+          "requiredClasses": [
+            "MiniMaxH3MotionContext",
+            "MiniMaxH3MotionContextTrim",
+            "MiniMaxH3MotionContextLoadLatent",
+            "MiniMaxH3MotionContextSaveLatent"
+          ]
+        }
+      ],
+      "notes": "Optional companion nodes for Frame Forge timeline generation. Install the Frame Forge application separately above. H3 weights, encoders and VAEs are separate model selections. Restart ComfyUI after installing."
+    },
+    {
+      "id": "frameforge-extras",
+      "label": "Frame Forge — Speech and Qwen prerequisites",
+      "optional": true,
+      "optIn": true,
+      "workflowIds": [
+        "frameforge-extras"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": [
+        "LTXAVTextEncoderLoader",
+        "LTXVAudioVAELoader",
+        "LTXVConditioning",
+        "LTXVEmptyLatentAudio",
+        "LTXVAudioVAEEncode",
+        "EmptyLTXVLatentVideo",
+        "LTXVImgToVideoInplace",
+        "LTXVConcatAVLatent",
+        "QwenImage21Cache",
+        "TextEncodeQwenImage21",
+        "SaveImageAdvanced"
+      ],
+      "customNodes": [],
+      "notes": "Optional built-in nodes; LTX 2.3 and Qwen 2.1 weights remain separate model selections. No Turbo LoRA is downloaded."
+    },
+    {
+      "id": "frameforge-world",
+      "label": "Frame Forge — optional WorldMirror 3D nodes",
+      "optional": true,
+      "optIn": true,
+      "workflowIds": [
+        "frameforge-world"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI_HYWorld2",
+          "minimumCommit": "a80b011c5a1af0e0f358659c7446822d43cb7d05",
+          "requiredClasses": [
+            "VNCCS_LoadWorldMirrorV2Model",
+            "VNCCS_WorldMirrorV2_3D",
+            "VNCCS_SavePLY",
+            "VNCCS_BackgroundPreview"
+          ]
+        }
+      ],
+      "notes": "Heavy optional 3D installation. Requires a compatible NVIDIA CUDA toolchain and native gsplat/recast/PyTorch3D builds. Setup runs the upstream native builder and reports failures. WorldMirror model downloads are controlled by the upstream nodes."
+    },
+    {
       "id": "longshot-studio",
       "label": "Longshot Studio (optional) — r34vtraining",
       "optional": true,

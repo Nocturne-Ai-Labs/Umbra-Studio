@@ -28,7 +28,8 @@ export async function openUmbraSetup(runtimeRoot: string, sourceRoot: string, ap
     const child = spawn(process.execPath, [script, '--root', runtimeRoot, '--source', sourceRoot, '--port', '0', '--tab', tab, '--token', randomUUID(),
       ...(packaged ? ['--server-pid', String(process.pid), '--launcher-pid', String(process.env.UMBRA_WEB_LAUNCHER === '1' ? process.ppid : 0),
         '--app-port', String(appPort)] : []), '--no-open'],
-      { cwd: runtimeRoot, env: { ...process.env, UMBRA_ROOT: runtimeRoot }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Setup must outlive Studio: every installation deliberately shuts Studio down.
+      { cwd: runtimeRoot, env: { ...process.env, UMBRA_ROOT: runtimeRoot }, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     const timer = setTimeout(() => { child.kill(); fail(new Error('Umbra Setup did not become ready.')); }, 15000);
     child.once('error', error => { clearTimeout(timer); fail(error); });
@@ -38,7 +39,7 @@ export async function openUmbraSetup(runtimeRoot: string, sourceRoot: string, ap
       output = (output + String(chunk)).slice(-8192);
       const match = output.match(/\[UmbraSetup\] Ready: (http:\/\/127\.0\.0\.1:\d+\/\?[^\s]+)/);
       if (!match) return;
-      clearTimeout(timer); active = { root: runtimeRoot, url: match[1], child }; ok(match[1]);
+      clearTimeout(timer); child.unref(); active = { root: runtimeRoot, url: match[1], child }; ok(match[1]);
     });
   });
   try { return withTab(await pending); } finally { pending = null; }

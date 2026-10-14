@@ -3,6 +3,7 @@
 import React from 'react';
 import { ExternalLink, RefreshCw, Wrench } from 'lucide-react';
 import { openUmbraToolsSetup } from '@/lib/openUmbraSetup';
+import { UmbraFrameForge } from './UmbraFrameForge';
 
 const button = 'inline-flex h-8 items-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-300 hover:bg-white/5';
 const required = {
@@ -63,14 +64,17 @@ function LongshotStudio() {
 
 // Keep both applications mounted when switching so upstream projects and Umbra drafts survive.
 export function UmbraCommunityVideo({ children }: { children: React.ReactNode }) {
-  const [studio, setStudio] = React.useState<'umbra' | 'longshot'>('umbra');
+  const [studio, setStudio] = React.useState<'umbra' | 'longshot' | 'frameforge'>('umbra');
+  const [frameForgeVisited, setFrameForgeVisited] = React.useState(false);
   const [visited, setVisited] = React.useState(false);
   return <>
     <div role="group" aria-label="Video studio" className="flex shrink-0 gap-2 border-b border-white/10 px-3 py-1.5">
       <button type="button" className={button} aria-pressed={studio === 'umbra'} onClick={() => setStudio('umbra')}>Umbra / DaSiWa</button>
       <button type="button" className={button} aria-pressed={studio === 'longshot'} onClick={() => { setVisited(true); setStudio('longshot'); }}>Longshot Studio</button>
+      <button type="button" className={button} aria-pressed={studio === 'frameforge'} onClick={() => { setFrameForgeVisited(true); setStudio('frameforge'); }}>Frame Forge</button>
     </div>
     <div className={studio === 'umbra' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>{children}</div>
     {visited ? <div className={studio === 'longshot' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><LongshotStudio /></div> : null}
+    {frameForgeVisited ? <div className={studio === 'frameforge' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><UmbraFrameForge /></div> : null}
   </>;
 }

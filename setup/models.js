@@ -481,6 +481,14 @@ async function loadManagedTools() {
   modelElement('shared-support-size').textContent = setupFormat('sharedSize', { size: (dependencies.sharedSupport.bytes / 1024 ** 3).toFixed(2) });
   modelElement('tools-list').replaceChildren();
   modelElement('tools-summary').textContent = tr(dependencies.features.length ? 'toolsHint' : 'noManagedTools');
+  toolsRow('Frame Forge — spacesimeco-hue and contributors', `${tr(dependencies.frameforge?.installed ? 'installed' : 'missing')}. Separate Python environment; projects stay in User/FrameForge. Install the Frame Forge video nodes below for generation.`,
+    '', '', async () => {
+      try {
+        setBusy(true);
+        const result = await api('/api/frameforge/install', { method: 'POST' });
+        renderJob(result.job); void poll();
+      } catch (error) { modelError(error); setBusy(false); }
+    }, dependencies.frameforge?.installed ? 'Update / Repair' : 'Install');
   for (const tool of dependencies.maintenanceTools || []) {
     const row = document.createElement('div'); row.className = 'model-file';
     const title = document.createElement('strong'); title.textContent = tool.name;

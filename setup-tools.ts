@@ -1861,6 +1861,8 @@ const COMFY_NODES = [
     { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', required: true },
     { name: 'ComfyUI-Iris', repo: 'https://github.com/envy-ai/ComfyUI-Iris.git', defaultEnabled: false },
     { name: 'Longshot_Studio', repo: 'https://github.com/r34vtraining/Longshot_Studio.git', defaultEnabled: false },
+    { name: 'ComfyUI-H3-Motion-Context', repo: 'https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context.git', defaultEnabled: false },
+    { name: 'ComfyUI_HYWorld2', repo: 'https://github.com/AHEKOT/ComfyUI_HYWorld2.git', defaultEnabled: false },
     { name: 'H3_Longshot', repo: 'https://github.com/r34vtraining/H3_Longshot.git', defaultEnabled: false },
     { name: 'H3_Prompt_Compiler', repo: 'https://github.com/r34vtraining/H3_Prompt_Compiler.git', defaultEnabled: false },
     { name: 'comfyui-tooling-nodes', repo: 'https://github.com/Acly/comfyui-tooling-nodes.git', required: true },
@@ -2108,6 +2110,17 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                 requiredFailure = true;
             } else {
                 log(`${c.yellow}WARN${c.reset}`, `${node.name} was installed without all optional dependencies`);
+            }
+            continue;
+        }
+        if (node.name === 'ComfyUI_HYWorld2') {
+            const py = getVenvPython(comfyDir);
+            const builder = join(nodePath, 'scripts', 'build_gsplat.py');
+            log('->', 'Building optional WorldMirror native dependencies; a compatible CUDA compiler is required.');
+            if (!py || !existsSync(builder) || spawnSync(py, [builder], { cwd: nodePath, stdio: 'inherit', windowsHide: true }).status !== 0) {
+                log('X', 'WorldMirror native dependencies failed. Review its CUDA/compiler requirements and retry this optional bundle.');
+                requiredFailure = true;
+                continue;
             }
         }
         for (const requirement of requirementsForManagedNode(managedRequirements, node.name)) {

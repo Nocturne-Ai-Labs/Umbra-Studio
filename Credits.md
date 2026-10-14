@@ -779,3 +779,15 @@ their interface and code remain unmodified. No license to their code is asserted
 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler)
 provides the optional MiniMax H3 latent upscaler used by DaSiWa's enhanced upscale node.
 Setup downloads the Apache-2.0 model only when selected; weights are not bundled.
+
+## Frame Forge
+
+[Frameforge](https://github.com/spacesimeco-hue/Chain-Motion-AI-Video-Editor)
+by **spacesimeco-hue and contributors** is an optional Apache-2.0 browser editor.
+Umbra Setup downloads the original repository and Python dependencies; its code
+and layout remain unchanged. Its upstream license stays in the installed checkout.
+[H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
+by **NikoDemon80 and contributors** provides the optional GPL-3.0 video continuation nodes.
+[HY-World / WorldMirror nodes](https://github.com/AHEKOT/ComfyUI_HYWorld2)
+by **AHEKOT and contributors** provide optional 3D reconstruction; their dependencies
+and models retain their upstream terms.
