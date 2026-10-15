@@ -9,7 +9,7 @@ export function repairManagedComfyCheckout(
   repository: string,
   installedVersion: string,
   minimumVersion: string,
-  hooks: { git?: GitRunner; log?: (message: string) => void } = {},
+  hooks: { git?: GitRunner; log?: (message: string) => void; minimumCommits?: string[] } = {},
 ): { previous: string; current: string } {
   const git: GitRunner = hooks.git || ((args, cwd) => {
     const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
@@ -26,10 +26,25 @@ export function repairManagedComfyCheckout(
   assertClean();
   const previous = checked(['rev-parse', 'HEAD']);
   hooks.log?.(`ComfyUI prior commit retained for recovery: ${previous}`);
-  if (compareUmbraVersions(installedVersion || '0.0.0', minimumVersion) >= 0) return { previous, current: previous };
+  const commits = [...new Set(hooks.minimumCommits || [])];
+  if (commits.some((commit) => !/^[a-f0-9]{40}$/.test(commit))) throw new Error('Invalid reviewed ComfyUI commit.');
+  const containsCommits = (target: string) => commits.every((commit) => git(['merge-base', '--is-ancestor', commit, target], toolDir).status === 0);
+  if (compareUmbraVersions(installedVersion || '0.0.0', minimumVersion) >= 0 && containsCommits(previous)) return { previous, current: previous };
   if (!/^\d+\.\d+\.\d+$/.test(minimumVersion)) throw new Error('The reviewed ComfyUI release version is invalid.');
   checked(['fetch', '--no-tags', repository, `v${minimumVersion}`]);
-  const target = checked(['rev-parse', 'FETCH_HEAD']);
+  const stable = checked(['rev-parse', 'FETCH_HEAD']);
+  for (const commit of commits) checked(['fetch', '--no-tags', repository, commit]);
+  if (compareUmbraVersions(installedVersion || '0.0.0', minimumVersion) >= 0 && containsCommits(previous)) return { previous, current: previous };
+  // Prefer the stable release when it already contains the required native support.
+  const target = [stable, ...commits].find((candidate) => containsCommits(candidate));
+  if (!target) throw new Error('The reviewed ComfyUI requirements have no single compatible revision. The checkout was preserved.');
+  if (commits.length) {
+    const targetVersion = checked(['show', `${target}:comfyui_version.py`]).match(/__version__\s*=\s*["'](\d+\.\d+\.\d+)["']/)?.[1];
+    if (!targetVersion || compareUmbraVersions(targetVersion, installedVersion || '0.0.0') < 0
+      || compareUmbraVersions(targetVersion, minimumVersion) < 0) {
+      throw new Error('The reviewed native-node revision would downgrade ComfyUI. Its checkout was preserved; update the reviewed requirements first.');
+    }
+  }
   if (git(['merge-base', '--is-ancestor', previous, target], toolDir).status !== 0) {
     // Upstream stable releases can use separate backport branches. Accept that
     // transition only when the untouched installed HEAD is its official release.

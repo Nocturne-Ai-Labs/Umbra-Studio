@@ -16,7 +16,7 @@ export type OnboardingState = {
   nodesFingerprint?: string; verificationFingerprint?: string; verifiedAt?: string;
   checkpointVerification?: { path: string; sha256: string; identity: ReturnType<typeof identity> };
 };
-const generationProfiles = new Set(['iris-3b', 'iris-3b-turbo', 'anima', 'anima-2.9b', 'anima-3.8b', 'flux-1', 'flux-2', 'qwen-image', 'qwen-image-2.1', 'krea-2', 'wulver-turbo', 'wulver-non-turbo', 'wulver-turbo-bf16', 'ernie-image', 'z-image', 'chroma-1', 'ideogram-4', 'omni-ovis', 'hidream-o1', 'classic-sd', 'minimax-h3', 'ltx-2.3', 'ltx-2.5']);
+const generationProfiles = new Set(['flux-3', 'iris-3b', 'iris-3b-turbo', 'anima', 'anima-2.9b', 'anima-3.8b', 'flux-1', 'flux-2', 'qwen-image', 'qwen-image-2.1', 'krea-2', 'wulver-turbo', 'wulver-non-turbo', 'wulver-turbo-bf16', 'ernie-image', 'z-image', 'chroma-1', 'ideogram-4', 'omni-ovis', 'hidream-o1', 'classic-sd', 'minimax-h3', 'ltx-2.3', 'ltx-2.5']);
 // Resolve every existing ancestor before any read/write; junctions cannot redirect Setup
 // to a different Umbra installation. Missing descendants remain local to this root.
 function assertLocalPath(root: string, target: string) {
@@ -149,14 +149,14 @@ export async function verifyOnboardingCheckpoint(root: string, path: string) {
 function modelEvidence(source: string, root: string, pack: ModelSetupPack, selection: string[]) {
   if (!selection.length) return { complete: false, files: [], generation: [] as string[] };
   const profiles = modelSetupSelection(source, pack, selection);
-  const models = readModelSetupManifest(source, pack).models.filter(m => m.installPolicy === 'automatic' && m.profiles.some(p => profiles.includes(p)));
-  const files = models.flatMap(m => m.files);
+  const models = readModelSetupManifest(source, pack).models.filter(m => (m.installPolicy === 'automatic' || m.profiles.includes('flux-3')) && m.profiles.some(p => profiles.includes(p)));
+  const files = models.flatMap(m => m.files.map(file => ({ ...file, manual: m.installPolicy === 'manual' })));
   for (const file of files) assertLocalPath(root, join(root, 'Tools', 'ComfyUI', 'models', file.destination));
   assertLocalPath(root, join(root, 'Tools', 'ComfyUI', 'models', '.umbra', pack === 'support' ? 'support-models.json' : 'model-requirements.json'));
   let receipt: any = null;
   try { receipt = JSON.parse(readFileSync(join(root, 'Tools', 'ComfyUI', 'models', '.umbra', pack === 'support' ? 'support-models.json' : 'model-requirements.json'), 'utf8')); } catch { /* Not verified yet. */ }
   const complete = files.every(f => identity(join(root, 'Tools', 'ComfyUI', 'models', f.destination))?.size === f.bytes
-    && Array.isArray(receipt?.installed) && receipt.installed.some((entry: any) => entry.destination === f.destination && entry.sha256 === f.sha256));
+    && (f.manual || (Array.isArray(receipt?.installed) && receipt.installed.some((entry: any) => entry.destination === f.destination && entry.sha256 === f.sha256))));
   return { complete, files: files.map(f => ({ destination: f.destination, hash: f.sha256, identity: identity(join(root, 'Tools', 'ComfyUI', 'models', f.destination)) })),
     generation: files.filter(f => /^(checkpoints|diffusion_models)\//.test(f.destination)).map(f => f.destination) };
 }
@@ -179,6 +179,7 @@ export async function inspectOnboarding(source: string, root: string) {
   const python = inspectComfyPython(join(root, 'Tools', 'ComfyUI'));
   const pythonPending = comfyPythonUpgradePending(root);
   const comfyComplete = core.installed && !pythonPending && python.healthy && !python.upgradeAvailable && core.filesVerified && core.pythonDependencies.verified
+    && dependencies.features.every(feature => !feature.minimumComfyCommit || feature.comfyCommitVerified)
     && compareUmbraVersions(core.version, core.minimumRequired || '0.0.0') >= 0
     && compareUmbraVersions(core.frontendVersion || '0.0.0', core.minimumFrontendRequired || '0.0.0') >= 0;
   const relevant = dependencies.features.filter(feature => !feature.optional || feature.modelProfiles.some(profile => state.profiles.includes(profile)));

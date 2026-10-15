@@ -22,7 +22,7 @@ export function sharedSupportCatalog(sourceRoot: string) {
   for (const model of models) for (const file of model.files) files.set(`${model.id}/${file.destination || file.path}`, file.bytes);
   return { bytes: [...files.values()].reduce((total, bytes) => total + bytes, 0), modelIds: models.map(model => model.id) };
 }
-type ModelFile = { destination: string; path?: string; bytes: number; sha256: string };
+type ModelFile = { destination: string; path?: string; bytes: number; sha256?: string };
 type Manifest = {
   schemaVersion: number;
   profiles: Record<string, { label: string; description: string; noDownload?: boolean; requiresProfiles?: string[] }>;

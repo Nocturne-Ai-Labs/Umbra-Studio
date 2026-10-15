@@ -976,6 +976,30 @@
           "reason": "Only the enabled PatchTritonVAE branch requires Triton; this pinned LTX original enables that branch by default. It is not required for H3 or the declared Umbra API workflows. Windows uses reviewed triton-windows pins matched to Torch and managed Python 3.13: Torch 2.10/2.11 uses Triton 3.6, 2.12/2.13 uses 3.7, and 2.14 uses 3.8. The current source is https://github.com/triton-lang/triton-windows#3-pytorch; its published CPython 3.13 wheels are verified before pinning. Linux uses its installed Torch wheel's declared Triton requirement. Unknown combinations remain held. Supported GPU/native execution and registration of every original node class, including bypassed stages, remain separate readiness checks."
         }
       ]
+    },
+    {
+      "id": "flux3-edit",
+      "label": "FLUX3 generation and image editing",
+      "optional": true,
+      "minimumComfyVersion": "0.40.0",
+      "minimumComfyCommit": "20b46065ef7f34fa21e8abebe8d0cca90a904d6d",
+      "modelProfiles": [
+        "flux-3"
+      ],
+      "workflowIds": [
+        "[Umbra UI] FLUX.3 Image Pipeline",
+        "[Umbra UI] FLUX.3 Image to Image Pipeline",
+        "[Umbra UI] FLUX.3 Edit Inpaint Pipeline"
+      ],
+      "requiredBuiltinClasses": [
+        "Flux3LayoutPrompt",
+        "ReferenceMultiLatent",
+        "EmptyFlux2LatentImage",
+        "CLIPLoader",
+        "VAELoader",
+        "KSampler"
+      ],
+      "customNodes": []
     }
   ]
 }

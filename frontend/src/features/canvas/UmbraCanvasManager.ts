@@ -28,6 +28,7 @@ interface UmbraCanvasManagerCallbacks {
     transform: Partial<Pick<UmbraCanvasDrawableEntity | UmbraCanvasMaskEntity, 'x' | 'y' | 'scaleX' | 'scaleY' | 'rotation'>>;
   }>) => void;
   onCropRasterEntity?: (entityId: string, sourceRevision: number, rect: UmbraCanvasRect) => void;
+  onCreateLayoutRegion?: (rect: UmbraCanvasRect) => void;
   onGenerationBboxChange: (bbox: UmbraCanvasRect) => void;
   onViewportChange: (viewport: UmbraCanvasViewport) => void;
   onMaskStroke: (entityId: string, stroke: UmbraCanvasMaskStroke) => void;
@@ -36,7 +37,7 @@ interface UmbraCanvasManagerCallbacks {
   onPickColor: (color: string) => void;
 }
 
-export type UmbraCanvasTool = 'select' | 'bbox' | 'pan' | 'eyedropper' | 'raster-brush' | 'raster-eraser' | 'mask-brush' | 'mask-eraser' | 'mask-lasso' | 'freehand-shape' | 'polygon-shape';
+export type UmbraCanvasTool = 'select' | 'layout' | 'bbox' | 'pan' | 'eyedropper' | 'raster-brush' | 'raster-eraser' | 'mask-brush' | 'mask-eraser' | 'mask-lasso' | 'freehand-shape' | 'polygon-shape';
 
 const IMAGE_CACHE = new Map<string, Promise<HTMLImageElement>>();
 const RASTER_SURFACE_CACHE = new Map<string, { entityId: string; imageUrl: string; surface: HTMLCanvasElement }>();
@@ -196,6 +197,8 @@ export class UmbraCanvasManager {
     anchorFill: '#071014',
     anchorSize: 9,
   });
+  private readonly layoutGroup = new Konva.Group({ listening: false });
+  private drawingLayout: { start: { x: number; y: number }; rect: Konva.Rect } | null = null;
   private readonly bboxRect = new Konva.Rect({
     stroke: '#fb7185',
     strokeWidth: 2,
@@ -262,7 +265,7 @@ export class UmbraCanvasManager {
     this.activeLayer.add(this.activeGroup);
     this.foregroundLayer.add(this.foregroundGroup);
     this.overlayLayer.add(this.overlayGroup);
-    this.overlayGroup.add(this.stagingGroup, this.samplingGroup, this.maskGroup, this.snapGuideGroup, this.bboxRect, this.bboxTransformer, this.entityTransformer);
+    this.overlayGroup.add(this.layoutGroup, this.stagingGroup, this.samplingGroup, this.maskGroup, this.snapGuideGroup, this.bboxRect, this.bboxTransformer, this.entityTransformer);
     this.stage.add(this.gridLayer, this.backingLayer, this.activeLayer, this.foregroundLayer, this.overlayLayer);
     this.bboxTransformer.nodes([this.bboxRect]);
     this.bindEvents();
@@ -294,6 +297,10 @@ export class UmbraCanvasManager {
   }
 
   setTool(tool: UmbraCanvasTool): void {
+    if (tool !== this.tool && this.drawingLayout) {
+      this.drawingLayout.rect.destroy();
+      this.drawingLayout = null;
+    }
     if (tool !== this.tool && (this.tool === 'polygon-shape' || this.tool === 'freehand-shape')) this.cancelShapeDrawing();
     this.tool = tool;
     const bboxActive = tool === 'bbox';
@@ -310,7 +317,7 @@ export class UmbraCanvasManager {
   private updateCursor(): void {
     this.stage.container().style.cursor = this.spacePressed || this.tool === 'pan'
       ? 'grab'
-      : this.tool === 'bbox' || this.tool === 'eyedropper' || this.tool === 'mask-brush' || this.tool === 'mask-eraser' || this.tool === 'mask-lasso' || this.tool === 'raster-brush' || this.tool === 'raster-eraser' || this.tool === 'freehand-shape' || this.tool === 'polygon-shape'
+      : this.tool === 'layout' || this.tool === 'bbox' || this.tool === 'eyedropper' || this.tool === 'mask-brush' || this.tool === 'mask-eraser' || this.tool === 'mask-lasso' || this.tool === 'raster-brush' || this.tool === 'raster-eraser' || this.tool === 'freehand-shape' || this.tool === 'polygon-shape'
         ? 'crosshair'
         : 'default';
   }
@@ -514,6 +521,11 @@ export class UmbraCanvasManager {
     this.viewport = project.viewport;
     this.applyViewport();
     this.renderBbox(project.generationBbox);
+    this.layoutGroup.destroyChildren();
+    (project.layoutRegions || []).forEach((region, index) => {
+      this.layoutGroup.add(new Konva.Rect({ ...region, stroke: '#a78bfa', strokeWidth: 2 / this.viewport.scale, dash: [6, 4], fill: '#a78bfa0c' }));
+      this.layoutGroup.add(new Konva.Text({ x: region.x + 4, y: region.y + 4, text: '<obj_' + (index + 1) + '>', fill: '#ddd6fe', fontSize: 13 / this.viewport.scale }));
+    });
     void this.renderEntities(project);
   }
 
@@ -590,6 +602,15 @@ export class UmbraCanvasManager {
         this.stage.container().style.cursor = 'grabbing';
         return;
       }
+      if (this.tool === 'layout' && button === 0) {
+        event.evt.preventDefault();
+        const start = this.worldPointer();
+        if (!start) return;
+        const rect = new Konva.Rect({ ...start, width: 0, height: 0, stroke: '#a78bfa', strokeWidth: 2 / this.viewport.scale, listening: false });
+        this.overlayGroup.add(rect);
+        this.drawingLayout = { start, rect };
+        return;
+      }
       if ((this.tool === 'mask-brush' || this.tool === 'mask-eraser' || this.tool === 'mask-lasso') && button === 0) {
         event.evt.preventDefault();
         this.beginMaskStroke();
@@ -620,6 +641,14 @@ export class UmbraCanvasManager {
 
     this.stage.on('pointermove', () => {
       if (this.touchGesture) return;
+      if (this.drawingLayout) {
+        const point = this.worldPointer();
+        if (!point) return;
+        const { start, rect } = this.drawingLayout;
+        rect.setAttrs({ x: Math.min(start.x, point.x), y: Math.min(start.y, point.y), width: Math.abs(point.x - start.x), height: Math.abs(point.y - start.y) });
+        this.overlayLayer.batchDraw();
+        return;
+      }
       if (this.drawingMask) {
         this.continueMaskStroke();
         return;
@@ -643,7 +672,16 @@ export class UmbraCanvasManager {
       }, false);
     });
 
-    this.stage.on('pointerup pointercancel', () => {
+    this.stage.on('pointerup pointercancel', (event) => {
+      if (this.drawingLayout) {
+        const { rect } = this.drawingLayout;
+        this.drawingLayout = null;
+        const box = { x: rect.x(), y: rect.y(), width: rect.width(), height: rect.height() };
+        rect.destroy();
+        this.overlayLayer.batchDraw();
+        if (event.type !== 'pointercancel' && box.width > 0 && box.height > 0) this.callbacks.onCreateLayoutRegion?.(box);
+        return;
+      }
       if (this.touchGesture) return;
       if (this.drawingMask) {
         this.finishMaskStroke();

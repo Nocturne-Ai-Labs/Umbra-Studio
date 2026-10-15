@@ -55,10 +55,14 @@ export function createManagedWorkflowRepairPlan(status: DependencyStatus, featur
   const steps: ManagedRepairStep[] = [];
   const core = status.comfyui;
   const coreVerified = core.installed && core.filesVerified && compareUmbraVersions(core.version || '0.0.0', feature.minimumComfyVersion) >= 0
+    && features.every((entry) => !entry.minimumComfyCommit || entry.comfyCommitVerified)
     && (!feature.minimumFrontendVersion || compareUmbraVersions(core.frontendVersion || '0.0.0', feature.minimumFrontendVersion) >= 0);
   // Keep verified targets visible for review and recovery; they are not installer work.
-  steps.push({ kind: 'comfyui', target: 'ComfyUI', pins: [feature.minimumComfyVersion, feature.minimumFrontendVersion].filter(Boolean),
-    installedVersion: core.version, installedCommit: core.installedCommit, requiredVersion: feature.minimumComfyVersion, requiredCommits: [],
+  steps.push({ kind: 'comfyui', target: 'ComfyUI', pins: [feature.minimumComfyVersion, feature.minimumFrontendVersion,
+    ...new Set(features.map((entry) => entry.minimumComfyCommit).filter(Boolean)),
+  ].filter(Boolean),
+    installedVersion: core.version, installedCommit: core.installedCommit, requiredVersion: feature.minimumComfyVersion,
+    requiredCommits: [...new Set(features.map((entry) => entry.minimumComfyCommit).filter(Boolean))],
     installedFrontendVersion: core.frontendVersion, requiredFrontendVersion: feature.minimumFrontendVersion,
     filesVerified: coreVerified, pythonDependenciesVerified: core.pythonDependencies.verified,
     verified: coreVerified && core.pythonDependencies.verified, runtimeReadiness: 'unverified' });
@@ -300,7 +304,7 @@ export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, st
   }
   for (const feature of features) {
     for (const node of feature.customNodes) if (node.status !== 'ready') issues.push(`${node.name}: ${node.reason || node.status}`);
-    if (compareUmbraVersions(status.comfyui.version || '0.0.0', feature.minimumComfyVersion) < 0
+    if ((feature.minimumComfyCommit && !feature.comfyCommitVerified) || compareUmbraVersions(status.comfyui.version || '0.0.0', feature.minimumComfyVersion) < 0
       || (feature.minimumFrontendVersion && compareUmbraVersions(status.comfyui.frontendVersion || '0.0.0', feature.minimumFrontendVersion) < 0)) issues.push('The installed ComfyUI core/frontend bundle still needs repair.');
     for (const dependency of feature.runtimePackages) {
       if ((dependency.status === 'missing' || dependency.moduleStatus === 'unverified')

@@ -1,0 +1,309 @@
+{
+  "1": {
+    "class_type": "UmbraLoadCheckpoint",
+    "inputs": {
+      "model_type": "diffusion_model",
+      "checkpoint_name": "[None]",
+      "diffusers_model": "",
+      "diffusion_model_name": "flux3_image_klein_sd_int8_convrot.safetensors",
+      "unet_name": "",
+      "gguf_name": "",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Umbra FLUX.3 Image Klein",
+      "umbra_model_family": "FLUX.3",
+      "umbra_ui_pipelines": [
+        {
+          "feature": "txt2img",
+          "model_family": "FLUX.3",
+          "model_sources": [
+            "diffusion_model",
+            "unet"
+          ],
+          "priority": 100,
+          "defaults": {
+            "modelName": "flux3_image_klein_sd_int8_convrot.safetensors",
+            "modelNamesBySource": {
+              "diffusion_model": "flux3_image_klein_sd_int8_convrot.safetensors",
+              "unet": "flux3_image_klein_sd_int8_convrot.safetensors"
+            },
+            "steps": 16,
+            "cfg": 1,
+            "samplerName": "euler",
+            "scheduler": "simple",
+            "width": 1024,
+            "height": 1024,
+            "clipSkip": 1,
+            "denoise": 1
+          }
+        }
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UmbraPowerPrompterReader",
+    "inputs": {
+      "prompt_text": "Describe the image or the changes to make.",
+      "negative_prompt": "",
+      "seed": 123456789,
+      "control_after_generate": "fixed",
+      "increment_step": 1,
+      "style_seed_behavior": "normal",
+      "aspect_ratio": "custom",
+      "swap_dimensions": "Off",
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Umbra Prompt + Generation Controls"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_4b_int8_convrot.safetensors",
+      "type": "flux3",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "FLUX.3 Qwen3-VL 4B",
+      "umbra_resources": [
+        {
+          "id": "flux3.text_encoder",
+          "label": "FLUX.3 Qwen3-VL 4B",
+          "kind": "text_encoder",
+          "input": "clip_name",
+          "required": true,
+          "order": 10
+        }
+      ]
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "_meta": {
+      "title": "FLUX.3 VAE",
+      "umbra_role": "inpaint_reference_vae",
+      "umbra_output_index": 0,
+      "umbra_resources": [
+        {
+          "id": "flux3.vae",
+          "label": "FLUX.2 / FLUX.3 VAE",
+          "kind": "vae",
+          "input": "vae_name",
+          "required": true,
+          "order": 20
+        }
+      ]
+    }
+  },
+  "5": {
+    "class_type": "UmbraA1111LoraSyntax",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt_text": [
+        "20",
+        0
+      ],
+      "lora_syntax_text": "",
+      "lora_name": "[None]",
+      "lora_strength_model": 1,
+      "lora_strength_clip": 0,
+      "strict_mode": false,
+      "strip_lora_tags_from_text": true
+    },
+    "_meta": {
+      "title": "Umbra LoRA Stack"
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "5",
+        1
+      ],
+      "text": [
+        "5",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.3 Positive"
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "5",
+        1
+      ],
+      "text": [
+        "2",
+        8
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.3 Negative Prompt",
+      "umbra_role": "negative_prompt"
+    }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "5",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 16,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "latent_image": [
+        "9",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Sample FLUX.3",
+      "umbra_role": "inpaint_sampler"
+    }
+  },
+  "9": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "width": [
+        "2",
+        4
+      ],
+      "height": [
+        "2",
+        5
+      ],
+      "batch_size": [
+        "2",
+        6
+      ]
+    },
+    "_meta": {
+      "title": "FLUX.3 Output Dimensions"
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "8",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode FLUX.3"
+    }
+  },
+  "11": {
+    "class_type": "UmbraImageUpscale",
+    "inputs": {
+      "image": [
+        "10",
+        0
+      ],
+      "upscale_model": "RealESRGAN_x4plus.safetensors",
+      "max_dimension": 3840,
+      "enabled": false
+    },
+    "_meta": {
+      "title": "Optional Output Upscale"
+    }
+  },
+  "12": {
+    "class_type": "UmbraLabSaveImage",
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "filename_prefix": "UmbraUI_txt2img_FLUX3_%date%",
+      "positive_prompt": [
+        "5",
+        2
+      ],
+      "negative_prompt": [
+        "2",
+        8
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "output_folder": "Umbra UI/txt2img",
+      "save_to_yyyy_mm_dd_folder": true,
+      "save_to_set_subfolder": false,
+      "set_subfolder": "",
+      "save_set_to_style_subfolder": "",
+      "model_name": [
+        "1",
+        3
+      ],
+      "seed": [
+        "2",
+        3
+      ],
+      "steps": 16,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple"
+    },
+    "_meta": {
+      "title": "Save FLUX.3"
+    }
+  },
+  "20": {
+    "class_type": "Flux3LayoutPrompt",
+    "inputs": {
+      "prompt": [
+        "2",
+        0
+      ],
+      "element": []
+    },
+    "_meta": {
+      "title": "FLUX.3 Layout Regions",
+      "umbra_role": "edit_layout_prompt"
+    }
+  }
+}

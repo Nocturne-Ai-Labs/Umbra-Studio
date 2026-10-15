@@ -1,7 +1,7 @@
 import { normalizeUmbraUiImageControlsSnapshot, type UmbraUiImageControlsSnapshot } from '@/lib/umbraUiImageControlsPersistence';
 import { createUmbraUiPromptSegment, migrateLegacyUmbraUiAgentPrompt, type UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
 
-export type ImageWorkspace = 'image' | 'img2img' | 'inpaint' | 'canvas';
+export type ImageWorkspace = 'image' | 'img2img' | 'inpaint' | 'canvas' | 'edit';
 export interface ImageWorkspaceDraft {
   controls: UmbraUiImageControlsSnapshot;
   promptSegments: UmbraUiPromptSegment[];
@@ -10,11 +10,11 @@ export interface ImageWorkspaceDraft {
 export type ImageWorkspaceDrafts = Partial<Record<ImageWorkspace, ImageWorkspaceDraft>>;
 
 export function isImageWorkspace(mode: string): mode is ImageWorkspace {
-  return mode === 'image' || mode === 'img2img' || mode === 'inpaint' || mode === 'canvas';
+  return mode === 'image' || mode === 'img2img' || mode === 'inpaint' || mode === 'canvas' || mode === 'edit';
 }
 
 export function usesInpaintWorkspacePipeline(mode: string): boolean {
-  return mode === 'inpaint' || mode === 'canvas';
+  return mode === 'inpaint' || mode === 'canvas' || mode === 'edit';
 }
 
 export function normalizeImageWorkspaceDrafts(value: unknown): ImageWorkspaceDrafts {
@@ -40,9 +40,11 @@ export function normalizeImageWorkspaceDrafts(value: unknown): ImageWorkspaceDra
   return result;
 }
 
-export function createImageWorkspaceDraft(): ImageWorkspaceDraft {
+export function createImageWorkspaceDraft(mode?: ImageWorkspace): ImageWorkspaceDraft {
   return {
-    controls: normalizeUmbraUiImageControlsSnapshot({ modelFamily: 'Anima', generation: {} })!,
+    controls: normalizeUmbraUiImageControlsSnapshot(mode === 'edit'
+      ? { modelFamily: 'FLUX.3', generation: { modelType: 'diffusion_model', steps: 16, cfg: 1, samplerName: 'euler', scheduler: 'simple' } }
+      : { modelFamily: 'Anima', generation: {} })!,
     promptSegments: [createUmbraUiPromptSegment()],
     activePromptSegmentId: '',
   };
@@ -60,6 +62,6 @@ export function stageImageWorkspaceNavigation(
   if (!isImageWorkspace(toMode)) return null;
   // Save the first destination draft before the active mode changes. A reload
   // during the debounced save must still restore this workspace's own controls.
-  drafts[toMode] ||= createImageWorkspaceDraft();
+  drafts[toMode] ||= createImageWorkspaceDraft(toMode);
   return drafts[toMode];
 }

@@ -1,3 +1,4 @@
+import { parseFlux3LayoutRegions } from '../shared/umbra-ui/flux3Edit';
 import { createHash, randomUUID } from 'crypto';
 import { copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises';
 import { extname, join, resolve, sep } from 'path';
@@ -105,6 +106,8 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
     };
   }).filter((lora: Record<string, any>) => lora.name);
   return {
+    layoutRegions: parseFlux3LayoutRegions(settings.layoutRegions),
+    ...(settings.editArea === 'whole' || settings.editArea === 'mask' ? { editArea: settings.editArea } : {}),
     modelFamily: String(settings.modelFamily || '').trim().slice(0, 160),
     modelSource: String(settings.modelSource || '').trim().slice(0, 160),
     checkpointName: String(settings.checkpointName || '').trim().replace(/\\/g, '/').slice(0, 4096),
@@ -419,6 +422,8 @@ function normalizeProject(rawProject: unknown): Record<string, any> {
     name: String(source.name || 'Untitled Canvas').trim().slice(0, 240) || 'Untitled Canvas',
     entities,
     activeEntityId: entityIds.has(String(source.activeEntityId || '')) ? String(source.activeEntityId) : '',
+    layoutRegions: parseFlux3LayoutRegions(source.layoutRegions),
+    ...(source.editArea === 'whole' || source.editArea === 'mask' ? { editArea: source.editArea } : {}),
     generationBbox: {
       x: Math.round(finiteNumber(bbox.x, 0, -MAX_COORDINATE, MAX_COORDINATE)),
       y: Math.round(finiteNumber(bbox.y, 0, -MAX_COORDINATE, MAX_COORDINATE)),

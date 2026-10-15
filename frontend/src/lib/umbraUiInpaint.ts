@@ -283,6 +283,7 @@ export interface UmbraUiInpaintSubmitOptions {
   source: Blob;
   sourceName: string;
   canvasProjectId: string;
+  layoutRegions?: import('../../../shared/umbra-ui/flux3Edit').Flux3LayoutRegion[];
   sourceFreeGeneration?: boolean;
   operationMode: 'inpaint' | 'outpaint';
   generationRegionX: number;
@@ -355,7 +356,7 @@ export async function submitUmbraUiInpaintJob(options: UmbraUiInpaintSubmitOptio
   form.append('source', options.source, options.sourceName || 'inpaint-source.png');
   form.append('mask', options.mask, 'inpaint-mask.png');
   for (const [key, value] of Object.entries(options)) {
-    if (key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'hiresFix' || key === 'detailerPipeline' || key === 'controlLayers' || key === 'referenceLayers') continue;
+    if (key === 'layoutRegions' || key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'hiresFix' || key === 'detailerPipeline' || key === 'controlLayers' || key === 'referenceLayers') continue;
     form.append(key, String(value));
   }
   form.append('promptSegments', JSON.stringify(options.promptSegments));
@@ -392,6 +393,7 @@ export async function submitUmbraUiInpaintJob(options: UmbraUiInpaintSubmitOptio
   for (const control of options.controlLayers) {
     form.append(`controlImage:${control.id}`, control.image, `${control.id}.png`);
   }
+  form.append('layoutRegions', JSON.stringify(options.layoutRegions || []));
   form.append('referenceLayers', JSON.stringify(options.referenceLayers.map((reference) => ({
     id: reference.id,
     name: reference.name,

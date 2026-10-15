@@ -100,6 +100,7 @@ const UMBRA_CANVAS_REFERENCE_METHODS: UmbraUiInpaintReferenceMethod[] = [
   'flux_redux',
   'flux_kontext',
   'flux2_reference',
+  'flux3_reference',
   'qwen_image_reference',
   'hidream_o1_reference',
 ];

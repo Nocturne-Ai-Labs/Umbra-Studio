@@ -349,7 +349,7 @@ function migrateProjectDocument(rawProject: unknown): Record<string, any> {
       layer.denoiseLimit = layer.denoiseLimit === undefined ? 1 : Math.max(0, Math.min(1, Number(layer.denoiseLimit) || 0));
     }
     if (layer.kind === 'reference') {
-      const referenceMethods = ['style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'qwen_image_reference', 'hidream_o1_reference'];
+      const referenceMethods = ['style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'flux3_reference', 'qwen_image_reference', 'hidream_o1_reference'];
       layer.method = referenceMethods.includes(String(layer.method || '')) ? layer.method : 'style_model';
       layer.crop = layer.crop === 'none' ? 'none' : 'center';
       layer.strengthType = layer.strengthType === 'attn_bias' ? 'attn_bias' : 'multiply';

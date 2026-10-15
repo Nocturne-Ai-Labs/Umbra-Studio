@@ -419,6 +419,13 @@ follow their latest upstream default branches.
   - Optional SDXL reference-image conditioning through ComfyUI_IPAdapter_plus
   - Installed when `Canvas Reference - SDXL` is selected in the Umbra UI model installer
 
+### FLUX3 Image Klein
+
+- Model creator: [Black Forest Labs](https://bfl.ai/).
+- Native ComfyUI integration and reference workflows: [Comfy Org and contributors](https://github.com/Comfy-Org/ComfyUI).
+- Model weights and license: [FLUX3 Image Klein](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy), FLUX Kommunity License.
+- Umbra uses the native model, multi-image reference and layout-box contracts in its shared image workflows and Canvas-based Edit workspace. Model weights are supplied separately under their upstream terms.
+
 ### FLUX.1 Redux and SigLIP Vision
 - FLUX.1 Redux project: https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev
 - ComfyUI packaged sources:

@@ -369,6 +369,27 @@ async function main() {
   }
 
   const models = selectedModels(manifest);
+  const manualModels = manifest.models.filter(model => model.installPolicy === 'manual' && model.requiredForProfile === true
+    && model.profiles.some(profile => requestedProfiles.includes(profile)));
+  const missingManual = [];
+  for (const model of manualModels) {
+    console.log(`\n[umbra-ui-models] Manual installation: ${model.purpose}\n${model.reference}`);
+    for (const file of model.files) {
+      const destination = normalizedRelative(file.destination, `${model.id} destination`);
+      const target = path.join(modelsRoot, ...destination.split('/'));
+      const info = fs.existsSync(target) ? fs.statSync(target) : null;
+      if (!info?.isFile() || info.size !== file.bytes) missingManual.push(target);
+    }
+  }
+  if (manualModels.length && !verifyTarget && missingManual.length) {
+    throw new Error(`Install the licensed model files manually, then verify again. Required files: ${missingManual.join(', ')}. See the official links above.`);
+  }
+  if (models.length === 0 && manualModels.length > 0) {
+    if (!fs.existsSync(comfyRoot)) throw new Error(`ComfyUI is not installed at ${comfyRoot}`);
+    console.log(verifyTarget ? `UMBRA_VERIFY_OK|umbra-ui-model-target|${modelsRoot}`
+      : 'Manual model files are present with the expected sizes. Upstream SHA-256 verification is unavailable; no download was performed.\nUMBRA_VERIFY_OK|umbra-ui-models');
+    return;
+  }
   if (models.length === 0) throw new Error(`No automatic models belong to profile ${requestedProfile}`);
   if (verifyTarget) {
     if (!fs.existsSync(comfyRoot)) throw new Error(`ComfyUI is not installed at ${comfyRoot}`);

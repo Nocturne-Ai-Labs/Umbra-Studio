@@ -1,3 +1,4 @@
+import type { Flux3LayoutRegion } from '../../../../shared/umbra-ui/flux3Edit';
 import type {
   UmbraUiInpaintControlAdapterType,
   UmbraUiInpaintControlMode,
@@ -286,6 +287,8 @@ export function isUmbraCanvasReferenceEntity(entity: UmbraCanvasEntity): entity 
 }
 
 export interface UmbraCanvasGenerationSettingsSnapshot {
+  editArea?: 'whole' | 'mask';
+  layoutRegions?: Flux3LayoutRegion[];
   modelFamily: string;
   modelSource: string;
   checkpointName: string;
@@ -361,11 +364,13 @@ export interface UmbraCanvasGenerationState {
 }
 
 export interface UmbraCanvasProjectDocument {
+  editArea?: 'whole' | 'mask';
   version: typeof UMBRA_CANVAS_PROJECT_VERSION;
   id: string;
   name: string;
   entities: UmbraCanvasEntity[];
   activeEntityId: string;
+  layoutRegions?: Flux3LayoutRegion[];
   generationBbox: UmbraCanvasRect;
   generationAlignment: number;
   viewport: UmbraCanvasViewport;
@@ -385,7 +390,10 @@ export function buildUmbraCanvasSnapshotSignature(project: UmbraCanvasProjectDoc
         : entity.kind === 'reference'
           ? [entity.id, entity.kind, entity.revision, entity.rasterEntityId, entity.method, entity.modelName, entity.visionModelName, entity.weight, entity.beginStepPercent, entity.endStepPercent, entity.maskEntityId].join(':')
       : [entity.id, entity.kind, entity.revision, entity.x, entity.y, entity.width, entity.height, entity.scaleX, entity.scaleY, entity.rotation].join(':'));
-  return [`${bbox.x}:${bbox.y}:${bbox.width}:${bbox.height}`, ...entities].join('|');
+  return [`${bbox.x}:${bbox.y}:${bbox.width}:${bbox.height}`, ...entities,
+    ...(project.layoutRegions?.length ? [JSON.stringify(project.layoutRegions)] : []),
+    ...(project.editArea ? [project.editArea] : []),
+  ].join('|');
 }
 
 function createId(prefix: string): string {

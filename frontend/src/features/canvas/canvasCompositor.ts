@@ -326,6 +326,7 @@ async function drawMask(
 
 export async function composeUmbraCanvasGenerationRegion(
   project: UmbraCanvasProjectDocument,
+  options: { wholeRegion?: boolean } = {},
 ): Promise<UmbraCanvasCompositeResult> {
   const bbox = project.generationBbox;
   const width = Math.max(1, Math.round(bbox.width));
@@ -387,7 +388,7 @@ export async function composeUmbraCanvasGenerationRegion(
     const automaticMask = 255 - sourceAlpha;
     if (automaticMask > 0) automaticMaskPixels += 1;
     const explicitValue = Math.max(maskPixels.data[offset], maskPixels.data[offset + 1], maskPixels.data[offset + 2]);
-    const value = Math.max(automaticMask, explicitValue);
+    const value = options.wholeRegion ? 255 : Math.max(automaticMask, explicitValue);
     maskPixels.data[offset] = value;
     maskPixels.data[offset + 1] = value;
     maskPixels.data[offset + 2] = value;

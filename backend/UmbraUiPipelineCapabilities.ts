@@ -1047,6 +1047,17 @@ export function deriveUmbraUiInpaintCanvasCapabilities(
       && referenceModelSink.referenceMethod === 'ip_adapter'
       && !!connectedNodeId(referenceModelSink, 'model');
     const providers = [
+      ...(sink?.classType === 'ReferenceMultiLatent'
+        && sink.referenceMethod === 'flux3_reference'
+        && !!source && !!vae
+        && connectedAutogrowImageNodeId(sink, 'image0') === source.id
+        && !!connectedNodeId(sink, 'positive') && !!connectedNodeId(sink, 'negative')
+        && connectedNodeId(sink, 'vae') === vae.id ? [{
+          method: 'flux3_reference' as const,
+          maxLayers: 9,
+          reason: 'FLUX3 reserves one reference for the editable image and accepts nine additional images.',
+          requiredNodes: ['LoadImage', 'ReferenceMultiLatent'],
+        }] : []),
       ...(fluxReady && fluxMethod ? [{
         method: fluxMethod,
         maxLayers: 8,

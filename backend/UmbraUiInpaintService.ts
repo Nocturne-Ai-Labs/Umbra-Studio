@@ -1,3 +1,4 @@
+import { applyFlux3References, flux3LayoutElements, removeFlux3BlankReference } from '../shared/umbra-ui/flux3Edit';
 import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'fs';
 import { mkdir, open, rename, rm } from 'fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'path';
@@ -131,6 +132,7 @@ const CONTROL_PREPROCESSOR_NODES: Record<string, string> = {
   content_shuffle: 'ShufflePreprocessor',
 };
 const NATIVE_REFERENCE_METHODS = new Set<UmbraUiInpaintReferenceMethod>([
+  'flux3_reference',
   'ip_adapter',
   'flux_redux',
   'flux_kontext',
@@ -299,6 +301,7 @@ export interface UmbraUiInpaintReferenceLayer {
 }
 
 export interface UmbraUiInpaintSettings {
+  layoutRegions?: import('../shared/umbra-ui/flux3Edit').Flux3LayoutRegion[];
   outputFolder?: string;
   workflowId: string;
   canvasProjectId: string;
@@ -1069,6 +1072,7 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
     modelType: settings.modelSource,
     checkpointName: settings.checkpointName,
     workflowResources,
+    layoutRegions: settings.layoutRegions || [],
     negativePrompt: settings.negativePrompt,
     seed: item.seed,
     controlAfterGenerate: settings.seedMode,
@@ -1951,6 +1955,8 @@ export class UmbraUiInpaintService {
           ? ['LoadImage', 'CLIPVisionLoader', 'CLIPVisionEncode', 'StyleModelLoader', 'StyleModelApply']
           : method === 'qwen_image_reference'
           ? ['LoadImage', 'TextEncodeQwenImageEditPlus']
+          : method === 'flux3_reference'
+            ? ['LoadImage', 'ReferenceMultiLatent']
           : method === 'hidream_o1_reference'
             ? ['LoadImage', 'HiDreamO1ReferenceImages']
             : ['LoadImage', 'VAEEncode', 'ReferenceLatent'];
@@ -2130,6 +2136,7 @@ export class UmbraUiInpaintService {
                     negativePrompt: settings.negativePrompt,
                     loras: settings.loras,
                     workflowResources: settings.workflowResources,
+                    layoutRegions: settings.layoutRegions || [],
                     seed: item.seed,
                     seedMode: settings.seedMode,
                     seedIncrement: settings.seedIncrement,
@@ -2933,6 +2940,16 @@ export class UmbraUiInpaintService {
     const graph = structuredClone(sourceGraph);
     const roleOf = (node: any) => String(node?._meta?.umbra_role || node?._meta?.role || '').trim().toLowerCase();
     const findRole = (role: string) => Object.entries(graph).find(([, node]) => roleOf(node) === role);
+    const layoutEntry = findRole('edit_layout_prompt');
+    if (settings.layoutRegions?.length && layoutEntry?.[1]?.class_type !== 'Flux3LayoutPrompt') {
+      throw new Error('The selected edit workflow does not support FLUX3 layout boxes.');
+    }
+    if (layoutEntry?.[1]?.class_type === 'Flux3LayoutPrompt') {
+      layoutEntry[1].inputs.element = flux3LayoutElements(settings.layoutRegions || [], {
+        x: settings.generationRegionX, y: settings.generationRegionY,
+        width: settings.generationRegionWidth, height: settings.generationRegionHeight,
+      });
+    }
     const sourceEntry = findRole('inpaint_source');
     const maskEntry = findRole('inpaint_mask');
     if (!sourceEntry) throw new Error('The native edit workflow is missing the required inpaint_source role.');
@@ -3101,6 +3118,8 @@ export class UmbraUiInpaintService {
           positiveInputs[field] = [imageId, 0];
           negativeInputs[field] = [imageId, 0];
         });
+      } else if (method === 'flux3_reference') {
+        applyFlux3References(graph, sourceEntry[0], loadReferenceImages().map(({ imageId }) => imageId));
       } else if (method === 'hidream_o1_reference') {
         if (referenceLayers.length > 9) {
           throw new Error('HiDream-O1 supports at most nine additional reference layers because image_1 is reserved for the editable source.');
@@ -3240,6 +3259,7 @@ export class UmbraUiInpaintService {
       sinkEntry[1].inputs = sinkInputs;
     }
 
+    if (settings.sourceFreeGeneration) removeFlux3BlankReference(graph);
     const processorEntry = findRole('inpaint_mask_processor');
     if (processorEntry) {
       const inputs = processorEntry[1].inputs && typeof processorEntry[1].inputs === 'object' ? processorEntry[1].inputs : {};

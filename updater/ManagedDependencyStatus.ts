@@ -40,6 +40,8 @@ export type ManagedFeatureStatus = {
   optIn?: boolean;
   active: boolean;
   minimumComfyVersion: string;
+  minimumComfyCommit?: string;
+  comfyCommitVerified?: boolean;
   minimumFrontendVersion: string;
   modelProfiles: string[];
   missingModels: string[];
@@ -293,6 +295,9 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       optIn: feature.optIn === true,
       active: feature.workflowIds?.length ? true : Boolean(feature.activationFile && existsSync(safeChild(modelsRoot, feature.activationFile))),
       minimumComfyVersion: feature.minimumComfyVersion,
+      minimumComfyCommit: feature.minimumComfyCommit,
+      comfyCommitVerified: !feature.minimumComfyCommit || (existsSync(comfyRoot)
+        && probeManagedGit(comfyRoot, ['merge-base', '--is-ancestor', feature.minimumComfyCommit, 'HEAD'], gitProbes).status === 0),
       minimumFrontendVersion: feature.minimumFrontendVersion || '',
       modelProfiles: feature.modelProfiles,
       missingModels,
@@ -326,6 +331,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
         .sort(compareUmbraVersions).at(-1) || '',
       minimumRequired: features.map((feature) => feature.minimumComfyVersion)
         .sort(compareUmbraVersions).at(-1) || '',
+      minimumCommits: [...new Set(features.map((feature) => feature.minimumComfyCommit).filter(Boolean))],
     },
     features,
     backgroundCompatibility: inspectBackgroundRemovalCompatibility(runtimeRoot),

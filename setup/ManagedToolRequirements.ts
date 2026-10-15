@@ -22,6 +22,7 @@ export type ManagedFeatureRequirement = {
   optIn?: boolean;
   activationFile?: string;
   minimumComfyVersion: string;
+  minimumComfyCommit?: string;
   minimumFrontendVersion?: string;
   modelProfiles: string[];
   workflowIds?: string[];
@@ -67,6 +68,7 @@ export function readManagedToolRequirements(sourceRoot: string): ManagedFeatureR
   for (const feature of parsed.features) {
     if (!feature || !/^[a-z0-9-]{1,64}$/.test(feature.id) || typeof feature.label !== 'string' || !feature.label
       || !/^\d+\.\d+\.\d+$/.test(feature.minimumComfyVersion)
+      || (feature.minimumComfyCommit !== undefined && !/^[a-f0-9]{40}$/.test(feature.minimumComfyCommit))
       || (feature.minimumFrontendVersion !== undefined && !/^\d+\.\d+\.\d+$/.test(feature.minimumFrontendVersion))
       || (feature.activationFile !== undefined && !relativePath(feature.activationFile))
       || (!feature.activationFile && !feature.workflowIds?.length)

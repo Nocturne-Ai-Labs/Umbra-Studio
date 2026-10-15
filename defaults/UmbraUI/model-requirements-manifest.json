@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "profiles": {
+    "flux-3": {"label":"FLUX3 Image Klein","description":"Native image generation and multi-reference editing. Accept the FLUX Kommunity License on Hugging Face, then install the gated weights manually. Requires the reviewed FLUX3 ComfyUI update. Base and distilled checkpoints share one pipeline."},
     "minimax-h3-latent-upscale": {"label":"MiniMax H3 Latent Upscaler","description":"Optional BF16 learned 3D latent upscaler for DaSiWa Enhanced Upscale. About 691 MB. Apache-2.0."},
     "iris-3b": {"label":"Iris 3B","description":"Original pixel-space Iris 3B checkpoint plus Qwen3-VL 4B text encoder. Apache-2.0; no VAE."},
     "iris-3b-turbo": {"label":"Iris 3B Turbo","description":"Official four-step distilled checkpoint plus Qwen3-VL 4B text encoder. No Turbo LoRA; no VAE."},
@@ -1096,6 +1097,35 @@
           "sourcePath": "Wulver_v0.5_w4a8-convrot.safetensors",
           "bytes": 7681032568,
           "sha256": "905af7686bb48d4f40dc80117f6839f6a9491b1af13e46b6242ecaadda6bf996"
+        }
+      ]
+    },
+    {
+      "id": "flux3-image-klein-manual",
+      "requiredForProfile": true,
+      "creator": "Black Forest Labs / Comfy Org",
+      "repository": "black-forest-labs/flux-3-image-klein-comfy",
+      "revision": "3700a1012ec75ad50a54e92199f85ba7cba93c1e",
+      "licenseUrl": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/blob/3700a1012ec75ad50a54e92199f85ba7cba93c1e/LICENSE.md",
+      "installPolicy": "manual",
+      "profiles": [
+        "flux-3"
+      ],
+      "license": "FLUX Kommunity License",
+      "reference": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy",
+      "purpose": "Accept the license and download from the official repository. Place flux3_image_klein_sd_int8_convrot.safetensors in Tools/ComfyUI/models/diffusion_models; qwen3vl_4b_int8_convrot.safetensors in Tools/ComfyUI/models/text_encoders; flux2-vae.safetensors in Tools/ComfyUI/models/vae. BF16, NVFP4 and base checkpoints use the same pipeline; select matching installed files and sampling settings. No Krea3 weights are available through this integration.",
+      "files": [
+        {
+          "destination": "diffusion_models/flux3_image_klein_sd_int8_convrot.safetensors",
+          "bytes": 5827874779
+        },
+        {
+          "destination": "text_encoders/qwen3vl_4b_int8_convrot.safetensors",
+          "bytes": 4858559240
+        },
+        {
+          "destination": "vae/flux2-vae.safetensors",
+          "bytes": 336211292
         }
       ]
     }

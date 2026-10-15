@@ -99,7 +99,7 @@ function formatStrength(value: number): string {
 }
 
 export function isUmbraUiModelOnlyLoraFamily(value: unknown): boolean {
-  return ['anima38b', 'wulverturbo', 'wulvernonturbo'].includes(normalizeUmbraUiModelFamilyKey(value));
+  return ['anima38b', 'wulverturbo', 'wulvernonturbo', 'flux3'].includes(normalizeUmbraUiModelFamilyKey(value));
 }
 
 export function buildUmbraUiLoraSyntax(lora: UmbraUiLoraEntry, modelOnly = false): string {

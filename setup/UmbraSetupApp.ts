@@ -538,7 +538,7 @@ async function main() {
               if (kind === 'node' && (!requirements.length || failed.length)) {
                 throw new Error(`Managed ${target} verification failed. ${failed.map((node) => node.pythonDependencies.detail || node.reason || node.status).join(' ')}`);
               }
-              if (kind === 'comfyui' && (!verified.comfyui.installed || (verified.comfyui.minimumRequired
+              if (kind === 'comfyui' && (verified.features.some(feature => feature.minimumComfyCommit && !feature.comfyCommitVerified) || !verified.comfyui.installed || (verified.comfyui.minimumRequired
                 && compareUmbraVersions(verified.comfyui.version, verified.comfyui.minimumRequired) < 0)
                 || (verified.comfyui.minimumFrontendRequired && compareUmbraVersions(verified.comfyui.frontendVersion || '0.0.0', verified.comfyui.minimumFrontendRequired) < 0))) {
                 throw new Error(`ComfyUI ${verified.comfyui.minimumRequired || 'installation'} is still required. Review the setup log.`);
@@ -594,7 +594,7 @@ async function main() {
                 if (step.kind === 'node' && (!requirements.length || failed.length)) {
                   throw new Error(`Managed ${step.target} verification failed. ${failed.map((node) => node.pythonDependencies.detail || node.reason || node.status).join(' ')}`);
                 }
-                if (step.kind === 'comfyui' && (!verified.comfyui.installed || compareUmbraVersions(verified.comfyui.version || '0.0.0', verified.comfyui.minimumRequired || '0.0.0') < 0
+                if (step.kind === 'comfyui' && (verified.features.some(feature => feature.minimumComfyCommit && !feature.comfyCommitVerified) || !verified.comfyui.installed || compareUmbraVersions(verified.comfyui.version || '0.0.0', verified.comfyui.minimumRequired || '0.0.0') < 0
                   || compareUmbraVersions(verified.comfyui.frontendVersion || '0.0.0', verified.comfyui.minimumFrontendRequired || '0.0.0') < 0)) throw new Error('The core/frontend bundle still needs repair.');
               } finally { state.lines.push(...job.lines.slice(-20)); }
             },

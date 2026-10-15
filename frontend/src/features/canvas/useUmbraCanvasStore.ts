@@ -1,3 +1,4 @@
+import type { Flux3LayoutRegion } from '../../../../shared/umbra-ui/flux3Edit';
 import { create } from 'zustand';
 import {
   createUmbraCanvasProjectDocument,
@@ -204,6 +205,8 @@ interface UmbraCanvasStore extends UmbraCanvasHistory {
   deleteEntity: (entityId: string) => void;
   deleteEntities: (entityIds: string[]) => void;
   moveEntity: (entityId: string, direction: 'up' | 'down') => void;
+  setLayoutRegions: (regions: Flux3LayoutRegion[]) => void;
+  setEditArea: (area: 'whole' | 'mask') => void;
   setGenerationBbox: (bbox: Partial<UmbraCanvasRect>) => void;
   setViewport: (viewport: Partial<UmbraCanvasViewport>) => void;
   setGenerationSettings: (settings: UmbraCanvasGenerationSettingsSnapshot) => void;
@@ -652,6 +655,8 @@ export const useUmbraCanvasStore = create<UmbraCanvasStore>((set) => ({
     [entities[index], entities[target]] = [entities[target], entities[index]];
     return { ...project, entities };
   })),
+  setLayoutRegions: (regions) => set((state) => revise(state, (project) => ({ ...project, layoutRegions: structuredClone(regions) }))),
+  setEditArea: (area) => set((state) => revise(state, (project) => ({ ...project, editArea: area }))),
   setGenerationBbox: (bbox) => set((state) => revise(state, (project) => ({
     ...project,
     generationBbox: normalizeUmbraCanvasBbox(

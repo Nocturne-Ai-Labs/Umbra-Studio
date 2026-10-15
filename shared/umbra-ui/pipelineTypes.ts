@@ -50,6 +50,7 @@ export type UmbraUiInpaintReferenceMethod =
   | 'flux_redux'
   | 'flux_kontext'
   | 'flux2_reference'
+  | 'flux3_reference'
   | 'qwen_image_reference'
   | 'hidream_o1_reference';
 
@@ -288,6 +289,8 @@ export function normalizeUmbraUiModelFamilyKey(value: unknown): string {
     flux1dev: 'flux1',
     flux1schnell: 'flux1',
     flux2dev: 'flux2',
+    flux3imageklein: 'flux3',
+    flux3klein: 'flux3',
     hidreamo1image: 'hidreamo1',
     ideogram: 'ideogram4',
     illustrious: 'illustriousxl',
@@ -658,7 +661,7 @@ const INPAINT_CONTROL_MODES: UmbraUiInpaintControlMode[] = [
   'balanced', 'more_prompt', 'more_control', 'unbalanced',
 ];
 const INPAINT_REFERENCE_METHODS: UmbraUiInpaintReferenceMethod[] = [
-  'style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'qwen_image_reference', 'hidream_o1_reference',
+  'style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'flux3_reference', 'qwen_image_reference', 'hidream_o1_reference',
 ];
 
 function normalizeInpaintControlCapability(value: unknown, fallbackReason: string): UmbraUiInpaintControlLayerCapability {

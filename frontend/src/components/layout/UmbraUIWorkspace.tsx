@@ -194,10 +194,10 @@ import {
   writeImg2ImgReplacementIntents,
 } from '@/lib/umbraImg2ImgReplacementIntents';
 
-type UmbraGenerationMode = 'prompter' | 'queue' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'video' | 'extras' | 'comfyui';
+type UmbraGenerationMode = 'prompter' | 'queue' | 'image' | 'img2img' | 'inpaint' | 'canvas' | 'edit' | 'video' | 'extras' | 'comfyui';
 
 const UMBRA_UI_ACTIVE_MODE_STORAGE_KEY = 'umbra-ui:active-mode';
-const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['prompter', 'queue', 'image', 'img2img', 'inpaint', 'canvas', 'video', 'extras', 'comfyui'];
+const UMBRA_UI_GENERATION_MODES: UmbraGenerationMode[] = ['prompter', 'queue', 'image', 'img2img', 'inpaint', 'canvas', 'edit', 'video', 'extras', 'comfyui'];
 
 function snapshotUmbraImageGenerationInfo(
   workflowName: string,
@@ -1332,7 +1332,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   }, [activeMode, currentWorkspaceDraft, imageControlsHydrated, restoreWorkspaceDraft]);
 
   React.useEffect(() => {
-    if (canvasEnabled || activeMode !== 'canvas') return;
+    if (canvasEnabled || (activeMode !== 'canvas' && activeMode !== 'edit')) return;
     if (imageControlsHydrated) navigateWorkspace('image');
     else setActiveMode('image');
   }, [activeMode, canvasEnabled, imageControlsHydrated, navigateWorkspace]);
@@ -1349,8 +1349,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     [activeImageFeature, workflows],
   );
   const inpaintModelFamilies = React.useMemo(
-    () => listUmbraUiPipelineFamilies(workflows, 'inpainting'),
-    [workflows],
+    () => listUmbraUiPipelineFamilies(workflows, 'inpainting').filter((family) => activeMode !== 'edit' || normalizeUmbraUiModelFamilyKey(family) === 'flux3'),
+    [activeMode, workflows],
   );
   const selectedFamilyPipelines = React.useMemo(() => workflows.flatMap((workflow) => (
     (workflow.umbraUiPipelines || [])
@@ -3048,6 +3048,10 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           >
             <Paintbrush size={13} /> Inpaint
           </button>
+          {canvasEnabled ? <button type="button" data-umbra-ui-mode="edit" onClick={() => navigateWorkspace('edit')}
+            className={cn('inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors', activeMode === 'edit' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300')}>
+            <Paintbrush size={13} /> FLUX3 / Krea3 Edit
+          </button> : null}
           {canvasEnabled ? (
             <button
               type="button"
@@ -3129,7 +3133,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           'grid min-h-0 flex-1',
           activeMode === 'video'
             ? 'grid-cols-[minmax(0,1fr)]'
-            : activeMode === 'canvas' || activeMode === 'comfyui' || prompterSurfaceActive
+            : activeMode === 'canvas' || activeMode === 'edit' || activeMode === 'comfyui' || prompterSurfaceActive
               ? 'grid-cols-[minmax(0,1fr)]'
             : activeMode === 'image'
               ? 'grid-cols-[clamp(300px,24vw,380px)_clamp(280px,22vw,360px)_minmax(300px,1fr)]'
@@ -3158,11 +3162,18 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             />
           </div>
         ) : null}
-        {canvasEnabled && modeIsMounted('canvas') ? (
-          <div className={activeMode === 'canvas' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'canvas'}>
+        {canvasEnabled && (modeIsMounted('canvas') || modeIsMounted('edit')) ? (
+          <div className={activeMode === 'canvas' || activeMode === 'edit' ? 'contents' : 'hidden'} aria-hidden={activeMode !== 'canvas' && activeMode !== 'edit'}>
             <UmbraCanvasWorkspace
               onCatalogTriggerContainerChange={setCanvasCatalogTriggerContainer}
-              active={activeMode === 'canvas'}
+              active={activeMode === 'canvas' || activeMode === 'edit'}
+              editingWorkspace={activeMode === 'edit'}
+              workflowResourceControls={<UmbraWorkflowResourceControls
+                workflowName={inpaintPipelineMatch.workflow?.name || 'Selected workflow'} modelFamily={modelFamily}
+                resources={selectedWorkflowResources} values={workflowResourceValues}
+                getOptions={(resource) => getWorkflowResourceItems(resource, modelCatalog)}
+                onChoose={openWorkflowResourcePicker} onChange={updateWorkflowResource}
+              />}
               capabilities={inpaintCapabilities}
               canvasCapabilities={inpaintCanvasCapabilities}
               controlLayersAvailable={inpaintControlLayersAvailable}
@@ -3866,7 +3877,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
 
       {activeMode !== 'comfyui' && activeMode !== 'extras' && activeMode !== 'video' && !prompterSurfaceActive && activeMode !== 'image' && activeMode !== 'img2img' && activeMode !== 'inpaint' ? (
         <PowerPrompterSearchPanel
-          drawerTriggerContainer={activeMode === 'canvas' ? canvasCatalogTriggerContainer : undefined}
+          drawerTriggerContainer={activeMode === 'canvas' || activeMode === 'edit' ? canvasCatalogTriggerContainer : undefined}
           onInsert={handleCatalogInsert}
           enabledCSVs={catalogEnabledCSVs}
           onToggleCSV={handleToggleCatalogCSV}

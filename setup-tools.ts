@@ -2283,7 +2283,7 @@ async function processTool(key: keyof typeof CONFIG, autoInstall = false, nonInt
 async function repairManagedComfyCore(): Promise<void> {
     const cfg = CONFIG.comfyui;
     const toolDir = ownedPath(ROOT_DIR, 'Tools', cfg.dir);
-    const status = inspectManagedDependencies(MANAGED_SOURCE_ROOT, ROOT_DIR);
+    let status = inspectManagedDependencies(MANAGED_SOURCE_ROOT, ROOT_DIR);
     const minimum = status.comfyui.minimumRequired;
     if (!minimum) throw new Error('This build does not declare a reviewed ComfyUI core version.');
     if (!existsSync(toolDir) || isComfyInstallScaffold(toolDir)) {
@@ -2293,10 +2293,12 @@ async function repairManagedComfyCore(): Promise<void> {
             cfg.branch = `v${minimum}`;
             if (!await processTool('comfyui', true, true, true)) exitWithExistingVerifyFailure();
         } finally { cfg.branch = originalBranch; }
-        return;
+        status = inspectManagedDependencies(MANAGED_SOURCE_ROOT, ROOT_DIR);
     }
     if (!isOwnGitCheckout(toolDir)) throw new Error('Existing ComfyUI is not an independent managed Git checkout. Its files were preserved.');
-    repairManagedComfyCheckout(toolDir, cfg.repo!, status.comfyui.version, minimum, { log: (message) => log('->', message) });
+    repairManagedComfyCheckout(toolDir, cfg.repo!, status.comfyui.version, minimum, {
+        minimumCommits: status.comfyui.minimumCommits, log: (message) => log('->', message),
+    });
     // Keep already-newer source and use its own pinned requirements. No reset, forced checkout or branch rewrite.
     if (!setupPythonEnv(toolDir, cfg.id) || !refreshComfyPinnedPackages(toolDir)) exitWithExistingVerifyFailure();
 }

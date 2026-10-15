@@ -1,3 +1,4 @@
+import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
 import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
 import { MangaStudioFiles } from './backend/MangaStudioFiles';
 import { resolveHostNodeRuntime, type HostNodeRuntime } from './shared/hostNodeRuntime';
@@ -9588,7 +9589,9 @@ function compileUmbraUiPipelineWorkflow(
     }
 
     if (classType === 'UmbraA1111LoraSyntax') {
-      setPPApiNodeInput(node, 'prompt_text', modelPrompt);
+      if (!bindFlux3LayoutPrompt(promptGraph, node, modelPrompt)) {
+        setPPApiNodeInput(node, 'prompt_text', modelPrompt);
+      }
       setPPApiNodeInput(node, 'lora_syntax_text', '');
       setPPApiNodeInput(node, 'lora_name', '[None]');
       continue;
@@ -22021,7 +22024,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       return json({ success: false, error: 'Reference layers are not valid JSON.' }, 400);
     }
     assertLayerLimit('reference layers', referencePayload.length, declaredLayerLimit(canvasCapabilities?.referenceLayers));
-    const referenceMethods = new Set(['style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'qwen_image_reference', 'hidream_o1_reference']);
+    const referenceMethods = new Set(['style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'flux3_reference', 'qwen_image_reference', 'hidream_o1_reference']);
     const declaredReferenceMethods = new Set<string>(canvasCapabilities?.referenceLayers?.methods || []);
     const ipAdapterWeightTypes = new Set(['linear', 'ease in', 'ease out', 'ease in-out', 'reverse in-out', 'weak input', 'weak output', 'weak middle', 'strong middle', 'style transfer', 'composition', 'strong style transfer', 'style and composition', 'style transfer precise', 'composition precise']);
     const ipAdapterCombineModes = new Set(['concat', 'add', 'subtract', 'average', 'norm average']);
@@ -22170,6 +22173,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       throw new Error(`The selected pipeline requires width and height aligned to ${resolutionStep} pixels.`);
     }
     const settings: UmbraUiInpaintSettings = {
+      layoutRegions: parseFlux3LayoutRegions(JSON.parse(String(form.get('layoutRegions') || '[]'))),
       outputFolder: resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'canvas' ? 'canvas' : 'inpainting', getGalleryTransferAllowedRoots()),
       workflowId: resolvedPipeline.loaded.item.id,
       canvasProjectId: String(form.get('canvasProjectId') || '').trim().slice(0, 160),

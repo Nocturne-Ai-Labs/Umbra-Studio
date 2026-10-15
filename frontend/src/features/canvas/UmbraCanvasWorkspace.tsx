@@ -1,3 +1,5 @@
+import { Flux3LayoutControls } from './Flux3LayoutControls';
+import { flux3LayoutElements } from '../../../../shared/umbra-ui/flux3Edit';
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -159,6 +161,8 @@ import { saveUmbraCanvasRequiredRevision } from './canvasProjectSaveGate';
 import { useUmbraCanvasStore } from './useUmbraCanvasStore';
 
 interface UmbraCanvasWorkspaceProps {
+  editingWorkspace?: boolean;
+  workflowResourceControls?: React.ReactNode;
   active: boolean;
   capabilities: UmbraUiPipelineCapabilities;
   canvasCapabilities: UmbraUiInpaintCanvasCapabilities;
@@ -322,6 +326,8 @@ function getUmbraCanvasGenerationFailureMessage(job: UmbraUiInpaintJob): string 
 }
 
 export function UmbraCanvasWorkspace({
+  editingWorkspace = false,
+  workflowResourceControls,
   active,
   capabilities,
   canvasCapabilities,
@@ -429,6 +435,8 @@ export function UmbraCanvasWorkspace({
   const updateDrawable = useUmbraCanvasStore((state) => state.updateDrawable);
   const updateDrawableTransform = useUmbraCanvasStore((state) => state.updateDrawableTransform);
   const updateDrawableTransforms = useUmbraCanvasStore((state) => state.updateDrawableTransforms);
+  const setLayoutRegions = useUmbraCanvasStore((state) => state.setLayoutRegions);
+  const setEditArea = useUmbraCanvasStore((state) => state.setEditArea);
   const setGenerationBbox = useUmbraCanvasStore((state) => state.setGenerationBbox);
   const setViewport = useUmbraCanvasStore((state) => state.setViewport);
   const renameProject = useUmbraCanvasStore((state) => state.renameProject);
@@ -464,6 +472,10 @@ export function UmbraCanvasWorkspace({
   const [pendingMediaImport, setPendingMediaImport] = React.useState<UmbraUiMediaHandoff | null>(null);
   const [mediaImportBusy, setMediaImportBusy] = React.useState(false);
   const [compactPanel, setCompactPanel] = React.useState<'generation' | 'inpaint' | 'layers' | ''>('');
+  React.useEffect(() => {
+    if (editingWorkspace) setCompactPanel('generation');
+    else setTool((current) => current === 'layout' ? 'select' : current);
+  }, [editingWorkspace]);
   const lastPanelRef = React.useRef<'generation' | 'inpaint' | 'layers'>('inpaint');
   const panelButtonsRef = React.useRef<Partial<Record<'generation' | 'inpaint' | 'layers', HTMLButtonElement | null>>>({});
   const [stagingExpanded, setStagingExpanded] = React.useState(true);
@@ -694,6 +706,10 @@ export function UmbraCanvasWorkspace({
       onTransformEntities: updateDrawableTransforms,
       onCropRasterEntity: cropRaster,
       onGenerationBboxChange: setGenerationBbox,
+      onCreateLayoutRegion: (rect) => {
+        const current = useUmbraCanvasStore.getState().present;
+        setLayoutRegions([...(current.layoutRegions || []), { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: crypto.randomUUID(), description: '' }]);
+      },
       onViewportChange: setViewport,
       onMaskStroke: addMaskStroke,
       onRasterStroke: addRasterStroke,
@@ -720,11 +736,12 @@ export function UmbraCanvasWorkspace({
   }, [addDrawable, addMaskStroke, addRasterStroke, cropRaster, handleSelectEntity, setGenerationBbox, setViewport, showToast, updateDrawableTransforms]);
 
   const canvasSceneKey = React.useMemo(() => JSON.stringify({
+    layout: project.layoutRegions,
     bbox: project.generationBbox,
     entities: project.entities
       .filter(isUmbraCanvasSpatialEntity)
       .map((entity) => [entity.id, entity.kind, entity.revision, entity.visible, entity.locked]),
-  }), [project.activeEntityId, project.entities, project.generationBbox]);
+  }), [project.activeEntityId, project.entities, project.generationBbox, project.layoutRegions]);
 
   React.useEffect(() => {
     managerRef.current?.render(projectRef.current);
@@ -1592,7 +1609,9 @@ export function UmbraCanvasWorkspace({
     autoSubmitPreparedRegionRef.current = true;
     setPreparingRegion(true);
     try {
-      const composite = await composeUmbraCanvasGenerationRegion(frozenProject);
+      const composite = await composeUmbraCanvasGenerationRegion(frozenProject, {
+        wholeRegion: editingWorkspace && frozenProject.editArea !== 'mask',
+      });
       const currentProject = useUmbraCanvasStore.getState().present;
       if (currentProject.id !== frozenProject.id || currentProject.revision !== frozenProject.revision) {
         autoSubmitPreparedRegionRef.current = false;
@@ -1612,7 +1631,7 @@ export function UmbraCanvasWorkspace({
     } finally {
       setPreparingRegion(false);
     }
-  }, [capabilities.resolution, preparingRegion, showToast, submitting]);
+  }, [capabilities.resolution, editingWorkspace, preparingRegion, showToast, submitting]);
 
   const submitPreparedRegion = React.useCallback(async () => {
     if (!preparedRegion || submitting) return;
@@ -1657,7 +1676,11 @@ export function UmbraCanvasWorkspace({
       const queuedSamples = resolveUmbraCanvasSampleCount(samples);
       const queuedSamplerName = resolveUmbraCanvasGenerationChoice(capabilities.sampler, samplerName, 'euler');
       const queuedScheduler = resolveUmbraCanvasGenerationChoice(capabilities.scheduler, scheduler, 'normal');
+      const layoutRegions = editingWorkspace ? structuredClone(submissionProject.layoutRegions || []) : [];
+      if (layoutRegions.length) flux3LayoutElements(layoutRegions, preparedRegion.bbox);
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
+        editArea: submissionProject.editArea || 'whole',
+        layoutRegions,
         modelFamily,
         modelSource,
         checkpointName,
@@ -1761,7 +1784,7 @@ export function UmbraCanvasWorkspace({
       })));
       const sourceFreeGeneration = preparedRegion.sourceContentPixels === 0
         && submittedControlLayers.length === 0
-        && submittedReferenceLayers.length === 0;
+        && (submittedReferenceLayers.length === 0 || editingWorkspace);
       const beforeQueue = useUmbraCanvasStore.getState().present;
       if (beforeQueue.id !== projectToSave.id || beforeQueue.revision !== projectToSave.revision
         || deletingProjectIdsRef.current.has(projectToSave.id)) {
@@ -1770,6 +1793,7 @@ export function UmbraCanvasWorkspace({
       const nextJob = await submitUmbraUiInpaintJob({
         pinnedOutputFolder,
         outputTask: 'canvas',
+        layoutRegions,
         source: preparedRegion.sourceBlob,
         sourceName: `${submissionProject.name || 'umbra-canvas'}.png`,
         canvasProjectId: submissionProject.id,
@@ -1933,6 +1957,7 @@ export function UmbraCanvasWorkspace({
     tiledVae,
     upsertPendingGeneration,
     workflowResources,
+    editingWorkspace,
   ]);
 
   React.useEffect(() => {
@@ -2582,7 +2607,7 @@ export function UmbraCanvasWorkspace({
         <div className="mb-3 flex items-center gap-2">
           <ScanLine size={14} className="text-rose-300" />
           <div>
-            <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Canvas Generation</h2>
+            <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{editingWorkspace ? 'FLUX3 / Krea3 Edit' : 'Canvas Generation'}</h2>
             <p className="font-mono text-[8px] uppercase text-zinc-600">Bound to the generation box</p>
           </div>
           <button type="button" aria-label="Close generation panel" onClick={closePanel} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400"><X size={13} /></button>
@@ -2595,7 +2620,8 @@ export function UmbraCanvasWorkspace({
               onValueChange={onModelFamilyChange}
               ariaLabel="Model Pipeline"
               menuTitle="Model Pipeline"
-              options={modelFamilyOptions.map((family) => ({ value: family, label: family }))}
+              options={[...modelFamilyOptions.map((family) => ({ value: family, label: family })),
+                ...(editingWorkspace ? [{ value: 'Krea3', label: 'Krea3 — open weights unavailable', disabled: true }] : [])]}
               size="sm"
               buttonClassName="h-9 px-2.5 text-xs focus-visible:border-rose-300/40"
             />
@@ -2619,6 +2645,13 @@ export function UmbraCanvasWorkspace({
             onModelTypeChange={onModelSourceChange}
             showClipSkip={capabilities.clipSkip.support === 'adjustable'}
           />
+          {workflowResourceControls}
+          {editingWorkspace ? <UmbraSelect
+            ariaLabel="Edit area" menuTitle="Edit area" value={project.editArea || 'whole'}
+            options={[{ value: 'whole', label: 'Whole generation box' }, { value: 'mask', label: 'Painted mask + empty space' }]}
+            onValueChange={(value) => setEditArea(value === 'mask' ? 'mask' : 'whole')}
+          /> : null}
+          {editingWorkspace ? <Flux3LayoutControls regions={project.layoutRegions || []} drawing={tool === 'layout'} onDraw={() => setTool(tool === 'layout' ? 'select' : 'layout')} onChange={setLayoutRegions} /> : null}
           {capabilities.loras.support === 'adjustable' ? (
             <UmbraLoraStackControls loras={loras} availableCount={loraAvailableCount} onChange={onLorasChange} onOpenPicker={onOpenLoraPicker} modelOnly={isUmbraUiModelOnlyLoraFamily(modelFamily)} />
           ) : null}
@@ -2806,6 +2839,7 @@ export function UmbraCanvasWorkspace({
         </div>
         <div data-umbra-canvas-tool-toolbar="" role="toolbar" aria-label="Canvas editing tools" className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/35 p-2 [&_button]:shrink-0">
           <ToolButton active={tool === 'select'} title="Select and transform; Ctrl-drag an image handle to crop" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
+          {editingWorkspace ? <ToolButton active={tool === 'layout'} title="Draw layout box" icon={<Square size={15} />} onClick={() => setTool('layout')} /> : null}
           <ToolButton active={tool === 'bbox'} title="Generation bounding box" shortcut="G" icon={<BoxSelect size={15} />} onClick={() => setTool('bbox')} />
           <ToolButton active={tool === 'pan'} title="Pan Canvas" shortcut="H" icon={<Hand size={15} />} onClick={() => setTool('pan')} />
           {UMBRA_CANVAS_RASTER_PAINT_ENABLED ? <ToolButton active={tool === 'raster-brush'} title="Paint active image layer" icon={<Brush size={15} />} onClick={() => activateRasterTool('raster-brush')} /> : null}

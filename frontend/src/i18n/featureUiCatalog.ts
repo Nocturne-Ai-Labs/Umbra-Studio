@@ -3,6 +3,17 @@ import type { RecentUiLanguage } from './recentUiCatalog';
 // Maintained translations for feature workspaces. Columns: English, Japanese,
 // Simplified Chinese, Korean, German. Brand names and file formats stay intact.
 const FEATURE_UI_ENTRIES: Array<readonly [string, string, string, string, string]> = [
+  ['FLUX3 / Krea3 Edit', 'FLUX3 / Krea3 編集', 'FLUX3 / Krea3 编辑', 'FLUX3 / Krea3 편집', 'FLUX3 / Krea3 Bearbeitung'],
+  ['Krea3 — open weights unavailable', 'Krea3 — 公開重み未提供', 'Krea3 — 开放权重尚未发布', 'Krea3 — 공개 가중치 미제공', 'Krea3 — offene Gewichte nicht verfügbar'],
+  ['Layout boxes', 'レイアウト領域', '布局框', '레이아웃 영역', 'Layout-Bereiche'],
+  ['Draw box', '領域を描画', '绘制框', '영역 그리기', 'Bereich zeichnen'],
+  ['Draw layout box', 'レイアウト領域を描画', '绘制布局框', '레이아웃 영역 그리기', 'Layout-Bereich zeichnen'],
+  ['Describe this subject', 'この被写体を説明', '描述此主体', '이 대상 설명', 'Dieses Motiv beschreiben'],
+  ['Draw inside the generation box. Mention <obj_1>, <obj_2> in your prompt.', '生成領域内に描画し、プロンプトで <obj_1>、<obj_2> を指定してください。', '在生成框内绘制，并在提示词中引用 <obj_1>、<obj_2>。', '생성 영역 안에 그리고 프롬프트에서 <obj_1>, <obj_2>를 언급하세요.', 'Innerhalb des Generierungsbereichs zeichnen. Im Prompt <obj_1>, <obj_2> verwenden.'],
+  ['FLUX3 Reference', 'FLUX3 参照', 'FLUX3 参考图', 'FLUX3 참조', 'FLUX3-Referenz'],
+  ['Edit area', '編集範囲', '编辑区域', '편집 영역', 'Bearbeitungsbereich'],
+  ['Whole generation box', '生成領域全体', '整个生成框', '전체 생성 영역', 'Gesamter Generierungsbereich'],
+  ['Painted mask + empty space', '描画マスク＋空白領域', '绘制的蒙版和空白区域', '그린 마스크 + 빈 영역', 'Gemalte Maske + leerer Bereich'],
   ['Loading editor…', 'エディターを読み込み中…', '正在加载编辑器…', '편집기 불러오는 중…', 'Editor wird geladen…'],
   ['The editor could not load. Reopen Umbra Studio to try again.', 'エディターを読み込めませんでした。Umbra Studio を開き直して再試行してください。', '无法加载编辑器。请重新打开 Umbra Studio 后重试。', '편집기를 불러오지 못했습니다. Umbra Studio를 다시 열어 재시도하세요.', 'Der Editor konnte nicht geladen werden. Öffnen Sie Umbra Studio erneut und versuchen Sie es noch einmal.'],
   ['Add Manga LoRA', 'Manga LoRA を追加', '添加漫画 LoRA', '만화 LoRA 추가', 'Manga-LoRA hinzufügen'],

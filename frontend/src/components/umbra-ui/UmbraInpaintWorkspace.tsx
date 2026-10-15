@@ -920,6 +920,7 @@ const REFERENCE_METHOD_LABELS: Record<UmbraUiInpaintReferenceMethod, string> = {
   flux_redux: 'FLUX Redux',
   flux_kontext: 'FLUX Kontext',
   flux2_reference: 'FLUX.2 Reference',
+  flux3_reference: 'FLUX3 Reference',
   qwen_image_reference: 'Qwen Image Reference',
   hidream_o1_reference: 'HiDream-O1 Reference',
 };

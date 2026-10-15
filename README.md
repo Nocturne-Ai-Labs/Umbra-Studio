@@ -467,7 +467,7 @@ Linux:
 ./umbra-setup.sh --tab models
 ```
 
-The menu covers Anima, FLUX.1, FLUX.2, Qwen Image, Krea 2, Wulver, ERNIE Image,
+The menu covers Anima, FLUX.1, FLUX.2, FLUX3, Qwen Image, Krea 2, Wulver, ERNIE Image,
 Z-Image, Chroma 1, Ideogram 4, and the shared OmniGen 2/Ovis AE VAE. It also
 explains when a model family such as HiDream-O1 or checkpoint-based SD/SDXL
 needs no standalone prerequisite files. Use `--list` to review the menu,
@@ -475,6 +475,21 @@ needs no standalone prerequisite files. Use `--list` to review the menu,
 previous selection without downloading.
 Use `--test-downloads` to validate the selected remote files with tiny ranged
 requests without downloading the model weights.
+
+**FLUX3 / Krea3 Edit** reuses Canvas layers, masks, selections and saved projects.
+FLUX3 Image Klein supports image editing with the source plus nine additional
+reference images, and described layout boxes referenced as `<obj_1>`, `<obj_2>`
+in the prompt. The shared FLUX3 pipelines also appear in generation and Manga.
+Base and step-distilled checkpoints use the same pipeline; the distilled default
+is 16 steps / CFG 1, while the upstream base edit example uses 25 steps / CFG 3.5.
+Sampling and resolution stay user-controlled.
+
+Setup declares ComfyUI revision `20b46065ef7f34fa21e8abebe8d0cca90a904d6d`
+or a descendant: stable v0.40.0 alone predates the required native FLUX3 nodes.
+Use the FLUX3 managed dependency repair, then restart the managed ComfyUI.
+Accept the [upstream license](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy)
+and install the gated files using the exact folders listed in Setup's Models tab.
+Krea3 remains unavailable until an official open-weight editing contract can be verified.
 
 Wulver v0.5 has dedicated **Wulver Turbo** and **Wulver Non-Turbo** pipelines
 for text-to-image, image-to-image and masked inpainting/Canvas. The shared
