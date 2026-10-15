@@ -20,7 +20,7 @@ function graphFor(feature: 'txt2img' | 'img2img' | 'inpainting'): Graph {
     '3': node('CLIPLoader', { clip_name: 'qwen3vl_4b_int8_convrot.safetensors', type: 'flux3', device: 'default' }, 'FLUX.3 Qwen3-VL 4B', {
       umbra_resources: [{ id: 'flux3.text_encoder', label: 'FLUX.3 Qwen3-VL 4B', kind: 'text_encoder', input: 'clip_name', required: true, order: 10 }],
     }),
-    '4': node('VAELoader', { vae_name: 'flux3/flux2-vae.safetensors' }, 'FLUX.3 VAE', {
+    '4': node('VAELoader', { vae_name: 'flux3-vae.safetensors' }, 'FLUX.3 VAE', {
       umbra_role: 'inpaint_reference_vae', umbra_output_index: 0,
       umbra_resources: [{ id: 'flux3.vae', label: 'FLUX.2 / FLUX.3 VAE', kind: 'vae', input: 'vae_name', required: true, order: 20 }],
     }),
@@ -33,7 +33,7 @@ function graphFor(feature: 'txt2img' | 'img2img' | 'inpainting'): Graph {
     '10': node('VAEDecode', { samples: ['8', 0], vae: ['4', 0] }, 'Decode FLUX.3'),
     '11': node('UmbraImageUpscale', { image: [masked ? '24' : '10', 0], upscale_model: 'RealESRGAN_x4plus.safetensors', max_dimension: 3840, enabled: false }, 'Optional Output Upscale'),
     '12': structuredClone(template['17']),
-    '20': node('Flux3LayoutPrompt', { prompt: ['2', 0], element: [] }, 'FLUX.3 Layout Regions', { umbra_role: 'edit_layout_prompt' }),
+    '20': node('Flux3LayoutPrompt', { prompt: ['2', 0], element: { __value__: [] } }, 'FLUX.3 Layout Regions', { umbra_role: 'edit_layout_prompt' }),
   };
   graph['1'].inputs.diffusion_model_name = 'flux3_image_klein_sd_int8_convrot.safetensors';
   graph['1']._meta = { title: 'Umbra FLUX.3 Image Klein', umbra_model_family: 'FLUX.3', umbra_ui_pipelines: [{

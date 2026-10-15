@@ -492,7 +492,7 @@ and select FLUX3 in Setup's Models tab. Download the three files in your signed-
 browser, place them at the displayed destinations, then choose **Verify selected**
 for SHA-256 verification. Authenticated downloads through Setup are optional.
 The FLUX3 VAE is stored under
-`Tools/ComfyUI/models/vae/flux3/` to preserve the existing FLUX.2 VAE.
+`Tools/ComfyUI/models/vae/flux3-vae.safetensors` to preserve the existing FLUX.2 VAE.
 Krea3 remains unavailable until an official open-weight editing contract can be verified.
 
 Wulver v0.5 has dedicated **Wulver Turbo** and **Wulver Non-Turbo** pipelines

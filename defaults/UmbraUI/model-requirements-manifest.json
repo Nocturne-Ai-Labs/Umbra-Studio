@@ -1114,7 +1114,7 @@
       "license": "FLUX Kommunity License",
       "licenseNotice": "Accept access in the official Hugging Face repository. Browser downloads work without entering credentials in Setup; place files in the displayed destinations, then choose Verify selected. Authenticated Setup downloads are optional. The transformer and VAE use the FLUX Kommunity License; the Qwen3-VL text encoder uses Apache-2.0. Review the linked license before use.",
       "reference": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy",
-      "purpose": "Accept the license and download from the official repository. Place flux3_image_klein_sd_int8_convrot.safetensors in Tools/ComfyUI/models/diffusion_models; qwen3vl_4b_int8_convrot.safetensors in Tools/ComfyUI/models/text_encoders; flux2-vae.safetensors in Tools/ComfyUI/models/vae/flux3. BF16, NVFP4 and base checkpoints use the same pipeline; select matching installed files and sampling settings. No Krea3 weights are available through this integration.",
+      "purpose": "Accept the license and download from the official repository. Place flux3_image_klein_sd_int8_convrot.safetensors in Tools/ComfyUI/models/diffusion_models; qwen3vl_4b_int8_convrot.safetensors in Tools/ComfyUI/models/text_encoders; flux2-vae.safetensors as flux3-vae.safetensors in Tools/ComfyUI/models/vae. BF16, NVFP4 and base checkpoints use the same pipeline; select matching installed files and sampling settings. No Krea3 weights are available through this integration.",
       "files": [
         {
           "destination": "diffusion_models/flux3_image_klein_sd_int8_convrot.safetensors",
@@ -1129,7 +1129,7 @@
           "sha256": "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c"
         },
         {
-          "destination": "vae/flux3/flux2-vae.safetensors",
+          "destination": "vae/flux3-vae.safetensors",
           "sourcePath": "vae/flux2-vae.safetensors",
           "bytes": 336211292,
           "sha256": "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"

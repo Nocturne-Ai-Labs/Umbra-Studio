@@ -12,6 +12,11 @@ export function bindFlux3LayoutPrompt(graph: Record<string, any>, consumer: any,
   const layout = Array.isArray(reference) && reference[1] === 0 ? graph[String(reference[0])] : null;
   if (layout?.class_type !== 'Flux3LayoutPrompt' || layout?._meta?.umbra_role !== 'edit_layout_prompt') return false;
   layout.inputs.prompt = prompt;
+  // ComfyUI reserves bare arrays for node links, including empty arrays.
+  const elements = layout.inputs.element;
+  if (Array.isArray(elements) && !(elements.length === 2 && typeof elements[0] === 'string' && Number.isInteger(elements[1]))) {
+    layout.inputs.element = { __value__: elements };
+  }
   return true;
 }
 

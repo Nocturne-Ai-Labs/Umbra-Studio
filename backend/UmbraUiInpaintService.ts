@@ -2945,10 +2945,10 @@ export class UmbraUiInpaintService {
       throw new Error('The selected edit workflow does not support FLUX3 layout boxes.');
     }
     if (layoutEntry?.[1]?.class_type === 'Flux3LayoutPrompt') {
-      layoutEntry[1].inputs.element = flux3LayoutElements(settings.layoutRegions || [], {
+      layoutEntry[1].inputs.element = { __value__: flux3LayoutElements(settings.layoutRegions || [], {
         x: settings.generationRegionX, y: settings.generationRegionY,
         width: settings.generationRegionWidth, height: settings.generationRegionHeight,
-      });
+      }) };
     }
     const sourceEntry = findRole('inpaint_source');
     const maskEntry = findRole('inpaint_mask');
