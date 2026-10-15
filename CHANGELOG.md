@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.90.17-beta - Community Video Studios And DaSiWa H3 Refresh
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Save your work and update through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux afterward. Setup remains the installation and update home following the major setup-flow refactor.
+- **Longshot Studio** and **Frame Forge** are optional choices under **Umbra UI > Video**. Existing DaSiWa workflows and controls remain available. In Setup's **Advanced > Tools**, install the selected studio's dependency bundle, then restart managed ComfyUI.
+- Longshot requires **Longshot Studio**, **H3 Longshot**, and **H3 Prompt Compiler** custom nodes. Setup downloads their original upstream repositories on request; they are not bundled or modified.
+- For Frame Forge, install the **Frame Forge** application and **Frame Forge video** dependency bundle (H3 Motion Context). Its original editor runs locally in a separate managed Python 3.12 environment. Existing projects and settings are preserved. Optional speech/LTX and 3D WorldMirror bundles are separate; the 3D dependencies require substantial CUDA/native tooling and are not required for H3 video.
+- For the refreshed **DaSiWa H3 C-MMH3-32** workflow, use Setup's official workflow dependency repair to install the reviewed DaSiWa 0.5.16 nodes. Restart ComfyUI and refresh/reconfigure the native workflow capture. The LTX C-LTX23-50 source is unchanged.
+- Generation models remain separate downloads. The standard H3 reference model, shared encoder, FP16 video VAE and audio VAE total approximately **42.5 GB / 39.6 GiB**; existing compatible files can be reused. The optional H3 latent upscaler is approximately **691 MB**. Review model licenses and the exact selected files in Setup. No generation weights or Turbo LoRA are bundled.
+- Optional AI Toolkit requires host Git and Node.js 20+ with npm. Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Community Video Tools
+
+- Embed Longshot Studio and Frame Forge as additional Video choices while keeping the established DaSiWa layout and workflow selection.
+- Show missing prerequisites with a direct Setup action. Optional studio bundles are excluded from ordinary first-install repairs until selected.
+- Preserve original upstream interfaces and code so managed updates can follow their reviewed repositories. Credit r34vtraining for Longshot, spacesimeco-hue and contributors for Frame Forge, and NikoDemon80 for H3 Motion Context.
+- Keep Frame Forge projects in Umbra's User folder, with managed launch/stop, loopback-only hosting and preserved library settings across restarts.
+
+### DaSiWa Workflow Refresh
+
+- Update the reviewed DaSiWa node baseline to 0.5.16 and the original H3 workflow to C-MMH3-32.
+- Wire native tiled latent upscale, RTX frame-generation and memory-budget controls through the existing editor; retain the compatible Prompt Forge compute patch.
+- Add the separately selectable, checksum-pinned H3 latent upscaler resource and update dependency/provenance records.
+
+### Validation And Limits
+
+- Seven focused integration tests (52 assertions), frontend build/lint and production-source typecheck passed. Real isolated Linux GPU tests generated an H3 clip and a linked continuation through the original Frame Forge app; both MP4s decoded and registered as project takes, with continuation latents retained.
+- Windows installation/launch and Linux installation, lifecycle and project preservation passed. These were short, low-resolution smoke generations, not production-quality render qualification. Longshot generation, optional 3D native builds, larger renders and Windows GPU inference remain unqualified. Archive, packaged startup and upgrade checks are recorded separately before publication.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Umbra Setup could exit with Studio when installation closed its parent process; Setup now survives that shutdown.
+- Fixed: newer DaSiWa workflow exports with omitted unconnected widgets could misalign native editor controls.
+- Improved: optional community video tools, prerequisite visibility and preserved project state without replacing the existing DaSiWa workflow.
+- Improved: H3 upscale, frame-generation and memory controls match the reviewed native workflow and dependency requirements.
+
 ## v0.90.16-beta - Iris 3B And Official Turbo
 
 ### TL;DR - Setup After Updating
@@ -176,7 +219,7 @@ Focused independent component, persistence and browser checks cover the changed 
 
 ### Update And Maintenance Safety
 
-- Retired standalone Updater source and UI are replaced by Setup’s shared update controller. Cleanup is limited to known regular application files after packaged Setup is available; redirected paths, directories, user data, tool installations and update workspaces are preserved. The main app and update worker no longer require retired updater files.
+- Retired standalone Updater source and UI are replaced by Setupâ€™s shared update controller. Cleanup is limited to known regular application files after packaged Setup is available; redirected paths, directories, user data, tool installations and update workspaces are preserved. The main app and update worker no longer require retired updater files.
 - Standalone and reused Setup sessions adopt fresh shutdown evidence for the matching installation, including managed-tool descendants, and wait until those processes exit before file replacement. OS process start identity prevents obsolete session PIDs from authorizing termination. Linux process execution changes remain part of the same live process.
 - Linux update relaunch uses Bash for the Bash launcher and cleans its own process group on failed attempts. Same-version stale snapshots hold new mutations while status, cancellation and close/reopen recovery stay available. Legacy app update links reuse the unified Setup status route.
 - Setup launch waits for the matching application to report ready before handing off. Slow startup responses get a bounded read-only retry; foreign or malformed installation identities still hold immediately. Overlapping launch requests share one startup operation instead of spawning duplicate applications.
@@ -606,7 +649,7 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 **Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
 
 - Update using `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio. **A working ComfyUI installation no longer needs Reinstall simply to create a completion marker after an Umbra update.**
-- Launch readiness checks the installed ComfyUI main script and managed Python environment. Launch/Restart remain blocked during an active Umbra-managed setup operation. If startup reports a genuine missing dependency or broken environment, stop managed ComfyUI and use **Neural Hub → ComfyUI → Install** to repair it; wait for setup to finish. Existing models and user data stay in place.
+- Launch readiness checks the installed ComfyUI main script and managed Python environment. Launch/Restart remain blocked during an active Umbra-managed setup operation. If startup reports a genuine missing dependency or broken environment, stop managed ComfyUI and use **Neural Hub â†’ ComfyUI â†’ Install** to repair it; wait for setup to finish. Existing models and user data stay in place.
 - No additional model downloads or data migration are required for these fixes. Linux custom-node prerequisites remain `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
 
 ### ComfyUI Launch
@@ -633,7 +676,7 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 ### Validation And Packaging
 
 - Independent source reviews and focused regression checks passed. Frontend build/lint, root/frontend/setup type checks and isolated Linux source/API/UI checks passed. Readiness fixtures were inert and no personal installation was used.
-- Native Windows launcher/runtime, full ComfyUI and AI Toolkit install/update/start, installed core-support verification, fresh GPU generation and Power Prompter hires/detailer graph receipt, and a refreshed curated UI tour remain unqualified. Windows packages are built on Windows CI; packaged candidate results are recorded separately. Both portable ZIPs omit installed tools, user-selected generation weights and the large Data Forge model pack; use **Umbra Setup → Models** for optional pinned model downloads.
+- Native Windows launcher/runtime, full ComfyUI and AI Toolkit install/update/start, installed core-support verification, fresh GPU generation and Power Prompter hires/detailer graph receipt, and a refreshed curated UI tour remain unqualified. Windows packages are built on Windows CI; packaged candidate results are recorded separately. Both portable ZIPs omit installed tools, user-selected generation weights and the large Data Forge model pack; use **Umbra Setup â†’ Models** for optional pinned model downloads.
 
 ### Fixes And Quality-of-Life Recap
 
@@ -655,8 +698,8 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 - Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio.
 - Open **UmbraSetup.bat** on Windows or **./umbra-setup.sh** on Linux for the numbered setup guide. Stop managed ComfyUI before dependency installation. The top **Install All Dependencies & Support Models** button installs Python helpers (including pandas), WD/Waifu and PixAI taggers, natural-language tagging/captioning, automatic detailer/masking/upscale support, reference vision models, and declared managed dependencies in one run.
 - This shared bundle downloads approximately **12.75 GiB of model files**, plus Python packages. Review the displayed model licenses and allow sufficient disk space. It does not include large generation-model families/checkpoints: choose those separately in **Models**, for the features you want to use.
-- If only Python helper imports are missing, use **Tools → Install / Repair Python Helpers**. After dependency repair, launch/restart managed ComfyUI and run runtime preflight; downloaded files alone do not establish runtime readiness.
-- **If ComfyUI cannot launch, Launch remains disabled, or automatic startup fails after updating an older/incomplete installation:** use **Neural Hub → ComfyUI → Install** to reinstall/repair, with managed ComfyUI stopped, and wait for all stages to finish. Existing models and user data remain in place. Then Launch, or restart Umbra to retry enabled automatic startup.
+- If only Python helper imports are missing, use **Tools â†’ Install / Repair Python Helpers**. After dependency repair, launch/restart managed ComfyUI and run runtime preflight; downloaded files alone do not establish runtime readiness.
+- **If ComfyUI cannot launch, Launch remains disabled, or automatic startup fails after updating an older/incomplete installation:** use **Neural Hub â†’ ComfyUI â†’ Install** to reinstall/repair, with managed ComfyUI stopped, and wait for all stages to finish. Existing models and user data remain in place. Then Launch, or restart Umbra to retry enabled automatic startup.
 - Linux managed-node prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
 
 ### Guided Setup
@@ -695,11 +738,11 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 
 **Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
 
-- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio. Open **Umbra Remote → Connection** for the new numbered setup checklist.
+- Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra Studio. Open **Umbra Remote â†’ Connection** for the new numbered setup checklist.
 - **Step 1:** install Tailscale on the Umbra computer and your remote device, connect both to the same Tailscale network, and turn it on. **Get Tailscale** opens the official download page; **Check Tailscale** checks the host without discarding unsaved settings.
 - **Step 2:** enable Umbra Remote in **Connection Settings** and save. Open **Security** and create the **Remote Access Account** if Umbra login is required.
 - **Step 3:** enable **Tailscale Serve** under **HTTPS Front Door**, approve Serve in Tailscale if prompted, then copy the HTTPS URL or scan its QR on the remote device and sign in. **Test URL** checks reachability; it does not sign you in. No additional Umbra restart is needed solely for a working Serve route; genuine pending port changes still require a restart.
-- No model-weight download or ComfyUI reinstall is required for these Remote changes. **If ComfyUI cannot launch, Launch stays disabled, or automatic startup fails after updating an older/incomplete installation:** open **Neural Hub → ComfyUI → Install** to reinstall/repair, stop managed ComfyUI first if running, and wait for every setup stage to succeed. Then Launch, or restart Umbra to retry automatic startup if enabled. Existing models and user data remain in place; dependency repair may download required packages.
+- No model-weight download or ComfyUI reinstall is required for these Remote changes. **If ComfyUI cannot launch, Launch stays disabled, or automatic startup fails after updating an older/incomplete installation:** open **Neural Hub â†’ ComfyUI â†’ Install** to reinstall/repair, stop managed ComfyUI first if running, and wait for every setup stage to succeed. Then Launch, or restart Umbra to retry automatic startup if enabled. Existing models and user data remain in place; dependency repair may download required packages.
 - Linux managed-node prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
 
 ### Umbra Remote
@@ -733,7 +776,7 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 **Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
 
 - Update with `UmbraUpdater.bat` on Windows or `./umbra-updater.sh` on Linux, then reopen Umbra. Power Prompter now lists its card documents when the card directory is a filesystem link. No sharing setup or helper scripts are included.
-- **If you cannot launch ComfyUI, the Launch button stays disabled, or ComfyUI does not start automatically after updating: reinstall/repair ComfyUI from Umbra.** Open **Neural Hub → ComfyUI → Install** (the reinstall/repair action), and wait for every setup stage to finish successfully. Stop managed ComfyUI first if it is running. This establishes the completion verification required by this update for older or previously failed installations. Once repair succeeds, select **Launch**, or restart Umbra to retry automatic startup if that setting is enabled. Existing models and user data remain in place; this update adds no required model-weight download. Dependency repairs download the packages required by the selected installation.
+- **If you cannot launch ComfyUI, the Launch button stays disabled, or ComfyUI does not start automatically after updating: reinstall/repair ComfyUI from Umbra.** Open **Neural Hub â†’ ComfyUI â†’ Install** (the reinstall/repair action), and wait for every setup stage to finish successfully. Stop managed ComfyUI first if it is running. This establishes the completion verification required by this update for older or previously failed installations. Once repair succeeds, select **Launch**, or restart Umbra to retry automatic startup if that setting is enabled. Existing models and user data remain in place; this update adds no required model-weight download. Dependency repairs download the packages required by the selected installation.
 - No new model-weight download is required. Linux managed-node prerequisites remain `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
 
 ### Power Prompter Card Browser
@@ -930,7 +973,7 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 ### Extras Transparency
 
 - Add **Transparency** beside Image Censor in Extras, with a before/after mask editor and checkerboard preview. Import images, erase or restore pixels with size, hardness and strength controls, pan/zoom, and keep independent masks and Undo/Redo histories when switching images.
-- Use **Auto cutout · CPU** to seed an editable soft-alpha mask with the existing local model. Cancel, switching images, or leaving Transparency stops only its owned worker. Manual editing works without the model or ComfyUI running.
+- Use **Auto cutout Â· CPU** to seed an editable soft-alpha mask with the existing local model. Cancel, switching images, or leaving Transparency stops only its owned worker. Manual editing works without the model or ComfyUI running.
 - Export a separate full-resolution `-transparent.png` with real alpha. Restore and reset preserve the original image's existing transparent pixels; originals are never overwritten. Edits remain in the current app session and are discarded on reload; export PNGs to keep results.
 
 ### Canvas Restored On Desktop And Tablet
@@ -946,7 +989,7 @@ Windows qualification covered broken Store-Python migrations for both tools, CUD
 - Track autosave by project identity and revision, so a new project still saves when its revision number matches the previous project. Retry the required save after an overlapping older autosave before switching projects.
 - Upload a shared temporary image once when duplicate layers are saved, retaining every layer's identity and transforms. Missing sources still block the save; existing request-size limits remain in place for projects with many distinct image payloads.
 - Keep failed-save drafts open with **Retry Save**. A conflicting saved revision exposes **Save project as a new copy** and **Reload saved project**, which asks before discarding the local draft.
-- Fix missing cutout pixels after Undo → Save → Redo: retain immutable saved image assets for open editing histories until project deletion. Save as Copy includes only current document assets. Repeated pixel edits can increase project storage.
+- Fix missing cutout pixels after Undo â†’ Save â†’ Redo: retain immutable saved image assets for open editing histories until project deletion. Save as Copy includes only current document assets. Repeated pixel edits can increase project storage.
 - Preserve the background model's soft alpha rather than thresholding it into a hard mask. Add **Cancel** and stop only the request's isolated CPU worker, including on project changes. Keep original pixels, source alpha, and stale-result/history guards intact. Missing weights or dependencies trigger no automatic download or installation.
 
 ### Video Workspace
