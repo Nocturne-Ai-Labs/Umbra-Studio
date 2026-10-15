@@ -20,7 +20,7 @@ function graphFor(feature: 'txt2img' | 'img2img' | 'inpainting'): Graph {
     '3': node('CLIPLoader', { clip_name: 'qwen3vl_4b_int8_convrot.safetensors', type: 'flux3', device: 'default' }, 'FLUX.3 Qwen3-VL 4B', {
       umbra_resources: [{ id: 'flux3.text_encoder', label: 'FLUX.3 Qwen3-VL 4B', kind: 'text_encoder', input: 'clip_name', required: true, order: 10 }],
     }),
-    '4': node('VAELoader', { vae_name: 'flux2-vae.safetensors' }, 'FLUX.3 VAE', {
+    '4': node('VAELoader', { vae_name: 'flux3/flux2-vae.safetensors' }, 'FLUX.3 VAE', {
       umbra_role: 'inpaint_reference_vae', umbra_output_index: 0,
       umbra_resources: [{ id: 'flux3.vae', label: 'FLUX.2 / FLUX.3 VAE', kind: 'vae', input: 'vae_name', required: true, order: 20 }],
     }),

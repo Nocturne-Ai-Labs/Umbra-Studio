@@ -84,7 +84,7 @@
   "4": {
     "class_type": "VAELoader",
     "inputs": {
-      "vae_name": "flux2-vae.safetensors"
+      "vae_name": "flux3/flux2-vae.safetensors"
     },
     "_meta": {
       "title": "FLUX.3 VAE",

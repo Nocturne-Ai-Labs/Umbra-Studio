@@ -488,7 +488,11 @@ Setup declares ComfyUI revision `20b46065ef7f34fa21e8abebe8d0cca90a904d6d`
 or a descendant: stable v0.40.0 alone predates the required native FLUX3 nodes.
 Use the FLUX3 managed dependency repair, then restart the managed ComfyUI.
 Accept the [upstream license](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy)
-and install the gated files using the exact folders listed in Setup's Models tab.
+and select FLUX3 in Setup's Models tab. Download the three files in your signed-in
+browser, place them at the displayed destinations, then choose **Verify selected**
+for SHA-256 verification. Authenticated downloads through Setup are optional.
+The FLUX3 VAE is stored under
+`Tools/ComfyUI/models/vae/flux3/` to preserve the existing FLUX.2 VAE.
 Krea3 remains unavailable until an official open-weight editing contract can be verified.
 
 Wulver v0.5 has dedicated **Wulver Turbo** and **Wulver Non-Turbo** pipelines
