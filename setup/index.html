@@ -595,8 +595,11 @@
       document.dispatchEvent(new CustomEvent('umbra-setup-busy', { detail: { busy: setupUiBusy } }));
     }
 
+    let renderedJobId = '';
     function renderJob(job) {
       if (!job) return;
+      if (renderedJobId !== job.id) delete status.dataset.actionError;
+      renderedJobId = job.id;
       progress.classList.add('visible');
       progress.classList.toggle('done', job.phase === 'complete');
       progress.classList.toggle('failed', job.phase === 'failed');
@@ -616,8 +619,11 @@
       renderModelProgress(job);
       renderToolsProgress(job);
       renderOnboardingProgress(job);
-      status.textContent = job.phase === 'running' ? job.kind === 'managed-tools' || job.kind === 'python-helpers' ? localizeJobStep(job.step) : tr('installingModels') : localizeJobStep(job.step);
-      status.classList.toggle('error', job.phase === 'failed');
+      // Polling an older job must not erase a newer request's admission error.
+      if (!status.dataset.actionError) {
+        status.textContent = job.phase === 'running' ? job.kind === 'managed-tools' || job.kind === 'python-helpers' ? localizeJobStep(job.step) : tr('installingModels') : localizeJobStep(job.step);
+        status.classList.toggle('error', job.phase === 'failed');
+      }
     }
 
     let savedLogSignature = '';

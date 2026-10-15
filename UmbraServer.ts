@@ -35534,7 +35534,10 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/frameforge' && ['GET', 'POST', 'DELETE'].includes(method)) {
         if (!isHostRequest(req, url, server)) return json({ error: 'Frame Forge is available on the host PC.' }, 403);
         try {
-          if (method === 'POST') return json({ ...frameForgeService.status(), url: await frameForgeService.start(getComfyHttpBaseUrl(getComfyProxyTarget())) });
+          if (method === 'POST') {
+            const frameForgeUrl = await frameForgeService.start(getComfyHttpBaseUrl(getComfyProxyTarget()));
+            return json({ ...frameForgeService.status(), url: frameForgeUrl });
+          }
           if (method === 'DELETE') await frameForgeService.stop();
           return json(frameForgeService.status());
         } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }

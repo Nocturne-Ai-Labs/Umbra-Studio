@@ -136,7 +136,7 @@ trainingPythonWarning¦Rebuild AI Toolkit with Python 3.12? Dependencies will be
 pythonUpgradeWarning¦Rebuild ComfyUI with Python 3.13? Dependencies will be downloaded again. Models and custom-node code stay in place. The previous environment is kept for rollback.¦ComfyUI を Python 3.13 で再構築しますか？依存関係を再ダウンロードします。モデルとカスタムノードのコードは維持され、以前の環境は復元用に保存されます。¦使用 Python 3.13 重建 ComfyUI？将重新下载依赖。模型和自定义节点代码保留在原位置，旧环境将保留用于回退。¦Python 3.13으로 ComfyUI를 다시 구성할까요? 의존성을 다시 다운로드합니다. 모델과 사용자 노드 코드는 유지하며 이전 환경은 복구용으로 보관합니다.¦ComfyUI mit Python 3.13 neu erstellen? Abhängigkeiten werden erneut heruntergeladen. Modelle und Custom-Node-Code bleiben erhalten. Die bisherige Umgebung wird für die Wiederherstellung aufbewahrt.
 comfyVersion¦ComfyUI version tag / branch / commit¦ComfyUI のタグ／ブランチ／コミット¦ComfyUI 版本标签／分支／提交¦ComfyUI 버전 태그 / 브랜치 / 커밋¦ComfyUI-Versionstag / Branch / Commit
 switchVersion¦Install / switch version¦インストール／バージョン切替¦安装／切换版本¦설치 / 버전 전환¦Version installieren / wechseln
-switchWarning¦Switch ComfyUI to {ref}? This rebuild can remove nodes not preinstalled by Umbra. Use Update to preserve custom nodes.¦ComfyUI を {ref} に切り替えますか？再構築で Umbra に同梱されていないノードが削除される場合があります。カスタムノードを保持するには「更新」を使用してください。¦将 ComfyUI 切换到 {ref}？重建可能删除 Umbra 未预装的节点。请使用“更新”保留自定义节点。¦ComfyUI를 {ref}(으)로 전환할까요? 재구축 시 Umbra가 사전 설치하지 않은 노드가 제거될 수 있습니다. 사용자 노드를 유지하려면 업데이트를 사용하세요.¦ComfyUI auf {ref} wechseln? Der Neuaufbau kann nicht von Umbra vorinstallierte Nodes entfernen. Zum Behalten eigener Nodes Aktualisieren verwenden.
+switchWarning¦Switch ComfyUI to {ref}? Upgrading to a newer official release keeps custom nodes and Python. Other version changes rebuild the source and may remove nodes not bundled by Umbra.¦ComfyUI を {ref} に切り替えますか？新しい公式リリースへの更新では、カスタムノードと Python を保持します。それ以外の変更ではソースを再構築し、Umbra に同梱されていないノードが削除される場合があります。¦将 ComfyUI 切换到 {ref}？升级到较新的官方版本会保留自定义节点和 Python。其他版本切换会重建源码，可能删除 Umbra 未捆绑的节点。¦ComfyUI를 {ref}(으)로 전환할까요? 더 새로운 공식 버전으로 업그레이드하면 사용자 노드와 Python을 유지합니다. 다른 버전 변경은 소스를 재구축하며 Umbra에 포함되지 않은 노드를 제거할 수 있습니다.¦ComfyUI auf {ref} wechseln? Ein Upgrade auf eine neuere offizielle Version behält Custom Nodes und Python bei. Andere Versionswechsel erstellen den Quellcode neu und können nicht mit Umbra gebündelte Nodes entfernen.
 sharedSize¦Shared support models: {size} GiB, plus Python packages. Valid existing files are checked and kept.¦共通補助モデル：{size} GiB と Python パッケージ。既存の有効なファイルは確認して保持します。¦共享辅助模型：{size} GiB，另含 Python 包。现有有效文件会被检查并保留。¦공통 보조 모델: {size} GiB 및 Python 패키지. 유효한 기존 파일은 확인 후 유지합니다.¦Gemeinsame Hilfsmodelle: {size} GiB plus Python-Pakete. Gültige vorhandene Dateien werden geprüft und behalten.
 cpuHelpers¦CPU Python helpers¦CPU 用 Python 補助ツール¦CPU Python 辅助工具¦CPU Python 보조 도구¦CPU-Python-Hilfsprogramme
 repairDownload¦Repair download: {size} MiB¦修復用ダウンロード：{size} MiB¦修复下载：{size} MiB¦복구 다운로드: {size} MiB¦Reparaturdownload: {size} MiB
@@ -230,7 +230,7 @@ let completedModelJob = '';
 const modelElement = id => document.getElementById(id);
 
 const modelBytes = value => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(2)} GB` : `${(value / 1024 ** 2).toFixed(1)} MB`;
-function modelError(error) { status.textContent = error.message; status.classList.add('error'); }
+function modelError(error) { status.textContent = error.message; status.classList.add('error'); status.dataset.actionError = 'true'; }
 
 function showSetupTab(tab) {
   if (tab === 'tools' || tab === 'models') modelElement('setup-advanced').open = true;

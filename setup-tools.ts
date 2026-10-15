@@ -1200,12 +1200,13 @@ function ensureRepoSourceAndBranch(dir: string, repoUrl: string, branch?: string
             checkoutFetchedRepositoryRef(dir, branch);
         }
         return true;
-    } catch {
+    } catch (error) {
         return failWithVerify(
             'repo-branch-sync-failed',
             'Failed to synchronize repository origin/branch.',
-            [`Repository: ${repoUrl}`, `Branch: ${branch || '(default)'}`, `Target: ${dir}`],
-            ['Verify repository access and rerun install/update.']
+            [`Repository: ${repoUrl}`, `Branch: ${branch || '(default)'}`, `Target: ${dir}`,
+                error instanceof Error ? error.message : String(error)],
+            ['Review the Git error above for ownership, local changes or branch divergence before retrying. Existing files were preserved.']
         );
     }
 }
@@ -2488,6 +2489,20 @@ async function setComfyUIVersion(ref: string) {
         }
     } else {
         log('->', 'ComfyUI git metadata missing. Will validate target ref after clean clone.');
+    }
+
+    const releaseVersion = /^v(\d+\.\d+\.\d+)$/.exec(targetRef)?.[1];
+    if (releaseVersion && isOwnGitCheckout(toolDir)) {
+        const installedVersion = inspectManagedDependencies(MANAGED_SOURCE_ROOT, ROOT_DIR).comfyui.version;
+        if (installedVersion && compareUmbraVersions(releaseVersion, installedVersion) > 0) {
+            // Official stable releases may be on separate backport branches.
+            // Verify the installed release and refuse edits/collisions rather than rebuilding its tools.
+            repairManagedComfyCheckout(toolDir, cfg.repo, installedVersion, releaseVersion, { log: (message) => log('->', message) });
+            if (!refreshComfySubmodules(toolDir, 'release upgrade') || !setupPythonEnv(toolDir, cfg.id)
+                || !refreshComfyPinnedPackages(toolDir)) exitWithExistingVerifyFailure();
+            log(`${c.green}OK${c.reset}`, `ComfyUI upgraded to ${targetRef}; existing custom nodes and Python environment retained.`);
+            return;
+        }
     }
 
     const preserveRoot = join(ROOT_DIR, 'User', 'Config', 'ComfyUI-Preserve');
