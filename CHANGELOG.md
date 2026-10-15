@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.90.18-beta - FLUX3 Generation And Canvas Editing
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Save your work and update through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux afterward. Setup remains the installation and update home following the major setup-flow refactor.
+- For **FLUX3 Image Klein**, use Setup's **Advanced > Tools** to repair the FLUX3 generation/editing requirements, then restart managed ComfyUI. Native FLUX3 support requires ComfyUI commit `20b46065ef7f34fa21e8abebe8d0cca90a904d6d` or a compatible descendant; stable v0.40.0 alone is insufficient. Setup also installs the required Umbra Nodes and inpaint mask-processing nodes.
+- In **Setup > Models**, select **FLUX3 Image Klein**. The three required default files total about **11.0 GB / 10.27 GiB**. Accept access and review the FLUX Kommunity License at the official [Black Forest Labs repository](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy). Generation weights are separate downloads and are not bundled.
+- Browser/manual downloads work without entering a Hugging Face token in Setup. Place `flux3_image_klein_sd_int8_convrot.safetensors` in `Tools/ComfyUI/models/diffusion_models/`, `qwen3vl_4b_int8_convrot.safetensors` in `Tools/ComfyUI/models/text_encoders/`, and rename the downloaded `flux2-vae.safetensors` to `flux3-vae.safetensors` in `Tools/ComfyUI/models/vae/`. Choose **Verify selected** to check the pinned file hashes. Authenticated downloads through Setup remain optional.
+- Optional AI Toolkit still requires host Git and Node.js 20+ with npm. Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### FLUX3 Generation And Edit
+
+- Add shared FLUX3 text-to-image, image-to-image and native editing pipelines, also available to Power Prompter and Manga Studio through the shared generation catalog.
+- The Canvas button now selects **Canvas** or **Edit**. Edit is available for supported native-edit model pipelines; both modes share the Canvas project, layers and generation controls.
+- Support the editable source plus nine additional reference images and described layout boxes referenced as `<obj_1>`, `<obj_2>`, and so on in the prompt.
+- Keep sampling and resolution user-controlled. Base and step-distilled checkpoints share the same pipeline; no Turbo LoRA is required. The installed distilled default uses 16 steps / CFG 1 with Euler/simple sampling.
+- Preserve layout regions and edit-area settings through project save, reopen and restore points. Krea3 stays unavailable until an official open-weight editing contract can be verified; the optional FLUX3 prompt upsampler is not connected in this release.
+
+### Validation And Limits
+
+- Real isolated Windows FLUX3 generation and editing were exercised across portraits, two-person scenes, animals, interiors, landscapes, character style transfer, product materials and manga expressions. Eight before/after pairs completed; seven passed visual review and sunset relighting was partial.
+- Targeted manga face edits preserved the dialogue, panel borders, opening scene and final panel. Whole-image editing can alter small details. Layout changes combined with hard mask boundaries can produce seams; exact outside-mask preservation does not guarantee a visually seamless edit.
+- Targeted tests, inpaint regressions, source/type checks, frontend build/lint and the shared pipeline audit are qualified separately from packaged Windows/Linux startup and upgrade checks.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: ComfyUI interprets literal layout arrays correctly, including empty layouts and compatible existing workflow copies.
+- Fixed: FLUX3 uses a distinct portable VAE filename, preserving the existing FLUX.2 VAE and avoiding nested Windows path mismatches.
+- Fixed: FLUX3 Setup repair declares native ComfyUI support and all required mask-processing nodes instead of relying on other feature installations.
+- Improved: Setup verifies official pinned FLUX3 files and clearly supports browser downloads with exact destination instructions.
+- Improved: Canvas and Edit share their selected model and settings while other workflow drafts remain independent.
+- Improved: Managed ComfyUI upgrades preserve compatible newer source and local modifications, and Setup retains useful maintenance diagnostics.
+
 ## v0.90.17-beta - Community Video Studios And DaSiWa H3 Refresh
 
 ### TL;DR - Setup After Updating
