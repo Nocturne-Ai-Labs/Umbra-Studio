@@ -23,6 +23,7 @@
           ],
           "priority": 100,
           "inpaint_adapter": "native_edit",
+          "instruction_editing": true,
           "defaults": {
             "modelName": "flux3_image_klein_sd_int8_convrot.safetensors",
             "modelNamesBySource": {

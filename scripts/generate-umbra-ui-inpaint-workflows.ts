@@ -13,7 +13,7 @@ const root = process.cwd();
 const bundledWorkflowDirectory = join(root, 'defaults', 'PowerPrompter', 'API Workflows');
 const workflowDirectories = [
   bundledWorkflowDirectory,
-  join(root, 'User', 'PowerPrompter', 'API Workflows'),
+  ...(!process.argv.includes('--bundled-only') ? [join(root, 'User', 'PowerPrompter', 'API Workflows')] : []),
 ];
 
 async function readGraph(fileName: string): Promise<PromptGraph> {
@@ -45,6 +45,7 @@ function inpaintDescriptor(
     model_family: modelFamily,
     model_sources: modelSources,
     inpaint_adapter: 'native_edit',
+    ...(['FLUX.2 Edit', 'Qwen Image Edit', 'HiDream O1'].includes(modelFamily) ? { instruction_editing: true } : {}),
     priority: 100,
     defaults,
   };
@@ -439,7 +440,7 @@ async function buildFlux2EditInpaint() {
 
 async function buildQwenImageEditInpaint() {
   const base = await readGraph('[Umbra UI] Qwen Image Pipeline.json');
-  const modelName = 'qwen_image_edit_fp8_e4m3fn.safetensors';
+  const modelName = 'qwen_image_edit_2511_fp8mixed.safetensors';
   const graph: PromptGraph = {
     '1': cloneNode(base, '1', {
       inputs: {

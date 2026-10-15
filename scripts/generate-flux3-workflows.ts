@@ -38,7 +38,7 @@ function graphFor(feature: 'txt2img' | 'img2img' | 'inpainting'): Graph {
   graph['1'].inputs.diffusion_model_name = 'flux3_image_klein_sd_int8_convrot.safetensors';
   graph['1']._meta = { title: 'Umbra FLUX.3 Image Klein', umbra_model_family: 'FLUX.3', umbra_ui_pipelines: [{
     feature, model_family: 'FLUX.3', model_sources: ['diffusion_model', 'unet'], priority: 100,
-    ...(masked ? { inpaint_adapter: 'native_edit' } : {}),
+    ...(masked ? { inpaint_adapter: 'native_edit', instruction_editing: true } : {}),
     defaults: { modelName: 'flux3_image_klein_sd_int8_convrot.safetensors', modelNamesBySource: {
       diffusion_model: 'flux3_image_klein_sd_int8_convrot.safetensors', unet: 'flux3_image_klein_sd_int8_convrot.safetensors',
     }, steps: 16, cfg: 1, samplerName: 'euler', scheduler: 'simple', width: 1024, height: 1024, clipSkip: 1, denoise: 1 },

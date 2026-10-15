@@ -28,10 +28,10 @@ export function supportsUmbraUiEditWorkspace(
   source?: UmbraUiPipelineModelSource,
 ): boolean {
   const key = normalizeUmbraUiModelFamilyKey(family);
-  if (key !== 'flux3' && key !== 'krea3') return false;
   return workflows.some((workflow) => workflow.umbraUiPipelines?.some((pipeline) => (
     pipeline.feature === 'inpainting' && pipeline.modelFamilyKey === key
     && pipeline.inpaintAdapter === 'native_edit'
+    && pipeline.instructionEditing === true
     && (!source || pipeline.modelSources.includes(source))
   )));
 }

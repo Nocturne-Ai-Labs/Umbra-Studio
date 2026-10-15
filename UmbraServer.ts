@@ -22024,7 +22024,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       return json({ success: false, error: 'Reference layers are not valid JSON.' }, 400);
     }
     assertLayerLimit('reference layers', referencePayload.length, declaredLayerLimit(canvasCapabilities?.referenceLayers));
-    const referenceMethods = new Set(['style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'flux3_reference', 'qwen_image_reference', 'hidream_o1_reference']);
+    const referenceMethods = new Set(['style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'flux3_reference', 'qwen_image_reference', 'qwen_image21_reference', 'hidream_o1_reference']);
     const declaredReferenceMethods = new Set<string>(canvasCapabilities?.referenceLayers?.methods || []);
     const ipAdapterWeightTypes = new Set(['linear', 'ease in', 'ease out', 'ease in-out', 'reverse in-out', 'weak input', 'weak output', 'weak middle', 'strong middle', 'style transfer', 'composition', 'strong style transfer', 'style and composition', 'style transfer precise', 'composition precise']);
     const ipAdapterCombineModes = new Set(['concat', 'add', 'subtract', 'average', 'norm average']);
@@ -25361,6 +25361,7 @@ function describeUmbraUiPipelines(
       priority: Number.isFinite(Number(rawPipeline.priority)) ? Math.floor(Number(rawPipeline.priority)) : 0,
       locked: true,
       ...(inpaintAdapter ? { inpaintAdapter } : {}),
+      ...(inpaintAdapter === 'native_edit' && (rawPipeline.instructionEditing ?? rawPipeline.instruction_editing) === true ? { instructionEditing: true } : {}),
       ...(hasDefaults ? { defaults } : {}),
     };
     if (feature === 'txt2img' || feature === 'img2img' || feature === 'inpainting') {

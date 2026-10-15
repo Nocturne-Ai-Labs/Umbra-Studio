@@ -21,6 +21,7 @@
             "checkpoint"
           ],
           "inpaint_adapter": "native_edit",
+          "instruction_editing": true,
           "priority": 100,
           "defaults": {
             "modelName": "hidream_o1_image_dev_fp8_scaled.safetensors",

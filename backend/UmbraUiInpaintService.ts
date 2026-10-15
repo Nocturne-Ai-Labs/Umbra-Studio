@@ -138,6 +138,7 @@ const NATIVE_REFERENCE_METHODS = new Set<UmbraUiInpaintReferenceMethod>([
   'flux_kontext',
   'flux2_reference',
   'qwen_image_reference',
+  'qwen_image21_reference',
   'hidream_o1_reference',
 ]);
 const CLASSIC_REFERENCE_METHODS = new Set<UmbraUiInpaintReferenceMethod>([
@@ -1666,7 +1667,7 @@ export class UmbraUiInpaintService {
       const requestedControlLayers = Array.isArray(settings.controlLayers) ? settings.controlLayers : [];
       const requestedReferenceLayers = Array.isArray(settings.referenceLayers) ? settings.referenceLayers : [];
       const requestedReferenceMethod = requestedReferenceLayers[0]?.method;
-      const referenceLimit = requestedReferenceMethod === 'hidream_o1_reference'
+      const referenceLimit = ['hidream_o1_reference', 'flux3_reference', 'qwen_image21_reference'].includes(String(requestedReferenceMethod))
         ? 9
         : requestedReferenceMethod === 'qwen_image_reference' ? 2 : 8;
       const controlLimit = requestedControlLayers[0]?.adapterType === 'z_image_control' ? 4 : 8;
@@ -1953,6 +1954,8 @@ export class UmbraUiInpaintService {
           ? ['LoadImage', 'IPAdapterModelLoader', 'CLIPVisionLoader', 'IPAdapterAdvanced']
           : method === 'flux_redux'
           ? ['LoadImage', 'CLIPVisionLoader', 'CLIPVisionEncode', 'StyleModelLoader', 'StyleModelApply']
+          : method === 'qwen_image21_reference'
+          ? ['LoadImage', 'TextEncodeQwenImage21']
           : method === 'qwen_image_reference'
           ? ['LoadImage', 'TextEncodeQwenImageEditPlus']
           : method === 'flux3_reference'
@@ -2965,6 +2968,31 @@ export class UmbraUiInpaintService {
     bindImageInput(maskEntry, maskInputName, 'inpaint_mask');
     const addNode = createNodeAllocator(graph);
 
+    // Bind the v2.1 autogrow contract even for a source-only edit. Never retain
+    // reference slots from a previous template or request.
+    const qwen21Entry = findRole('inpaint_reference_sink');
+    if (qwen21Entry?.[1]?.class_type === 'TextEncodeQwenImage21') {
+      const node = qwen21Entry[1];
+      if (node._meta?.umbra_reference_method !== 'qwen_image21_reference') {
+        throw new Error('Qwen Image 2.1 requires its exact reference contract.');
+      }
+      const inputs = node.inputs || {};
+      const grouped = inputs.images && typeof inputs.images === 'object' && !Array.isArray(inputs.images) ? inputs.images : {};
+      const sourceRef = normalizeGraphReference(inputs['images.image_1'] ?? grouped.image_1 ?? inputs.image_1, graph);
+      const sourceOutput = Math.max(0, Math.floor(Number(sourceEntry[1]?._meta?.umbra_output_index) || 0));
+      if (!sourceRef || sourceRef[0] !== sourceEntry[0] || sourceRef[1] !== sourceOutput
+        || !normalizeGraphReference(inputs.clip, graph) || !normalizeGraphReference(inputs.vae, graph)
+        || !Object.prototype.hasOwnProperty.call(inputs, 'prompt')
+        || !Object.prototype.hasOwnProperty.call(inputs, 'negative_prompt')) {
+        throw new Error('Qwen Image 2.1 is missing its source, CLIP, VAE, or prompt binding.');
+      }
+      for (const key of Object.keys(inputs)) {
+        if (key === 'images' || /^(?:images\.)?image_\d+$/.test(key)) delete inputs[key];
+      }
+      inputs['images.image_1'] = sourceRef;
+      node.inputs = inputs;
+    }
+
     if (referenceLayers.length > 0) {
       const methods = Array.from(new Set(referenceLayers.map((reference) => reference.method)));
       if (methods.length !== 1 || !NATIVE_REFERENCE_METHODS.has(methods[0])) {
@@ -3078,6 +3106,13 @@ export class UmbraUiInpaintService {
         }
         sinkInputs[sinkField] = currentConditioning;
         sinkEntry[1].inputs = sinkInputs;
+      } else if (method === 'qwen_image21_reference') {
+        if (!qwen21Entry || qwen21Entry[1]?.class_type !== 'TextEncodeQwenImage21' || referenceLayers.length > 9) {
+          throw new Error('Qwen Image 2.1 requires its native encoder and at most nine additional reference images.');
+        }
+        loadReferenceImages().forEach(({ imageId }, index) => {
+          qwen21Entry[1].inputs[`images.image_${index + 2}`] = [imageId, 0];
+        });
       } else if (method === 'qwen_image_reference') {
         if (referenceLayers.length > 2) {
           throw new Error('Qwen Image Edit Plus supports at most two additional reference layers because image1 is reserved for the source image.');

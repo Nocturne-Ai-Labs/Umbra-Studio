@@ -676,6 +676,7 @@ export async function loadUmbraUiWorkflowCatalog(fetcher: typeof fetch = fetch):
       priority: pipeline.priority,
       locked: true,
       ...(pipeline.inpaintAdapter ? { inpaintAdapter: pipeline.inpaintAdapter } : {}),
+      ...(pipeline.instructionEditing === true ? { instructionEditing: true } : {}),
       ...(pipeline.defaults ? { defaults: { ...pipeline.defaults } } : {}),
       capabilities,
       ...(pipeline.inpaintCanvas ? { inpaintCanvas: pipeline.inpaintCanvas } : {}),

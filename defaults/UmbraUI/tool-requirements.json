@@ -451,6 +451,7 @@
         "[Umbra UI] Ovis Image Pipeline",
         "[Umbra UI] Ovis Image to Image Pipeline",
         "[Umbra UI] Qwen Image 2.1 Image Pipeline",
+        "[Umbra UI] Qwen Image 2.1 Edit Inpaint Pipeline",
         "[Umbra UI] Qwen Image Edit Inpaint Pipeline",
         "[Umbra UI] Qwen Image Pipeline",
         "[Umbra UI] Qwen Image to Image Pipeline",
@@ -1015,6 +1016,105 @@
           "version": "1.4.3",
           "license": "GPL-3.0",
           "requiredClasses": ["INPAINT_ExpandMask"]
+        }
+      ]
+    },
+    {
+      "id": "qwen-image-edit",
+      "label": "Qwen Image Edit 2511",
+      "optional": true,
+      "minimumComfyVersion": "0.40.0",
+      "minimumComfyCommit": "20b46065ef7f34fa21e8abebe8d0cca90a904d6d",
+      "modelProfiles": [
+        "qwen-image-edit-2511"
+      ],
+      "workflowIds": [
+        "[Umbra UI] Qwen Image Edit Inpaint Pipeline"
+      ],
+      "requiredBuiltinClasses": [
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "LoadImageMask",
+        "ImageCompositeMasked",
+        "VAEDecode",
+        "TextEncodeQwenImageEditPlus",
+        "ModelSamplingAuraFlow",
+        "CFGNorm"
+      ],
+      "customNodes": [
+        {
+          "name": "Umbra-Nodes",
+          "minimumCommit": "1a6aba4ac9021c0c0eb54e156c41bc4c4c856828",
+          "repository": "https://github.com/Nocturne-Ai-Labs/Umbra-Nodes",
+          "version": "0.1.1",
+          "license": "MIT",
+          "requiredClasses": [
+            "UmbraLoadCheckpoint",
+            "UmbraPowerPrompterReader",
+            "UmbraA1111LoraSyntax",
+            "UmbraLabSaveImage",
+            "UmbraKSamplerHiResFix"
+          ]
+        },
+        {
+          "name": "comfyui-inpaint-nodes",
+          "minimumCommit": "bd6d8fd5104d539187dfb172d07352215c09fcaa",
+          "repository": "https://github.com/Acly/comfyui-inpaint-nodes",
+          "version": "1.4.3",
+          "license": "GPL-3.0",
+          "requiredClasses": [
+            "INPAINT_ExpandMask"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "qwen-image21-edit",
+      "label": "Qwen Image 2.1 generation and editing (Research Only)",
+      "optional": true,
+      "minimumComfyVersion": "0.40.0",
+      "minimumComfyCommit": "20b46065ef7f34fa21e8abebe8d0cca90a904d6d",
+      "modelProfiles": [
+        "qwen-image-2.1"
+      ],
+      "workflowIds": [
+        "[Umbra UI] Qwen Image 2.1 Image Pipeline",
+        "[Umbra UI] Qwen Image 2.1 Edit Inpaint Pipeline"
+      ],
+      "requiredBuiltinClasses": [
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "LoadImageMask",
+        "ImageCompositeMasked",
+        "VAEDecode",
+        "TextEncodeQwenImage21",
+        "KSampler"
+      ],
+      "customNodes": [
+        {
+          "name": "Umbra-Nodes",
+          "minimumCommit": "1a6aba4ac9021c0c0eb54e156c41bc4c4c856828",
+          "repository": "https://github.com/Nocturne-Ai-Labs/Umbra-Nodes",
+          "version": "0.1.1",
+          "license": "MIT",
+          "requiredClasses": [
+            "UmbraLoadCheckpoint",
+            "UmbraPowerPrompterReader",
+            "UmbraA1111LoraSyntax",
+            "UmbraLabSaveImage"
+          ]
+        },
+        {
+          "name": "comfyui-inpaint-nodes",
+          "minimumCommit": "bd6d8fd5104d539187dfb172d07352215c09fcaa",
+          "repository": "https://github.com/Acly/comfyui-inpaint-nodes",
+          "version": "1.4.3",
+          "license": "GPL-3.0",
+          "requiredClasses": [
+            "INPAINT_ExpandMask"
+          ]
         }
       ]
     }

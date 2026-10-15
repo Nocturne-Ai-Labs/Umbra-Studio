@@ -29,9 +29,10 @@
       "label": "Qwen Image",
       "description": "Qwen 2.5 VL 7B FP8 text encoder and Qwen Image VAE."
     },
+    "qwen-image-edit-2511": {"label": "Qwen Image Edit 2511", "description": "Native instruction editing with up to three input images. FP8 mixed checkpoint, shared Qwen 2.5 VL encoder and Qwen Image VAE. Apache-2.0. About 30 GB total.", "requiresProfiles": ["qwen-image"]},
     "qwen-image-2.1": {
       "label": "Qwen Image 2.1 (Research Only)",
-      "description": "INT8 generation model, Qwen3 VL 8B encoder and dedicated 2.1 VAE. Non-commercial research/evaluation only under the Qwen Research License. Requires updated ComfyUI with TextEncodeQwenImage21 support. Not compatible with the older Qwen Image encoder/VAE."
+      "description": "INT8 generation/editing model, Qwen3 VL 8B encoder and dedicated 2.1 VAE. Non-commercial research/evaluation only under the Qwen Research License. Requires updated ComfyUI with TextEncodeQwenImage21 support. Not compatible with the older Qwen Image encoder/VAE."
     },
     "krea-2": {
       "label": "Krea 2",
@@ -233,6 +234,28 @@
       ]
     },
     {
+      "id": "qwen-image-edit-2511",
+      "family": "Qwen Image Edit",
+      "creator": "Qwen",
+      "repository": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+      "revision": "f68ace85e60b4a02a323e394253731947657b7d2",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Qwen/Qwen-Image-Edit-2511/blob/main/LICENSE",
+      "installPolicy": "automatic",
+      "profiles": [
+        "qwen-image-edit-2511"
+      ],
+      "purpose": "Qwen Image Edit 2511 native instruction editing; uses TextEncodeQwenImageEditPlus. No acceleration LoRA required.",
+      "files": [
+        {
+          "destination": "diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+          "sourcePath": "split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+          "bytes": 20533762817,
+          "sha256": "c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e"
+        }
+      ]
+    },
+    {
       "id": "qwen-image-2.1-int8",
       "family": "Qwen Image 2.1",
       "creator": "Qwen",
@@ -243,7 +266,7 @@
       "licenseNotice": "Qwen’s clarification treats generated outputs as separate from the licensed Materials and users retain output rights; that does not permit commercial use of the Qwen model Materials under this research license.",
       "installPolicy": "automatic",
       "profiles": ["qwen-image-2.1"],
-      "purpose": "Native Qwen Image 2.1 text-to-image. Update ComfyUI for TextEncodeQwenImage21 before use. License: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
+      "purpose": "Native Qwen Image 2.1 text-to-image and instruction editing with source plus nine reference images. Update ComfyUI for TextEncodeQwenImage21 before use. License: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
       "files": [
         { "destination": "diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "sourcePath": "diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "bytes": 7256783064, "sha256": "cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d" },
         { "destination": "text_encoders/qwen3vl_8b_int8_convrot.safetensors", "sourcePath": "text_encoders/qwen3vl_8b_int8_convrot.safetensors", "bytes": 9350798360, "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f" },

@@ -42,6 +42,7 @@ function normalizeApiWorkflowItem(entry: any): PowerPrompterApiWorkflowItem | nu
         priority: Number.isFinite(Number(pipeline?.priority)) ? Math.floor(Number(pipeline.priority)) : 0,
         locked: true,
         ...(pipeline?.inpaintAdapter ? { inpaintAdapter: pipeline.inpaintAdapter } : {}),
+        ...(pipeline?.instructionEditing === true ? { instructionEditing: true } : {}),
         ...(pipeline?.inpaintCanvas ? { inpaintCanvas: pipeline.inpaintCanvas } : {}),
       };
     })

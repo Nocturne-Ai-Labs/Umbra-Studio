@@ -102,6 +102,7 @@ const UMBRA_CANVAS_REFERENCE_METHODS: UmbraUiInpaintReferenceMethod[] = [
   'flux2_reference',
   'flux3_reference',
   'qwen_image_reference',
+  'qwen_image21_reference',
   'hidream_o1_reference',
 ];
 const UMBRA_IP_ADAPTER_WEIGHT_TYPES: UmbraUiIpAdapterWeightType[] = [

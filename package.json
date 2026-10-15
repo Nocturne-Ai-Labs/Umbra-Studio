@@ -72,6 +72,7 @@
     "models:umbra-ui:check": "bun scripts/download-umbra-ui-models.mjs --profile core --check",
     "models:umbra-ui:manifest": "bun scripts/download-umbra-ui-models.mjs --manifest-only",
     "generate:umbra-ui-flux3-workflows": "bun scripts/generate-flux3-workflows.ts",
+    "generate:umbra-ui-qwen21-edit-workflow": "bun scripts/generate-qwen21-edit-workflow.ts",
     "generate:umbra-ui-wulver-workflows": "bun scripts/generate-wulver-workflows.ts"
   },
   "workspaces": [

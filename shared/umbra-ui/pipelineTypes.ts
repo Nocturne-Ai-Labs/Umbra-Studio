@@ -52,6 +52,7 @@ export type UmbraUiInpaintReferenceMethod =
   | 'flux2_reference'
   | 'flux3_reference'
   | 'qwen_image_reference'
+  | 'qwen_image21_reference'
   | 'hidream_o1_reference';
 
 export type UmbraUiIpAdapterWeightType =
@@ -259,6 +260,7 @@ export interface UmbraUiPipelineDescriptor {
   priority: number;
   locked: true;
   inpaintAdapter?: UmbraUiInpaintAdapter;
+  instructionEditing?: boolean;
   defaults?: UmbraUiPipelineDefaults;
   capabilities?: UmbraUiPipelineCapabilities;
   inpaintCanvas?: UmbraUiInpaintCanvasCapabilities;
@@ -661,7 +663,7 @@ const INPAINT_CONTROL_MODES: UmbraUiInpaintControlMode[] = [
   'balanced', 'more_prompt', 'more_control', 'unbalanced',
 ];
 const INPAINT_REFERENCE_METHODS: UmbraUiInpaintReferenceMethod[] = [
-  'style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'flux3_reference', 'qwen_image_reference', 'hidream_o1_reference',
+  'style_model', 'ip_adapter', 'flux_redux', 'flux_kontext', 'flux2_reference', 'flux3_reference', 'qwen_image_reference', 'qwen_image21_reference', 'hidream_o1_reference',
 ];
 
 function normalizeInpaintControlCapability(value: unknown, fallbackReason: string): UmbraUiInpaintControlLayerCapability {

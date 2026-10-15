@@ -23,6 +23,7 @@
             "gguf"
           ],
           "inpaint_adapter": "native_edit",
+          "instruction_editing": true,
           "priority": 100,
           "defaults": {
             "modelName": "",

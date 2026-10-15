@@ -1033,6 +1033,13 @@ export function deriveUmbraUiInpaintCanvasCapabilities(
       && connectedNodeId(node, 'image1') === source?.id
       && hasInput(node, 'prompt');
     const qwenReady = !!source && qwenEncoderReady(qwenPositive) && qwenEncoderReady(qwenNegative);
+    const qwen21Ready = !!source && !!sink && !!vae
+      && sink.classType === 'TextEncodeQwenImage21'
+      && sink.referenceMethod === 'qwen_image21_reference'
+      && connectedAutogrowImageNodeId(sink, 'image_1') === source.id
+      && connectedNodeId(sink, 'vae') === vae.id
+      && !!connectedNodeId(sink, 'clip')
+      && hasInput(sink, 'prompt') && hasInput(sink, 'negative_prompt');
     const hiDreamReady = !!sink
       && sink.classType === 'HiDreamO1ReferenceImages'
       && sink.referenceMethod === 'hidream_o1_reference'
@@ -1063,6 +1070,12 @@ export function deriveUmbraUiInpaintCanvasCapabilities(
         maxLayers: 8,
         reason: `The locked native edit graph declares an exact ${fluxMethod} ReferenceLatent sink and VAE binding.`,
         requiredNodes: ['LoadImage', 'VAEEncode', 'ReferenceLatent'],
+      }] : []),
+      ...(qwen21Ready ? [{
+        method: 'qwen_image21_reference' as const,
+        maxLayers: 9,
+        reason: 'Qwen Image 2.1 reserves image_1 for the editable source and accepts nine additional reference images.',
+        requiredNodes: ['LoadImage', 'TextEncodeQwenImage21'],
       }] : []),
       ...(qwenReady ? [{
         method: 'qwen_image_reference' as const,

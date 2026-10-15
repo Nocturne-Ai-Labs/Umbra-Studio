@@ -5,7 +5,7 @@
       "model_type": "diffusion_model",
       "checkpoint_name": "[None]",
       "diffusers_model": "",
-      "diffusion_model_name": "qwen_image_edit_fp8_e4m3fn.safetensors",
+      "diffusion_model_name": "qwen_image_edit_2511_fp8mixed.safetensors",
       "unet_name": "",
       "gguf_name": "",
       "weight_dtype": "default"
@@ -22,12 +22,13 @@
             "unet"
           ],
           "inpaint_adapter": "native_edit",
+          "instruction_editing": true,
           "priority": 100,
           "defaults": {
-            "modelName": "qwen_image_edit_fp8_e4m3fn.safetensors",
+            "modelName": "qwen_image_edit_2511_fp8mixed.safetensors",
             "modelNamesBySource": {
-              "diffusion_model": "qwen_image_edit_fp8_e4m3fn.safetensors",
-              "unet": "qwen_image_edit_fp8_e4m3fn.safetensors"
+              "diffusion_model": "qwen_image_edit_2511_fp8mixed.safetensors",
+              "unet": "qwen_image_edit_2511_fp8mixed.safetensors"
             },
             "steps": 20,
             "cfg": 4,

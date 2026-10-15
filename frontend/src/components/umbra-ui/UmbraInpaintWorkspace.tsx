@@ -922,6 +922,7 @@ const REFERENCE_METHOD_LABELS: Record<UmbraUiInpaintReferenceMethod, string> = {
   flux2_reference: 'FLUX.2 Reference',
   flux3_reference: 'FLUX3 Reference',
   qwen_image_reference: 'Qwen Image Reference',
+  qwen_image21_reference: 'Qwen Image 2.1 Reference',
   hidream_o1_reference: 'HiDream-O1 Reference',
 };
 const IP_ADAPTER_WEIGHT_TYPES: UmbraUiIpAdapterWeightType[] = [

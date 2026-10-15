@@ -476,7 +476,21 @@ previous selection without downloading.
 Use `--test-downloads` to validate the selected remote files with tiny ranged
 requests without downloading the model weights.
 
-**FLUX3 / Krea3 Edit** reuses Canvas layers, masks, selections and saved projects.
+**Image Edit** reuses Canvas layers, masks, selections and saved projects. Its
+model selector includes FLUX3, FLUX.2 Edit, HiDream O1, Qwen Image Edit and
+Qwen Image 2.1. Available controls follow each pipeline's actual capabilities.
+
+Qwen Image Edit defaults to the official **2511 FP8 mixed** checkpoint and accepts
+two additional references alongside the source. Select **Qwen Image Edit 2511**
+in Setup's Models tab for the checkpoint and shared Qwen encoder/VAE.
+Qwen Image 2.1 uses its own encoder, VAE and edit pipeline, with nine additional
+references; address the source as `<image1>` and references as `<image2>`, etc.
+Its existing Setup model pack supports generation and editing. The
+[Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE)
+restricts use of the 2.1 model materials to non-commercial research/evaluation;
+[Qwen Edit 2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) is Apache-2.0.
+No Turbo LoRA or separate Turbo pipeline is required.
+
 FLUX3 Image Klein supports image editing with the source plus nine additional
 reference images, and described layout boxes referenced as `<obj_1>`, `<obj_2>`
 in the prompt. The shared FLUX3 pipelines also appear in generation and Manga.
