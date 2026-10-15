@@ -152,7 +152,7 @@ import {
   type UmbraUiPowerPrompterHandoff,
 } from '@/lib/umbraUiPowerPrompterHandoff';
 import { stageUmbraUiGenerationControlsHandoff } from '@/lib/umbraUiGenerationControlsHandoff';
-import { listUmbraUiPipelineFamilies, resolveUmbraUiPipeline, resolveUmbraUiPipelineFamily } from '@/lib/umbraUiPipelines';
+import { listUmbraUiPipelineFamilies, resolveUmbraUiPipeline, resolveUmbraUiPipelineFamily, supportsUmbraUiEditWorkspace } from '@/lib/umbraUiPipelines';
 import {
   advanceUmbraUiSeed,
   normalizeUmbraUiSeedIncrement,
@@ -1349,9 +1349,10 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     [activeImageFeature, workflows],
   );
   const inpaintModelFamilies = React.useMemo(
-    () => listUmbraUiPipelineFamilies(workflows, 'inpainting').filter((family) => activeMode !== 'edit' || normalizeUmbraUiModelFamilyKey(family) === 'flux3'),
+    () => listUmbraUiPipelineFamilies(workflows, 'inpainting').filter((family) => activeMode !== 'edit' || supportsUmbraUiEditWorkspace(workflows, family)),
     [activeMode, workflows],
   );
+  const editWorkspaceAvailable = supportsUmbraUiEditWorkspace(workflows, modelFamily, modelType);
   const selectedFamilyPipelines = React.useMemo(() => workflows.flatMap((workflow) => (
     (workflow.umbraUiPipelines || [])
       .filter((pipeline) => pipeline.feature === activeImageFeature
@@ -3048,22 +3049,24 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           >
             <Paintbrush size={13} /> Inpaint
           </button>
-          {canvasEnabled ? <button type="button" data-umbra-ui-mode="edit" onClick={() => navigateWorkspace('edit')}
-            className={cn('inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors', activeMode === 'edit' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300')}>
-            <Paintbrush size={13} /> FLUX3 / Krea3 Edit
-          </button> : null}
           {canvasEnabled ? (
-            <button
-              type="button"
-              data-umbra-ui-mode="canvas"
-              onClick={() => navigateWorkspace('canvas')}
-              className={cn(
-                'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
-                activeMode === 'canvas' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300',
-              )}
-            >
-              <Layers3 size={13} /> Canvas
-            </button>
+            <div data-umbra-ui-mode="canvas" className="self-stretch border-l border-white/10">
+              <UmbraSelect
+                ariaLabel="Canvas workspace" menuTitle="Canvas workspace"
+                value={activeMode === 'edit' ? 'edit' : 'canvas'}
+                leadingIcon={activeMode === 'edit' ? <Paintbrush size={13} /> : <Layers3 size={13} />}
+                options={[
+                  { value: 'canvas', label: 'Canvas', icon: <Layers3 size={13} /> },
+                  { value: 'edit', label: 'Edit', icon: <Paintbrush size={13} />, disabled: !editWorkspaceAvailable,
+                    description: editWorkspaceAvailable ? undefined : 'Select a supported edit model to enable Edit.' },
+                ]}
+                onValueChange={(value) => {
+                  if (value === 'canvas' || (value === 'edit' && editWorkspaceAvailable)) navigateWorkspace(value);
+                }}
+                buttonClassName={cn('h-full min-h-8 rounded-none border-0 bg-transparent px-3 text-[10px] font-black uppercase tracking-[0.11em]',
+                  activeMode === 'canvas' || activeMode === 'edit' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300')}
+              />
+            </div>
           ) : null}
           <button
             type="button"

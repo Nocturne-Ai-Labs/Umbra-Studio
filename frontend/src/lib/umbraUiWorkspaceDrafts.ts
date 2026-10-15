@@ -58,6 +58,11 @@ export function stageImageWorkspaceNavigation(
 ): ImageWorkspaceDraft | null {
   if (isImageWorkspace(fromMode) && fromDraft) {
     drafts[fromMode] = structuredClone(fromDraft);
+    // Canvas and Edit are two views of the same editor. Keep their model and
+    // controls together so changing views cannot disable the Edit selector.
+    if (fromMode === 'canvas' || fromMode === 'edit') {
+      drafts[fromMode === 'canvas' ? 'edit' : 'canvas'] = structuredClone(fromDraft);
+    }
   }
   if (!isImageWorkspace(toMode)) return null;
   // Save the first destination draft before the active mode changes. A reload

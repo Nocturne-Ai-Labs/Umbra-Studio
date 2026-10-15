@@ -22,6 +22,20 @@ export interface UmbraUiPipelineMatch<T extends UmbraUiPipelineWorkflowItem> {
   error: string;
 }
 
+export function supportsUmbraUiEditWorkspace(
+  workflows: UmbraUiPipelineWorkflowItem[],
+  family: string,
+  source?: UmbraUiPipelineModelSource,
+): boolean {
+  const key = normalizeUmbraUiModelFamilyKey(family);
+  if (key !== 'flux3' && key !== 'krea3') return false;
+  return workflows.some((workflow) => workflow.umbraUiPipelines?.some((pipeline) => (
+    pipeline.feature === 'inpainting' && pipeline.modelFamilyKey === key
+    && pipeline.inpaintAdapter === 'native_edit'
+    && (!source || pipeline.modelSources.includes(source))
+  )));
+}
+
 export function mergeUmbraUiWorkflowCatalog<T extends UmbraUiPipelineWorkflowItem>(
   userWorkflows: T[],
   bundledWorkflows: T[],

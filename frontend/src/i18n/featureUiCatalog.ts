@@ -3,6 +3,8 @@ import type { RecentUiLanguage } from './recentUiCatalog';
 // Maintained translations for feature workspaces. Columns: English, Japanese,
 // Simplified Chinese, Korean, German. Brand names and file formats stay intact.
 const FEATURE_UI_ENTRIES: Array<readonly [string, string, string, string, string]> = [
+  ['Canvas workspace', 'Canvas ワークスペース', 'Canvas 工作区', 'Canvas 작업 공간', 'Canvas-Arbeitsbereich'],
+  ['Select a supported edit model to enable Edit.', '対応する編集モデルを選択して編集を有効にしてください。', '选择受支持的编辑模型以启用编辑。', '지원되는 편집 모델을 선택해 편집을 활성화하세요.', 'Zum Aktivieren ein unterstütztes Bearbeitungsmodell auswählen.'],
   ['FLUX3 / Krea3 Edit', 'FLUX3 / Krea3 編集', 'FLUX3 / Krea3 编辑', 'FLUX3 / Krea3 편집', 'FLUX3 / Krea3 Bearbeitung'],
   ['Krea3 — open weights unavailable', 'Krea3 — 公開重み未提供', 'Krea3 — 开放权重尚未发布', 'Krea3 — 공개 가중치 미제공', 'Krea3 — offene Gewichte nicht verfügbar'],
   ['Layout boxes', 'レイアウト領域', '布局框', '레이아웃 영역', 'Layout-Bereiche'],
