@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.90.19-beta - Shared Image Edit And Native Qwen Editing
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Save your work and update through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux afterward. Setup remains the installation and update home following the major setup-flow refactor.
+- **Qwen Image Edit 2511** is an optional Apache-2.0 editing model. In **Setup > Models**, select **Qwen Image Edit 2511** to install the FP8 mixed checkpoint and shared Qwen 2.5 VL encoder/VAE: about **30.2 GB / 28.1 GiB** in total, less when shared files are already installed. Use its managed dependency repair under **Advanced > Tools**, then restart managed ComfyUI.
+- **Qwen Image 2.1** uses its existing, separate Setup model pack for generation and editing: about **17.3 GB / 16.1 GiB**. Its Qwen Research License restricts model-material use to non-commercial research/evaluation. Review the [license](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE) before downloading or using it. The older Qwen encoder and VAE are incompatible with 2.1.
+- Qwen 2.1 editing requires native `TextEncodeQwenImage21` support. Setup declares reviewed ComfyUI commit `20b46065ef7f34fa21e8abebe8d0cca90a904d6d` or a compatible descendant and the required Umbra/mask-processing nodes. Generation weights remain separate downloads; no weights or Turbo LoRA are bundled.
+- Manual/browser downloads are supported; no Hugging Face token is required. Setup displays exact destinations and verifies SHA-256 hashes. Models belong under `Tools/ComfyUI/models/diffusion_models/`, `text_encoders/`, and `vae/` as listed for the selected pack.
+- Optional AI Toolkit requires host Git and Node.js 20+ with npm. Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Shared Image Edit
+
+- The Canvas/Edit selector exposes FLUX3, FLUX.2 Edit, HiDream O1, Qwen Image Edit and Qwen Image 2.1 through their own native pipelines. Shared controls follow the actual capabilities of each selected pipeline; ordinary masked-generation models remain in Canvas.
+- Qwen Image Edit defaults to the official 2511 FP8 mixed checkpoint, retaining its paired encoders and source plus two additional reference images.
+- Add a distinct Qwen Image 2.1 edit pipeline with its native encoder, dedicated VAE, 64-channel output latent, and source plus nine additional reference slots. Address the source as `<image1>` and subsequent references as `<image2>`, etc.
+- Keep model-specific node graphs separate while sharing Canvas layers, masks, project persistence, LoRA controls, generation queue and output metadata. Compatible base/Turbo checkpoints share a pipeline and user-controlled sampling settings. Krea3 remains unavailable pending a verified open-weight editing contract.
+
+### Validation And Limits
+
+- Both Qwen pipelines completed real isolated Windows edits with output metadata retained. Qwen 2.1 used a second image as its color reference; every pixel outside the painted mask remained unchanged. These small illustrative checks do not qualify every edit task, resolution, LoRA or hardware configuration.
+- 62 targeted tests (360 assertions), production/frontend TypeScript, frontend lint/build, and the 70-workflow/81-descriptor pipeline audit passed. Packaged startup, Setup and upgrade checks are recorded separately. Native Linux GPU inference remains unqualified.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Image Edit was restricted to FLUX3/Krea3 even when other instruction-editing pipelines were available.
+- Fixed: FLUX3-only layout controls and stale layout-box requests could carry into another model's Edit workspace.
+- Fixed: the FLUX3 reference limit now matches its declared source-plus-nine contract.
+- Improved: Qwen 2.1 reference slots preserve order and discard stale template inputs; source-only edits keep the source binding intact.
+- Improved: Setup exposes pinned Qwen 2511 model downloads and separate native Qwen dependency repairs, with shared-file reuse and visible license requirements.
+
 ## v0.90.18-beta - FLUX3 Generation And Canvas Editing
 
 ### TL;DR - Setup After Updating
