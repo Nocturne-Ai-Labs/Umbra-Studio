@@ -5,6 +5,7 @@ import { assertLtx23StagedMediaName } from './Ltx23OmniForgeWorkflow';
 import { readComfyInputChoices } from '../shared/umbra-ui/comfyInputChoices';
 import { isOfficialVideoWorkflowId, normalizeOfficialVideoWorkflowSelection, type OfficialVideoBinding, type OfficialVideoWorkflowId, type OfficialVideoWorkflowSelection } from '../shared/umbra-ui/officialVideoWorkflow';
 import { dasiwaVideoGraphRoute, videoGraphNodes } from '../shared/umbra-ui/videoRoutePolicy';
+import { expandComfyRuntimeInputs } from './ComfyDynamicInputs';
 
 type Node = { class_type: string; inputs: Record<string, unknown>; _meta?: Record<string, unknown> };
 export type OfficialApiGraph = Record<string, Node>;
@@ -208,8 +209,9 @@ export function assertOfficialApiRuntime(graph: OfficialApiGraph, objectInfo: Re
   for (const [id, node] of Object.entries(graph)) {
     const schema = objectInfo[node.class_type];
     if (!schema) throw new Error(`Official workflow needs ${node.class_type}. This installed runtime is missing that node; generation is held.`);
-    const required = record(schema.input?.required);
-    const inputs = { ...required, ...record(schema.input?.optional) };
+    const expanded = expandComfyRuntimeInputs(schema.input || {}, node.inputs);
+    const required = record(expanded.required);
+    const inputs = { ...required, ...record(expanded.optional) };
     for (const name of Object.keys(required)) if (!Object.hasOwn(node.inputs, name)) throw new Error(`Official workflow ${node.class_type} requires ${name}. Its installed schema differs from this capture.`);
     for (const [name, value] of Object.entries(node.inputs)) {
       let descriptor = inputs[name];
