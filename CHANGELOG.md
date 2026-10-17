@@ -1,13 +1,40 @@
 # Changelog
 
-## Unreleased
+## v0.90.21-beta - MOSS Image Support
 
-- Add dedicated MOSS Image text-to-image, img2img and masked-inpainting pipelines, shared by Base and SFT and available in Manga Studio and Canvas.
-- Add checksum-pinned MOSS model prerequisites and the native ComfyUI commit requirement to Setup; reuse the shared FLUX.2 VAE.
-- Align MOSS generation dimensions to 16 pixels without adding a model-specific resolution cap. A dedicated instruction-edit model is not advertised.
-- Keep native Canvas generations in the Canvas output folder when no pinned Gallery destination is selected.
-- Verify managed API workflows through their graph, runtime-node and model-resource readiness instead of requiring an unrelated native-video frontend bridge.
-- Install a reviewed hires-fix compatibility patch through Setup so explicit output sizes and latent scaling respect each VAE's spatial compression, including MOSS's 16× VAE.
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is
+somewhat usable; other video models remain experimental and less reliable.**
+
+- Save your work and update through **Umbra Setup > Updates**. Reopen `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Setup remains the installation and update home following the major setup-flow refactor.
+- MOSS Image is optional. In **Setup > Models**, select **MOSS Image** (SFT) or **MOSS Image Base**. Either needs about **13.1 GB / 12.2 GiB** for its INT8 model, Qwen 3.5 encoder and shared FLUX.2 VAE; installing both adds about **5.4 GB / 5.0 GiB**. Existing shared files are reused. No model weights are bundled.
+- Use **Setup > Advanced > Tools** to install or repair the selected MOSS prerequisites, then restart managed ComfyUI. MOSS requires native ComfyUI commit `e087d8f6cb7c6cdb11b59dc7c9bf17c79f8d877d` or a compatible descendant, plus Umbra Nodes and the declared mask-processing nodes. Setup applies a reviewed Umbra Nodes VAE-scale compatibility patch so MOSS high-resolution refinement uses the requested dimensions.
+- Models use the Apache-2.0 license. Public automatic downloads and manual/browser downloads are supported without a Hugging Face token. Setup shows destinations under `Tools/ComfyUI/models/diffusion_models/`, `text_encoders/`, and `vae/` and verifies pinned SHA-256 hashes.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit also requires host Git and Node.js 20+ with npm.
+
+### MOSS Image
+
+- Dedicated native text-to-image, img2img and masked-inpainting pipelines support both Base and SFT, including Manga Studio and Canvas through the shared generation controls.
+- Use native MOSS flow sampling and skip-layer guidance, real negative conditioning, the Qwen 3.5 encoder and 128-channel FLUX.2 VAE latents. MOSS dimensions follow 16-pixel alignment with no model-specific resolution cap.
+- Shared LoRA, detailer, high-resolution refinement, tiled VAE and output-upscale controls follow pipeline capabilities. Structured layout prompts are supported. MOSS does not advertise a dedicated instruction-edit model; masked image generation remains available in Canvas.
+
+### Validation And Limits
+
+- Real isolated Windows GPU checks produced images with both Base and SFT and exercised img2img, Manga generation/save, Manga-to-Canvas metadata transfer, masked inpainting, Canvas generation/layer acceptance, structured layout prompting, and high-resolution refinement with tiled VAE.
+- Masked tests preserved every pixel outside the mask. A requested 768 x 576 high-resolution output rendered at exactly that size. Twelve targeted tests (43 assertions), 8x/16x VAE geometry checks and the 73-workflow/84-descriptor pipeline audit passed.
+- Windows and Linux packages receive isolated startup and Setup checks. Native Linux GPU inference, arbitrary MOSS LoRAs and enabled detector/detailer inference remain unqualified; these checks do not cover every model setting or device.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Canvas native generations could appear in the Inpainting output folder when no pinned Gallery destination was selected.
+- Fixed: managed API workflow readiness could be blocked by an unrelated native-video frontend bridge requirement.
+- Fixed: high-resolution refinement assumed an 8x VAE and produced incorrect dimensions with MOSS's 16x VAE. Setup installs the reviewed compatibility patch and preserves it across managed node updates.
+- Improved: Setup provides pinned MOSS prerequisites, shared-file reuse and verified native ComfyUI requirements.
 
 ## v0.90.20-beta - Native Video Input Compatibility Hotfix
 
