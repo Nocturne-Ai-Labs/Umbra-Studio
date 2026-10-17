@@ -1,14 +1,17 @@
 import { inspectUmbraRuntimeStatus } from './umbraRuntimeHealth';
 
+export const UMBRA_LAUNCH_READY_TIMEOUT_MS = 120_000;
+
 /** Waiting for identity is read-only; an unverified listener never authorizes launch. */
 export async function ensureUmbraRuntimeReady(options: {
   runtimeRoot: string;
   port: number;
   host?: string;
-  launch: () => void;
+  launch: () => void | Promise<void>;
   timeoutMs?: number;
 }): Promise<void> {
-  const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+  const timeoutMs = options.timeoutMs ?? UMBRA_LAUNCH_READY_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   let launched = false;
   let ownedSeen = false;
   while (true) {
@@ -18,11 +21,11 @@ export async function ensureUmbraRuntimeReady(options: {
     }
     if (status.ready) return;
     if (Date.now() >= deadline) {
-      throw new Error('Umbra Studio did not report a verified ready state within 30 seconds. Review its startup log and retry.');
+      throw new Error(`Umbra Studio did not report a verified ready state within ${timeoutMs / 1000} seconds. It may still be starting; review its startup log before retrying.`);
     }
     if (status.health === 'owned') ownedSeen = true;
     if (status.health === 'absent' && !launched && !ownedSeen) {
-      options.launch();
+      await options.launch();
       launched = true;
     }
     await Bun.sleep(250);
