@@ -225,7 +225,7 @@ import {
   resolveUmbraUiPrompterOutputLayout,
 } from './backend/UmbraUiPrompterOutputLayout';
 import { getComfyBridgeUnavailableError } from './backend/comfyBridgeAvailability';
-import { createComfyStartup, validateComfyAutoStartSetting } from './backend/comfyStartup';
+import { createComfyStartup, validateComfyAutoStartSetting, waitForComfyStartup, isComfyStartupTransportFailure } from './backend/comfyStartup';
 import { getComfyHttpBaseUrl, getComfyWebSocketUrl, resolveComfyEndpoint } from './backend/comfyEndpoint';
 import { getTrackedComfyProcessPids } from './backend/comfyProcessOwnership';
 import { officialComfySessionFromEnvironment, officialComfySessionMutationIssue } from './backend/OfficialComfySession';
@@ -17965,6 +17965,7 @@ async function probeConfiguredAIToolkit(config: ReturnType<typeof getBackendConf
 }
 
 let comfyStopRequested = false;
+let comfyStartupTransportError: string | null = null;
 const comfyStartup = createComfyStartup(startComfyUIProcess);
 const startComfyUI = () => comfyStartup.start();
 
@@ -17978,7 +17979,12 @@ async function startComfyUIProcess() {
       return { success: true, message: 'Using the explicit existing-runtime test session; lifecycle control is disabled.', running: true, ownership: 'external-compatible', pid: target.pid, port: new URL(target.baseUrl).port };
     }
     if (isChildProcessAlive(comfyProcess)) {
-      return { success: true, message: 'Already running' };
+      const tracked = comfyProcess;
+      return await waitForComfyStartup({
+        probe: () => probeConfiguredComfyUI(),
+        active: () => comfyProcess === tracked && isChildProcessAlive(tracked) && !comfyStopRequested,
+        failure: () => comfyStartupTransportError,
+      });
     }
     if (comfyProcess) {
       console.warn('\x1b[36m[ComfyUI]\x1b[0m Clearing stale tracked process handle before relaunch.');
@@ -18088,7 +18094,10 @@ async function startComfyUIProcess() {
     });
     startComfyProcessTelemetry();
 
+    const launchedProcess = comfyProcess;
+    comfyStartupTransportError = null;
     comfyProcess.on('error', (err) => {
+      if (comfyProcess !== launchedProcess) return;
       console.error(`\x1b[36m[COMFYUI]\x1b[0m \x1b[31mSpawn error: ${err.message}\x1b[0m`);
       appendBackendLifecycleLog('comfyui', 'spawn_error', {
         pid: comfyProcess?.pid ?? null,
@@ -18107,6 +18116,7 @@ async function startComfyUIProcess() {
     });
 
     comfyProcess.stdout?.on('data', (data) => {
+      if (comfyProcess !== launchedProcess) return;
       const lines = data.toString().trim().split(/\r?\n|\r/);
       lines.forEach((line: string) => {
         if (line.trim()) {
@@ -18119,9 +18129,14 @@ async function startComfyUIProcess() {
     });
 
     comfyProcess.stderr?.on('data', (data) => {
+      if (comfyProcess !== launchedProcess) return;
       const lines = data.toString().trim().split(/\r?\n|\r/);
       lines.forEach((line: string) => {
         if (line.trim()) {
+          if (isComfyStartupTransportFailure(line)) {
+            comfyStartupTransportError = 'ComfyUI could not start its HTTP listener. Stop ComfyUI and launch it again; see the ComfyUI log for the socket error.';
+            comfyStartup.fail(comfyStartupTransportError);
+          }
           if (!shouldEmitComfyProcessLine('stderr', line)) return;
           console.error(`\x1b[36m[COMFYUI]\x1b[0m \x1b[31m${line}\x1b[0m`);
           appendBackendStreamLog('comfyui', 'stderr', line);
@@ -18131,6 +18146,7 @@ async function startComfyUIProcess() {
     });
 
     comfyProcess.on('exit', (code, signal) => {
+      if (comfyProcess !== launchedProcess) return;
       const uptimeMs = comfyStartTime ? Date.now() - comfyStartTime : null;
       const trackedPid = comfyProcess?.pid ?? null;
       const message = `Process exited with code ${code}${signal ? ` signal ${signal}` : ''}`;
@@ -18158,7 +18174,18 @@ async function startComfyUIProcess() {
       comfyProcess.once('spawn', resolve);
       comfyProcess.once('error', reject);
     });
-    return { success: true, message: 'Started' };
+    const ready = await waitForComfyStartup({
+      probe: () => probeConfiguredComfyUI(),
+      active: () => comfyProcess === launchedProcess && isChildProcessAlive(launchedProcess) && !comfyStopRequested,
+      failure: () => comfyStartupTransportError,
+    });
+    appendBackendLifecycleLog('comfyui', ready.success ? 'ready' : 'startup_not_ready', {
+      pid: launchedProcess.pid ?? null, error: ready.error,
+    });
+    await forceRefreshBackendControlPlaneStatus().catch((error) => {
+      console.warn('[ComfyUI] Could not refresh status after startup:', error);
+    });
+    return { ...ready, running: isChildProcessAlive(launchedProcess), healthy: ready.success };
   } catch (error: any) {
     const message = String(error?.message || 'Failed to launch ComfyUI');
     console.error(`[ComfyUI] startComfyUI failed: ${message}`, error);
@@ -19356,7 +19383,7 @@ async function getBackendStatusAsync(backend: 'comfyui' | 'aitoolkit', portTimeo
   const portOpen = ownership.portOpen || await isPortOpen(port, portTimeoutMs);
   return {
     running: processRunning || portOpen,
-    healthy: portOpen,
+    healthy: portOpen && await probeConfiguredComfyUI(portTimeoutMs),
     port,
     pid: trackedProc?.pid ?? null,
     uptime: startTime ? Math.floor((Date.now() - startTime) / 1000) : (portOpen ? 999 : 0),
@@ -35688,6 +35715,7 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/umbrabridge/backend/start' && method === 'POST') {
         const { backend } = await req.json() as { backend: string };
         if (backend === 'comfyui') {
+          server.timeout(req, 0); // Cold custom-node imports may exceed the normal HTTP idle timeout.
           const result = await startComfyUI();
           return json(result, 'busy' in result && result.busy ? 409 : 200);
         }
@@ -35743,6 +35771,7 @@ const server = Bun.serve<UmbraSocketData>({
 
       // Poll backend until server responds or timeout
       if (path === '/api/umbrabridge/backend/wait-ready' && method === 'POST') {
+        server.timeout(req, 0);
         const { backend, timeout = null } = await req.json() as { backend: string; timeout?: number | null };
         const requestedTimeout = Number(timeout);
         const effectiveTimeout = timeout === null || timeout === undefined
@@ -35801,7 +35830,11 @@ const server = Bun.serve<UmbraSocketData>({
         }
         else return json({ error: 'Invalid backend' }, 400);
 
-        while (!hasTimedOut()) {
+        while (!hasTimedOut() && !req.signal.aborted) {
+          if (backend === 'comfyui') {
+            const startup = comfyStartup.getState();
+            if (startup.error) return json({ ready: false, backend, port, error: startup.error, elapsed: Date.now() - startTime });
+          }
           try {
             const ready = backend === 'aitoolkit'
               ? await probeConfiguredAIToolkit(getBackendConfig().aitoolkit)

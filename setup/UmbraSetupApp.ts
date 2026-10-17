@@ -269,7 +269,7 @@ async function runModelInstall(
   );
 }
 
-function launchUmbra(runtimeRoot: string) {
+async function launchUmbra(runtimeRoot: string): Promise<void> {
   const windowsLauncher = process.platform === 'win32'
     ? resolveUmbraWindowsLauncher(runtimeRoot)
     : null;
@@ -277,7 +277,7 @@ function launchUmbra(runtimeRoot: string) {
     ? windowsLauncher?.launcherPath || ''
     : join(runtimeRoot, 'start-umbra.sh');
   if (!launcher || !existsSync(launcher)) throw new Error('Umbra Studio launcher is missing.');
-  spawn(
+  const child = spawn(
     process.platform === 'win32' ? windowsLauncher!.command : launcher,
     process.platform === 'win32' ? windowsLauncher!.args : [],
     {
@@ -286,7 +286,12 @@ function launchUmbra(runtimeRoot: string) {
       stdio: 'ignore',
       windowsHide: false,
     },
-  ).unref();
+  );
+  await new Promise<void>((done, fail) => {
+    child.once('error', fail);
+    child.once('spawn', done);
+  });
+  child.unref();
 }
 
 async function main() {
@@ -364,6 +369,7 @@ async function main() {
   if (sessionPath) updateController = await createUmbraUpdateController(sessionPath, { isSetupBusy: setupBusy, needsReopen: snapshotNeedsReopen, onClose: closeSetup });
 
   const server = Bun.serve({
+    idleTimeout: 255,
     hostname: '127.0.0.1',
     port,
     async fetch(request) {
@@ -389,7 +395,7 @@ async function main() {
         if (!validSetupJobId(id)) return json({ success: false, error: 'Invalid setup job ID.' }, 400);
         try {
           const log = jobLogs.download(id);
-          return log ? new Response(log, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename=setup-${id}.log`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
+          return log ? new Response(new Uint8Array(log), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename=setup-${id}.log`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
             : json({ success: false, error: 'Saved installer log not found.' }, 404);
         } catch (error) { return json({ success: false, error: redactSetupOutput(error instanceof Error ? error.message : String(error), [token]) }, 500); }
       }
@@ -728,7 +734,7 @@ async function main() {
               runtimeRoot, port: Number(target.port), host: target.hostname === '[::1]' ? '::1' : '127.0.0.1',
               launch: () => {
                 if (hasRunningInstaller()) throw new Error('Wait for the current operation to finish.');
-                launchUmbra(runtimeRoot);
+                return launchUmbra(runtimeRoot);
               },
             });
           }

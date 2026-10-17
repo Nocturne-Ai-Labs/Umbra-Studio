@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { dirname, join, resolve, sep } from 'node:path';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
+import { ensureUmbraRuntimeReady, UMBRA_LAUNCH_READY_TIMEOUT_MS } from '../shared/umbraRuntimeLaunch';
 import { inspectUmbraRuntimeHealth } from '../shared/umbraRuntimeHealth';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
 import {
@@ -25,7 +26,7 @@ type UmbraLaunchHandle = {
   child?: ChildProcess;
 };
 
-const LAUNCH_READY_TIMEOUT_MS = 30_000;
+const LAUNCH_READY_TIMEOUT_MS = UMBRA_LAUNCH_READY_TIMEOUT_MS;
 const LAUNCH_ATTEMPTS = 3;
 
 function readArg(name: string): string {
@@ -202,14 +203,20 @@ async function waitForLaunchReady(
     if (await fetchUmbraReady(request)) return { ready: true, detail: '' };
     await Bun.sleep(250);
   }
-  return { ready: false, detail: 'Umbra Studio did not report ready within 30 seconds' };
+  return { ready: false, detail: `Umbra Studio did not report ready within ${LAUNCH_READY_TIMEOUT_MS / 1000} seconds` };
 }
 
 async function launchWithRetry(request: UmbraRelaunchRequest): Promise<number> {
   let lastFailure = '';
   for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt += 1) {
     const health = await inspectUmbraRuntimeHealth(request.runtimeRoot, request.appPort, request.appHost);
-    if (health === 'owned') return 0;
+    if (health === 'owned') {
+      await ensureUmbraRuntimeReady({
+        runtimeRoot: request.runtimeRoot, port: request.appPort, host: request.appHost,
+        launch: () => { throw new Error('The existing Umbra Studio instance stopped before becoming ready.'); },
+      });
+      return 0;
+    }
     if (health === 'foreign') throw new Error(`Port ${request.appPort} is occupied by another or unverified installation. Close it or select the intended app port before launching.`);
     const handle = launchUmbraStudio(request);
     const result = await waitForLaunchReady(request, handle);
