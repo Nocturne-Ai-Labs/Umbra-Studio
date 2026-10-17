@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.90.22-beta - Startup Readiness Fixes
+
+### TL;DR - Setup After Updating
+
+**Umbra Studio Mobile is experimental and is not ready for feedback.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is
+somewhat usable; other video models remain experimental and less reliable.**
+
+- Save your work and update through **Umbra Setup > Updates**, then reopen Studio. Use `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. This is a maintenance update; no new models, custom nodes or model downloads are required. Setup remains the installation and update home following the major setup-flow refactor.
+- If ComfyUI reports an HTTP-listener startup failure, stop it through Studio's managed controls and launch it again. This update reports stalled starts clearly; it does not force-restart processes or change your Python dependencies.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents.
+
+### Startup Reliability
+
+- Setup and the update relaunch worker share a 120-second cold-start readiness budget. An owned Studio listener that is still initializing is no longer treated as ready; launcher spawn errors are returned to Setup.
+- Managed ComfyUI launch verifies HTTP readiness before reporting success, with a bounded three-minute startup wait. A Python process or an open TCP port alone no longer counts as a healthy backend.
+- Known Windows socket-accept startup failures surface an actionable error, and readiness requests stop waiting when startup has failed. Stale child callbacks cannot clear or poison a replacement process. Startup also refreshes the backend status cache.
+
+### Validation And Limits
+
+- Eight focused regression tests, a real isolated Windows managed ComfyUI launch, an actual Setup request delayed beyond 30 seconds, injected live-process/listener-failure recovery, and foreign-listener launch/stop protection checks passed.
+- Windows and Linux archives receive isolated packaged startup, Setup and upgrade checks. Existing generation/model qualification is retained from v0.90.21-beta; this maintenance release changes startup handling rather than generation pipelines.
+- The original Windows aiohttp crash was not naturally reproduced. Controlled fault injection verifies detection and managed stop/start recovery; it does not establish a fix for the upstream race. Native Linux GPU inference remains unqualified.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Setup could report a 30-second timeout while Studio was still starting normally.
+- Fixed: ComfyUI could be reported as started or healthy before its HTTP server accepted requests.
+- Fixed: failed ComfyUI startup could leave readiness polling waiting indefinitely.
+- Improved: clear socket-failure messages, verified relaunch readiness, launcher error handling and backend status refresh.
+
 ## v0.90.21-beta - MOSS Image Support
 
 ### TL;DR - Setup After Updating
