@@ -3,7 +3,7 @@
   "features": [
     {
       "id": "frameforge-video",
-      "label": "Frame Forge — H3 video nodes",
+      "label": "Frame Forge â€” H3 video nodes",
       "optional": true,
       "optIn": true,
       "workflowIds": [
@@ -38,7 +38,7 @@
     },
     {
       "id": "frameforge-extras",
-      "label": "Frame Forge — Speech and Qwen prerequisites",
+      "label": "Frame Forge â€” Speech and Qwen prerequisites",
       "optional": true,
       "optIn": true,
       "workflowIds": [
@@ -64,7 +64,7 @@
     },
     {
       "id": "frameforge-world",
-      "label": "Frame Forge — optional WorldMirror 3D nodes",
+      "label": "Frame Forge â€” optional WorldMirror 3D nodes",
       "optional": true,
       "optIn": true,
       "workflowIds": [
@@ -89,7 +89,7 @@
     },
     {
       "id": "longshot-studio",
-      "label": "Longshot Studio (optional) — r34vtraining",
+      "label": "Longshot Studio (optional) â€” r34vtraining",
       "optional": true,
       "optIn": true,
       "workflowIds": [
@@ -1117,6 +1117,69 @@
           ]
         }
       ]
+    },
+    {
+      "id": "moss-image",
+      "label": "MOSS Image \u2014 generation and masked editing",
+      "optional": true,
+      "optIn": true,
+      "minimumComfyVersion": "0.41.0",
+      "minimumComfyCommit": "e087d8f6cb7c6cdb11b59dc7c9bf17c79f8d877d",
+      "modelProfiles": [
+        "moss-image",
+        "moss-image-base"
+      ],
+      "workflowIds": [
+        "[Umbra UI] MOSS Image Image Pipeline",
+        "[Umbra UI] MOSS Image Image to Image Pipeline",
+        "[Umbra UI] MOSS Image Inpaint Pipeline"
+      ],
+      "requiredBuiltinClasses": [
+        "MOSSImageLayoutPrompt",
+        "CLIPLoader",
+        "VAELoader",
+        "EmptyFlux2LatentImage",
+        "ModelSamplingAuraFlow",
+        "SkipLayerGuidanceDiTSimple",
+        "CLIPTextEncode",
+        "VAEEncode",
+        "VAEEncodeForInpaint",
+        "VAEDecode",
+        "LoadImage",
+        "LoadImageMask",
+        "ImageCompositeMasked"
+      ],
+      "customNodes": [
+        {
+          "name": "Umbra-Nodes",
+          "minimumCommit": "1a6aba4ac9021c0c0eb54e156c41bc4c4c856828",
+          "repository": "https://github.com/Nocturne-Ai-Labs/Umbra-Nodes",
+          "version": "0.1.1",
+          "license": "MIT",
+          "webDirectory": "./web",
+          "requiredClasses": [
+            "UmbraLoadCheckpoint",
+            "UmbraPowerPrompterReader",
+            "UmbraA1111LoraSyntax",
+            "UmbraKSamplerHiResFix",
+            "UmbraImageDetailer",
+            "UmbraImageUpscale",
+            "UmbraLabSaveImage"
+          ],
+          "requiredPatch": "UmbraHiresVaeScale.patch"
+        },
+        {
+          "name": "comfyui-inpaint-nodes",
+          "minimumCommit": "bd6d8fd5104d539187dfb172d07352215c09fcaa",
+          "repository": "https://github.com/Acly/comfyui-inpaint-nodes",
+          "version": "1.4.3",
+          "license": "GPL-3.0",
+          "requiredClasses": [
+            "INPAINT_ExpandMask"
+          ]
+        }
+      ],
+      "notes": "Native ComfyUI MOSS architecture (merged 2026-10-16). Base and SFT share one family. Supports Manga Studio, img2img and Canvas masked inpainting; no released instruction-edit model. Model files are separate Setup downloads."
     }
   ]
 }

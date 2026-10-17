@@ -1,5 +1,11 @@
 # Credits
 
+## MOSS Image
+
+- Models and original implementation: [OpenMOSS MOSS-Image](https://github.com/OpenMOSS/MOSS-Image), Apache-2.0.
+- Native ComfyUI support and repackaged weights: [Comfy Org](https://huggingface.co/Comfy-Org/MOSS-Image).
+- Base and SFT share the MOSS Image pipelines, using Qwen3.5-9B text conditioning and the FLUX.2 VAE. Model binaries are downloaded separately through Setup.
+
 ## Iris 3B And Iris 3B Turbo
 
 - Models and original implementation: [Sperid Labs Iris 3B](https://github.com/speridlabs/iris-3b), Apache-2.0.

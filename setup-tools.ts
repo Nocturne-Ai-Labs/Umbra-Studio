@@ -16,6 +16,7 @@ import { installOrdinaryNodeRequirements } from './setup/OrdinaryNodeRequirement
 import { checkoutFetchedRepositoryRef } from './setup/RepositoryRef';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
+import { ensureUmbraHiresVaeScalePatch, removeUmbraHiresVaeScalePatchForUpdate } from './setup/UmbraHiresVaeScale';
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
 import { readManagedToolRequirements, requirementsForManagedNode } from './setup/ManagedToolRequirements';
 import { readOnboarding } from './setup/Onboarding';
@@ -1267,7 +1268,7 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
         const declared = requirementsForManagedNode(readManagedToolRequirements(MANAGED_SOURCE_ROOT), 'Umbra-Nodes');
         if (declared.length) {
             repairManagedNodeCheckout(nodesDir, { name: 'Umbra-Nodes', repo: UMBRA_NODES_REPO }, declared,
-                { log: (message) => log('->', message) });
+                { beforeUpdate: removeUmbraHiresVaeScalePatchForUpdate, afterUpdate: ensureUmbraHiresVaeScalePatch, log: (message) => log('->', message) });
             return hasUmbraNodesPayload(targetUmbraNodes);
         }
         if (hasUmbraNodesPayload(targetUmbraNodes) && existsSync(join(targetUmbraNodes, '.git'))) {
@@ -2004,6 +2005,9 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                     ...(node.name === 'ComfyUI-DaSiWa-Nodes' ? {
                         beforeUpdate: removeDaSiWaForgeComputePatchForUpdate,
                         afterUpdate: ensureDaSiWaForgeComputePatch,
+                    } : node.name === 'Umbra-Nodes' ? {
+                        beforeUpdate: removeUmbraHiresVaeScalePatchForUpdate,
+                        afterUpdate: ensureUmbraHiresVaeScalePatch,
                     } : {}),
                     log: (message) => log('->', message),
                 });
@@ -2056,6 +2060,13 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
                         } finally {
                             ensureDaSiWaForgeComputePatch(nodePath);
                         }
+                    } else if (node.name === 'Umbra-Nodes') {
+                        removeUmbraHiresVaeScalePatchForUpdate(nodePath);
+                        try {
+                            if (!pullRepoWithRecovery(nodePath)) throw new Error(`Git update failed for ${node.name}; review the preserved diagnostic above.`);
+                        } finally {
+                            ensureUmbraHiresVaeScalePatch(nodePath);
+                        }
                     } else {
                         if (!pullRepoWithRecovery(nodePath)) throw new Error(`Git update failed for ${node.name}; review the preserved diagnostic above.`);
                     }
@@ -2096,9 +2107,10 @@ function installComfyNodes(comfyDir: string, onlyNames?: readonly string[]): boo
             continue;
         }
 
-        if (node.name === 'ComfyUI-DaSiWa-Nodes') {
+        if (node.name === 'ComfyUI-DaSiWa-Nodes' || node.name === 'Umbra-Nodes') {
             try {
-                ensureDaSiWaForgeComputePatch(nodePath);
+                if (node.name === 'Umbra-Nodes') ensureUmbraHiresVaeScalePatch(nodePath);
+                else ensureDaSiWaForgeComputePatch(nodePath);
             } catch (error) {
                 log(`${c.yellow}WARN${c.reset}`, error instanceof Error ? error.message : 'DaSiWa H3 Forge patch failed');
                 if (required) requiredFailure = true;

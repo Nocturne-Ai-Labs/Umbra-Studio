@@ -1,6 +1,9 @@
 {
   "schemaVersion": 1,
   "profiles": {
+    "moss-image": {"label": "MOSS Image SFT", "description": "MOSS 5B image generation, img2img and masked inpainting. Official INT8 SFT, Qwen3.5 9B encoder and FLUX.2 VAE. Apache-2.0."},
+    "moss-image-base": {"label": "MOSS Image Base", "description": "Optional original MOSS 5B Base weights, sharing the MOSS Image pipelines and support files. Apache-2.0."},
+
     "flux-3": {"label":"FLUX3 Image Klein","description":"Native image generation and multi-reference editing. Accept access on Hugging Face, then download in your browser or use Setup's optional authenticated download. Setup verifies installed INT8 weights. Requires the reviewed FLUX3 ComfyUI update. Base and distilled checkpoints share one pipeline."},
     "minimax-h3-latent-upscale": {"label":"MiniMax H3 Latent Upscaler","description":"Optional BF16 learned 3D latent upscaler for DaSiWa Enhanced Upscale. About 691 MB. Apache-2.0."},
     "iris-3b": {"label":"Iris 3B","description":"Original pixel-space Iris 3B checkpoint plus Qwen3-VL 4B text encoder. Apache-2.0; no VAE."},
@@ -263,7 +266,7 @@
       "revision": "6ba8d44168a20144423d886669a4eb524fc14b02",
       "license": "qwen-research (non-commercial research/evaluation only)",
       "licenseUrl": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
-      "licenseNotice": "Qwen’s clarification treats generated outputs as separate from the licensed Materials and users retain output rights; that does not permit commercial use of the Qwen model Materials under this research license.",
+      "licenseNotice": "Qwenâ€™s clarification treats generated outputs as separate from the licensed Materials and users retain output rights; that does not permit commercial use of the Qwen model Materials under this research license.",
       "installPolicy": "automatic",
       "profiles": ["qwen-image-2.1"],
       "purpose": "Native Qwen Image 2.1 text-to-image and instruction editing with source plus nine reference images. Update ComfyUI for TextEncodeQwenImage21 before use. License: https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE",
@@ -508,7 +511,13 @@
     {
       "id": "flux-2-vae",
       "installPolicy": "automatic",
-      "profiles": ["flux-2", "ernie-image", "ideogram-4"],
+      "profiles": [
+        "flux-2",
+        "ernie-image",
+        "ideogram-4",
+        "moss-image",
+        "moss-image-base"
+      ],
       "repository": "Comfy-Org/flux2-dev",
       "revision": "03d6521e6f6a47396b3f951cbea50f7e6c2f482e",
       "files": [
@@ -1156,6 +1165,70 @@
           "sourcePath": "vae/flux2-vae.safetensors",
           "bytes": 336211292,
           "sha256": "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"
+        }
+      ]
+    },
+    {
+      "id": "moss-image-sft-int8",
+      "family": "MOSS Image",
+      "creator": "OpenMOSS / Comfy Org",
+      "repository": "Comfy-Org/MOSS-Image",
+      "revision": "6c170adf6af419f9877872ae9c7d397fcb341b99",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base",
+      "installPolicy": "automatic",
+      "profiles": [
+        "moss-image"
+      ],
+      "files": [
+        {
+          "sourcePath": "diffusion_models/moss_image_sft_int8_convrot.safetensors",
+          "destination": "diffusion_models/moss_image_sft_int8_convrot.safetensors",
+          "bytes": 5413698958,
+          "sha256": "b4d1475bc7eeffd7b809e82ea13a1fba1fb85c4e18365af3813722faa5c0fe4f"
+        }
+      ]
+    },
+    {
+      "id": "moss-image-base-int8",
+      "family": "MOSS Image",
+      "creator": "OpenMOSS / Comfy Org",
+      "repository": "Comfy-Org/MOSS-Image",
+      "revision": "6c170adf6af419f9877872ae9c7d397fcb341b99",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base",
+      "installPolicy": "automatic",
+      "profiles": [
+        "moss-image-base"
+      ],
+      "files": [
+        {
+          "sourcePath": "diffusion_models/moss_image_base_int8_convrot.safetensors",
+          "destination": "diffusion_models/moss_image_base_int8_convrot.safetensors",
+          "bytes": 5413698958,
+          "sha256": "f601c1e1161915fb3fea003da0c1782e374dd960fbb3978bc0e4e3fa1f2d8e6f"
+        }
+      ]
+    },
+    {
+      "id": "moss-image-support",
+      "family": "MOSS Image",
+      "creator": "OpenMOSS / Comfy Org",
+      "repository": "Comfy-Org/MOSS-Image",
+      "revision": "6c170adf6af419f9877872ae9c7d397fcb341b99",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base",
+      "installPolicy": "automatic",
+      "profiles": [
+        "moss-image",
+        "moss-image-base"
+      ],
+      "files": [
+        {
+          "sourcePath": "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+          "destination": "text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+          "bytes": 7343591088,
+          "sha256": "4cc6a1543ad2061806da46f35f90cadb4801dcba246c44782cf42ec0feb6407c"
         }
       ]
     }

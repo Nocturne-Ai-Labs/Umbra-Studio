@@ -325,10 +325,26 @@ export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, st
   const workflowIds = plan.featureId === 'all-managed-dependencies'
     ? status.features.filter((feature) => ['official-dasiwa-h3-26', 'official-dasiwa-ltx23-50'].includes(feature.id)).flatMap((feature) => feature.workflowIds)
     : plan.workflowIds;
-  if (workflowIds.length) {
+  const apiWorkflowIds = workflowIds.filter(id => id.startsWith('[Umbra UI] '));
+  const nativeWorkflowIds = workflowIds.filter(id => !apiWorkflowIds.includes(id));
+  if (apiWorkflowIds.length) {
+    const catalog = await get('/api/umbra-ui/pipelines');
+    if (catalog.success !== true || !Array.isArray(catalog.pipelines)) issues.push('Owned Umbra UI pipeline catalog is unavailable.');
+    else for (const id of new Set(apiWorkflowIds)) {
+      const pipelines = catalog.pipelines.filter((entry: any) => entry.workflowId === id);
+      if (!pipelines.length) { issues.push(`${id}: locked API pipeline is unavailable.`); continue; }
+      for (const pipeline of pipelines) {
+        const readiness = pipeline.readiness;
+        if (!pipeline.compatible || pipeline.policyHold || readiness?.graph?.status !== 'valid') issues.push(`${id}: locked API graph validation is held.`);
+        if (readiness?.runtime?.comfyUi !== 'online' || readiness?.runtime?.nodes?.status !== 'ready') issues.push(`${id}: runtime node registration is held.`);
+        if (readiness?.runtime?.resources?.status !== 'ready') issues.push(`${id}: required model resources are missing or unverified.`);
+      }
+    }
+  }
+  if (nativeWorkflowIds.length) {
     const catalog = await get('/api/video/official-workflows');
     if (catalog.success !== true || !Array.isArray(catalog.items)) issues.push('Owned official workflow catalogs are unavailable.');
-    else for (const id of new Set(workflowIds)) {
+    else for (const id of new Set(nativeWorkflowIds)) {
       const item = catalog.items.find((entry: any) => entry.id === id);
       if (!item) issues.push(`${id}: use its normal pipeline preflight; official runtime qualification is unavailable.`);
       else if (!item.readiness?.ready) issues.push(...(item.readiness?.issues || [`${id}: runtime node registration is held.`]));
@@ -338,6 +354,6 @@ export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, st
   const next = after.backends?.comfyui;
   if (after.stale || after.refreshing || !next?.running || !next.healthy || next.ownership !== 'owned'
     || next.ownerPid !== target.ownerPid || next.port !== target.port) issues.push('The owned ComfyUI process or port changed during preflight. Refresh readiness before resuming any queue.');
-  issues.push('Native frontend hooks remain unverified. Refresh the ComfyUI frontend and import/capture the pinned original workflow through its native bridge before explicitly resuming its queue. GPU execution and quality remain unqualified.');
+  if (nativeWorkflowIds.length || plan.featureId === 'all-managed-dependencies') issues.push('Native frontend hooks remain unverified. Refresh the ComfyUI frontend and import/capture the pinned original workflow through its native bridge before explicitly resuming its queue. GPU execution and quality remain unqualified.');
   return [...new Set(issues)];
 }

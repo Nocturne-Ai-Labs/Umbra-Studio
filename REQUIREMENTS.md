@@ -144,6 +144,18 @@ inactive LTX TritonVAE branch do not require this probe. Native frontend export,
 installed model compatibility and real GPU output remain separate qualification
 checks. See [the official video walkthrough](README.md#official-h3-and-ltx-video-workflows).
 
+## MOSS Image
+
+Choose **MOSS Image SFT** or **MOSS Image Base** in Umbra Setup's generation prerequisites, then install the selected family's managed dependencies. MOSS needs native ComfyUI commit `e087d8f6cb7c6cdb11b59dc7c9bf17c79f8d877d` or later; a version number alone does not identify this support. Restart ComfyUI after updating.
+
+- Both checkpoints use the **MOSS Image** family for text-to-image, image-to-image, Manga panel generation, inpainting and Canvas masked generation. No dedicated instruction-edit model is currently declared, so MOSS does not enable the Edit workspace.
+- Setup installs official INT8 model weights, the Qwen3.5-9B W4A8 encoder and the shared FLUX.2 VAE. Existing verified VAE files are reused. Model binaries are not bundled in Umbra releases.
+- Default sampling is 50 steps, CFG 3, Euler / sgm_uniform, flow shift 5 and negative-branch layer skipping at layer 22. Negative prompts remain editable. Generation dimensions align to 16 pixels, with no model-specific resolution cap.
+- Setup applies the reviewed Umbra node compatibility patch for VAE-aware hires sizing. Re-run the MOSS managed dependency repair on existing installations before using hires fix, then restart ComfyUI.
+- Model files belong in `Tools/ComfyUI/models/diffusion_models/`, the encoder in `text_encoders/`, and `flux2-vae.safetensors` in `vae/`. Manually downloaded compatible Base/SFT weights can use the same pipeline.
+
+See the [OpenMOSS guide](https://github.com/OpenMOSS/MOSS-Image/blob/main/USERGUIDE.md) and [Comfy Org weights](https://huggingface.co/Comfy-Org/MOSS-Image) for upstream recommendations and licenses.
+
 ## Iris 3B And Official Turbo
 
 Choose **Iris 3B** or **Iris 3B Turbo** in **Umbra Setup > Advanced > Models > Generation prerequisites**. The guided node stage installs the pinned `ComfyUI-Iris` integration for selected Iris profiles; existing installations can repair it through Setup's managed dependencies. Restart ComfyUI after installing nodes. ComfyUI 0.37.0+ and Comfy Kitchen 0.2.35+ are required.

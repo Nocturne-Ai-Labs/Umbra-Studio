@@ -15,6 +15,7 @@ import { execSync, spawnSync } from 'child_process';
 import { installOrdinaryNodeRequirements } from './setup/OrdinaryNodeRequirements';
 import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
+import { ensureUmbraHiresVaeScalePatch, removeUmbraHiresVaeScalePatchForUpdate } from './setup/UmbraHiresVaeScale';
 import * as readline from 'readline';
 
 const COMFY_NODES_FILE = join(import.meta.dir, 'User', 'Config', 'comfy-nodes.json');
@@ -678,6 +679,13 @@ async function manageCustomNodes() {
                             } finally {
                                 ensureDaSiWaForgeComputePatch(nodePath);
                             }
+                        } else if (node.name === 'Umbra-Nodes') {
+                            removeUmbraHiresVaeScalePatchForUpdate(nodePath);
+                            try {
+                                execSync('git pull --ff-only', { cwd: nodePath, stdio: 'ignore' });
+                            } finally {
+                                ensureUmbraHiresVaeScalePatch(nodePath);
+                            }
                         } else {
                             execSync('git pull', { cwd: nodePath, stdio: 'ignore' });
                         }
@@ -699,9 +707,10 @@ async function manageCustomNodes() {
                 }
             }
 
-            if (node.name === 'ComfyUI-DaSiWa-Nodes' && existsSync(nodePath)) {
+            if (['ComfyUI-DaSiWa-Nodes', 'Umbra-Nodes'].includes(node.name) && existsSync(nodePath)) {
                 try {
-                    ensureDaSiWaForgeComputePatch(nodePath);
+                    if (node.name === 'Umbra-Nodes') ensureUmbraHiresVaeScalePatch(nodePath);
+                    else ensureDaSiWaForgeComputePatch(nodePath);
                 } catch (error) {
                     log(`${c.yellow}WARN${c.reset}`, error instanceof Error ? error.message : 'DaSiWa H3 Forge patch failed');
                 }
