@@ -467,7 +467,7 @@ Linux:
 ./umbra-setup.sh --tab models
 ```
 
-The menu covers Anima, FLUX.1, FLUX.2, FLUX3, Qwen Image, Krea 2, Wulver, ERNIE Image,
+The menu covers MOSS Image, Anima, FLUX.1, FLUX.2, FLUX3, Qwen Image, Krea 2, Wulver, ERNIE Image,
 Z-Image, Chroma 1, Ideogram 4, and the shared OmniGen 2/Ovis AE VAE. It also
 explains when a model family such as HiDream-O1 or checkpoint-based SD/SDXL
 needs no standalone prerequisite files. Use `--list` to review the menu,

@@ -804,6 +804,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
     node.classType === 'EmptyFlux2LatentImage' || node.classType === 'EmptySD3LatentImage'
     || node.classType === 'IrisKSampler' || node.classType === 'IrisSamplerCustomAdvanced'
     || node.classType === 'TextEncodeQwenImage21'
+    || (node.classType === 'CLIPLoader' && node.inputs.type === 'moss_image')
   ));
   const resolutionStep = hasHiDreamPixelLatent ? 32 : hasSixteenPixelLatent ? 16 : 8;
   const resolutionIds = new Set(resolutionNodes.map(node => node.id));

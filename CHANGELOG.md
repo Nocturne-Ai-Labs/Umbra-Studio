@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Add dedicated MOSS Image text-to-image, img2img and masked-inpainting pipelines, shared by Base and SFT and available in Manga Studio and Canvas.
+- Add checksum-pinned MOSS model prerequisites and the native ComfyUI commit requirement to Setup; reuse the shared FLUX.2 VAE.
+- Align MOSS generation dimensions to 16 pixels without adding a model-specific resolution cap. A dedicated instruction-edit model is not advertised.
+- Keep native Canvas generations in the Canvas output folder when no pinned Gallery destination is selected.
+- Verify managed API workflows through their graph, runtime-node and model-resource readiness instead of requiring an unrelated native-video frontend bridge.
+- Install a reviewed hires-fix compatibility patch through Setup so explicit output sizes and latent scaling respect each VAE's spatial compression, including MOSS's 16× VAE.
+
 ## v0.90.20-beta - Native Video Input Compatibility Hotfix
 
 ### TL;DR - Setup After Updating

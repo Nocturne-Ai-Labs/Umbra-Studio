@@ -16,7 +16,7 @@ export type OnboardingState = {
   nodesFingerprint?: string; verificationFingerprint?: string; verifiedAt?: string;
   checkpointVerification?: { path: string; sha256: string; identity: ReturnType<typeof identity> };
 };
-const generationProfiles = new Set(['flux-3', 'iris-3b', 'iris-3b-turbo', 'anima', 'anima-2.9b', 'anima-3.8b', 'flux-1', 'flux-2', 'qwen-image', 'qwen-image-edit-2511', 'qwen-image-2.1', 'krea-2', 'wulver-turbo', 'wulver-non-turbo', 'wulver-turbo-bf16', 'ernie-image', 'z-image', 'chroma-1', 'ideogram-4', 'omni-ovis', 'hidream-o1', 'classic-sd', 'minimax-h3', 'ltx-2.3', 'ltx-2.5']);
+const generationProfiles = new Set(['moss-image', 'moss-image-base', 'flux-3', 'iris-3b', 'iris-3b-turbo', 'anima', 'anima-2.9b', 'anima-3.8b', 'flux-1', 'flux-2', 'qwen-image', 'qwen-image-edit-2511', 'qwen-image-2.1', 'krea-2', 'wulver-turbo', 'wulver-non-turbo', 'wulver-turbo-bf16', 'ernie-image', 'z-image', 'chroma-1', 'ideogram-4', 'omni-ovis', 'hidream-o1', 'classic-sd', 'minimax-h3', 'ltx-2.3', 'ltx-2.5']);
 // Resolve every existing ancestor before any read/write; junctions cannot redirect Setup
 // to a different Umbra installation. Missing descendants remain local to this root.
 function assertLocalPath(root: string, target: string) {
