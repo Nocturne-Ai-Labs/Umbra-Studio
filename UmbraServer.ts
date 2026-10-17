@@ -22174,7 +22174,8 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
     }
     const settings: UmbraUiInpaintSettings = {
       layoutRegions: parseFlux3LayoutRegions(JSON.parse(String(form.get('layoutRegions') || '[]'))),
-      outputFolder: resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'canvas' ? 'canvas' : 'inpainting', getGalleryTransferAllowedRoots()),
+      outputFolder: resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'canvas' ? 'canvas' : 'inpainting', getGalleryTransferAllowedRoots())
+        || (form.get('outputTask') === 'canvas' ? 'Umbra UI/canvas' : ''),
       workflowId: resolvedPipeline.loaded.item.id,
       canvasProjectId: String(form.get('canvasProjectId') || '').trim().slice(0, 160),
       sourceFreeGeneration: String(form.get('sourceFreeGeneration') || '').trim().toLowerCase() === 'true',
