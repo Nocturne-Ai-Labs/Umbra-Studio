@@ -2,12 +2,20 @@
 # Upstream: https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes
 # Reviewed commit: bdb62d4c561bbed30351974844e0168ad471331a
 # Rechecked against 0.5.16 / c99e9c4dab652010a6e051e94dc51bd8b60ee20b.
+# Local output-format reminder checked against 0.5.29 / 60d7a364e18232a6b5482b4af729fcc53ce4a379.
 # Upstream license: GPL-3.0; upstream notices and LICENSE remain unchanged.
 
 diff --git a/nodes/h3_forge.py b/nodes/h3_forge.py
 --- a/nodes/h3_forge.py
 +++ b/nodes/h3_forge.py
-@@ -301,6 +301,9 @@
+@@ -301,6 +301,16 @@
++        if kind == "local":
++            user += ("\n\nRequired output format: return ALL sections below in order, "
++                     "each marker on its own line followed by nonempty content. "
++                     "Keep soundscape separate from the visual description. "
++                     "For Music, use N/A when no music is requested. "
++                     "Do not stop after the first section.\n" +
++                     "\n".join(f"===SEGMENT: {label}===" for label in contract["segments"]))
          check_fits(kind, name, contract["system"], user, with_images, ctx)
          if ctx != num_ctx:
              log_dasiwa("H3 Forge", f"{len(with_images)} picture(s): asking for {ctx:,} tokens of context")
@@ -17,7 +25,7 @@ diff --git a/nodes/h3_forge.py b/nodes/h3_forge.py
          return backend.chat(name, contract["system"], user, with_images, sampling, ctx, timeout, stop)
 
      if kind != "local":
-@@ -641,7 +644,11 @@
+@@ -641,7 +651,11 @@
              ctx = (context_for(bundle["context_length"], images) if sets_its_context(kind, name)
                     else bundle["context_length"])
              check_fits(kind, name, system, user_with_evidence, images, ctx)
@@ -30,7 +38,7 @@ diff --git a/nodes/h3_forge.py b/nodes/h3_forge.py
          except urlerror.HTTPError as exc:
              if _key_refused(exc):
                  raise ForgeError("backend", KEY_REFUSED.format(where=backend.base, code=exc.code))
-@@ -717,6 +724,8 @@
+@@ -717,6 +731,8 @@
          bundle = load_bundle()
          return web.json_response({
              "models": models,

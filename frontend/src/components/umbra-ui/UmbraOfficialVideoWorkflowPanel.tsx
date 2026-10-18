@@ -1,5 +1,6 @@
 'use client';
 
+import { mobileOfficialVideoDraft, mobileOfficialVideoInputError } from '@/lib/mobileOfficialVideo';
 import { prepareOfficialVideoResolution } from '@/lib/officialVideoResolution';
 
 import React from 'react';
@@ -11,6 +12,9 @@ import { useStore } from '@/store/useStore';
 import { normalizeVideoRoutePolicy } from '../../../../shared/umbra-ui/videoRoutePolicy';
 import type { UmbraOfficialVideoQueueOptions } from './useUmbraPowerPrompterBridge';
 import { createOfficialVideoEditorDraft, configureOfficialVideoEditor, type OfficialVideoEditorDraft } from '../../../../shared/umbra-ui/officialVideoEditor';
+import { UmbraMobileSettingsSection } from './UmbraMobileSettingsSection';
+import { UmbraMobileWorkspaceSheet } from './UmbraMobileWorkspaceSheet';
+import { useDaSiWaActive } from './UmbraCommunityVideo';
 import { UmbraOfficialVideoEditor } from './UmbraOfficialVideoEditor';
 import { configureOfficialH3DirectorSettings, hasOfficialH3Continuity } from '../../../../shared/umbra-ui/officialH3Director';
 import { configureOfficialLtxDirectorSettings } from '../../../../shared/umbra-ui/officialLtxDirector';
@@ -41,6 +45,8 @@ interface CapturedWorkflow {
   name: string;
 }
 interface UmbraOfficialVideoWorkflowPanelProps {
+  phoneMode?: boolean;
+  active?: boolean;
   queueConnected: boolean;
   comfyConnected: boolean;
   queueOfficialVideo: (options: UmbraOfficialVideoQueueOptions) => Promise<string>;
@@ -53,10 +59,10 @@ const labelClass = 'text-[10px] font-black uppercase tracking-[0.12em] text-zinc
 const MAX_NATIVE_EXPORT_BYTES = 16 * 1024 * 1024;
 const isWorkflowId = (value: unknown): value is OfficialWorkflowId => value === 'h3-26' || value === 'ltx23-50';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error || 'Official workflow action failed.');
-const draftStorageKey = (item: OfficialWorkflow) => `umbra.official-video-draft.${item.id}.${item.sha256}`;
-function restoredDraft(item: OfficialWorkflow, fallback: OfficialVideoEditorDraft): OfficialVideoEditorDraft {
+const draftStorageKey = (item: OfficialWorkflow, phoneMode = false) => `umbra.official-video-draft.${item.id}.${item.sha256}${phoneMode ? '.phone' : ''}`;
+function restoredDraft(item: OfficialWorkflow, fallback: OfficialVideoEditorDraft, phoneMode = false): OfficialVideoEditorDraft {
   try {
-    const saved = window.localStorage.getItem(draftStorageKey(item));
+    const saved = window.localStorage.getItem(draftStorageKey(item, phoneMode));
     if (!saved || saved.length > 1024 * 1024) return fallback;
     const draft = JSON.parse(saved) as OfficialVideoEditorDraft;
     if (typeof draft?.prompt !== 'string' || typeof draft.mode !== 'string' || typeof draft.seed !== 'string'
@@ -74,7 +80,8 @@ function restoredDraft(item: OfficialWorkflow, fallback: OfficialVideoEditorDraf
   } catch { return fallback; }
 }
 
-export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected, queueOfficialVideo, preview, review }: UmbraOfficialVideoWorkflowPanelProps) {
+export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = true, queueConnected, comfyConnected, queueOfficialVideo, preview, review }: UmbraOfficialVideoWorkflowPanelProps) {
+  const daSiWaActive = useDaSiWaActive();
   const [items, setItems] = React.useState<OfficialWorkflow[]>([]);
   const [selectedId, setSelectedId] = React.useState<OfficialWorkflowId>('h3-26');
   const [loading, setLoading] = React.useState(true);
@@ -88,9 +95,12 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const [workflowFile, setWorkflowFile] = React.useState<File | null>(null);
   const [apiFile, setApiFile] = React.useState<File | null>(null);
   const [reviewOpen, setReviewOpen] = React.useState(() => window.innerWidth >= 1100);
-  const [editors, setEditors] = React.useState<Partial<Record<OfficialWorkflowId, { sourceText: string; source: Record<string, unknown>; draft: OfficialVideoEditorDraft }>>>({});
+  const [editors, setEditors] = React.useState<Partial<Record<string, { sourceText: string; source: Record<string, unknown>; draft: OfficialVideoEditorDraft }>>>({});
   const [editorError, setEditorError] = React.useState('');
+  const [editorRetry, setEditorRetry] = React.useState(0);
   const [settingsError, setSettingsError] = React.useState('');
+  const [settingsLoading, setSettingsLoading] = React.useState(false);
+  const [settingsRetry, setSettingsRetry] = React.useState(0);
   const [nodeCatalog, setNodeCatalog] = React.useState<Record<string, unknown>>({});
   const [mediaBusy, setMediaBusy] = React.useState(false);
   const [pendingHandoff, setPendingHandoff] = React.useState<UmbraUiMediaHandoff | null>(null);
@@ -106,7 +116,9 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
   const mountedRef = React.useRef(true);
   const reviewId = React.useId();
   const selected = items.find(item => item.id === selectedId);
-  const editor = editors[selectedId];
+  const editorKey = `${selectedId}:${phoneMode ? 'phone' : 'desktop'}`;
+  const editor = editors[editorKey];
+  const mobileInputError = phoneMode && editor ? mobileOfficialVideoInputError(editor.draft) : '';
 
   React.useEffect(() => {
     const receive = (value: unknown) => {
@@ -137,6 +149,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     setHandoffError('');
     void (async () => {
       const kind = pendingHandoff.videoFrameRole === 'source_video' || pendingHandoff.h3DirectorRole === 'motion_video' ? 'video' : 'image';
+      if (phoneMode && kind !== 'image') throw new Error('Mobile supports one image or a text prompt. Use desktop for video references.');
       const response = await fetch('/api/comfy/copy-media', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourcePath: pendingHandoff.path, kind }), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]) });
       const result = await response.json();
@@ -144,9 +157,11 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
       if (!response.ok || result.success !== true || typeof result.filename !== 'string') throw new Error(String(result.error || 'The image could not be transferred to video.'));
       const dimensions = await readOfficialVideoReferenceDimensions(result.destPath, kind, abort.signal);
       if (abort.signal.aborted || latestHandoffRef.current?.createdAt !== pendingHandoff.createdAt) return;
-      const draft = applyOfficialVideoMediaHandoff(editor.draft, selectedId, pendingHandoff, result.filename, dimensions);
-      setEditors(current => ({ ...current, [selectedId]: { ...editor, draft } }));
-      try { window.localStorage.setItem(draftStorageKey(selected), JSON.stringify(draft)); } catch { /* In-memory editing still works. */ }
+      const transferred = applyOfficialVideoMediaHandoff(phoneMode ? { ...editor.draft, references: [] } : editor.draft, selectedId,
+        phoneMode ? { ...pendingHandoff, h3DirectorRole: undefined, videoFrameRole: 'first' } : pendingHandoff, result.filename, dimensions);
+      const draft = phoneMode ? mobileOfficialVideoDraft(selectedId, transferred, 'image') : transferred;
+      setEditors(current => ({ ...current, [editorKey]: { ...editor, draft } }));
+      try { window.localStorage.setItem(draftStorageKey(selected, phoneMode), JSON.stringify(draft)); } catch { /* In-memory editing still works. */ }
       clearPendingUmbraUiMediaHandoff(pendingHandoff);
       appliedHandoffAtRef.current = pendingHandoff.createdAt;
       setPendingHandoff(null);
@@ -155,7 +170,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     })().catch(error => { if (!abort.signal.aborted) { failedHandoffRef.current = attempt; setHandoffError(errorText(error)); } })
       .finally(() => { if (!abort.signal.aborted) setHandoffBusy(false); });
     return () => { abort.abort(); setHandoffBusy(false); };
-  }, [pendingHandoff, selected, selectedId, editor, busy, policySaving, mediaBusy, handoffRetry]);
+  }, [pendingHandoff, selected, selectedId, editor, busy, policySaving, mediaBusy, handoffRetry, phoneMode, editorKey]);
 
   React.useEffect(() => { setWorkflowFile(null); setApiFile(null); }, [selectedId]);
 
@@ -163,37 +178,43 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     if (!selected || editor) return;
     const abort = new AbortController();
     setEditorError('');
-    void fetch(`/api/video/official-workflows/${selected.id}/source`, { cache: 'no-store', signal: abort.signal })
+    void fetch(`/api/video/official-workflows/${selected.id}/source`, { cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]) })
       .then(async response => {
         if (!response.ok) throw new Error(`Official source could not be loaded (${response.status}).`);
         const sourceText = await response.text();
         const source = JSON.parse(sourceText) as Record<string, unknown>;
-        const draft = restoredDraft(selected, createOfficialVideoEditorDraft(selected.id, source));
-        if (!abort.signal.aborted) setEditors(current => ({ ...current, [selected.id]: { sourceText, source, draft } }));
+        const initial = createOfficialVideoEditorDraft(selected.id, source);
+        const fallback = phoneMode ? mobileOfficialVideoDraft(selected.id, { ...initial, prompt: '' }) : initial;
+        const restored = restoredDraft(selected, fallback, phoneMode);
+        const draft = phoneMode ? mobileOfficialVideoDraft(selected.id, restored) : restored;
+        if (!abort.signal.aborted) setEditors(current => ({ ...current, [editorKey]: { sourceText, source, draft } }));
       }).catch(error => { if (!abort.signal.aborted) setEditorError(errorText(error)); });
     return () => abort.abort();
-  }, [selected, editor]);
+  }, [selected, editor, phoneMode, editorKey, editorRetry]);
 
   React.useEffect(() => {
-    if (!comfyConnected) { setNodeCatalog({}); setSettingsError(''); return; }
+    if (!comfyConnected) { setNodeCatalog({}); setSettingsError(''); setSettingsLoading(false); return; }
     const abort = new AbortController();
+    setSettingsLoading(true);
+    setSettingsError('');
     let retryTimer: number | undefined;
     let attempts = 0;
     const loadCatalog = async () => {
       try {
-        const response = await fetch('/comfy/object_info', { cache: 'no-store', signal: abort.signal });
+        const response = await fetch('/comfy/object_info', { cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]) });
         if (!response.ok) throw new Error('Installed video settings could not be checked.');
         const catalog = await response.json();
-        if (!abort.signal.aborted) { setNodeCatalog(catalog); setSettingsError(''); }
+        if (!catalog || typeof catalog !== 'object' || Array.isArray(catalog) || Object.keys(catalog).length === 0) throw new Error('ComfyUI has not supplied its available settings yet.');
+        if (!abort.signal.aborted) { setNodeCatalog(catalog); setSettingsError(''); setSettingsLoading(false); }
       } catch (error) {
         if (abort.signal.aborted) return;
         if (++attempts < 10) retryTimer = window.setTimeout(() => void loadCatalog(), 3000);
-        else setSettingsError(errorText(error));
+        else { setSettingsError(errorText(error)); setSettingsLoading(false); }
       }
     };
     void loadCatalog();
     return () => { abort.abort(); window.clearTimeout(retryTimer); };
-  }, [comfyConnected, items]);
+  }, [comfyConnected, items, settingsRetry]);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -318,9 +339,10 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
 
   const prepareEditorCapture = async (): Promise<CapturedWorkflow> => {
     if (!selected || !editor) throw new Error('The official video editor is still loading.');
+    if (mobileInputError) throw new Error(mobileInputError);
     setBusy('opening');
     if (editor.draft.loraStack) validateOfficialVideoLoraChoices(editor.draft.loraStack, nodeCatalog);
-    const preparedDraft = await prepareOfficialVideoResolution({ ...editor.draft, saveLastFrame: editor.draft.saveLastFrame !== false }, selected.id);
+    const preparedDraft = await prepareOfficialVideoResolution({ ...(phoneMode ? mobileOfficialVideoDraft(selected.id, editor.draft) : editor.draft), saveLastFrame: editor.draft.saveLastFrame !== false }, selected.id);
     if (!mountedRef.current) throw new Error('The video workspace was closed.');
     if (selected.id === 'h3-26' && hasOfficialH3Continuity(preparedDraft.h3)) {
       if (preparedDraft.resolution?.mode === 'workflow') throw new Error('Continuity needs a fixed source canvas. Use Match source settings, or choose Fixed pixels before continuing.');
@@ -364,7 +386,7 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     } finally { backgroundLoadRef.current = false; }
   };
   const generateFromEditor = async (queue = true) => {
-    if (!selected?.readiness.ready || !editor || !comfyConnected || busy || policySaving || mediaBusy || handoffBusy || pendingHandoff || operationRef.current || (queue && !queueConnected)) return;
+    if (!selected?.readiness.ready || !editor || mobileInputError || !comfyConnected || busy || policySaving || mediaBusy || handoffBusy || pendingHandoff || operationRef.current || (queue && !queueConnected)) return;
     operationRef.current = true;
     setCaptured(null); setActionError(''); setStatus('');
     try {
@@ -380,18 +402,17 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
     finally { operationRef.current = false; if (mountedRef.current) setBusy(''); }
   };
 
-  return (
-    <section data-umbra-official-video="" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--umbra-panel-bg)] text-[var(--umbra-text)]">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
-        <Clapperboard size={16} className="text-[var(--umbra-accent)]" /><h2 className={labelClass}>Video Studio</h2>
-        <span className="min-w-0 flex-1 text-[11px] font-bold">Official DaSiWa</span>
-        <UmbraSelectControl value="dasiwa-only" disabled={policySaving || !!busy} onChange={event => void changePolicy(event.target.value)} aria-label="Video routing policy" controlSize="sm" className="min-w-40 rounded border border-white/15 bg-black/20 px-2 text-[11px]">
+  const generateButton = <button type="button" aria-label="Generate video" title={mobileInputError || undefined} className={cn(buttonClass, 'border-[var(--umbra-accent)]', phoneMode && 'min-h-12 bg-[color-mix(in_srgb,var(--umbra-accent)_18%,var(--umbra-panel))] px-4 text-xs')} disabled={!!mobileInputError || !selected?.readiness.ready || !editor || !comfyConnected || !queueConnected || !!busy || mediaBusy || handoffBusy || !!pendingHandoff || policySaving} onClick={() => void generateFromEditor()}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}{phoneMode ? (busy ? 'Working…' : 'Generate') : 'Generate video'}</button>;
+  const verifyButton = <button type="button" className={buttonClass} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !!busy || mediaBusy || handoffBusy || !!pendingHandoff || policySaving} onClick={() => void generateFromEditor(false)}><Camera size={14} />Verify video configuration</button>;
+  const settingsStatus = <>
+    {settingsLoading ? <p role="status" className="flex items-center gap-2 py-3 text-xs text-zinc-400"><Loader2 size={14} className="animate-spin" />Loading available settings from ComfyUI…</p> : null}
+    {settingsError ? <div role="alert" className="space-y-2 py-3 text-xs text-amber-200"><p>{settingsError}</p><button type="button" className={buttonClass} disabled={settingsLoading || !comfyConnected} onClick={() => setSettingsRetry(value => value + 1)}>Retry loading settings</button></div> : null}
+    {!comfyConnected ? <p role="status" className="py-3 text-xs text-zinc-400">Connect ComfyUI to load model choices and additional settings. They appear automatically.</p> : !settingsLoading && selected?.readiness.issues.some(issue => issue.startsWith('Missing installed node:')) ? <p role="status" className="py-3 text-xs text-amber-200">Some settings need missing ComfyUI nodes. Install the workflow requirements through Umbra Setup, then check readiness.</p> : null}
+  </>;
+  const routingControl = <UmbraSelectControl value="dasiwa-only" disabled={policySaving || !!busy} onChange={event => void changePolicy(event.target.value)} aria-label="Video routing policy" controlSize="sm" className="min-w-40 rounded border border-white/15 bg-black/20 px-2 text-[11px]">
           <option value="dasiwa-only">DaSiWa only</option><option value="all-routes">All video routes</option>
-        </UmbraSelectControl>
-        <button type="button" className={buttonClass} aria-expanded={reviewOpen} aria-controls={reviewId} onClick={() => setReviewOpen(!reviewOpen)}><PanelRight size={13} />Queue / Results</button>
-      </header>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto custom-scrollbar xl:flex-row xl:overflow-hidden">
-        <main className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto p-3 custom-scrollbar">
+        </UmbraSelectControl>;
+  const workflowControls = <UmbraMobileSettingsSection enabled={phoneMode} title="Workflow & setup" summary={`${loading ? 'Checking…' : catalogError ? 'Check failed' : selected?.readiness.ready ? 'Ready' : 'Setup required'} · ${selected?.name || 'Choose a workflow'}`}>
           <div className="flex items-center justify-between gap-2"><h3 className={labelClass}>Official workflows</h3><button type="button" className={buttonClass} disabled={loading || !!busy} onClick={() => void refresh()} aria-label="Refresh official workflow readiness"><RefreshCw size={13} />Check readiness</button></div>
           {loading ? <p role="status" className="flex items-center gap-2 py-3 text-xs text-zinc-400"><Loader2 size={15} className="animate-spin" />Checking official workflows…</p> : null}
           {catalogError ? <p role="alert" className="break-words text-xs text-red-300">{catalogError}</p> : null}
@@ -406,19 +427,35 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
             {!selected.readiness.ready ? <div role="status" data-official-readiness-blocked="" className="space-y-1 text-xs text-amber-200"><h4 className={labelClass}>Setup required</h4>{selected.readiness.issues.map((issue, index) => <p key={`${index}:${issue}`} className="break-words">{issue}</p>)}</div> : null}
             {!comfyConnected ? <p className="text-xs text-zinc-400">ComfyUI is not connected. Open its workspace to use the managed controls.</p> : null}
           </section> : null}
-          {editorError ? <p role="alert" className="text-xs text-red-300">{editorError}</p> : null}
-          {settingsError ? <p role="alert" className="text-xs text-red-300">{settingsError}</p> : null}
+  </UmbraMobileSettingsSection>;
+
+  return (
+    <section data-umbra-official-video="" data-phone={phoneMode ? '' : undefined} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--umbra-panel-bg)] text-[var(--umbra-text)]">
+      <header hidden={phoneMode} className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
+        <Clapperboard size={16} className="text-[var(--umbra-accent)]" /><h2 className={labelClass}>Video Studio</h2>
+        <span className="min-w-0 flex-1 text-[11px] font-bold">Official DaSiWa</span>
+        {!phoneMode ? routingControl : null}
+        {!phoneMode ? <button type="button" className={buttonClass} aria-expanded={reviewOpen} aria-controls={reviewId} onClick={() => setReviewOpen(!reviewOpen)}><PanelRight size={13} />Queue / Results</button> : null}
+      </header>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto custom-scrollbar xl:flex-row xl:overflow-hidden">
+        <main className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto p-3 custom-scrollbar">
+          {!phoneMode || !editor ? workflowControls : null}
+          {selected && !editor && !editorError ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={14} className="animate-spin" />Loading video controls…</p> : null}
+          {editorError && !editor ? <div role="alert" className="space-y-2 text-xs text-red-300"><p>{editorError}</p><button type="button" className={buttonClass} onClick={() => setEditorRetry(value => value + 1)}>Retry loading controls</button></div> : null}
           {handoffBusy ? <p role="status" className="text-xs text-zinc-400">Loading media into video generation…</p> : null}
-          {handoffError ? <div role="alert" className="space-y-2 text-xs text-red-300"><p>{handoffError}</p><button type="button" className={buttonClass} disabled={handoffBusy || !!busy || mediaBusy} onClick={() => setHandoffRetry(current => current + 1)}>Retry media transfer</button></div> : null}
-          {editor ? <UmbraOfficialVideoEditor key={selectedId} workflowId={selectedId} source={editor.source} draft={editor.draft} catalog={nodeCatalog} disabled={!!busy || mediaBusy || handoffBusy} comfyConnected={comfyConnected} preview={preview} onMediaBusyChange={setMediaBusy}
-            onChange={draft => {
-              setEditors(current => ({ ...current, [selectedId]: { ...editor, draft } }));
-              if (selected) { try { window.localStorage.setItem(draftStorageKey(selected), JSON.stringify(draft)); } catch { /* In-memory editing works when storage is unavailable. */ } }
+          {handoffError ? <div role="alert" className="space-y-2 text-xs text-red-300"><p>{handoffError}</p><button type="button" className={buttonClass} disabled={handoffBusy || !!busy || mediaBusy} onClick={() => setHandoffRetry(current => current + 1)}>Retry media transfer</button>{phoneMode ? <button type="button" className={buttonClass} onClick={() => { if (pendingHandoff) { clearPendingUmbraUiMediaHandoff(pendingHandoff); appliedHandoffAtRef.current = pendingHandoff.createdAt; } setPendingHandoff(null); setHandoffError(''); }}>Dismiss transfer</button> : null}</div> : null}
+          {editor ? <UmbraOfficialVideoEditor key={editorKey} phoneMode={phoneMode} workflowControls={workflowControls} settingsStatus={settingsStatus} workflowId={selectedId} source={editor.source} draft={editor.draft} catalog={nodeCatalog} disabled={!!busy || mediaBusy || handoffBusy} comfyConnected={comfyConnected} preview={preview} onMediaBusyChange={setMediaBusy}
+            onChange={updated => {
+              const draft = phoneMode ? mobileOfficialVideoDraft(selectedId, updated) : updated;
+              setEditors(current => ({ ...current, [editorKey]: { ...editor, draft } }));
+              if (selected) { try { window.localStorage.setItem(draftStorageKey(selected, phoneMode), JSON.stringify(draft)); } catch { /* In-memory editing works when storage is unavailable. */ } }
               setCaptured(null); setStatus(''); setActionError('');
-            }} /> : <div className="min-h-44">{preview}</div>}
-          <details className="border-t border-white/10 py-3">
+            }} /> : !phoneMode ? <div className="min-h-44">{preview}</div> : null}
+          {phoneMode ? <UmbraMobileSettingsSection enabled title="Queue & results"><div className="min-h-72">{review}</div></UmbraMobileSettingsSection> : null}
+          {!phoneMode ? <details className="border-t border-white/10 py-3">
           <summary className="cursor-pointer text-[11px] text-zinc-400">Advanced workflow tools</summary>
-          <div className="flex flex-wrap gap-2 py-3"><button type="button" className={buttonClass} disabled={!!busy || !comfyConnected} onClick={() => void openWorkflow()}><ExternalLink size={13} />Load official workflow in ComfyUI</button><button type="button" className={buttonClass} onClick={openComfy}>Open ComfyUI</button><button type="button" className={buttonClass} disabled={!!busy || !selected?.readiness.ready || loadedId !== selectedId || !comfyConnected} onClick={() => void captureWorkflow()}><Camera size={13} />Capture from ComfyUI</button></div>
+          <p className="pt-3 text-xs text-zinc-400">Generate prepares your settings automatically. Capture is only for a workflow you edited in ComfyUI.</p>
+          <div className="flex flex-wrap gap-2 py-3">{verifyButton}<button type="button" className={buttonClass} disabled={!!busy || !comfyConnected} onClick={() => void openWorkflow()}><ExternalLink size={13} />Load official workflow in ComfyUI</button><button type="button" className={buttonClass} onClick={openComfy}>Open ComfyUI</button><button type="button" className={buttonClass} disabled={!!busy || !selected?.readiness.ready || loadedId !== selectedId || !comfyConnected} onClick={() => void captureWorkflow()}><Camera size={13} />Capture from ComfyUI</button></div>
           {selected ? <section key={selected.id} className="space-y-2 py-3" aria-label="Import native ComfyUI exports">
             <h3 className={labelClass}>Import native exports</h3>
             <p className="text-[11px] text-zinc-400">Choose Workflow JSON and API JSON exported from the same configured workflow in ComfyUI. Maximum 16 MiB per file.</p>
@@ -429,18 +466,23 @@ export function UmbraOfficialVideoWorkflowPanel({ queueConnected, comfyConnected
             <button type="button" className={buttonClass} disabled={!!busy || policySaving || !workflowFile || !apiFile} onClick={() => void importWorkflow()}><Upload size={13} />Import native exports</button>
           </section> : null}
           {captured ? <button type="button" className={buttonClass} disabled={!!queueReason || !!busy || policySaving} onClick={() => void queueCapture()}><Play size={14} />Queue captured workflow</button> : null}
-          </details>
+          </details> : null}
           {busy ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={14} className="animate-spin" />{busy === 'opening' ? 'Opening official workflow…' : busy === 'capturing' ? 'Capturing native configuration…' : busy === 'importing' ? 'Importing native exports…' : 'Waiting for queue acknowledgement…'}</p> : null}
           {actionError ? <p role="alert" className="break-words text-xs text-red-300">{actionError}</p> : null}
           {status ? <p role="status" className="text-xs text-zinc-400">{status}</p> : null}
         </main>
-        <aside id={reviewId} hidden={!reviewOpen} aria-label="Video queue and results" className="min-h-72 min-w-0 shrink-0 border-t border-white/10 xl:w-80 xl:border-l xl:border-t-0">{review}</aside>
+        {!phoneMode ? <aside id={reviewId} hidden={!reviewOpen} aria-label="Video queue and results" className="min-h-72 min-w-0 shrink-0 border-t border-white/10 xl:w-80 xl:border-l xl:border-t-0">{review}</aside> : null}
       </div>
-      <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 p-3">
-        <button type="button" className={cn(buttonClass, 'border-[var(--umbra-accent)]')} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !queueConnected || !!busy || mediaBusy || handoffBusy || !!pendingHandoff || policySaving} onClick={() => void generateFromEditor()}><Play size={14} />Generate video</button>
-        <button type="button" className={buttonClass} disabled={!selected?.readiness.ready || !editor || !comfyConnected || !!busy || mediaBusy || handoffBusy || !!pendingHandoff || policySaving} onClick={() => void generateFromEditor(false)}><Camera size={14} />Verify video configuration</button>
+      <footer hidden={phoneMode} className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 p-3">
+        {generateButton}
         {!comfyConnected ? <p className="text-[11px] text-zinc-500">ComfyUI is not connected.</p> : null}
       </footer>
+      {phoneMode ? <UmbraMobileWorkspaceSheet active={active && daSiWaActive} kind="video" title="Video preview" subtitle={selected?.name} icon={<Clapperboard size={16} />} tone="fuchsia" dockAction={generateButton}>
+        <div data-umbra-mobile-video-preview="" className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{preview}</div>
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-white/10 p-2">{generateButton}</div>
+        </div>
+      </UmbraMobileWorkspaceSheet> : null}
     </section>
   );
 }

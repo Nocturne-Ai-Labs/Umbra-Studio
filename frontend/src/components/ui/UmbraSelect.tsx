@@ -30,6 +30,7 @@ interface UmbraSelectProps {
   size?: 'xs' | 'sm' | 'md';
   menuTitle?: string;
   menuSubtitle?: string;
+  menuPresentation?: 'auto' | 'anchored';
   boundarySelector?: string;
   leadingIcon?: React.ReactNode;
   triggerId?: string;
@@ -109,6 +110,7 @@ export function UmbraSelect({
   size = 'md',
   menuTitle,
   menuSubtitle,
+  menuPresentation = 'auto',
   boundarySelector,
   leadingIcon,
   triggerId,
@@ -120,6 +122,9 @@ export function UmbraSelect({
   const [open, setOpen] = React.useState(false);
   const [position, setPosition] = React.useState({ x: 0, y: 0 });
   const touchPresentation = useTouchSelectorPresentation();
+  const presentation = touchPresentation
+    ? (menuPresentation === 'anchored' ? 'touch-anchored' : 'touch-sheet')
+    : 'anchored';
   const selectedOption = React.useMemo(
     () => options.find((option) => option.value === value),
     [options, value],
@@ -170,7 +175,7 @@ export function UmbraSelect({
   return (
     <div
       className={cn('min-w-0', className)}
-      data-umbra-select-presentation={touchPresentation ? 'touch-sheet' : 'anchored'}
+      data-umbra-select-presentation={presentation}
     >
       <button
         ref={triggerRef}
@@ -218,7 +223,7 @@ export function UmbraSelect({
         boundarySelector={boundarySelector}
         title={menuTitle || ariaLabel}
         subtitle={menuSubtitle || (selectedOption ? `Current: ${selectedOption.label}` : 'Choose an option')}
-        presentation={touchPresentation ? 'touch-sheet' : 'anchored'}
+        presentation={presentation}
       />
     </div>
   );

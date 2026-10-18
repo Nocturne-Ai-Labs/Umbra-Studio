@@ -54,6 +54,7 @@ interface UmbraPositivePromptEditorProps {
   heading?: string;
   onSubmit?: () => void;
   singleField?: boolean;
+  headerAction?: React.ReactNode;
 }
 
 const MAX_PROMPT_SEGMENTS = 24;
@@ -76,6 +77,7 @@ export function UmbraPositivePromptEditor({
   heading = 'Positive Prompt',
   onSubmit,
   singleField = false,
+  headerAction,
 }: UmbraPositivePromptEditorProps) {
   const segments = React.useMemo(
     () => singleField ? getUmbraUiSinglePromptField(sourceSegments) : sourceSegments,
@@ -250,10 +252,11 @@ export function UmbraPositivePromptEditor({
 
 
   return (
-    <section className="rounded-md border border-white/10 bg-white/[0.02]">
+    <section data-umbra-positive-prompt-editor="" className="rounded-md border border-white/10 bg-white/[0.02]">
       <header className="flex min-h-10 flex-wrap items-center gap-2 px-2.5 py-1.5">
         <Sparkles size={13} className={accent === 'rose' ? 'text-rose-300' : accent === 'fuchsia' ? 'text-fuchsia-300' : 'text-cyan-300'} />
         <span className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{heading}</span>
+        {headerAction}
         {!singleField && <span className="rounded-sm border border-white/10 bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400">
           {segments.length} field{segments.length === 1 ? '' : 's'}
         </span>}

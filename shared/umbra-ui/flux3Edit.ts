@@ -5,6 +5,8 @@ export interface Flux3LayoutRegion {
   y: number;
   width: number;
   height: number;
+  label?: 'object' | 'text';
+  text?: string;
 }
 
 export function bindFlux3LayoutPrompt(graph: Record<string, any>, consumer: any, prompt: string): boolean {
@@ -33,7 +35,10 @@ export function parseFlux3LayoutRegions(value: unknown): Flux3LayoutRegion[] {
     if (typeof region.description !== 'string' || region.description.length > 10_000) throw new Error('Invalid layout description.');
     if (![region.x, region.y, region.width, region.height].every((n) => typeof n === 'number' && Number.isFinite(n))
       || region.width <= 0 || region.height <= 0) throw new Error('Layout regions need finite coordinates and positive dimensions.');
-    return { id, description: region.description, x: region.x, y: region.y, width: region.width, height: region.height };
+    if (region.label !== undefined && region.label !== 'object' && region.label !== 'text') throw new Error('Invalid layout item type.');
+    if (region.text !== undefined && (typeof region.text !== 'string' || region.text.length > 10_000)) throw new Error('Invalid layout text.');
+    return { id, description: region.description, x: region.x, y: region.y, width: region.width, height: region.height,
+      ...(region.label !== undefined ? { label: region.label } : {}), ...(region.text !== undefined ? { text: region.text } : {}) };
   });
 }
 

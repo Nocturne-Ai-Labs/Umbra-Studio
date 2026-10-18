@@ -7,7 +7,8 @@ const modularPatchPath = join(import.meta.dir, 'DaSiWaForgeCompute.modular.patch
 const reviewedPatches = [patchPath, modularPatchPath];
 const legacyPatchPath = join(import.meta.dir, 'DaSiWaForgeCompute.legacy.patch');
 const previousPatchPath = join(import.meta.dir, 'DaSiWaForgeCompute.previous.patch');
-const previousPatches = [previousPatchPath, legacyPatchPath];
+const previousModularPatchPath = join(import.meta.dir, 'DaSiWaForgeCompute.modular.previous.patch');
+const previousPatches = [previousModularPatchPath, previousPatchPath, legacyPatchPath];
 
 export function reviewedDaSiWaForgePatchNames(requiredPatch: string): string[] {
     return requiredPatch === 'DaSiWaForgeCompute.patch'

@@ -171,7 +171,13 @@ export function ScannerWorkspace({
         try {
           const workflowValue = metadata.workflow || metadata.prompt;
           const workflowText = typeof workflowValue === 'string' ? workflowValue : JSON.stringify(workflowValue, null, 2);
-          if (workflowText && navigator?.clipboard?.writeText) await navigator.clipboard.writeText(workflowText);
+          // Clipboard permission/focus can remain pending on mobile browsers.
+          // Optional auto-copy must not hold the imported media in a busy state.
+          if (workflowText && navigator?.clipboard?.writeText) {
+            void navigator.clipboard.writeText(workflowText).catch((error) => {
+              console.warn('[ScannerWorkspace] Failed to auto-copy workflow:', error);
+            });
+          }
         } catch (error) {
           console.warn('[ScannerWorkspace] Failed to auto-copy workflow:', error);
         }

@@ -3,6 +3,8 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, Film, Image as ImageIcon, Loader2, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, X } from 'lucide-react';
+import { mobileOfficialVideoDraft, mobileOfficialVideoInputError, type MobileVideoMode } from '@/lib/mobileOfficialVideo';
+import { UmbraMobileSettingsSection } from './UmbraMobileSettingsSection';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { normalizePowerPrompterGenerationControls } from '@/lib/powerPrompter';
 import { readOfficialVideoReferenceDimensions } from '@/lib/umbraOfficialVideoMediaHandoff';
@@ -16,6 +18,9 @@ import { DEFAULT_OFFICIAL_H3_RESOLUTION, getOfficialVideoEditorFields, OFFICIAL_
 import type { OfficialVideoWorkflowId } from '../../../../shared/umbra-ui/officialVideoWorkflow';
 
 interface Props {
+  phoneMode?: boolean;
+  workflowControls?: React.ReactNode;
+  settingsStatus?: React.ReactNode;
   workflowId: OfficialVideoWorkflowId;
   source: Record<string, unknown>;
   catalog: Record<string, unknown>;
@@ -31,17 +36,20 @@ const inputClass = 'min-h-9 w-full min-w-0 rounded border border-white/15 bg-bla
 const iconClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-white/15 text-zinc-300 hover:bg-white/5 disabled:opacity-30';
 const labelClass = 'text-[11px] text-zinc-400';
 
-export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, onChange, disabled, comfyConnected, preview, onMediaBusyChange }: Props) {
+export function UmbraOfficialVideoEditor({ phoneMode = false, workflowControls, settingsStatus, workflowId, source, catalog, draft, onChange, disabled, comfyConnected, preview, onMediaBusyChange }: Props) {
   const [forgeOpen, setForgeOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const settingsTrigger = React.useRef<HTMLButtonElement>(null);
   const settingsDialog = React.useRef<HTMLElement>(null);
   const settingsId = React.useId();
+  const promptId = React.useId();
   const [uploading, setUploading] = React.useState('');
   const [uploadError, setUploadError] = React.useState('');
   const fileInput = React.useRef<HTMLInputElement>(null);
   const uploadKind = React.useRef<'image' | 'video' | 'audio'>('image');
   const latest = React.useRef(draft);
+  const phoneImage = React.useRef<OfficialVideoEditorDraft['references'][number] | null>(null);
+  if (phoneMode && draft.references[0]?.kind === 'image') phoneImage.current = draft.references[0];
   const uploadAbort = React.useRef<AbortController | null>(null);
   latest.current = draft;
   React.useEffect(() => () => { if (uploadAbort.current) { uploadAbort.current.abort(); onMediaBusyChange(false); } }, [onMediaBusyChange]);
@@ -117,6 +125,7 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
   };
   const addMedia = async (file: File) => {
     const kind = uploadKind.current;
+    if (phoneMode && file.type && !file.type.startsWith('image/')) { setUploadError('Choose an image file.'); return; }
     const abort = new AbortController(); uploadAbort.current = abort;
     setUploading(file.name); setUploadError(''); onMediaBusyChange(true);
     try {
@@ -135,7 +144,9 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
         ...dimensions,
         startSeconds: h3 ? 0 : endpoint ? (current.references.length ? current.durationSeconds - 1 / current.frameRate : 0) : startSeconds,
         durationSeconds: h3 ? kind === 'image' ? 1 : Math.min(2, current.durationSeconds) : endpoint ? 1 / current.frameRate : Math.min(1, current.durationSeconds - startSeconds) };
-      onChange({ ...current, references: [...current.references, reference] });
+      onChange(phoneMode
+        ? mobileOfficialVideoDraft(workflowId, { ...current, references: [reference] }, 'image')
+        : { ...current, references: [...current.references, reference] });
     } catch (error) { if (!abort.signal.aborted) setUploadError(error instanceof Error ? error.message : 'Media upload failed.'); }
     finally { if (uploadAbort.current === abort) uploadAbort.current = null; if (!abort.signal.aborted) { setUploading(''); onMediaBusyChange(false); if (fileInput.current) fileInput.current.value = ''; } }
   };
@@ -164,21 +175,96 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
         onChange={event => setValue(field.type === 'number' ? Number(event.target.value) : event.target.value)} className={inputClass} />}
     </label>;
   };
+  const generationSettings = <>
+          {settingsStatus}
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Resolution" summary={workflowSizing ? 'DaSiWa resolution' : `${draft.width} × ${draft.height}`}><section aria-label="Resolution and aspect ratio settings" className="space-y-3 border-b border-white/10 py-4">
+            <h4 className="text-xs font-semibold text-zinc-200">Resolution and aspect ratio</h4>
+            <div className="grid min-w-0 grid-cols-2 gap-3">
+              <label className={`col-span-2 flex min-w-0 flex-col gap-1 ${labelClass}`}>Sizing<UmbraSelectControl aria-label="Video resolution method" value={workflowSizing ? 'workflow' : 'fixed'} disabled={disabled} onChange={event => change({ resolution: { ...latest.current.resolution, mode: event.target.value as 'workflow' | 'fixed' } })} className={inputClass}><option value="workflow">DaSiWa resolution</option><option value="fixed">Fixed pixels</option></UmbraSelectControl></label>
+              {workflowSizing && h3 ? <>
+                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Aspect ratio<UmbraSelectControl aria-label="H3 aspect ratio" value={h3Resolution.aspect} disabled={disabled} onChange={event => changeH3Resolution({ aspect: event.target.value })} className={inputClass}>{OFFICIAL_H3_ASPECTS.map(value => <option key={value} value={value}>{value === 'auto' ? 'Auto (reference)' : value === 'custom' ? 'Custom ratio' : value}</option>)}</UmbraSelectControl></label>
+                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Resolution<UmbraSelectControl aria-label="H3 resolution preset" value={h3Resolution.resolution} disabled={disabled} onChange={event => changeH3Resolution({ resolution: event.target.value })} className={inputClass}>{OFFICIAL_H3_RESOLUTIONS.map(value => <option key={value} value={value}>{value === 'auto' ? 'Native (768px short edge)' : value === 'custom' ? 'Custom' : value}</option>)}</UmbraSelectControl></label>
+                <label className={`col-span-2 flex min-w-0 flex-col gap-1 ${labelClass}`}>Input scaling<UmbraSelectControl aria-label="H3 input scaling" value={h3Resolution.input_scaling} disabled={disabled} onChange={event => changeH3Resolution({ input_scaling: event.target.value })} className={inputClass}>{OFFICIAL_H3_INPUT_SCALING.map(value => <option key={value} value={value}>{value === 'Auto' ? 'Native (2048px short edge)' : value}</option>)}</UmbraSelectControl></label>
+                {h3Resolution.aspect === 'custom' ? <>{(['custom_aspect_w', 'custom_aspect_h'] as const).map((key, index) => <label key={key} className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Ratio {index ? 'height' : 'width'}<input aria-label={`H3 aspect ${index ? 'height' : 'width'}`} type="number" min={1} max={8192} value={h3Resolution[key]} disabled={disabled} onChange={event => changeH3Resolution({ [key]: Number(event.target.value) })} className={inputClass} /></label>)}</> : null}
+                {h3Resolution.resolution === 'custom' ? <><label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Custom sizing<UmbraSelectControl aria-label="H3 custom resolution mode" value={h3Resolution.custom_mode} disabled={disabled} onChange={event => changeH3Resolution({ custom_mode: event.target.value as 'mp' | 'fixed' })} className={inputClass}><option value="mp">Megapixels</option><option value="fixed">Fixed pixels</option></UmbraSelectControl></label>{h3Resolution.custom_mode === 'mp' ? <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Megapixels<input aria-label="H3 custom megapixels" type="number" min={0.01} max={64} step={0.01} value={h3Resolution.custom_mp} disabled={disabled} onChange={event => changeH3Resolution({ custom_mp: Number(event.target.value) })} className={inputClass} /></label> : null}</> : null}
+              </> : null}
+              {workflowSizing && !h3 ? <>
+                <label className={`col-span-2 flex items-center gap-2 py-2 ${labelClass}`}><input type="checkbox" checked={draft.resolution?.followSourceAspect === true} disabled={disabled} onChange={event => change({ resolution: { ...latest.current.resolution, mode: 'workflow', followSourceAspect: event.target.checked } })} className="h-4 w-4 accent-[var(--umbra-accent)]" />Use first reference aspect ratio</label>
+                {fields.filter(field => field.category === 'resolution').map(renderField)}
+              </> : null}
+              {!workflowSizing || (h3 && h3Resolution.resolution === 'custom' && h3Resolution.custom_mode === 'fixed') ? <>
+                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Width<input aria-label="Video width" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.width} disabled={disabled} onChange={event => change({ width: Number(event.target.value) })} className={inputClass} /></label>
+                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Height<input aria-label="Video height" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.height} disabled={disabled} onChange={event => change({ height: Number(event.target.value) })} className={inputClass} /></label>
+              </> : null}
+            </div>
+          </section>
+          </UmbraMobileSettingsSection>
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Seed & LoRAs" summary={`${(draft.loraStack || []).filter(row => row.on && row.lora !== 'None').length} active LoRAs`}><section aria-label="Seed settings" className="space-y-3 border-b border-white/10 py-4"><h4 className="text-xs font-semibold text-zinc-200">Seed</h4><label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}><input aria-label="Video seed" inputMode="numeric" value={draft.seed} disabled={disabled} onChange={event => change({ seed: event.target.value })} className={inputClass} /></label></section>
+          <section aria-label="LoRA stack settings" className="space-y-3 border-b border-white/10 py-4"><UmbraOfficialVideoLoraControls rows={draft.loraStack || []} onChange={loraStack => change({ loraStack })} workflowId={workflowId} catalog={catalog} disabled={disabled} /></section>
+          </UmbraMobileSettingsSection>
+          {settingsSections.map(category => <UmbraMobileSettingsSection key={category.id} enabled={phoneMode} title={category.label}><section aria-label={`${category.label} settings`} className="space-y-3 border-b border-white/10 py-4 last:border-b-0">
+            <h4 className="text-xs font-semibold text-zinc-200">{category.label}</h4>
+            <div className="grid min-w-0 grid-cols-2 gap-3">{category.id === 'video-output' ? <label className={`col-span-2 flex items-center gap-2 py-2 ${labelClass}`}><input aria-label="Save last frame" type="checkbox" checked={draft.saveLastFrame !== false} disabled={disabled} onChange={event => change({ saveLastFrame: event.target.checked })} className="h-4 w-4 accent-[var(--umbra-accent)]" />Save last frame</label> : null}{category.fields.map(renderField)}</div>
+          </section></UmbraMobileSettingsSection>)}
+  </>;
+  const promptControls = <>
+    <section aria-label="Video prompt" data-official-editor-section="prompt" className="min-w-0 space-y-2 py-4">
+      <div className="mb-2 flex items-center justify-between gap-2"><label htmlFor={promptId} className={labelClass}>{phoneMode ? 'Prompt' : continuing ? 'Continuation prompt' : 'Overall prompt'}</label>
+        {h3 && phoneMode ? <button type="button" aria-label="Auto prompt (Prompt Forge)" aria-haspopup="dialog" aria-expanded={forgeOpen} disabled={disabled} onClick={() => setForgeOpen(true)} className="inline-flex min-h-11 items-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-300 hover:text-[var(--umbra-accent)] disabled:opacity-40"><Sparkles size={15} />Auto prompt</button> : null}
+      </div>
+      <textarea id={promptId} aria-label="Video overall prompt" placeholder={phoneMode ? 'Describe the scene, movement, and camera…' : undefined} value={activePrompt} disabled={disabled} onChange={event => changePrompt(event.target.value)} className={`${inputClass} min-h-28 resize-y`} />
+    </section>
+    {h3 ? <section aria-label="Prompt Forge" data-official-editor-section="forge" className={phoneMode ? undefined : 'min-w-0 border-t border-white/10 pb-3'}>
+      {!phoneMode ? <button type="button" className="flex min-h-10 items-center gap-2 text-xs text-zinc-300 hover:text-[var(--umbra-accent)]" aria-expanded={forgeOpen} onClick={() => setForgeOpen(!forgeOpen)}><Sparkles size={15} />Prompt Forge<Plus size={13} /></button> : null}
+      {forgeOpen ? <UmbraH3PromptForgeModal inline={!phoneMode} phoneMode={phoneMode} disabled={disabled} modeOverride={draft.mode as 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'REF2VA'} video={video} prompt={activePrompt} durationSeconds={draft.durationSeconds} comfyConnected={comfyConnected} onApplyPrompt={prompt => { if (!disabled) changePrompt(prompt); }} onClose={() => setForgeOpen(false)} continuity={continuing ? { session: h3Settings.continuity.session, source_kind: h3Settings.continuity.sourceKind, clip_id: h3Settings.continuity.sourceKind === 'video' ? h3Settings.continuity.sourceVideoId : h3Settings.continuity.sourceId, overlap_frames: h3Settings.continuity.overlapFrames, current_prompt: activePrompt, use_references: h3Settings.continuity.useReferences } : undefined} referenceNotes={references.filter(reference => reference.enabled !== false && (!continuing || (draft.mode === 'REF2VA' && h3Settings.continuity.useReferences))).map(reference => ({ kind: reference.kind, ...(reference.kind === 'video' ? { stream: reference.mediaMode || 'video' } : {}), role: draft.mode === 'REF2VA' ? 'subject' : 'keyframe', keep: reference.prompt }))} /> : null}
+    </section> : null}
+  </>;
+  const timingControls = <>
+        <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Duration (s)<input aria-label="Video duration seconds" type="number" min={1} max={h3 ? 15 : 120} step={1 / Math.max(1, draft.frameRate)} value={Number(draft.durationSeconds.toFixed(6))} disabled={disabled} onChange={event => changeTiming({ durationSeconds: Number(event.target.value) })} className={inputClass} /></label>
+        <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Frame rate<input aria-label="Video frame rate" type="number" min={1} max={120} value={draft.frameRate} disabled={disabled} onChange={event => changeTiming({ frameRate: Number(event.target.value) })} className={inputClass} /></label>
+  </>;
+  const phoneImageMode = ['I2VA', 'I2V'].includes(draft.mode);
+  const setPhoneMode = (mode: MobileVideoMode) => {
+    setUploadError('');
+    onChange(mobileOfficialVideoDraft(workflowId, {
+      ...latest.current, references: mode === 'image' && phoneImage.current ? [phoneImage.current] : [],
+    }, mode));
+  };
+  const phoneInput = <section aria-label="Mobile video input" className="min-w-0 space-y-3 border-b border-white/10 pb-3">
+    <div role="group" aria-label="Video input mode" className="grid grid-cols-2 gap-2">
+      {(['text', 'image'] as const).map(mode => <button key={mode} type="button" disabled={disabled} aria-pressed={phoneImageMode === (mode === 'image')}
+        onClick={() => setPhoneMode(mode)} className={`flex min-h-11 items-center justify-center gap-2 rounded border px-2 text-xs font-semibold disabled:opacity-40 ${phoneImageMode === (mode === 'image') ? 'border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_10%,transparent)]' : 'border-white/15 text-zinc-400'}`}>
+        {mode === 'text' ? <Film size={15} /> : <ImageIcon size={15} />}{mode === 'text' ? 'Text to Video' : 'Image to Video'}
+      </button>)}
+    </div>
+    {phoneImageMode ? <div className="space-y-2">
+      {references[0] ? <img src={`/comfy/view?filename=${encodeURIComponent(references[0].filename)}&type=input`} alt="Video source image" className="max-h-52 w-full rounded border border-white/10 bg-black/20 object-contain" /> : null}
+      <div className="flex gap-2">
+        <button type="button" disabled={disabled || !comfyConnected} onClick={() => { uploadKind.current = 'image'; if (fileInput.current) { fileInput.current.accept = 'image/*'; fileInput.current.click(); } }} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded border border-white/15 px-3 text-xs disabled:opacity-40"><ImageIcon size={16} />{references[0] ? 'Replace image' : 'Choose image'}</button>
+        {references[0] ? <button type="button" aria-label="Remove video image" disabled={disabled} onClick={() => { phoneImage.current = null; change({ references: [] }); }} className={`${iconClass} min-w-11`}><Trash2 size={16} /></button> : null}
+      </div>
+      {!comfyConnected ? <p className="text-xs text-zinc-500">Connect ComfyUI to upload an image.</p> : null}
+    </div> : null}
+    {uploading ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={13} className="animate-spin" />Uploading image…</p> : null}
+    {uploadError ? <p role="alert" className="text-xs text-red-300">{uploadError}</p> : null}
+    {mobileOfficialVideoInputError(draft) ? <p className="text-xs text-zinc-500">{mobileOfficialVideoInputError(draft)}</p> : null}
+  </section>;
   const mediaAllowed = !disabled && !uploading && comfyConnected && draft.mode !== 'T2VA' && draft.mode !== 'T2V';
-  return <div className="min-w-0">
+  return <div data-official-mobile-editor={phoneMode ? '' : undefined} className="min-w-0">
+    <input ref={fileInput} type="file" className="hidden" accept={phoneMode ? 'image/*' : undefined} onChange={event => { const file = event.target.files?.[0]; if (file) void addMedia(file); }} />
+    {phoneMode ? <>{promptControls}{phoneInput}{workflowControls}<UmbraMobileSettingsSection enabled title="Duration & frame rate" summary={`${draft.durationSeconds}s · ${draft.frameRate} fps`}><div className="grid grid-cols-2 gap-3">{timingControls}</div></UmbraMobileSettingsSection></> : null}
+    {!phoneMode ? <>
     <section aria-label="Director timeline and settings" data-official-editor-section="director" className="min-w-0 space-y-3 border-b border-white/10 pb-4">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-xs font-semibold">Director</h3><span className="text-[10px] text-zinc-500">{references.length} references</span></div>
       <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-4">
         <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Mode<UmbraSelectControl aria-label="Director mode" value={draft.mode} disabled={disabled} onChange={event => changeMode(event.target.value)} className={inputClass}>
           {OFFICIAL_VIDEO_EDITOR_MODES[workflowId].map(mode => <option key={mode} value={mode}>{mode}</option>)}
         </UmbraSelectControl></label>
-        <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Duration (s)<input aria-label="Video duration seconds" type="number" min={1} max={h3 ? 15 : 120} step={1 / Math.max(1, draft.frameRate)} value={Number(draft.durationSeconds.toFixed(6))} disabled={disabled} onChange={event => changeTiming({ durationSeconds: Number(event.target.value) })} className={inputClass} /></label>
-        <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Frame rate<input aria-label="Video frame rate" type="number" min={1} max={120} value={draft.frameRate} disabled={disabled} onChange={event => changeTiming({ frameRate: Number(event.target.value) })} className={inputClass} /></label>
+        {timingControls}
         <div className="flex items-end gap-1">
           {(h3 && draft.mode === 'REF2VA' ? ['image', 'video', 'audio'] as const : draft.mode === 'V2V' ? ['video'] as const : ['image'] as const).map(kind => <button key={kind} type="button" disabled={!mediaAllowed || (['I2VA', 'L2VA'].includes(draft.mode) && references.length >= 1) || (['FL2VA', 'FLF2V'].includes(draft.mode) && references.length >= 2) || (!h3 && draft.mode !== 'FLF2V' && references.some(reference => reference.startSeconds + reference.durationSeconds >= draft.durationSeconds))} className={iconClass} aria-label={`Add Director ${kind}`} title={`Add ${kind} reference`} onClick={() => { uploadKind.current = kind; if (fileInput.current) { fileInput.current.accept = `${kind}/*`; fileInput.current.click(); } }}>
             {kind === 'image' ? <ImageIcon size={16} /> : kind === 'video' ? <Film size={16} /> : <Music2 size={16} />}
           </button>)}
-          <input ref={fileInput} type="file" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) void addMedia(file); }} />
         </div>
       </div>
       <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-3">{fields.filter(field => field.group === 'director').map(renderField)}</div>
@@ -208,12 +294,14 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
       {uploading ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={13} className="animate-spin" />{uploading}</p> : null}
       {uploadError ? <p role="alert" className="text-xs text-red-300">{uploadError}</p> : null}
     </section>
-    <section aria-label="Video preview" data-official-editor-section="preview" className="min-h-44 min-w-0 overflow-hidden border-b border-white/10 py-3">{preview}</section>
+    </> : null}
+    {phoneMode ? generationSettings : <><section aria-label="Video preview" data-official-editor-section="preview" className="min-h-44 min-w-0 overflow-hidden border-b border-white/10 py-3">{preview}</section>
     <div data-official-editor-section="generation" className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 py-2">
       <span className="text-[11px] text-zinc-400">{workflowSizing ? 'DaSiWa resolution' : `${draft.width} x ${draft.height}`}</span>
       <button ref={settingsTrigger} type="button" aria-label="Open video generation settings" aria-haspopup="dialog" aria-expanded={settingsOpen} aria-controls={settingsOpen ? settingsId : undefined} onClick={() => setSettingsOpen(true)} className="inline-flex min-h-9 items-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-300 hover:bg-white/5"><SlidersHorizontal size={15} />Settings</button>
     </div>
-    {settingsOpen ? createPortal(<div data-umbra-modal-root="" className="fixed inset-0 z-[240] bg-black/60 text-[var(--umbra-text)]" onPointerDown={event => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
+    </>}
+    {!phoneMode && settingsOpen ? createPortal(<div data-umbra-modal-root="" className="fixed inset-0 z-[240] bg-black/60 text-[var(--umbra-text)]" onPointerDown={event => { if (event.target === event.currentTarget) setSettingsOpen(false); }}>
       <style>{'@keyframes umbra-video-settings-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }'}</style>
       <aside ref={settingsDialog} id={settingsId} role="dialog" aria-modal="true" aria-label="Video generation settings" tabIndex={-1} className="absolute inset-y-0 right-0 flex w-full flex-col border-l border-white/15 bg-[#101114] shadow-2xl outline-none motion-safe:animate-[umbra-video-settings-slide-in_200ms_ease-out] sm:max-w-[560px]" onKeyDown={event => {
         // Selection menus are portalled children and own their keyboard handling.
@@ -227,42 +315,11 @@ export function UmbraOfficialVideoEditor({ workflowId, source, catalog, draft, o
       }}>
         <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-white/10 px-4 pt-[env(safe-area-inset-top)]"><SlidersHorizontal size={16} className="text-[var(--umbra-accent)]" /><h3 className="min-w-0 flex-1 text-sm font-semibold">Generation settings</h3><button type="button" aria-label="Close video generation settings" title="Close settings" className={iconClass} onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] custom-scrollbar">
-          <section aria-label="Resolution and aspect ratio settings" className="space-y-3 border-b border-white/10 py-4">
-            <h4 className="text-xs font-semibold text-zinc-200">Resolution and aspect ratio</h4>
-            <div className="grid min-w-0 grid-cols-2 gap-3">
-              <label className={`col-span-2 flex min-w-0 flex-col gap-1 ${labelClass}`}>Sizing<UmbraSelectControl aria-label="Video resolution method" value={workflowSizing ? 'workflow' : 'fixed'} disabled={disabled} onChange={event => change({ resolution: { ...latest.current.resolution, mode: event.target.value as 'workflow' | 'fixed' } })} className={inputClass}><option value="workflow">DaSiWa resolution</option><option value="fixed">Fixed pixels</option></UmbraSelectControl></label>
-              {workflowSizing && h3 ? <>
-                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Aspect ratio<UmbraSelectControl aria-label="H3 aspect ratio" value={h3Resolution.aspect} disabled={disabled} onChange={event => changeH3Resolution({ aspect: event.target.value })} className={inputClass}>{OFFICIAL_H3_ASPECTS.map(value => <option key={value} value={value}>{value === 'auto' ? 'Auto (reference)' : value === 'custom' ? 'Custom ratio' : value}</option>)}</UmbraSelectControl></label>
-                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Resolution<UmbraSelectControl aria-label="H3 resolution preset" value={h3Resolution.resolution} disabled={disabled} onChange={event => changeH3Resolution({ resolution: event.target.value })} className={inputClass}>{OFFICIAL_H3_RESOLUTIONS.map(value => <option key={value} value={value}>{value === 'auto' ? 'Native (768px short edge)' : value === 'custom' ? 'Custom' : value}</option>)}</UmbraSelectControl></label>
-                <label className={`col-span-2 flex min-w-0 flex-col gap-1 ${labelClass}`}>Input scaling<UmbraSelectControl aria-label="H3 input scaling" value={h3Resolution.input_scaling} disabled={disabled} onChange={event => changeH3Resolution({ input_scaling: event.target.value })} className={inputClass}>{OFFICIAL_H3_INPUT_SCALING.map(value => <option key={value} value={value}>{value === 'Auto' ? 'Native (2048px short edge)' : value}</option>)}</UmbraSelectControl></label>
-                {h3Resolution.aspect === 'custom' ? <>{(['custom_aspect_w', 'custom_aspect_h'] as const).map((key, index) => <label key={key} className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Ratio {index ? 'height' : 'width'}<input aria-label={`H3 aspect ${index ? 'height' : 'width'}`} type="number" min={1} max={8192} value={h3Resolution[key]} disabled={disabled} onChange={event => changeH3Resolution({ [key]: Number(event.target.value) })} className={inputClass} /></label>)}</> : null}
-                {h3Resolution.resolution === 'custom' ? <><label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Custom sizing<UmbraSelectControl aria-label="H3 custom resolution mode" value={h3Resolution.custom_mode} disabled={disabled} onChange={event => changeH3Resolution({ custom_mode: event.target.value as 'mp' | 'fixed' })} className={inputClass}><option value="mp">Megapixels</option><option value="fixed">Fixed pixels</option></UmbraSelectControl></label>{h3Resolution.custom_mode === 'mp' ? <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Megapixels<input aria-label="H3 custom megapixels" type="number" min={0.01} max={64} step={0.01} value={h3Resolution.custom_mp} disabled={disabled} onChange={event => changeH3Resolution({ custom_mp: Number(event.target.value) })} className={inputClass} /></label> : null}</> : null}
-              </> : null}
-              {workflowSizing && !h3 ? <>
-                <label className={`col-span-2 flex items-center gap-2 py-2 ${labelClass}`}><input type="checkbox" checked={draft.resolution?.followSourceAspect === true} disabled={disabled} onChange={event => change({ resolution: { ...latest.current.resolution, mode: 'workflow', followSourceAspect: event.target.checked } })} className="h-4 w-4 accent-[var(--umbra-accent)]" />Use first reference aspect ratio</label>
-                {fields.filter(field => field.category === 'resolution').map(renderField)}
-              </> : null}
-              {!workflowSizing || (h3 && h3Resolution.resolution === 'custom' && h3Resolution.custom_mode === 'fixed') ? <>
-                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Width<input aria-label="Video width" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.width} disabled={disabled} onChange={event => change({ width: Number(event.target.value) })} className={inputClass} /></label>
-                <label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}>Height<input aria-label="Video height" type="number" min={64} max={4096} step={h3 ? 32 : 64} value={draft.height} disabled={disabled} onChange={event => change({ height: Number(event.target.value) })} className={inputClass} /></label>
-              </> : null}
-            </div>
-          </section>
-          <section aria-label="Seed settings" className="space-y-3 border-b border-white/10 py-4"><h4 className="text-xs font-semibold text-zinc-200">Seed</h4><label className={`flex min-w-0 flex-col gap-1 ${labelClass}`}><input aria-label="Video seed" inputMode="numeric" value={draft.seed} disabled={disabled} onChange={event => change({ seed: event.target.value })} className={inputClass} /></label></section>
-          <section aria-label="LoRA stack settings" className="space-y-3 border-b border-white/10 py-4"><UmbraOfficialVideoLoraControls rows={draft.loraStack || []} onChange={loraStack => change({ loraStack })} workflowId={workflowId} catalog={catalog} disabled={disabled} /></section>
-          {settingsSections.map(category => <section key={category.id} aria-label={`${category.label} settings`} className="space-y-3 border-b border-white/10 py-4 last:border-b-0">
-            <h4 className="text-xs font-semibold text-zinc-200">{category.label}</h4>
-            <div className="grid min-w-0 grid-cols-2 gap-3">{category.id === 'video-output' ? <label className={`col-span-2 flex items-center gap-2 py-2 ${labelClass}`}><input aria-label="Save last frame" type="checkbox" checked={draft.saveLastFrame !== false} disabled={disabled} onChange={event => change({ saveLastFrame: event.target.checked })} className="h-4 w-4 accent-[var(--umbra-accent)]" />Save last frame</label> : null}{category.fields.map(renderField)}</div>
-          </section>)}
+          {generationSettings}
         </div>
       </aside>
     </div>, document.body) : null}
-    <section aria-label="Video prompt" data-official-editor-section="prompt" className="min-w-0 space-y-2 py-4">
-      <label className={`block space-y-2 ${labelClass}`}><span>{continuing ? 'Continuation prompt' : 'Overall prompt'}</span><textarea aria-label="Video overall prompt" value={activePrompt} disabled={disabled} onChange={event => changePrompt(event.target.value)} className={`${inputClass} min-h-28 resize-y`} /></label>
-    </section>
-    {h3 ? <section aria-label="Prompt Forge" data-official-editor-section="forge" className="min-w-0 border-t border-white/10 pb-3">
-      <button type="button" className="flex min-h-10 items-center gap-2 text-xs text-zinc-300 hover:text-[var(--umbra-accent)]" aria-expanded={forgeOpen} onClick={() => setForgeOpen(!forgeOpen)}><Sparkles size={15} />Prompt Forge<Plus size={13} /></button>
-      {forgeOpen ? <UmbraH3PromptForgeModal inline disabled={disabled} modeOverride={draft.mode as 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'REF2VA'} video={video} prompt={activePrompt} durationSeconds={draft.durationSeconds} comfyConnected={comfyConnected} onApplyPrompt={prompt => { if (!disabled) changePrompt(prompt); }} onClose={() => setForgeOpen(false)} continuity={continuing ? { session: h3Settings.continuity.session, source_kind: h3Settings.continuity.sourceKind, clip_id: h3Settings.continuity.sourceKind === 'video' ? h3Settings.continuity.sourceVideoId : h3Settings.continuity.sourceId, overlap_frames: h3Settings.continuity.overlapFrames, current_prompt: activePrompt, use_references: h3Settings.continuity.useReferences } : undefined} referenceNotes={references.filter(reference => reference.enabled !== false && (!continuing || (draft.mode === 'REF2VA' && h3Settings.continuity.useReferences))).map(reference => ({ kind: reference.kind, ...(reference.kind === 'video' ? { stream: reference.mediaMode || 'video' } : {}), role: draft.mode === 'REF2VA' ? 'subject' : 'keyframe', keep: reference.prompt }))} /> : null}
-    </section> : null}
+
+    {!phoneMode ? promptControls : null}
   </div>;
 }

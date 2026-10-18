@@ -31,7 +31,7 @@ export function Toaster() {
       )}
       style={{
         bottom: isPhoneRemote
-          ? 'calc(var(--umbra-phone-bottom-nav-height) + 0.5rem)'
+          ? 'calc(var(--umbra-phone-bottom-nav-height) + var(--umbra-mobile-filmstrip-height, 0px) + 0.5rem)'
           : 'calc(var(--umbra-filmstrip-toast-offset, 0px) + 1.25rem)',
       }}
     >

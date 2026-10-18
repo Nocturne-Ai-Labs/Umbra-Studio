@@ -31,6 +31,7 @@ interface Props {
   onApplyPrompt: (prompt: string) => void;
   onClose: () => void;
   inline?: boolean;
+  phoneMode?: boolean;
   disabled?: boolean;
   modeOverride?: 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'REF2VA';
   referenceNotes?: Array<{ kind: 'image' | 'video' | 'audio'; role: string; keep: string; stream?: 'video' | 'audio' | 'video_audio' }>;
@@ -40,7 +41,7 @@ interface Props {
 const fieldClass = 'min-h-9 w-full min-w-0 rounded border border-white/15 bg-black/30 px-2 py-2 text-xs text-zinc-100 outline-none focus:border-fuchsia-300/50';
 const buttonClass = 'inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-200 hover:border-fuchsia-300/40 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
 
-export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose, inline = false, disabled = false, referenceNotes, modeOverride, continuity }: Props) {
+export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose, inline = false, phoneMode = false, disabled = false, referenceNotes, modeOverride, continuity }: Props) {
   const [catalog, setCatalog] = React.useState<ForgeCatalog | null>(null);
   const [model, setModel] = React.useState('');
   const [detail, setDetail] = React.useState(5);
@@ -159,9 +160,10 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
 
   const panel = (
       <div ref={dialogRef} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : true} aria-label="MiniMax H3 Prompt Forge" tabIndex={inline ? undefined : -1}
-        className={inline ? 'flex w-full min-w-0 flex-col text-[var(--umbra-text)]' : 'flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-fuchsia-300/35 bg-[#101114] text-zinc-200 shadow-2xl outline-none'}
+        className={inline ? 'flex w-full min-w-0 flex-col text-[var(--umbra-text)]' : phoneMode ? 'flex h-full w-full min-w-0 flex-col overflow-hidden bg-[var(--umbra-panel-bg)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-[var(--umbra-text)] outline-none [&_button]:min-h-11 [&_input]:min-h-11' : 'flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-fuchsia-300/35 bg-[#101114] text-zinc-200 shadow-2xl outline-none'}
         onKeyDown={(event) => {
           if (inline) return;
+          if ((event.target as HTMLElement).closest('[role="menu"]')) return;
           if (event.key === 'Escape') { event.stopPropagation(); if (!drafting) onClose(); }
           if (event.key !== 'Tab') return;
           const nodes = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), textarea:not(:disabled), input:not(:disabled)') ?? []);
@@ -208,7 +210,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
           <p className="text-xs text-zinc-500">Text-only model: describe reference images in your idea or reference notes.</p>
           {localModel ? <>
             <UmbraH3ForgeDeviceControl value={computeDevice} onChange={(value) => { setComputeDevice(value); setDraft(''); }} disabled={drafting || !supportsComputeDevice} />
-            {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Updater and restart ComfyUI for local Llama support.</p> : null}
+            {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI for local Llama support.</p> : null}
           </> : null}
           {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
           <H3ForgeRawResponse raw={rawResponse} />
@@ -228,6 +230,6 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
       </div>
   );
   return inline ? panel : createPortal(
-    <div data-umbra-modal-root="" className="fixed inset-0 z-[240] flex items-center justify-center bg-black/80 p-3" onMouseDown={(event) => { if (event.target === event.currentTarget && !drafting) onClose(); }}>{panel}</div>, document.body,
+    <div data-umbra-modal-root="" className={`fixed inset-0 z-[240] flex items-center justify-center bg-black/80 ${phoneMode ? '' : 'p-3'}`} onMouseDown={(event) => { if (event.target === event.currentTarget && !drafting) onClose(); }}>{panel}</div>, document.body,
   );
 }

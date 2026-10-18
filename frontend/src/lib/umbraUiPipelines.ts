@@ -30,8 +30,7 @@ export function supportsUmbraUiEditWorkspace(
   const key = normalizeUmbraUiModelFamilyKey(family);
   return workflows.some((workflow) => workflow.umbraUiPipelines?.some((pipeline) => (
     pipeline.feature === 'inpainting' && pipeline.modelFamilyKey === key
-    && pipeline.inpaintAdapter === 'native_edit'
-    && pipeline.instructionEditing === true
+    && ((pipeline.inpaintAdapter === 'native_edit' && pipeline.instructionEditing === true) || key === 'mossimage')
     && (!source || pipeline.modelSources.includes(source))
   )));
 }

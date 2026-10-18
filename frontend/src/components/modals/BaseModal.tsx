@@ -84,6 +84,7 @@ export function BaseModal({
           </h2>
           {showCloseButton && (
             <button
+              aria-label="Close"
               onClick={onClose}
               className="p-2 rounded-lg glass-panel hover:bg-red-500/20 hover:text-red-400 transition-colors"
             >

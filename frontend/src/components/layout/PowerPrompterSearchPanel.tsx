@@ -15,9 +15,11 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Star,
   Tags,
   Trash2,
+  X,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 
@@ -81,6 +83,7 @@ interface PowerPrompterSearchPanelProps {
   overlayMode?: boolean;
   menuMode?: boolean;
   drawerMode?: boolean;
+  mobileLayout?: boolean;
   drawerTriggerContainer?: HTMLElement | null;
   drawerOpen?: boolean;
   onDrawerOpenChange?: (open: boolean) => void;
@@ -145,12 +148,15 @@ export const PowerPrompterSearchPanel = React.memo(({
   overlayMode = false,
   menuMode = false,
   drawerMode = false,
+  mobileLayout = false,
   drawerTriggerContainer,
   drawerOpen,
   onDrawerOpenChange,
 }: PowerPrompterSearchPanelProps) => {
   const [internalDrawerOpen, setInternalDrawerOpen] = useState(false);
   const [activeView, setActiveView] = useState<CatalogView>('catalog');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersId = React.useId();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [classifier, setClassifier] = useState('all');
@@ -559,7 +565,7 @@ export const PowerPrompterSearchPanel = React.memo(({
             {selected ? <Check className="h-2.5 w-2.5" /> : null}
           </span>
           <span className="min-w-0">
-            <span className="block truncate font-mono text-[10px] font-semibold" style={{ color: getCategoryColor(item.category) }} title={displayTag}>{displayTag}</span>
+            <span className="block truncate font-mono text-[10px] font-semibold" style={{ color: mobileLayout ? 'var(--umbra-text)' : getCategoryColor(item.category) }} title={displayTag}>{displayTag}</span>
             <span className="mt-0.5 block truncate text-[8px] font-black uppercase tracking-[0.08em] text-zinc-600">
               {CATEGORY_LABELS[item.category] || `Category ${item.category}`} · {item.source || 'Favorite'}
             </span>
@@ -571,7 +577,7 @@ export const PowerPrompterSearchPanel = React.memo(({
               </span>
             ) : null}
           </span>
-          <span className="shrink-0 font-mono text-[9px] text-cyan-200/70">{formatPostCount(item.count)}</span>
+          <span data-umbra-catalog-post-count="" className="shrink-0 font-mono text-[9px] text-cyan-200/70">{formatPostCount(item.count)}</span>
         </button>
         <button
           type="button"
@@ -606,6 +612,7 @@ export const PowerPrompterSearchPanel = React.memo(({
       <div
       data-umbra-powerprompter-search-panel=""
       data-umbra-powerprompter-tag-catalog=""
+      data-umbra-catalog-mobile={mobileLayout ? '' : undefined}
       data-umbra-tag-catalog-drawer={drawerMode ? '' : undefined}
       data-umbra-tag-catalog-open={drawerMode ? String(effectiveDrawerOpen) : undefined}
       className={`${drawerMode
@@ -626,21 +633,21 @@ export const PowerPrompterSearchPanel = React.memo(({
       <header className="flex min-h-12 items-center gap-2 border-b border-white/10 px-3 py-2">
         <Tags className="h-4 w-4 shrink-0 text-cyan-200" />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-zinc-100">Danbooru Tag Catalog</h2>
+          <h2 className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-zinc-100">{mobileLayout ? 'Tag Catalog' : 'Danbooru Tag Catalog'}</h2>
           <div className="font-mono text-[9px] text-zinc-600">
-            {loading ? 'Loading...' : `${activeView === 'favorites' ? favorites.length : results.length} shown`} · {selectedItems.length} selected · {enabledCSVs.length} CSV
+            {loading ? 'Loading...' : `${activeView === 'favorites' ? favorites.length : results.length} shown`} · {mobileLayout ? `${enabledCSVs.length} source${enabledCSVs.length === 1 ? '' : 's'}` : `${selectedItems.length} selected · ${enabledCSVs.length} CSV`}
           </div>
         </div>
-        <button type="button" onClick={() => setRefreshRevision((value) => value + 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Refresh catalog">
+        {!mobileLayout ? <button type="button" onClick={() => setRefreshRevision((value) => value + 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Refresh catalog">
           <RefreshCw className={`h-3.5 w-3.5 ${loading || classifiersLoading ? 'animate-spin' : ''}`} />
-        </button>
+        </button> : null}
         {onOpenSettings ? <button type="button" onClick={onOpenSettings} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Power Prompter settings"><Settings className="h-3.5 w-3.5" /></button> : null}
         {drawerMode ? (
-          <button type="button" onClick={() => setDrawerOpen(false)} className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400 hover:text-zinc-100">
-            <ChevronDown className="h-3.5 w-3.5" /> Close
+          <button type="button" aria-label="Close tag catalog" onClick={() => setDrawerOpen(false)} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-white/10 px-2 text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400 hover:text-zinc-100">
+            {mobileLayout ? <X className="h-5 w-5" /> : <><ChevronDown className="h-3.5 w-3.5" /> Close</>}
           </button>
         ) : null}
-        <button
+        {!mobileLayout ? <button
           type="button"
           disabled={selectedItems.length === 0}
           onClick={() => insertItems(selectedItems)}
@@ -648,10 +655,10 @@ export const PowerPrompterSearchPanel = React.memo(({
           title="Insert selected catalog entries"
         >
           <Plus className="h-3 w-3" /> Insert{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
-        </button>
+        </button> : null}
       </header>
 
-      <div className="grid grid-cols-3 gap-1 border-b border-white/[0.08] p-2">
+      <div data-umbra-catalog-tabs="" className="grid grid-cols-3 gap-1 border-b border-white/[0.08] p-2">
         {([
           ['catalog', 'Catalog', Tags],
           ['favorites', 'Favorites', Star],
@@ -673,7 +680,7 @@ export const PowerPrompterSearchPanel = React.memo(({
 
       {activeView === 'catalog' ? (
         <>
-          <div className="border-b border-white/[0.08] px-3 py-2.5">
+          <div data-umbra-catalog-search-controls="" className="shrink-0 border-b border-white/[0.08] px-3 py-2.5">
             <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" />
@@ -681,17 +688,29 @@ export const PowerPrompterSearchPanel = React.memo(({
                   data-umbra-powerprompter-catalog-search
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  aria-label="Search tags and characters"
                   placeholder={enabledCSVs.length > 0 ? 'Search tags and characters' : 'Enable a CSV source first'}
                   disabled={enabledCSVs.length === 0}
                   className="settings-input h-9 !py-1.5 pl-8 text-xs"
                 />
               </div>
-              <div className="flex gap-1.5">
+              {mobileLayout ? <button
+                type="button"
+                aria-label="Catalog filters"
+                aria-expanded={filtersOpen}
+                aria-controls={filtersId}
+                onClick={() => setFiltersOpen((value) => !value)}
+                className="relative inline-flex items-center justify-center rounded-sm border border-white/15 px-3 text-zinc-300"
+              >
+                <SlidersHorizontal className="h-5 w-5" />
+                {category !== 'all' || classifier !== 'all' ? <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--umbra-accent)]" /> : null}
+              </button> : <div className="flex gap-1.5">
                 <button type="button" disabled={selectedItems.length === 0} onClick={() => setSelectedItems([])} className="h-9 rounded-sm border border-white/10 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-zinc-500 hover:text-zinc-200 disabled:opacity-30">Clear</button>
                 <button data-umbra-powerprompter-catalog-insert type="button" disabled={selectedItems.length === 0} onClick={() => insertItems(selectedItems)} className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-emerald-300/30 bg-emerald-500/10 px-3 text-[8px] font-black uppercase tracking-[0.08em] text-emerald-100 disabled:opacity-30"><Plus className="h-3.5 w-3.5" /> Insert</button>
-              </div>
+              </div>}
             </div>
 
+            <div id={filtersId} hidden={mobileLayout && !filtersOpen} data-umbra-catalog-filters="">
             <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5 custom-scrollbar">
               {CATEGORIES.map((entry) => (
                 <button
@@ -735,8 +754,9 @@ export const PowerPrompterSearchPanel = React.memo(({
               <span className={`inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.09em] ${explicitCatalogEnabled ? 'text-red-200/80' : 'text-zinc-600'}`}><ShieldCheck className="h-3 w-3" /> Explicit classifiers {explicitCatalogEnabled ? 'visible' : 'hidden'}</span>
               <button type="button" aria-pressed={explicitCatalogEnabled} data-umbra-powerprompter-catalog-explicit-toggle onClick={() => setAppSetting('ui.tagCatalogExplicitEnabled', !explicitCatalogEnabled)} className={`h-6 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${explicitCatalogEnabled ? 'border-red-300/20 text-red-200/70 hover:text-red-100' : 'border-white/10 text-zinc-500 hover:text-zinc-200'}`}>Explicit {explicitCatalogEnabled ? 'On' : 'Off'}</button>
             </div>
+            </div>
 
-            {drawerMode || menuMode || activeView === 'catalog' ? (
+            {(!mobileLayout || (relationCorpusStatus?.indexedPosts ?? 0) > 0) ? (
               <section data-umbra-tag-suggestion-rail className="mt-2 h-[5.25rem] flex-none overflow-hidden rounded-sm border border-fuchsia-300/15 bg-fuchsia-500/[0.025]">
                 <div className="flex h-8 shrink-0 flex-wrap items-center gap-2 border-b border-white/[0.06] px-2.5 py-1.5">
                   <span className="inline-flex shrink-0 items-center gap-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-fuchsia-100">
@@ -796,7 +816,7 @@ export const PowerPrompterSearchPanel = React.memo(({
             ) : null}
           </div>
 
-          <div ref={scrollRef} onScroll={handleScroll} className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-2.5">
+          <div ref={scrollRef} onScroll={handleScroll} data-umbra-catalog-results="" className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-2.5">
             {enabledCSVs.length === 0 ? (
               <button type="button" onClick={() => setActiveView('sources')} className="flex min-h-28 w-full items-center justify-center rounded-md border border-dashed border-white/10 px-4 text-center text-[10px] text-zinc-500 hover:border-cyan-300/25 hover:text-cyan-100">Choose at least one tag or character CSV source.</button>
             ) : query.trim().length === 1 ? (
@@ -808,23 +828,23 @@ export const PowerPrompterSearchPanel = React.memo(({
             ) : results.length === 0 ? (
               <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 text-[10px] text-zinc-600">No matching catalog entries.</div>
             ) : (
-              <div className={`grid grid-cols-1 gap-1.5 ${menuMode || drawerMode ? 'sm:grid-cols-2 lg:grid-cols-3' : ''}`}>{results.map(renderCatalogItem)}</div>
+              <div className={`grid grid-cols-1 gap-1.5 ${!mobileLayout && (menuMode || drawerMode) ? 'sm:grid-cols-2 lg:grid-cols-3' : ''}`}>{results.map(renderCatalogItem)}</div>
             )}
             {loading && results.length > 0 ? <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin text-zinc-600" /></div> : null}
           </div>
         </>
       ) : activeView === 'favorites' ? (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center justify-between gap-2 border-b border-white/[0.08] px-3 py-2">
+          {!mobileLayout ? <div className="flex items-center justify-between gap-2 border-b border-white/[0.08] px-3 py-2">
             <span className="text-[9px] font-black uppercase tracking-[0.1em] text-zinc-500">Saved entries</span>
             <button type="button" disabled={selectedItems.length === 0} onClick={() => insertItems(selectedItems)} className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-emerald-300/30 bg-emerald-500/10 px-3 text-[8px] font-black uppercase tracking-[0.08em] text-emerald-100 disabled:opacity-30"><Plus className="h-3 w-3" /> Insert Selected</button>
-          </div>
-          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-2.5">
-            {favorites.length === 0 ? <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 px-4 text-center text-[10px] text-zinc-600">No favorites yet. Use the star on any catalog entry.</div> : <div className={`grid grid-cols-1 gap-1.5 ${menuMode || drawerMode ? 'sm:grid-cols-2 lg:grid-cols-3' : ''}`}>{favorites.map(renderCatalogItem)}</div>}
+          </div> : null}
+          <div data-umbra-catalog-results="" className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-2.5">
+            {favorites.length === 0 ? <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 px-4 text-center text-[10px] text-zinc-600">No favorites yet. Use the star on any catalog entry.</div> : <div className={`grid grid-cols-1 gap-1.5 ${!mobileLayout && (menuMode || drawerMode) ? 'sm:grid-cols-2 lg:grid-cols-3' : ''}`}>{favorites.map(renderCatalogItem)}</div>}
           </div>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div data-umbra-catalog-sources="" className="flex min-h-0 flex-1 flex-col">
           <div className="flex items-center justify-between gap-3 border-b border-white/[0.08] px-3 py-2.5">
             <div><div className="text-[9px] font-black uppercase tracking-[0.1em] text-zinc-400">CSV Sources</div><div className="mt-0.5 text-[9px] text-zinc-600">{enabledCSVs.length} enabled source{enabledCSVs.length === 1 ? '' : 's'}</div></div>
             <button type="button" onClick={() => void loadCSVList(true, true)} disabled={csvLoading} className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-white/10 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-zinc-400 hover:text-cyan-100 disabled:opacity-40"><RefreshCw className={`h-3 w-3 ${csvLoading ? 'animate-spin' : ''}`} /> Reindex</button>
@@ -856,6 +876,14 @@ export const PowerPrompterSearchPanel = React.memo(({
           </div>
         </div>
       )}
+
+      {mobileLayout ? <footer data-umbra-catalog-selection="" className="flex shrink-0 items-center gap-2 border-t border-white/10 px-3 py-2">
+        <span role="status" className="min-w-0 flex-1 text-xs text-zinc-400">{selectedItems.length} selected</span>
+        <button type="button" aria-label="Clear selected tags" disabled={selectedItems.length === 0} onClick={() => setSelectedItems([])} className="rounded-sm border border-white/10 px-3 text-xs text-zinc-300 disabled:opacity-30">Clear</button>
+        <button data-umbra-powerprompter-catalog-insert type="button" disabled={selectedItems.length === 0} onClick={() => insertItems(selectedItems)} className="inline-flex items-center justify-center gap-1.5 rounded-sm border border-[var(--umbra-accent)] px-3 text-sm font-semibold text-[var(--umbra-text)] disabled:opacity-30">
+          <Plus className="h-4 w-4" /> Insert{selectedItems.length > 0 ? ` ${selectedItems.length}` : ''}
+        </button>
+      </footer> : null}
 
       {contextMenu ? (
         <div className="umbra-context-menu-panel fixed z-[100] min-w-[196px] p-1" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>

@@ -25,6 +25,10 @@ const VALID_EXTRAS_TOOLS = new Set<UmbraUiExtrasToolId>([
   'gif',
 ]);
 
+export function isUmbraUiExtrasToolAvailable(tool: UmbraUiExtrasToolId, remoteMode: string): boolean {
+  return remoteMode !== 'phone' || (tool !== 'censor' && tool !== 'manga');
+}
+
 export function normalizeUmbraUiExtrasTool(value: unknown): UmbraUiExtrasToolId | null {
   const tool = String(value || '').trim() as UmbraUiExtrasToolId;
   return VALID_EXTRAS_TOOLS.has(tool) ? tool : null;
