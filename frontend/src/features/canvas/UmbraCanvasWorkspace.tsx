@@ -2612,6 +2612,11 @@ export function UmbraCanvasWorkspace({
           <button type="button" title="Import portable Canvas project" aria-label="Import portable Canvas project" onClick={() => archiveInputRef.current?.click()} disabled={archiving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800"><Upload size={14} /></button>
         </div>
       </header>
+      {mossLayout ? <div aria-label="MOSS layout mode" className="shrink-0 border-b border-white/10 bg-black/25 px-3 py-2 text-[11px] text-[var(--umbra-text)]">
+        <strong className="mr-2">Layout generation</strong>
+        Creates new artwork from prompts and boxes. Existing images are not edited or used as references.
+        <span className="ml-2 opacity-70">Use IMG2IMG or Inpaint to modify an image.</span>
+      </div> : null}
       <div data-umbra-canvas-layout="" className={cn('relative grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)]', compactPanel ? '@min-[1100px]/canvas:grid-cols-[320px_minmax(0,1fr)]' : '')}>
       {compactPanel ? <button type="button" aria-label="Close Canvas side panel" onClick={closePanel} className="absolute inset-0 z-10 bg-black/65 @min-[1100px]/canvas:hidden" /> : null}
 
@@ -2988,10 +2993,10 @@ export function UmbraCanvasWorkspace({
             </div>
           </section>
         ) : null}
-        <UmbraGenerationActionBar task="Canvas" onGenerate={() => void prepareGenerationRegion()}
+        <UmbraGenerationActionBar task={mossLayout ? 'MOSS Layout' : 'Canvas'} onGenerate={() => void prepareGenerationRegion()}
           disabled={preparingRegion || submitting || project.generation.pending.length > 0 || !!generationResolutionIssue} busy={preparingRegion || submitting || project.generation.pending.length > 0}
-          title={generationResolutionIssue || (project.generation.pending.length > 0 ? 'Wait for the current Canvas generation to finish before starting another' : 'Generate the selected Canvas region')}
-          label={preparingRegion ? 'Preparing' : submitting ? 'Submitting' : project.generation.pending.length > 0 ? 'Generating' : 'Generate'}
+          title={generationResolutionIssue || (project.generation.pending.length > 0 ? 'Wait for the current Canvas generation to finish before starting another' : mossLayout ? 'Generate a new composition from the scene prompt and layout boxes' : 'Generate the selected Canvas region')}
+          label={preparingRegion ? 'Preparing' : submitting ? 'Submitting' : project.generation.pending.length > 0 ? 'Generating' : mossLayout ? 'Generate layout' : 'Generate'}
           folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
           <button type="button" disabled={!previewStage?.sourcePath} onClick={() => { if (previewStage) void sendStagedResult(previewStage, 'img2img'); }}
             title="Continue the previewed result in IMG2IMG" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-cyan-300/20 px-2.5 text-[10px] font-bold text-cyan-100 disabled:text-zinc-600"><ImagePlus size={12} /> IMG2IMG</button>

@@ -18,7 +18,7 @@ export function Flux3LayoutControls({ regions, drawing, onDraw, onChange, onAdd,
         {moss && onAdd ? <button type="button" onClick={onAdd} className="ml-auto mr-2 rounded border border-white/15 px-2 py-1 text-[10px] text-zinc-300">Add box</button> : null}
         <button type="button" aria-pressed={drawing} onClick={onDraw} className="rounded border border-white/15 px-2 py-1 text-[10px] text-zinc-300">Draw box</button>
       </div>
-      <p className="text-[10px] text-zinc-500">{moss ? 'Describe the scene in your prompt, then draw object or text boxes inside the generation box. Generates new artwork; existing layers remain separate. Layout control is experimental.' : 'Draw inside the generation box. Mention <obj_1>, <obj_2> in your prompt.'}</p>
+      <p className="text-[10px] text-zinc-500">{moss ? 'Describe the complete scene, then place object and text boxes. Each run generates a new composition; existing images do not guide it. Layout control is experimental.' : 'Draw inside the generation box. Mention <obj_1>, <obj_2> in your prompt.'}</p>
       {regions.map((region, index) => (
         <div key={region.id} className="space-y-1 rounded border border-white/10 p-2">
           <div className="flex items-center gap-2">

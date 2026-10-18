@@ -1353,6 +1353,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     [activeMode, workflows],
   );
   const editWorkspaceAvailable = supportsUmbraUiEditWorkspace(workflows, modelFamily, modelType);
+  const mossLayoutWorkspace = normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage';
   const selectedFamilyPipelines = React.useMemo(() => workflows.flatMap((workflow) => (
     (workflow.umbraUiPipelines || [])
       .filter((pipeline) => pipeline.feature === activeImageFeature
@@ -3054,11 +3055,12 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               <UmbraSelect
                 ariaLabel="Canvas workspace" menuTitle="Canvas workspace"
                 value={activeMode === 'edit' ? 'edit' : 'canvas'}
-                leadingIcon={activeMode === 'edit' ? <Paintbrush size={13} /> : <Layers3 size={13} />}
+                leadingIcon={activeMode === 'edit' && !mossLayoutWorkspace ? <Paintbrush size={13} /> : <Layers3 size={13} />}
                 options={[
                   { value: 'canvas', label: 'Canvas', icon: <Layers3 size={13} /> },
-                  { value: 'edit', label: 'Edit', icon: <Paintbrush size={13} />, disabled: !editWorkspaceAvailable,
-                    description: editWorkspaceAvailable ? undefined : 'Select a supported edit model to enable Edit.' },
+                  { value: 'edit', label: mossLayoutWorkspace ? 'MOSS Layout' : 'Edit', icon: mossLayoutWorkspace ? <Layers3 size={13} /> : <Paintbrush size={13} />, disabled: !editWorkspaceAvailable,
+                    description: mossLayoutWorkspace ? 'Generate new compositions from prompts and layout boxes. Source images are not edited.'
+                      : editWorkspaceAvailable ? 'Edit a source image with a supported instruction-editing model.' : 'Select a supported edit model to enable Edit.' },
                 ]}
                 onValueChange={(value) => {
                   if (value === 'canvas' || (value === 'edit' && editWorkspaceAvailable)) navigateWorkspace(value);
