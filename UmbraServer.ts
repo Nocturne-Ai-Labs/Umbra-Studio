@@ -29707,9 +29707,15 @@ async function handleGalleryArchives(req: Request, url: URL): Promise<Response> 
         'Cache-Control': 'no-store',
       } });
     }
-    if (!(await fs.stat(physicalPath)).isDirectory()) return json({ error: 'Select a folder' }, 400);
-    if (req.method === 'POST') return json(queueGalleryArchive(physicalPath, path), 202);
-    return json({ archives: await listGalleryArchives(physicalPath, path) });
+    try {
+      if (!(await fs.stat(physicalPath)).isDirectory()) return json({ error: 'Select a folder' }, 400);
+      if (req.method === 'POST') return json(queueGalleryArchive(physicalPath, path), 202);
+      return json({ archives: await listGalleryArchives(physicalPath, path) });
+    } catch (error) {
+      // Fresh installs have no ComfyUI output folder until their first output.
+      if (req.method === 'GET' && (error as NodeJS.ErrnoException).code === 'ENOENT') return json({ archives: [] });
+      throw error;
+    }
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Archive operation failed' }, 400);
   }
