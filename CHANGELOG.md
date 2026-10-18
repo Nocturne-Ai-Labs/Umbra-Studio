@@ -37,6 +37,7 @@
 
 - Fixed: opening touch menus could accidentally activate an action; nested menus could overlap on mobile.
 - Fixed: metadata import could wait on optional clipboard access, and mobile controls could be cramped or difficult to reach.
+- Fixed: fresh Gallery folders could show a ZIP listing error before ComfyUI created its output directory.
 - Fixed: DaSiWa Auto Prompt compatibility with the reviewed modular node layout.
 - Improved: prompt-first mobile generation, folder navigation, Gallery-only OLED glass filmstrip, compact analysis controls and mobile Beta support status.
 
