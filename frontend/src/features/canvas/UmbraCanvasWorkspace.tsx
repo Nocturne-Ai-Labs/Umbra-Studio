@@ -1,5 +1,6 @@
 import { Flux3LayoutControls } from './Flux3LayoutControls';
 import { flux3LayoutElements } from '../../../../shared/umbra-ui/flux3Edit';
+import { compileMossLayoutPrompt } from '../../../../shared/umbra-ui/mossLayout';
 import { normalizeUmbraUiModelFamilyKey } from '../../../../shared/umbra-ui/pipelineTypes';
 'use client';
 
@@ -473,7 +474,10 @@ export function UmbraCanvasWorkspace({
   const [pendingMediaImport, setPendingMediaImport] = React.useState<UmbraUiMediaHandoff | null>(null);
   const [mediaImportBusy, setMediaImportBusy] = React.useState(false);
   const [compactPanel, setCompactPanel] = React.useState<'generation' | 'inpaint' | 'layers' | ''>('');
-  const layoutAvailable = editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'flux3';
+  const mossLayout = editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage';
+  const mossLayoutRef = React.useRef(mossLayout);
+  mossLayoutRef.current = mossLayout;
+  const layoutAvailable = mossLayout || (editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'flux3');
   React.useEffect(() => {
     if (editingWorkspace) setCompactPanel('generation');
   }, [editingWorkspace]);
@@ -712,7 +716,7 @@ export function UmbraCanvasWorkspace({
       onGenerationBboxChange: setGenerationBbox,
       onCreateLayoutRegion: (rect) => {
         const current = useUmbraCanvasStore.getState().present;
-        setLayoutRegions([...(current.layoutRegions || []), { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: crypto.randomUUID(), description: '' }]);
+        setLayoutRegions([...(current.layoutRegions || []), { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: crypto.randomUUID(), description: '', ...(mossLayoutRef.current ? { label: 'object' as const } : {}) }]);
       },
       onViewportChange: setViewport,
       onMaskStroke: addMaskStroke,
@@ -737,7 +741,7 @@ export function UmbraCanvasWorkspace({
       manager.destroy();
       managerRef.current = null;
     };
-  }, [addDrawable, addMaskStroke, addRasterStroke, cropRaster, handleSelectEntity, setGenerationBbox, setViewport, showToast, updateDrawableTransforms]);
+  }, [addDrawable, addMaskStroke, addRasterStroke, cropRaster, handleSelectEntity, setGenerationBbox, setLayoutRegions, setViewport, showToast, updateDrawableTransforms]);
 
   const canvasSceneKey = React.useMemo(() => JSON.stringify({
     layout: project.layoutRegions,
@@ -781,6 +785,10 @@ export function UmbraCanvasWorkspace({
   React.useEffect(() => {
     managerRef.current?.setTool(tool);
   }, [tool]);
+
+  React.useEffect(() => {
+    managerRef.current?.setMossLayout(mossLayout);
+  }, [mossLayout]);
 
   React.useEffect(() => {
     managerRef.current?.setLayerSnappingEnabled(layerSnappingEnabled);
@@ -1614,7 +1622,7 @@ export function UmbraCanvasWorkspace({
     setPreparingRegion(true);
     try {
       const composite = await composeUmbraCanvasGenerationRegion(frozenProject, {
-        wholeRegion: editingWorkspace && frozenProject.editArea !== 'mask',
+        wholeRegion: mossLayout || (editingWorkspace && frozenProject.editArea !== 'mask'),
       });
       const currentProject = useUmbraCanvasStore.getState().present;
       if (currentProject.id !== frozenProject.id || currentProject.revision !== frozenProject.revision) {
@@ -1635,7 +1643,7 @@ export function UmbraCanvasWorkspace({
     } finally {
       setPreparingRegion(false);
     }
-  }, [capabilities.resolution, editingWorkspace, preparingRegion, showToast, submitting]);
+  }, [capabilities.resolution, editingWorkspace, mossLayout, preparingRegion, showToast, submitting]);
 
   const submitPreparedRegion = React.useCallback(async () => {
     if (!preparedRegion || submitting) return;
@@ -1681,7 +1689,8 @@ export function UmbraCanvasWorkspace({
       const queuedSamplerName = resolveUmbraCanvasGenerationChoice(capabilities.sampler, samplerName, 'euler');
       const queuedScheduler = resolveUmbraCanvasGenerationChoice(capabilities.scheduler, scheduler, 'normal');
       const layoutRegions = layoutAvailable ? structuredClone(submissionProject.layoutRegions || []) : [];
-      if (layoutRegions.length) flux3LayoutElements(layoutRegions, preparedRegion.bbox);
+      if (mossLayout) compileMossLayoutPrompt(compiledPrompt, layoutRegions, preparedRegion.bbox, preparedRegion);
+      else if (layoutRegions.length) flux3LayoutElements(layoutRegions, preparedRegion.bbox);
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
         editArea: submissionProject.editArea || 'whole',
         layoutRegions,
@@ -1786,7 +1795,7 @@ export function UmbraCanvasWorkspace({
         ipAdapterCombineEmbeds: reference.ipAdapterCombineEmbeds,
         ipAdapterEmbedsScaling: reference.ipAdapterEmbedsScaling,
       })));
-      const sourceFreeGeneration = preparedRegion.sourceContentPixels === 0
+      const sourceFreeGeneration = mossLayout || preparedRegion.sourceContentPixels === 0
         && submittedControlLayers.length === 0
         && (submittedReferenceLayers.length === 0 || editingWorkspace);
       const beforeQueue = useUmbraCanvasStore.getState().present;
@@ -1798,6 +1807,7 @@ export function UmbraCanvasWorkspace({
         pinnedOutputFolder,
         outputTask: 'canvas',
         layoutRegions,
+        mossLayout,
         source: preparedRegion.sourceBlob,
         sourceName: `${submissionProject.name || 'umbra-canvas'}.png`,
         canvasProjectId: submissionProject.id,
@@ -1934,6 +1944,8 @@ export function UmbraCanvasWorkspace({
     modelFamily,
     modelSource,
     maskFeather,
+    mossLayout,
+    layoutAvailable,
     maskGrow,
     negativePrompt,
     onSeedChange,
@@ -2579,7 +2591,6 @@ export function UmbraCanvasWorkspace({
       className="@container/canvas relative col-span-full flex min-h-0 min-w-0 flex-col bg-[#07090a]"
     >
       <header data-umbra-canvas-project-toolbar="" className="flex min-h-12 min-w-0 shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/25 px-3 py-1.5">
-        <a href="/?umbraPopout=manga" target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center rounded-md border border-[var(--umbra-accent)] px-2 text-[10px] font-bold text-[var(--umbra-text)]" title="Open private Manga Studio prototype">Manga Studio</a>
         <div role="group" aria-label="Canvas panels" className="flex shrink-0 items-center gap-1">
           {([
             { id: 'inpaint', label: 'Prompt', icon: Focus },
@@ -2611,7 +2622,7 @@ export function UmbraCanvasWorkspace({
         <div className="mb-3 flex items-center gap-2">
           <ScanLine size={14} className="text-rose-300" />
           <div>
-            <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{editingWorkspace ? 'Image Edit' : 'Canvas Generation'}</h2>
+            <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{mossLayout ? 'MOSS Layout Generation' : editingWorkspace ? 'Image Edit' : 'Canvas Generation'}</h2>
             <p className="font-mono text-[8px] uppercase text-zinc-600">Bound to the generation box</p>
           </div>
           <button type="button" aria-label="Close generation panel" onClick={closePanel} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400"><X size={13} /></button>
@@ -2650,12 +2661,17 @@ export function UmbraCanvasWorkspace({
             showClipSkip={capabilities.clipSkip.support === 'adjustable'}
           />
           {workflowResourceControls}
-          {editingWorkspace ? <UmbraSelect
+          {editingWorkspace && !mossLayout ? <UmbraSelect
             ariaLabel="Edit area" menuTitle="Edit area" value={project.editArea || 'whole'}
             options={[{ value: 'whole', label: 'Whole generation box' }, { value: 'mask', label: 'Painted mask + empty space' }]}
             onValueChange={(value) => setEditArea(value === 'mask' ? 'mask' : 'whole')}
           /> : null}
-          {layoutAvailable ? <Flux3LayoutControls regions={project.layoutRegions || []} drawing={tool === 'layout'} onDraw={() => setTool(tool === 'layout' ? 'select' : 'layout')} onChange={setLayoutRegions} /> : null}
+          {layoutAvailable ? <Flux3LayoutControls moss={mossLayout} regions={project.layoutRegions || []} drawing={tool === 'layout'} onDraw={() => setTool(tool === 'layout' ? 'select' : 'layout')} onAdd={() => {
+            const current = useUmbraCanvasStore.getState().present;
+            const frame = current.generationBbox;
+            setLayoutRegions([...(current.layoutRegions || []), { id: crypto.randomUUID(), label: 'object', description: '',
+              x: frame.x + frame.width / 4, y: frame.y + frame.height / 4, width: frame.width / 2, height: frame.height / 2 }]);
+          }} onChange={setLayoutRegions} /> : null}
           {capabilities.loras.support === 'adjustable' ? (
             <UmbraLoraStackControls loras={loras} availableCount={loraAvailableCount} onChange={onLorasChange} onOpenPicker={onOpenLoraPicker} modelOnly={isUmbraUiModelOnlyLoraFamily(modelFamily)} />
           ) : null}
@@ -2742,8 +2758,8 @@ export function UmbraCanvasWorkspace({
         <div className="mb-3 flex items-center gap-2">
           <Focus size={14} className="text-cyan-300" />
           <div>
-            <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">Prompt & Inpaint</h2>
-            <p className="font-mono text-[8px] uppercase text-zinc-600">Content and edge behavior</p>
+            <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-zinc-200">{mossLayout ? 'Scene Prompt' : 'Prompt & Inpaint'}</h2>
+            <p className="font-mono text-[8px] uppercase text-zinc-600">{mossLayout ? 'Describe the complete composition' : 'Content and edge behavior'}</p>
           </div>
           <button type="button" aria-label="Close prompt and inpaint panel" onClick={closePanel} className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400"><X size={13} /></button>
         </div>
@@ -2763,6 +2779,7 @@ export function UmbraCanvasWorkspace({
               <textarea value={negativePrompt} onChange={(event) => onNegativePromptChange(event.target.value)} placeholder="Negative prompt" className="min-h-20 w-full resize-y rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-300/40" />
             </label>
           ) : null}
+          {!mossLayout ? <>
           <section className="rounded-md border border-white/10 bg-white/[0.02] p-2.5">
             <div className="mb-2 flex items-center gap-2"><ScanLine size={12} className="text-rose-300" /><span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-300">Edit Mode</span><span className="ml-auto font-mono text-[8px] uppercase text-zinc-600">{activeInpaintTaskMode ? CANVAS_INPAINT_TASK_MODES.find((mode) => mode.id === activeInpaintTaskMode)?.label : 'Custom'}</span></div>
             <div className="grid grid-cols-3 gap-1">
@@ -2786,6 +2803,7 @@ export function UmbraCanvasWorkspace({
             <label className="block" title={inpaintAdapter === 'native_edit' ? 'This native edit pipeline owns its blend behavior.' : undefined}><span className="flex justify-between text-[8px] font-black uppercase text-zinc-500">Color Match <span className="font-mono text-rose-200">{inpaintAdapter === 'native_edit' ? 'Off' : `${Math.round(colorMatch * 100)}%`}</span></span><input type="range" aria-label="Color Match" min="0" max="1" step="0.05" disabled={inpaintAdapter === 'native_edit'} value={inpaintAdapter === 'native_edit' ? 0 : colorMatch} onChange={(event) => setColorMatch(Number(event.target.value))} className="mt-1 w-full accent-rose-300 disabled:opacity-40" /></label>
             <label className="block"><span className="flex justify-between text-[8px] font-black uppercase text-zinc-500">Mask Bias <span className="font-mono text-rose-200">{Math.round(softInpaintMaskInfluence * 100)}%</span></span><input type="range" min="0" max="1" step="0.05" value={softInpaintMaskInfluence} onChange={(event) => setSoftInpaintMaskInfluence(Number(event.target.value))} className="mt-1 w-full accent-rose-300" /></label>
           </section>
+          </> : null}
           {job ? <div className="rounded-md border border-white/10 bg-black/30 p-2.5 font-mono text-[9px] text-zinc-500"><div className="flex items-center gap-2"><span className="font-black uppercase text-zinc-300">{job.status}</span><span>{job.completed}/{job.total}</span>{!isUmbraUiInpaintJobTerminal(job) ? <button type="button" onClick={() => void cancelGeneration()} disabled={canceling || job.cancelRequested} className="ml-auto text-rose-300 hover:text-rose-100">{canceling || job.cancelRequested ? 'Canceling' : 'Cancel'}</button> : null}</div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-rose-400 transition-[width]" style={{ width: `${Math.round(job.completed / Math.max(1, job.total) * 100)}%` }} /></div></div> : null}
         </div>
         <div ref={onCatalogTriggerContainerChange} data-umbra-canvas-catalog-trigger-container="" className="mt-3 flex justify-end" />

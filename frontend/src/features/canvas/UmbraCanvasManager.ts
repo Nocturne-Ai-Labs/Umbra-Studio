@@ -224,6 +224,7 @@ export class UmbraCanvasManager {
   private stagingPreviewToken = 0;
   private samplingPreviewToken = 0;
   private tool: UmbraCanvasTool = 'select';
+  private mossLayout = false;
   private spacePressed = false;
   private panning = false;
   private panPointerStart: UmbraCanvasViewport | null = null;
@@ -312,6 +313,12 @@ export class UmbraCanvasManager {
     for (const node of this.stage.find('.mask-entity')) node.listening(tool === 'select');
     this.updateCursor();
     this.stage.batchDraw();
+  }
+
+  setMossLayout(enabled: boolean): void {
+    if (this.mossLayout === enabled) return;
+    this.mossLayout = enabled;
+    if (this.document) this.render(this.document);
   }
 
   private updateCursor(): void {
@@ -523,8 +530,8 @@ export class UmbraCanvasManager {
     this.renderBbox(project.generationBbox);
     this.layoutGroup.destroyChildren();
     (project.layoutRegions || []).forEach((region, index) => {
-      this.layoutGroup.add(new Konva.Rect({ ...region, stroke: '#a78bfa', strokeWidth: 2 / this.viewport.scale, dash: [6, 4], fill: '#a78bfa0c' }));
-      this.layoutGroup.add(new Konva.Text({ x: region.x + 4, y: region.y + 4, text: '<obj_' + (index + 1) + '>', fill: '#ddd6fe', fontSize: 13 / this.viewport.scale }));
+      this.layoutGroup.add(new Konva.Rect({ ...region, stroke: '#a78bfa', strokeWidth: 2 / this.viewport.scale, dash: [6 / this.viewport.scale, 4 / this.viewport.scale], fill: '#a78bfa0c' }));
+      this.layoutGroup.add(new Konva.Text({ x: region.x + 4, y: region.y + 4, text: this.mossLayout ? `${region.label === 'text' ? 'Text' : 'Object'} ${index + 1}` : '<obj_' + (index + 1) + '>', fill: '#ddd6fe', fontSize: 13 / this.viewport.scale }));
     });
     void this.renderEntities(project);
   }
@@ -1060,6 +1067,10 @@ export class UmbraCanvasManager {
     for (const group of [this.gridGroup, this.backingGroup, this.activeGroup, this.foregroundGroup, this.overlayGroup]) {
       group.position({ x: this.viewport.x, y: this.viewport.y });
       group.scale({ x: this.viewport.scale, y: this.viewport.scale });
+    }
+    for (const node of this.layoutGroup.getChildren()) {
+      if (node instanceof Konva.Text) node.fontSize(13 / this.viewport.scale);
+      if (node instanceof Konva.Rect) node.strokeWidth(2 / this.viewport.scale).dash([6 / this.viewport.scale, 4 / this.viewport.scale]);
     }
     this.drawGrid();
     this.stage.batchDraw();

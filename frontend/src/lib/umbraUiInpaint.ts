@@ -284,6 +284,7 @@ export interface UmbraUiInpaintSubmitOptions {
   sourceName: string;
   canvasProjectId: string;
   layoutRegions?: import('../../../shared/umbra-ui/flux3Edit').Flux3LayoutRegion[];
+  mossLayout?: boolean;
   sourceFreeGeneration?: boolean;
   operationMode: 'inpaint' | 'outpaint';
   generationRegionX: number;

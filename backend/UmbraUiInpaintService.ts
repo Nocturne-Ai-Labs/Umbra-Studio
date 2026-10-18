@@ -1,4 +1,5 @@
 import { applyFlux3References, flux3LayoutElements, removeFlux3BlankReference } from '../shared/umbra-ui/flux3Edit';
+import { compileMossLayoutPrompt } from '../shared/umbra-ui/mossLayout';
 import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'fs';
 import { mkdir, open, rename, rm } from 'fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'path';
@@ -307,6 +308,7 @@ export interface UmbraUiInpaintSettings {
   workflowId: string;
   canvasProjectId: string;
   sourceFreeGeneration?: boolean;
+  mossLayout?: boolean;
   operationMode: 'inpaint' | 'outpaint';
   generationRegionX: number;
   generationRegionY: number;
@@ -1620,6 +1622,16 @@ export class UmbraUiInpaintService {
     this.prune();
     const prompt = String(settings.prompt || '').trim();
     if (!prompt) throw new Error('Enter an inpaint prompt before generating.');
+    if (settings.mossLayout) {
+      if (normalizeUmbraUiModelFamilyKey(settings.modelFamily) !== 'mossimage' || !settings.sourceFreeGeneration
+        || settings.controlLayers?.length || settings.referenceLayers?.length) {
+        throw new Error('MOSS layout mode requires source-free MOSS generation without control or reference layers.');
+      }
+      compileMossLayoutPrompt(prompt, settings.layoutRegions || [], {
+        x: settings.generationRegionX, y: settings.generationRegionY,
+        width: settings.generationRegionWidth, height: settings.generationRegionHeight,
+      }, settings);
+    }
     const samples = Math.max(1, Math.min(8, Math.round(finiteNumberOrFallback(settings.samples, 1))));
     const seedIncrement = settings.seedIncrement === 100 || settings.seedIncrement === 1000
       ? settings.seedIncrement
@@ -2107,6 +2119,7 @@ export class UmbraUiInpaintService {
                     source: 'umbra_ui_inpaint',
                     canvasProjectId: settings.canvasProjectId,
                     sourceFreeGeneration: settings.sourceFreeGeneration === true,
+                    mossLayout: settings.mossLayout === true,
                     operationMode: settings.operationMode,
                     workflowId: settings.workflowId,
                     modelFamily: settings.modelFamily,
@@ -2140,6 +2153,7 @@ export class UmbraUiInpaintService {
                     loras: settings.loras,
                     workflowResources: settings.workflowResources,
                     layoutRegions: settings.layoutRegions || [],
+    mossLayout: settings.mossLayout === true,
                     seed: item.seed,
                     seedMode: settings.seedMode,
                     seedIncrement: settings.seedIncrement,
@@ -2324,7 +2338,7 @@ export class UmbraUiInpaintService {
   ): Record<string, any> {
     if (settings.sourceFreeGeneration) {
       // Native edit graphs still require the uploaded blank source and full mask.
-      const graph = settings.inpaintAdapter === 'native_edit'
+      const graph = settings.inpaintAdapter === 'native_edit' && !settings.mossLayout
         ? this.buildNativeEditWorkflow(sourceGraph, sourceInputName, maskInputName, controlLayers, referenceLayers, settings, seed)
         : structuredClone(sourceGraph);
       const sourceStem = sanitizeFilename(sourceName, 'canvas.png').replace(/\.[^.]+$/, '');

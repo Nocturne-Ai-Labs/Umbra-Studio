@@ -1,4 +1,5 @@
 import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
+import { compileMossLayoutPrompt } from './shared/umbra-ui/mossLayout';
 import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
 import { MangaStudioFiles } from './backend/MangaStudioFiles';
 import { resolveHostNodeRuntime, type HostNodeRuntime } from './shared/hostNodeRuntime';
@@ -21464,7 +21465,13 @@ async function saveUmbraUiVideoControlsSession(rawVideo: unknown): Promise<Power
 }
 
 async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings, seed: number) {
-  const loaded = await loadBundledUmbraUiWorkflowById(settings.workflowId);
+  const mossLayout = settings.mossLayout === true;
+  if (mossLayout && (normalizeUmbraUiModelFamilyKey(settings.modelFamily) !== 'mossimage' || !settings.sourceFreeGeneration)) {
+    throw new Error('MOSS layout mode requires source-free MOSS generation.');
+  }
+  const loaded = mossLayout
+    ? (await resolveUmbraUiPipeline('txt2img', settings.modelFamily, settings.modelSource)).loaded
+    : await loadBundledUmbraUiWorkflowById(settings.workflowId);
   if (!loaded) throw new Error('The selected Umbra image workflow could not be loaded.');
   if (loaded.item.mediaType === 'video') throw new Error('Video workflows cannot be used for image inpainting.');
   if (!loaded.item.compatible) {
@@ -21472,7 +21479,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   }
   const selectedPipeline = [...(loaded.item.umbraUiPipelines || [])]
     .filter((pipeline) => (
-      pipeline.feature === 'inpainting'
+      pipeline.feature === (mossLayout ? 'txt2img' : 'inpainting')
       && pipeline.modelFamilyKey === normalizeUmbraUiModelFamilyKey(settings.modelFamily)
       && pipeline.modelSources.includes(settings.modelSource)
     ))
@@ -21480,7 +21487,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   if (!selectedPipeline) {
     throw new Error(`The selected workflow does not expose an inpainting pipeline for ${settings.modelSource} models.`);
   }
-  if (selectedPipeline.inpaintAdapter !== settings.inpaintAdapter) {
+  if (!mossLayout && selectedPipeline.inpaintAdapter !== settings.inpaintAdapter) {
     throw new Error('The selected workflow inpainting adapter changed after the job was staged. Refresh the pipeline catalog and try again.');
   }
   const executionTarget: LoadedPPApiWorkflow = {
@@ -21488,6 +21495,10 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     selectedPipeline,
     selectedModelSource: settings.modelSource,
   };
+  const prompt = mossLayout ? compileMossLayoutPrompt(settings.prompt, settings.layoutRegions || [], {
+    x: settings.generationRegionX, y: settings.generationRegionY,
+    width: settings.generationRegionWidth, height: settings.generationRegionHeight,
+  }, settings) : settings.prompt;
   const generation = {
     mediaType: 'image',
     outputOwner: 'umbra_ui',
@@ -21534,9 +21545,9 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   };
   const state = {
     sourceFile: '',
-    activePrompt: settings.prompt,
-    prompts: [settings.prompt],
-    joinedPrompt: settings.prompt,
+    activePrompt: prompt,
+    prompts: [prompt],
+    joinedPrompt: prompt,
     activeQueueSet: 1,
     activeSetId: 1,
     generation,
@@ -21544,7 +21555,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   normalizeIrisSamplingControls(extractPPApiPromptGraph(loaded.document) || {}, generation);
   await assertPPApiWorkflowExecutionReady(executionTarget, generation);
   const compiled = compileUmbraUiPipelineWorkflow(loaded.document, state, {
-    prompt: settings.prompt,
+    prompt,
     generation,
     promptSetId: 1,
     outputSubfolder: '',
@@ -22200,6 +22211,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       throw new Error(`The selected pipeline requires width and height aligned to ${resolutionStep} pixels.`);
     }
     const settings: UmbraUiInpaintSettings = {
+      mossLayout: String(form.get('mossLayout') || '') === 'true',
       layoutRegions: parseFlux3LayoutRegions(JSON.parse(String(form.get('layoutRegions') || '[]'))),
       outputFolder: resolveUmbraPinnedTaskFolder(form.get('pinnedOutputFolder'), settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, form.get('outputTask') === 'canvas' ? 'canvas' : 'inpainting', getGalleryTransferAllowedRoots())
         || (form.get('outputTask') === 'canvas' ? 'Umbra UI/canvas' : ''),
@@ -22285,6 +22297,15 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       controlLayers,
       referenceLayers,
     };
+    if (settings.mossLayout) {
+      if (form.get('outputTask') !== 'canvas') throw new Error('MOSS layout mode requires the Edit canvas.');
+      // Keep the canvas world frame intact when mapping boxes to output pixels.
+      for (const field of ['generationRegionX', 'generationRegionY', 'generationRegionWidth', 'generationRegionHeight'] as const) {
+        const value = Number(form.get(field));
+        if (form.get(field) == null || !Number.isFinite(value)) throw new Error('Invalid MOSS layout frame.');
+        settings[field] = value;
+      }
+    }
     if (!settings.checkpointName) return json({ success: false, error: 'Choose a primary model for inpainting.' }, 400);
     if (!settings.prompt) return json({ success: false, error: 'Enter an inpaint prompt.' }, 400);
 
