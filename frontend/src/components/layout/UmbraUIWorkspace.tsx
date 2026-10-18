@@ -88,6 +88,8 @@ import {
   type UmbraImageGenerationInfo,
 } from '@/components/umbra-ui/UmbraImageGenerationInfoDrawer';
 import { UmbraMobileWorkspaceSheet } from '@/components/umbra-ui/UmbraMobileWorkspaceSheet';
+import { UmbraMobileSettingsSection } from '@/components/umbra-ui/UmbraMobileSettingsSection';
+import { UmbraMobilePromptCatalog } from '@/components/umbra-ui/UmbraMobilePromptCatalog';
 import { NsfwPrivacyShield } from '@/components/privacy/NsfwPrivacyProvider';
 import { UmbraQueueEmergencyControls } from '@/components/umbra-ui/UmbraQueueEmergencyControls';
 import { useUmbraQueueNotificationAudio } from '@/components/umbra-ui/useUmbraQueueNotificationAudio';
@@ -2868,20 +2870,37 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     }
   }, [queueControlBusy, showToast, stopAllUmbraJobs]);
 
+  const phoneImageGeneration = remoteMode === 'phone' && (activeMode === 'image' || activeMode === 'img2img');
   const imageQueueDisabled = isQueueing || !!imageQueueBlockReason;
   const imageQueueTitle = imageQueueBlockReason || (activeMode === 'img2img'
     ? 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
     : 'Queue this image through the locked Umbra UI pipeline');
+  const mobilePromptCatalogAction = remoteMode === 'phone' ? (
+    <UmbraMobilePromptCatalog
+      enabledCSVs={catalogEnabledCSVs}
+      onToggleCSV={handleToggleCatalogCSV}
+      onInsert={handleCatalogInsert}
+      onBeforeOpen={(trigger) => {
+        const editor = trigger.closest('[data-umbra-positive-prompt-editor]');
+        if (lastCatalogTargetRef.current && editor?.contains(lastCatalogTargetRef.current)) return;
+        const target = editor?.querySelector('textarea');
+        if (!target) return;
+        lastCatalogTargetRef.current = target;
+        lastCatalogSelectionRef.current = { target, start: target.selectionStart, end: target.selectionEnd };
+      }}
+    />
+  ) : undefined;
   const imagePromptControls = (
-    <div className="relative">
+    <div className={phoneImageGeneration ? 'relative space-y-3' : 'relative'}>
       <>
         <UmbraPositivePromptEditor
-        singleField={remoteMode === 'phone' && activeMode === 'image'}
+        singleField={phoneImageGeneration}
         segments={promptSegments}
         activeSegmentId={activePromptSegmentId}
         onChange={setPromptSegments}
         onActiveSegmentChange={setActivePromptSegmentId}
         heading="Positive Prompt"
+        headerAction={mobilePromptCatalogAction}
         history={promptHistory}
         onRememberCurrent={rememberCurrentPrompt}
         onRestoreHistory={restorePromptHistoryEntry}
@@ -2891,6 +2910,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       />
 
       {imageCapabilities.negativePrompt.support === 'adjustable' ? (
+        <UmbraMobileSettingsSection enabled={phoneImageGeneration} title="Negative prompt" summary={negativePrompt.trim() ? 'Configured' : 'None'}>
         <label className="block space-y-1.5">
           <span className={labelClass}>Negative Prompt</span>
           <textarea
@@ -2901,10 +2921,30 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             className={`${inputClass} min-h-20 resize-y leading-relaxed`}
           />
         </label>
+        </UmbraMobileSettingsSection>
       ) : null}
 
       </>
     </div>
+  );
+
+  const img2imgSourceControls = (
+    <UmbraImg2ImgSourceControls
+      source={img2imgSource}
+      denoise={img2imgDenoise}
+      replaceSourceOnComplete={replaceImg2ImgSourceOnComplete}
+      onSourceChange={setImg2imgSource}
+      onDenoiseChange={setImg2imgDenoise}
+      onReplaceSourceOnCompleteChange={setReplaceImg2ImgSourceOnComplete}
+      onUseSourceSize={(sourceWidth, sourceHeight) => {
+        if (sourceWidth <= 0 || sourceHeight <= 0) return;
+        syncImageDimensions(
+          Math.max(64, Math.round(sourceWidth / 8) * 8),
+          Math.max(64, Math.round(sourceHeight / 8) * 8),
+        );
+      }}
+      showToast={showToast}
+    />
   );
 
   const imageQueueControls = (
@@ -3312,6 +3352,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           <div className={inpaintWorkspaceActive ? 'contents' : 'hidden'} aria-hidden={!inpaintWorkspaceActive}>
             <UmbraInpaintWorkspace
             active={inpaintWorkspaceActive}
+            phoneMode={remoteMode === 'phone'}
+            promptHeaderAction={mobilePromptCatalogAction}
             capabilities={inpaintCapabilities}
             inpaintAdapter={inpaintPipelineMatch.pipeline?.inpaintAdapter || 'native_edit'}
             modelFamily={modelFamily}
@@ -3427,12 +3469,22 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             aria-hidden={activeMode !== 'image' && activeMode !== 'img2img'}
           >
           <section data-umbra-ui-generation-panel="" className="min-h-0 overflow-y-auto border-r border-white/10 bg-black/15 p-4 custom-scrollbar">
-          <div className="mb-3 flex items-center gap-2">
+          {phoneImageGeneration ? <div data-umbra-mobile-image-prompt="" className="mb-3">
+            {imagePromptControls}
+            {imageQueueBlockReason ? <p role="status" className="mt-2 text-[11px] text-zinc-400">{imageQueueBlockReason}</p> : null}
+          </div> : null}
+          <div className={phoneImageGeneration ? 'hidden' : 'mb-3 flex items-center gap-2'}>
             <Sparkles size={14} className="text-cyan-300" />
             <h2 className="text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Generation</h2>
           </div>
 
           <div className="space-y-3">
+            {phoneImageGeneration && activeMode === 'img2img' ? (
+              <UmbraMobileSettingsSection enabled title="Source image & strength" summary={`${img2imgSource.name || img2imgSource.path.split(/[\\/]/).pop() || 'Choose an image'} · Denoise ${img2imgDenoise.toFixed(2)}`}>
+                {img2imgSourceControls}
+              </UmbraMobileSettingsSection>
+            ) : null}
+            <UmbraMobileSettingsSection enabled={phoneImageGeneration} title="Model & LoRAs" summary={`${modelFamily} · ${activeLoras.filter((lora) => lora.enabled).length} LoRAs`}>
             <label className="block space-y-1.5">
               <span className={labelClass}>Model Pipeline</span>
               <UmbraSelectControl
@@ -3451,24 +3503,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               </div>
             ) : null}
 
-            {activeMode === 'img2img' ? (
-              <UmbraImg2ImgSourceControls
-                source={img2imgSource}
-                denoise={img2imgDenoise}
-                replaceSourceOnComplete={replaceImg2ImgSourceOnComplete}
-                onSourceChange={setImg2imgSource}
-                onDenoiseChange={setImg2imgDenoise}
-                onReplaceSourceOnCompleteChange={setReplaceImg2ImgSourceOnComplete}
-                onUseSourceSize={(sourceWidth, sourceHeight) => {
-                  if (sourceWidth <= 0 || sourceHeight <= 0) return;
-                  syncImageDimensions(
-                    Math.max(64, Math.round(sourceWidth / 8) * 8),
-                    Math.max(64, Math.round(sourceHeight / 8) * 8),
-                  );
-                }}
-                showToast={showToast}
-              />
-            ) : null}
+            {activeMode === 'img2img' && !phoneImageGeneration ? img2imgSourceControls : null}
 
             <UmbraCheckpointControls
               checkpointName={checkpointName}
@@ -3524,9 +3559,11 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                 modelOnly={isUmbraUiModelOnlyLoraFamily(selectedImagePipeline?.modelFamilyKey)}
               />
             ) : null}
+            </UmbraMobileSettingsSection>
 
-            {activeMode === 'img2img' ? imagePromptControls : null}
+            {activeMode === 'img2img' && !phoneImageGeneration ? imagePromptControls : null}
 
+            <UmbraMobileSettingsSection enabled={phoneImageGeneration} title="Size & sampling" summary={`${width} × ${height} · ${steps} steps`}>
             <UmbraSeedControls
               seed={seed}
               mode={seedMode}
@@ -3598,6 +3635,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               </div>
             ) : null}
 
+            </UmbraMobileSettingsSection>
+
+            <UmbraMobileSettingsSection enabled={phoneImageGeneration} title="Enhancements" summary="Hires fix, detailers, upscale & VAE">
             {imageCapabilities.hiresFix.support === 'adjustable' ? (
               <UmbraHiresFixControls
               enabled={hiresEnabled}
@@ -3663,11 +3703,20 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               showOutputMaxDimension={imageCapabilities.finalModelUpscale.maxDimension}
               />
             ) : null}
+            </UmbraMobileSettingsSection>
+            {phoneImageGeneration ? <UmbraMobileSettingsSection enabled title="Queue & output" summary={`${queueSummary.pending} queued · ${queueSummary.running} running`}>
+              {imageQueueControls}
+              <UmbraPinnedOutputControl
+                task={activeMode === 'img2img' ? 'IMG2IMG' : 'TXT2IMG'}
+                value={activeMode === 'img2img' ? img2imgOutputFolder : activeTxt2imgOutputFolder}
+                onChange={activeMode === 'img2img' ? setImg2imgOutputFolder : setTxt2imgOutputFolder}
+              />
+            </UmbraMobileSettingsSection> : null}
           </div>
 
-          {activeMode === 'img2img' ? imageQueueControls : null}
+          {activeMode === 'img2img' && !phoneImageGeneration ? imageQueueControls : null}
         </section>
-        {activeMode === 'image' ? (
+        {activeMode === 'image' && !phoneImageGeneration ? (
           <aside
             data-umbra-ui-prompt-panel=""
             className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-[#07090a] p-4 custom-scrollbar"
@@ -3687,6 +3736,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         ) : null}
         <UmbraMobileWorkspaceSheet
           active={activeMode === 'image' || activeMode === 'img2img'}
+          className={phoneImageGeneration ? 'umbra-phone-image-preview' : undefined}
           title={activeMode === 'img2img' ? 'IMG2IMG Preview' : 'Image Preview'}
           subtitle={queueSummary.running > 0
             ? `Generating ${queueSummary.activePosition}/${queueSummary.activeTotal}`
@@ -3699,9 +3749,22 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           icon={<ImageIcon size={14} />}
           thumbnailUrl={imagePreviewUrl}
           thumbnailProtected={imagePreviewIsNsfw}
+          dockAction={phoneImageGeneration ? (
+            <button
+              type="button"
+              data-umbra-mobile-image-generate=""
+              onClick={() => void handleQueueImage(imageQueuePlacement.effectivePlacement)}
+              disabled={imageQueueDisabled}
+              title={imageQueueTitle}
+              className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md border border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_18%,var(--umbra-panel))] px-4 text-xs font-bold text-[var(--umbra-text)] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {isQueueing ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+              {isQueueing ? 'Queueing…' : 'Generate'}
+            </button>
+          ) : undefined}
         >
-          <main data-umbra-ui-preview-panel="" className="relative flex min-h-0 min-w-0 flex-col">
-          <div className="flex min-h-11 items-center gap-2 border-b border-white/10 px-3">
+          <main data-umbra-ui-preview-panel="" data-compact-preview={phoneImageGeneration ? '' : undefined} className="relative flex min-h-0 min-w-0 flex-col">
+          <div data-umbra-ui-preview-heading="" className="flex min-h-11 items-center gap-2 border-b border-white/10 px-3">
             {activeMode === 'image' || activeMode === 'img2img'
               ? <ImageIcon size={13} className="text-zinc-500" />
               : <Clapperboard size={13} className="text-fuchsia-300/70" />}
@@ -3710,13 +3773,13 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             </span>
             <span className="ml-auto font-mono text-[10px] text-zinc-500">{queueSummary.completed} outputs</span>
           </div>
-          <PowerPrompterSearchPanel
+          {remoteMode !== 'phone' ? <PowerPrompterSearchPanel
             onInsert={handleCatalogInsert}
             enabledCSVs={catalogEnabledCSVs}
             onToggleCSV={handleToggleCatalogCSV}
             drawerMode
-          />
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black/35 p-4">
+          /> : null}
+          <div data-umbra-ui-preview-stage="" className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black/35 p-4">
             <div className="relative flex h-full min-h-0 w-full items-center justify-center border border-white/10 bg-black/25">
               {imagePreviewUrl ? (
                 <img
@@ -3734,15 +3797,15 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               {imagePreviewUrl ? <NsfwPrivacyShield protectedMedia={imagePreviewIsNsfw} /> : null}
             </div>
           </div>
-          <div className="flex min-h-11 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 px-3 py-2">
-            <UmbraQueueEmergencyControls
+          <div data-umbra-ui-preview-toolbar="" className="flex min-h-11 flex-wrap items-center gap-2 border-t border-white/10 bg-black/20 px-3 py-2">
+            {!phoneImageGeneration ? <UmbraQueueEmergencyControls
               queueSummary={queueSummary}
               queueConnected={queueConnected}
               busyAction={queueControlBusy}
               onSkip={() => void handleSkipUmbraJob()}
               onStopAll={() => void handleStopAllUmbraJobs()}
               mobileOnly
-            />
+            /> : null}
             <div data-umbra-ui-preview-status="" className="min-w-0 flex-1 basis-full">
               <div className="flex min-w-0 items-center gap-2">
                 <Activity size={12} className={queueSummary.running > 0 ? 'shrink-0 text-cyan-300' : 'shrink-0 text-zinc-600'} />
@@ -3755,7 +3818,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                         ? `${queueSummary.pending} queued`
                         : 'Idle'}
                 </span>
-                <button
+                {!phoneImageGeneration ? <button
                   type="button"
                   onClick={() => setImageGenerationInfoOpen(true)}
                   disabled={!activeImageGenerationInfo}
@@ -3763,7 +3826,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                   title={activeImageGenerationInfo ? 'Show complete generation information' : 'Queue an image to capture generation information'}
                 >
                   <Info size={11} /> Info
-                </button>
+                </button> : null}
               </div>
               {showingLivePreview && generationPreview && generationPreview.maxStep > 0 ? (
                 <div className="mt-1.5 flex max-w-xl items-center gap-2 pl-5">
@@ -3792,7 +3855,15 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                     </button>
                   </div>
                 ) : null}
-                {(activeMode === 'image' || activeMode === 'img2img') && (
+                {phoneImageGeneration ? <UmbraQueueEmergencyControls
+                  queueSummary={queueSummary}
+                  queueConnected={queueConnected}
+                  busyAction={queueControlBusy}
+                  onSkip={() => void handleSkipUmbraJob()}
+                  onStopAll={() => void handleStopAllUmbraJobs()}
+                  mobileOnly
+                /> : null}
+                {!phoneImageGeneration && (activeMode === 'image' || activeMode === 'img2img') && (
                   <div data-umbra-ui-preview-output="" className="min-w-0 max-w-full">
                     <UmbraPinnedOutputControl task={activeMode === 'image' ? 'TXT2IMG' : 'IMG2IMG'}
                       value={activeMode === 'image' ? activeTxt2imgOutputFolder : img2imgOutputFolder}
@@ -3820,21 +3891,34 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                 <button
                   type="button"
                   onClick={() => sendLatestToUpscale(false)}
+                  aria-label="Add to Batch"
                   disabled={!latestSavedImage?.path || outputHandoffPending}
                   className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-white/10 bg-white/[0.025] px-2.5 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-300 transition-colors hover:border-amber-300/25 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-30"
                   title="Add the latest completed image to the Extras upscale batch"
                 >
-                  <Layers3 size={12} /> Add to Batch
+                  <Layers3 size={12} /> {phoneImageGeneration ? 'Batch' : 'Add to Batch'}
                 </button>
                 <button
                   type="button"
                   onClick={() => sendLatestToUpscale(true)}
+                  aria-label="Upscale Now"
                   disabled={!latestSavedImage?.path || !comfyConnected || outputHandoffPending}
                   className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-amber-300/25 bg-amber-500/[0.08] px-2.5 text-[10px] font-black uppercase tracking-[0.1em] text-amber-100 transition-colors hover:bg-amber-500/[0.14] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.025] disabled:text-zinc-600"
                   title="Upscale the latest completed image now"
                 >
-                  <ImageUp size={12} /> Upscale Now
+                  <ImageUp size={12} /> {phoneImageGeneration ? 'Upscale' : 'Upscale Now'}
                 </button>
+                {phoneImageGeneration ? (
+                  <button
+                    type="button"
+                    onClick={() => setImageGenerationInfoOpen(true)}
+                    disabled={!activeImageGenerationInfo}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-sm border border-white/10 bg-white/[0.025] text-zinc-300 disabled:cursor-not-allowed disabled:text-zinc-600"
+                    title="Show complete generation information"
+                  >
+                    <Info size={12} /> Info
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -3849,8 +3933,10 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         ) : null}
         {modeIsMounted('video') ? (
           <div className={activeMode === 'video' ? 'flex min-h-0 min-w-0 flex-col' : 'hidden'} aria-hidden={activeMode !== 'video'}>
-            <UmbraCommunityVideo>
-            {videoRoutePolicy === 'dasiwa-only' ? <UmbraOfficialVideoWorkflowPanel
+            <UmbraCommunityVideo phoneMode={remoteMode === 'phone'}>
+            {videoRoutePolicy === 'dasiwa-only' || remoteMode === 'phone' ? <UmbraOfficialVideoWorkflowPanel
+              phoneMode={remoteMode === 'phone'}
+              active={activeMode === 'video'}
               queueConnected={queueConnected}
               comfyConnected={comfyConnected}
               queueOfficialVideo={queueOfficialVideo}

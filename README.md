@@ -13,9 +13,9 @@ generation backends, prompt tooling, media browsing, metadata handling, model
 management, and portable tool orchestration inside one app-managed environment.
 
 Umbra Studio has entered **Beta**, beginning with **0.90.0-beta**. Development
-will continue through Beta before 1.0; this milestone does not remove the
-experimental status of Mobile, Canvas, or video generation. See the current
-release notes for feature-specific limitations and setup requirements.
+will continue through Beta before 1.0. **Umbra Remote mobile is a supported Beta
+interface.** See the current release notes for feature-specific limitations,
+including Canvas and video generation qualification, and setup requirements.
 
 ## Built With
 
@@ -74,6 +74,19 @@ Quick summary:
 Umbra Studio is open source. Forks or contributions that establish reliable AMD
 or Intel GPU support are welcome, but those platforms are not supported by the
 current releases.
+
+## Umbra Remote Mobile
+
+Umbra Remote's phone and tablet layouts are supported Beta interfaces. Further
+usability, stability, and device-compatibility improvements are ongoing.
+
+Phone layouts provide prompt-first image generation, image-to-image and
+inpainting controls, folder-based Gallery navigation with a compact filmstrip,
+Power Prompter, metadata viewing, visual analysis, and supported media tools.
+The phone video layout provides DaSiWa text-to-video and image-to-video.
+Canvas and Manga Studio remain desktop/tablet tools; FrameForge, Longshot Studio,
+and H3 Director are not offered in the phone layout. Generation uses the host's
+managed ComfyUI, installed nodes, and models.
 
 ## Feature Highlights
 

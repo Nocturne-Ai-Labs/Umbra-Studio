@@ -1,5 +1,6 @@
 @import "tailwindcss" source("../");
 @import "../features/manga/manga.css";
+@import "../components/layout/galleryRemoteBrowser.css";
 
 @container umbra-model-merge-editor (max-width: 700px) {
   [data-model-merge-sources],
@@ -2136,6 +2137,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-body] {
 
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="prompter"],
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-body]:has([data-censor-review="workspace"]),
+html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="extras"]:has([data-umbra-ui-extras-inspector]:not(.hidden)),
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-mode="queue"] {
   overflow: hidden;
   padding-bottom: 0;
@@ -2342,6 +2344,36 @@ html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-trigger]
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-tone="cyan"] {
   --umbra-mobile-sheet-accent: #67e8f9;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-dock] {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  padding: 0.4rem;
+  border: 1px solid var(--umbra-border-color, rgba(255, 255, 255, 0.15));
+  background: var(--umbra-panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-dock] > [data-umbra-mobile-workspace-sheet-trigger] {
+  width: auto;
+  min-height: 3rem;
+  flex: 1 1 0;
+  margin: 0;
+  padding: 0.3rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-dock] [data-umbra-mobile-workspace-sheet-icon] {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-open="1"] > [data-umbra-mobile-workspace-sheet-dock] {
+  display: none;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-tone="rose"] {
@@ -2609,6 +2641,240 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-preview-output] select {
   min-height: 2.75rem;
 }
 
+/* The prompt catalog uses a full-height, touch-friendly sheet on phones. */
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-prompt-catalog] {
+  position: fixed;
+  inset: max(0.25rem, env(safe-area-inset-top)) max(0.25rem, env(safe-area-inset-right)) max(0.25rem, env(safe-area-inset-bottom)) max(0.25rem, env(safe-area-inset-left));
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-prompt-catalog] [data-umbra-tag-catalog-drawer] {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-prompt-catalog] button {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-prompt-catalog] [data-umbra-tag-catalog-drawer] > header {
+  flex-shrink: 0;
+}
+
+[data-umbra-catalog-mobile] > header h2 {
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+}
+
+[data-umbra-catalog-mobile] > header .font-mono {
+  margin-top: 0.25rem;
+  color: var(--umbra-text-muted, #a1a1aa);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-tabs] {
+  flex-shrink: 0;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-tabs] button {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--umbra-text-muted, #a1a1aa);
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-tabs] svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (max-width: 360px) {
+  [data-umbra-catalog-mobile] [data-umbra-catalog-tabs] svg {
+    display: none;
+  }
+}
+
+[data-umbra-catalog-mobile] button[aria-pressed="true"],
+[data-umbra-catalog-mobile] button[aria-expanded="true"],
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-source]:has(input:checked) {
+  border-color: var(--umbra-accent);
+  background: color-mix(in srgb, var(--umbra-accent) 10%, transparent);
+  color: var(--umbra-text);
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-search] {
+  min-height: 2.75rem;
+  padding-left: 2.25rem;
+  font-size: 1rem;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-filters] {
+  max-height: 32dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-filters] > .overflow-x-auto {
+  flex-wrap: wrap;
+  overflow-x: visible;
+  gap: 0.375rem;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-filters] button,
+[data-umbra-catalog-mobile] [data-umbra-catalog-filters] span,
+[data-umbra-catalog-mobile] [data-umbra-catalog-sources] :is(button, span, .text-\[8px\], .text-\[9px\], .text-\[10px\]) {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-filters] [data-umbra-powerprompter-catalog-classifiers] > span {
+  flex-basis: 100%;
+  padding-top: 0.25rem;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-filters] .text-zinc-600,
+[data-umbra-catalog-mobile] [data-umbra-catalog-sources] .text-zinc-600 {
+  color: var(--umbra-text-muted, #a1a1aa);
+}
+
+[data-umbra-catalog-mobile] [data-umbra-tag-suggestion-rail] {
+  height: auto;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-tag-suggestion-rail] > div {
+  height: auto;
+  min-height: 2.75rem;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-tag-suggestion-rail] :is(button, span) {
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-results] > :is(button, div):not(.grid) {
+  font-size: 0.875rem;
+  color: var(--umbra-text-muted, #a1a1aa);
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-item] {
+  grid-template-columns: minmax(0, 1fr) 2.75rem;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-item]:has(> button[aria-pressed="true"]) {
+  border-color: var(--umbra-accent);
+  background: color-mix(in srgb, var(--umbra-accent) 10%, transparent);
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-item] > button[aria-pressed="true"] {
+  background: transparent;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-item] > button:first-child {
+  grid-template-columns: 1.2rem minmax(0, 1fr);
+  padding: 0.625rem;
+  column-gap: 0.5rem;
+  row-gap: 0.25rem;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-item] > button:first-child > span:nth-child(2) > span {
+  font-size: 0.6875rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--umbra-text-muted, #a1a1aa);
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-item] > button:first-child > span:nth-child(2) > span:first-child {
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-post-count] {
+  grid-column: 2;
+  font-size: 0.6875rem;
+  color: var(--umbra-text-muted, #a1a1aa);
+}
+
+[data-umbra-catalog-mobile] [data-umbra-catalog-sources] > div:first-child {
+  flex-shrink: 0;
+}
+
+[data-umbra-catalog-mobile] [data-umbra-powerprompter-catalog-source] {
+  min-height: 3rem;
+}
+
+/* Open phone image previews prioritize artwork over repeated controls. */
+html[data-umbra-remote-mode="phone"] .umbra-phone-image-preview [data-umbra-mobile-workspace-sheet-header] {
+  min-height: 3.25rem;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+}
+
+html[data-umbra-remote-mode="phone"] .umbra-phone-image-preview [data-umbra-mobile-workspace-sheet-handle],
+html[data-umbra-remote-mode="phone"] [data-compact-preview] [data-umbra-ui-preview-heading] {
+  display: none !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-compact-preview] > [data-umbra-ui-preview-stage] {
+  flex: 1 1 0;
+  padding: 0.25rem !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-compact-preview] > [data-umbra-ui-preview-toolbar] {
+  flex: 0 0 auto;
+  gap: 0.25rem;
+  padding: 0.375rem !important;
+  max-height: 48%;
+  overflow-y: auto;
+}
+
+html[data-umbra-remote-mode="phone"] [data-compact-preview] [data-umbra-ui-preview-actions] {
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-compact-preview] [data-umbra-ui-preview-generate] {
+  grid-column: span 4;
+  border: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+html[data-umbra-remote-mode="phone"] [data-compact-preview] [data-umbra-ui-queue-emergency-controls] {
+  grid-column: span 6;
+  gap: 0.25rem;
+}
+
+html[data-umbra-remote-mode="phone"] [data-compact-preview] [data-umbra-ui-preview-actions] > button {
+  grid-column: span 2;
+  flex-direction: column;
+  gap: 0.125rem;
+  font-weight: 600;
+  font-size: 0.65rem !important;
+  line-height: 1.2;
+}
+
+html[data-umbra-remote-mode="phone"] [data-compact-preview] [data-umbra-ui-preview-actions] svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-video-queue] {
   height: 100%;
   min-height: 0;
@@ -2744,6 +3010,26 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-tool-picker] .umbra-s
 html[data-umbra-remote-mode="phone"] [data-umbra-ui-extras-inspector] {
   min-height: 0;
   overflow: hidden;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector="visual"] [data-umbra-inspector-toolbar] {
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding: 0.5rem;
+  scrollbar-width: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector="visual"] [data-umbra-inspector-toolbar] > button {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  padding: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector="visual"] [data-umbra-inspector-toolbar] > button:last-child {
+  margin-left: auto;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-image-inspector] {
@@ -2923,45 +3209,6 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-workspace] {
   overflow: visible;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-tabs] {
-  position: sticky;
-  top: 0;
-  z-index: 70;
-  display: grid !important;
-  min-height: 3.4rem;
-  flex: 0 0 auto;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.35rem;
-  padding: 0.4rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(5, 7, 8, 0.97);
-  backdrop-filter: blur(14px);
-}
-
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-tabs] button {
-  display: inline-flex;
-  min-width: 0;
-  min-height: 2.6rem;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 0.7rem;
-  background: rgba(255, 255, 255, 0.025);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #71717a;
-}
-
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-tabs] button[data-active="1"] {
-  border-color: rgba(253, 164, 175, 0.36);
-  background: rgba(244, 63, 94, 0.1);
-  color: #ffe4e6;
-  box-shadow: 0 0 16px rgba(244, 63, 94, 0.08);
-}
-
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-generation-sidebar],
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-settings-sidebar] {
   min-height: auto;
@@ -2970,11 +3217,6 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-settings-sidebar] {
   border-right: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0.8rem !important;
-}
-
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-generation-sidebar][data-mobile-active="0"],
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-settings-sidebar][data-mobile-active="0"] {
-  display: none !important;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] {
@@ -4258,7 +4500,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-bar] > div:first
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-gallery-action-controls] {
-  display: grid !important;
+  display: grid;
   width: 100%;
   min-width: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4307,12 +4549,49 @@ html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-header] button {
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  border-radius: 0.45rem;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-gallery-menu-trigger] {
+  position: relative;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  flex-shrink: 0;
+  pointer-events: auto;
+  touch-action: manipulation;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-gallery-menu-trigger]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
   width: 1.65rem;
   height: 1.65rem;
-  min-height: 1.65rem;
-  border-radius: 0.45rem;
-  background: rgba(5, 5, 8, 0.78);
-  backdrop-filter: blur(8px);
+  border: 1px solid var(--umbra-border-color, rgb(255 255 255 / 0.12));
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--umbra-panel) 90%, transparent);
+  pointer-events: none;
+}
+
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-gallery-menu-trigger] > svg {
+  position: absolute;
+  top: calc((1.65rem - 14px) / 2);
+  right: calc((1.65rem - 14px) / 2);
+  pointer-events: none;
+}
+
+html[data-umbra-remote-mode="tablet"] [data-umbra-gallery-tile-header] {
+  height: auto;
+  min-height: 2.75rem;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-react-gallery-root][data-umbra-gallery-mobile-media-view="grid"] [data-umbra-gallery-tile-header] :where(span:not(:first-child)) {
@@ -7650,7 +7929,8 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
   -webkit-backdrop-filter: blur(2px);
 }
 
-.umbra-context-menu-touch-sheet {
+.umbra-context-menu-touch-sheet,
+.umbra-context-menu-touch-anchored {
   width: auto;
   border-radius: 0.65rem;
   overscroll-behavior: contain;
@@ -7660,7 +7940,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
     0 0 0 1px color-mix(in srgb, var(--umbra-accent) 10%, rgba(255, 255, 255, 0.04)) inset;
 }
 
-.umbra-context-menu-touch-sheet .umbra-context-menu-header {
+:is(.umbra-context-menu-touch-sheet, .umbra-context-menu-touch-anchored) .umbra-context-menu-header {
   position: sticky;
   top: -0.5rem;
   z-index: 1;
@@ -7669,7 +7949,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
   -webkit-backdrop-filter: blur(18px);
 }
 
-.umbra-context-menu-touch-sheet .umbra-context-menu-item {
+:is(.umbra-context-menu-touch-sheet, .umbra-context-menu-touch-anchored) .umbra-context-menu-item {
   min-height: 3rem;
   padding: 0.7rem 0.8rem;
   border-radius: 0.45rem;
@@ -7678,13 +7958,13 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
   text-transform: none;
 }
 
-.umbra-context-menu-touch-sheet .umbra-context-menu-description {
+:is(.umbra-context-menu-touch-sheet, .umbra-context-menu-touch-anchored) .umbra-context-menu-description {
   font-size: 0.68rem;
   line-height: 1.3;
   white-space: normal;
 }
 
-.umbra-context-menu-touch-sheet .umbra-context-menu-icon {
+:is(.umbra-context-menu-touch-sheet, .umbra-context-menu-touch-anchored) .umbra-context-menu-icon {
   width: 1.25rem;
   height: 1.25rem;
 }
@@ -7720,6 +8000,11 @@ html[data-umbra-remote-mode="phone"] [data-umbra-gallery-tag-modal] button {
   text-transform: uppercase;
   transition: color 100ms ease, background-color 100ms ease, box-shadow 100ms ease;
   outline: none;
+}
+
+:where(html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"])) .umbra-context-menu-item {
+  min-height: 2.75rem;
+  touch-action: pan-y;
 }
 
 .umbra-context-menu-item:not(:disabled):hover,
@@ -7894,21 +8179,24 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inp
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] {
-  display: flex !important;
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   height: 52px;
   min-height: 52px;
   flex: 0 0 52px;
   gap: 4px;
   padding: 4px 8px;
   border-bottom: 1px solid var(--umbra-border);
-  background: #080a0b;
+  background: var(--umbra-panel);
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button {
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-view-controls] button,
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-toolbar] button {
   display: inline-flex;
-  width: 44px;
+  width: 100%;
+  min-width: 44px;
   height: 44px;
-  flex: 0 0 44px;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -7918,20 +8206,63 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inp
   font-size: 11px;
   letter-spacing: 0;
   color: var(--umbra-text);
+  background: var(--umbra-input-bg);
+  touch-action: manipulation;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button:first-child {
-  width: auto;
-  flex: 1 1 auto;
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [role="toolbar"] button svg,
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-toolbar] button > svg {
+  width: 18px;
+  height: 18px;
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button[aria-expanded="true"] {
-  border-color: #fda4af;
-  background: #3b1720;
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [role="toolbar"] button:is([aria-expanded="true"], [aria-pressed="true"]),
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-toolbar] button[aria-pressed="true"] {
+  border-color: var(--umbra-accent);
+  background: color-mix(in srgb, var(--umbra-accent) 16%, var(--umbra-panel));
 }
 
-html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-job-controls] button:disabled {
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [role="toolbar"] button:disabled,
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-toolbar] button:disabled {
   opacity: 0.35;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-view-controls] {
+  display: flex;
+  flex: 0 0 52px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--umbra-border);
+  background: var(--umbra-panel);
+}
+
+/* Pan controls replace scrollbars; keep the fitted canvas size stable while zooming. */
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-viewport] {
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-viewport]::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mobile-zoom] {
+  display: grid;
+  grid-template-columns: 44px minmax(72px, 1fr) 44px;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-mobile-view-controls] > button {
+  width: 44px;
+  flex: 0 0 44px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-layers-panel]:not(:has(button[aria-expanded="true"])) {
+  display: none;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-tools-expanded="0"] [data-umbra-inpaint-toolbar] {
@@ -7940,11 +8271,43 @@ html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor][data-mobile-too
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-inpaint-toolbar] {
   position: absolute;
-  inset: 52px 0 auto;
-  max-height: 45%;
+  inset: 104px 0 auto;
+  max-height: calc(100% - 164px);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-toolbar] > div:first-child {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mask-shapes],
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mask-actions] {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 0;
+  border: 0;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-mask-actions] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-toolbar] > div:first-child > label {
+  height: 44px;
+  border: 0;
+  font-size: 11px;
+}
+
+html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-toolbar] > div:first-child > label input {
+  flex: 1;
+  min-width: 0;
 }
 
 html[data-umbra-remote-mode="phone"] [data-umbra-inpaint-editor] [data-umbra-generation-action-bar="Inpaint"] {
@@ -8200,6 +8563,39 @@ html[data-umbra-remote-mode="phone"] [data-umbra-ui-body][data-umbra-ui-active-m
   scroll-padding-bottom: 0;
   overflow: hidden;
 }
+/* DaSiWa phone controls share the prompt-first layout and fixed preview dock. */
+html[data-umbra-remote-mode="phone"] [data-umbra-official-video][data-phone] > :is(header, footer)[hidden] {
+  display: none;
+}
+html[data-umbra-remote-mode="phone"] [aria-label="Video studio"] > button {
+  min-height: 44px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+html[data-umbra-remote-mode="phone"] [data-umbra-official-video][data-phone] main {
+  padding: 0 0.75rem 6rem;
+}
+html[data-umbra-remote-mode="phone"] [data-umbra-official-video][data-phone] :is(button, summary, input:not([type="checkbox"]), [data-umbra-select-trigger]) {
+  min-height: 44px;
+}
+html[data-umbra-remote-mode="phone"] [data-umbra-official-video][data-phone] button.w-9 {
+  min-width: 44px;
+}
+html[data-umbra-remote-mode="phone"] [data-official-mobile-editor] [data-official-editor-section="prompt"] {
+  padding-top: 0.75rem;
+  padding-bottom: 0.5rem;
+}
+html[data-umbra-remote-mode="phone"] [data-official-mobile-editor] [data-official-editor-section="prompt"] textarea {
+  min-height: 9rem;
+  font-size: 16px;
+  line-height: 1.5;
+}
+html[data-umbra-remote-mode="phone"] [data-official-mobile-editor] [data-official-editor-section="forge"] {
+  padding-bottom: 0;
+}
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-video-preview] [data-video-workspace-preview] {
+  flex: 1 1 auto;
+}
 html[data-umbra-remote-mode="phone"] [data-umbra-video-workspace] {
   min-height: 0;
   height: 100%;
@@ -8292,4 +8688,85 @@ html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [da
 html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-detailer-stage-toolbar] > button:first-child:not([data-umbra-detailer-stage-title]) { width: 44px !important; min-width: 44px !important; }
 @media (prefers-reduced-motion: reduce) {
   [data-umbra-detailer-switch-track], [data-umbra-detailer-switch-thumb] { transition: none; }
+}
+
+/* Remote controls keep their compact glyphs, with a full touch target. */
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) :is(
+  [data-umbra-positive-prompt-editor], [data-umbra-ui-generation-panel],
+  [data-umbra-inspector-frame], [data-umbra-transparency-workspace],
+  [data-umbra-ui-media-tool-controls], [data-umbra-powerprompter-sidebar],
+  [data-umbra-gallery-modal-form], [data-umbra-modal-root]
+) :is(button, input[type="range"]) {
+  min-width: 44px;
+  min-height: 44px;
+}
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) :is(
+  [data-umbra-inspector-frame], [data-umbra-ui-media-tool-controls], [data-umbra-ui-generation-panel]
+) label:has(input[type="checkbox"]) {
+  min-height: 44px;
+}
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-gallery-modal-form] input:not([type="checkbox"]) {
+  min-height: 44px;
+}
+
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]):root body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]):root body textarea {
+  font-size: max(16px, 1rem) !important;
+}
+
+html:is([data-umbra-remote-mode="phone"], [data-umbra-remote-mode="tablet"]) [data-umbra-watermark-placement-controls] {
+  grid-template-columns: 154px minmax(0, 1fr);
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] :is(
+  [data-umbra-gallery-header], [data-umbra-gallery-action-controls]
+) button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-header] {
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-browser-search] input {
+  height: 44px;
+}
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-action-controls] > div > button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+[data-umbra-mobile-filmstrip].glass-panel {
+  border-radius: 0;
+  border-inline-width: 0;
+  border-bottom-width: 0;
+  color: var(--umbra-text);
+}
+[data-umbra-mobile-filmstrip] > button {
+  min-width: 44px;
+  min-height: 44px;
+  border-right: 1px solid color-mix(in srgb, var(--umbra-text) 12%, transparent);
+  color: color-mix(in srgb, var(--umbra-text) 65%, transparent);
+}
+[data-umbra-mobile-filmstrip] > button:is(:hover, [data-active="1"]) {
+  color: var(--umbra-accent);
+  background: color-mix(in srgb, var(--umbra-accent) 10%, transparent);
+}
+[data-umbra-mobile-filmstrip] button:focus-visible {
+  outline: 2px solid var(--umbra-accent);
+  outline-offset: -2px;
+}
+[data-umbra-mobile-filmstrip] .umbra-mobile-filmstrip-tile {
+  border-radius: 4px;
+  border-color: color-mix(in srgb, var(--umbra-text) 12%, transparent);
+  background: color-mix(in srgb, var(--umbra-panel) 72%, transparent);
+  box-shadow: none;
+}
+[data-umbra-mobile-filmstrip] .umbra-mobile-filmstrip-tile[aria-pressed="true"] {
+  border-color: var(--umbra-accent);
+  box-shadow: inset 0 0 0 1px var(--umbra-accent);
+}
+[data-umbra-mobile-filmstrip] .umbra-mobile-filmstrip-tile:hover {
+  border-color: color-mix(in srgb, var(--umbra-accent) 50%, transparent);
 }

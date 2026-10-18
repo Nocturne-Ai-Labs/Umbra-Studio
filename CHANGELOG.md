@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.90.23-beta - Umbra Remote Mobile
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Save your work and update through **Umbra Setup > Updates**, then reopen Studio. Setup remains the installation and update home following the major setup-flow refactor.
+- Update managed DaSiWa nodes through Setup to apply the reviewed Auto Prompt compatibility repair. No new model downloads are required for this update.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Mobile Workspace And Gallery
+
+- TXT2IMG, IMG2IMG, Inpainting and DaSiWa video put prompts first, keep Generate reachable and group other controls into collapsible settings.
+- Larger previews, compact toolbars, mobile prompt catalogs, inpainting pan/zoom controls and a top-anchored Extras selector make better use of phone space.
+- Gallery combines folders and media in a tap-to-navigate browser. A compact Gallery-only filmstrip retains shared viewing, selection, folder navigation and media actions.
+- Touch menus require a fresh press before selecting an action. Nested menus use one panel with Back; Rename, readable inputs and reachable touch targets improve phone and tablet use.
+- Visual Analysis uses compact icon controls and gives more space to imported media. Metadata imports no longer wait for optional clipboard copying.
+- Phone video focuses on DaSiWa text-to-video and image-to-video with Auto Prompt. Director, FrameForge and Longshot remain desktop/tablet tools; Canvas and Manga retain their existing availability.
+
+### Compatibility And Composition
+
+- MOSS composition controls are available in Edit with bounding-box layout generation, clearly distinguished from instruction-based image editing. Manga remains in Extras.
+- DaSiWa Auto Prompt preserves the reviewed local-model response formatting and migrates the previous modular patch safely during managed updates.
+
+### Validation And Limits
+
+- Targeted touch-menu regressions, TypeScript, lint, pipeline audits and frontend builds are checked against the candidate. Responsive layouts were inspected at phone, tablet, landscape and desktop sizes.
+- Physical-device Safari/Samsung interaction and native Linux GPU inference remain unqualified. Existing generation qualification is retained where pipeline bytes are unchanged.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: opening touch menus could accidentally activate an action; nested menus could overlap on mobile.
+- Fixed: metadata import could wait on optional clipboard access, and mobile controls could be cramped or difficult to reach.
+- Fixed: DaSiWa Auto Prompt compatibility with the reviewed modular node layout.
+- Improved: prompt-first mobile generation, folder navigation, Gallery-only OLED glass filmstrip, compact analysis controls and mobile Beta support status.
+
 ## v0.90.22-beta - Startup Readiness Fixes
 
 ### TL;DR - Setup After Updating

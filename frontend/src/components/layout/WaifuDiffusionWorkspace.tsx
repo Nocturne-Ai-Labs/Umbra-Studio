@@ -10,6 +10,7 @@ import {
   Loader2,
   Paintbrush,
   Sparkles,
+  Square,
   Tags,
   Trash2,
   X,
@@ -770,6 +771,9 @@ export function WaifuDiffusionWorkspace({
 
   const selectedStatus = analysisMode === 'caption' ? selectedItem?.naturalCaption.status : selectedItem?.waifuTagger.status;
   const runDisabled = batchTagging || !selectedItem || selectedItem.isVideo || selectedStatus === 'loading';
+  const selectedActionLabel = analysisMode === 'caption' ? 'Caption selected' : 'Tag selected';
+  const batchActionLabel = analysisMode === 'caption' ? 'Caption all' : 'Tag all';
+  const actionLabelClassName = remoteMode === 'phone' ? 'sr-only' : undefined;
   return <UmbraMediaInspectorFrame kind="visual" title={hideHeader ? 'Image Analysis' : 'Visual Analysis'} remoteMode={remoteMode}
     items={items.map(item => ({ ...item, status: analysisMode === 'caption' ? item.naturalCaption.status : item.waifuTagger.status }))}
     selectedId={selectedId} onSelect={setSelectedId} onAdd={() => fileInputRef.current?.click()} onRemove={removeItem} onClear={clearAll}
@@ -777,9 +781,9 @@ export function WaifuDiffusionWorkspace({
     input={<input ref={fileInputRef} aria-label="Import analysis media" type="file" accept="image/*,video/*" multiple hidden onChange={event => void handleFileSelection(event)} />}
     isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
     actions={<>
-      <button type="button" className={censorButton} disabled={runDisabled} onClick={() => { setInspectorTab('results'); void runSelectedAnalysis(); }}>{selectedStatus === 'loading' ? <Loader2 size={15} className="animate-spin" /> : analysisMode === 'caption' ? <FileText size={15} /> : <Tags size={15} />}{analysisMode === 'caption' ? 'Caption selected' : 'Tag selected'}</button>
-      <button type="button" className={censorButton} disabled={batchTagging || !items.some(item => !item.isVideo)} onClick={() => { setInspectorTab('results'); void runAnalysisForAll(); }}><Sparkles size={15} />{analysisMode === 'caption' ? 'Caption all' : 'Tag all'}</button>
-      {batchTagging && <button type="button" className={censorButton} onClick={() => { stopBatch.current = true; }}>Stop after current</button>}
+      <button type="button" className={censorButton} title={selectedActionLabel} aria-label={selectedActionLabel} disabled={runDisabled} onClick={() => { setInspectorTab('results'); void runSelectedAnalysis(); }}>{selectedStatus === 'loading' ? <Loader2 size={15} className="animate-spin" /> : analysisMode === 'caption' ? <FileText size={15} /> : <Tags size={15} />}<span className={actionLabelClassName}>{selectedActionLabel}</span></button>
+      <button type="button" className={censorButton} title={batchActionLabel} aria-label={batchActionLabel} disabled={batchTagging || !items.some(item => !item.isVideo)} onClick={() => { setInspectorTab('results'); void runAnalysisForAll(); }}><Sparkles size={15} /><span className={actionLabelClassName}>{batchActionLabel}</span></button>
+      {batchTagging && <button type="button" className={censorButton} title="Stop after current" aria-label="Stop after current" onClick={() => { stopBatch.current = true; }}><Square size={15} /><span className={actionLabelClassName}>Stop after current</span></button>}
       {remoteMode !== 'phone' && !isUmbraRemoteClient() && <CensorIconButton title="Show selected file in file explorer" disabled={!selectedItem || !/[\\/]/.test(selectedItem.path)} onClick={() => void revealInExplorer(selectedItem?.path)}><FolderOpen size={15} /></CensorIconButton>}
     </>}
     detailsTitle="Analysis inspector" details={<div data-umbra-visual-analysis-controls="" className="space-y-3">

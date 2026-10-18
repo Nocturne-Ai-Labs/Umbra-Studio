@@ -83,6 +83,7 @@ export interface FilmstripProps {
   onExitSelectionMode?: () => void;
   onDelete?: (ids: string[]) => void;
   onOpen?: (image: FilmstripImage) => void;
+  onOpenFolder?: (path: string) => void;
   onShowInExplorer?: (ids: string[]) => void;
   onCopyPaths?: (ids: string[]) => void;
   onCopyComfyJson?: (ids: string[]) => void;
@@ -735,7 +736,7 @@ function FilmstripMenu({
   );
 }
 
-function FilmstripTile({
+export function FilmstripTile({
   image,
   selected,
   displayMode,
@@ -744,6 +745,7 @@ function FilmstripTile({
   showContextButton,
   selectionMode,
   singleTapOpen,
+  compact = false,
   onSelect,
   onOpen,
   onContextMenu,
@@ -760,6 +762,7 @@ function FilmstripTile({
   showContextButton?: boolean;
   selectionMode?: boolean;
   singleTapOpen?: boolean;
+  compact?: boolean;
   onSelect: (event: React.MouseEvent) => void;
   onOpen: () => void;
   onContextMenu: (event: React.MouseEvent) => void;
@@ -808,7 +811,7 @@ function FilmstripTile({
   const isMedia = image.type === 'video' || image.type === 'gif';
   const isNsfw = image.privacyClass === 'nsfw';
   const isLivePreview = normalizePath(image.path).startsWith('umbra-live-generation://');
-  const accentStyle: React.CSSProperties = !selected && !isLivePreview && imageAccentColor ? {
+  const accentStyle: React.CSSProperties = !compact && !selected && !isLivePreview && imageAccentColor ? {
     borderColor: `rgba(${imageAccentColor}, 0.34)`,
     background: `linear-gradient(180deg, rgba(${imageAccentColor}, 0.13), rgba(0,0,0,0.34))`,
     boxShadow: `inset 0 1px 0 rgba(${imageAccentColor}, 0.14), 0 0 14px rgba(${imageAccentColor}, 0.09)`,
@@ -833,12 +836,14 @@ function FilmstripTile({
       type="button"
       draggable={!isLivePreview && !selectionMode && !singleTapOpen}
       data-filmstrip-id={image.id}
+      data-umbra-filmstrip-compact={compact ? '' : undefined}
+      aria-pressed={compact ? selected : undefined}
       data-active-workspace={activeWorkspace || ''}
       data-umbra-filmstrip-live-preview={isLivePreview ? '1' : '0'}
       aria-label={tooltip}
-      onMouseEnter={hoverPreview.enter}
+      onMouseEnter={compact ? undefined : hoverPreview.enter}
       onMouseLeave={hoverPreview.close}
-      onFocus={hoverPreview.enter}
+      onFocus={compact ? undefined : hoverPreview.enter}
       onBlur={hoverPreview.close}
       onPointerDown={hoverPreview.close}
       data-umbra-filmstrip-selection-mode={selectionMode ? '1' : '0'}
@@ -857,9 +862,10 @@ function FilmstripTile({
       onDragEnd={onDragEnd}
       style={accentStyle}
       className={cn(
-        'group relative shrink-0 overflow-hidden rounded-lg border bg-black/30 text-left shadow-sm outline-none transition-colors',
+        'group relative shrink-0 overflow-hidden border text-left outline-none transition-colors',
+        compact ? 'umbra-mobile-filmstrip-tile' : 'rounded-lg bg-black/30 shadow-sm',
         'before:pointer-events-none before:absolute before:inset-0 before:z-10 before:border before:border-white/5',
-        displayMode === 'grid' ? 'aspect-square w-full' : 'h-[104px] w-[104px]',
+        compact ? 'h-16 w-16' : displayMode === 'grid' ? 'aspect-square w-full' : 'h-[104px] w-[104px]',
         selected
           ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] shadow-[0_0_0_1px_var(--umbra-accent),0_0_18px_color-mix(in_srgb,var(--umbra-accent)_35%,transparent)]'
           : isLivePreview
@@ -867,8 +873,8 @@ function FilmstripTile({
             : 'border-white/10 hover:border-white/20 hover:bg-white/[0.04]',
         dropPosition === 'before' && 'ring-2 ring-[var(--umbra-accent)] ring-offset-[-2px] ring-offset-zinc-950',
         dropPosition === 'after' && 'ring-2 ring-[var(--umbra-accent)] ring-offset-2 ring-offset-zinc-950',
-        'duration-150 hover:-translate-y-0.5',
-        isLivePreview ? 'cursor-pointer' : selectionMode ? 'touch-none select-none' : singleTapOpen ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
+        compact ? '' : 'duration-150 hover:-translate-y-0.5',
+        compact ? 'touch-pan-x select-none cursor-pointer' : isLivePreview ? 'cursor-pointer' : selectionMode ? 'touch-none select-none' : singleTapOpen ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
       )}
     >
       {src ? (
@@ -886,7 +892,7 @@ function FilmstripTile({
               scheduleRetry();
               return;
             }
-            if (!isLivePreview) {
+            if (!isLivePreview && !compact) {
               const sampledAccent = filmstripAccentColorCache.get(primarySrc) || sampleFilmstripAccentColor(img);
               if (sampledAccent) {
                 rememberFilmstripAccentColor(primarySrc, sampledAccent);
@@ -948,12 +954,13 @@ function FilmstripTile({
         </span>
       ) : null}
 
-      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/92 via-black/55 to-transparent px-1.5 pb-1 pt-5">
+      {compact && selected ? <span className="absolute bottom-1 right-1 z-20 rounded bg-black/80 text-[var(--umbra-accent)]"><CheckSquare size={14} aria-label="Selected" /></span> : null}
+      {!compact && <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/92 via-black/55 to-transparent px-1.5 pb-1 pt-5">
         <div data-i18n-skip="" className="truncate text-[10px] font-medium text-zinc-100">{image.name}</div>
         {isLivePreview ? (
           <div className="truncate text-[9px] font-semibold text-emerald-200">Streaming preview</div>
         ) : size ? <div className="truncate text-[9px] text-zinc-400">{size}</div> : null}
-      </div>
+      </div>}
     </button>
     {hoverPreview.open ? <FilmstripHoverPreview anchor={tileRef} image={image} open /> : null}
     </>

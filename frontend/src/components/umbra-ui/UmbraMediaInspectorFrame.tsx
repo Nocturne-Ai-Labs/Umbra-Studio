@@ -24,18 +24,18 @@ const inspectorStyles = `
 }
 `;
 
-function InspectorPreview({ item }: { item: InspectorMedia }) {
+function InspectorPreview({ item, expandToFit = false }: { item: InspectorMedia; expandToFit?: boolean }) {
   const [zoom, setZoom] = React.useState(1), [pan, setPan] = React.useState({ x: 0, y: 0 }), [error, setError] = React.useState('');
   const stage = React.useRef<HTMLDivElement>(null);
   const [mediaHeight, setMediaHeight] = React.useState(220);
   React.useLayoutEffect(() => {
     const element = stage.current;
     if (!element) return;
-    const update = () => setMediaHeight(Math.max(1, Math.min(550, element.clientHeight - 24)));
+    const update = () => setMediaHeight(Math.max(1, expandToFit ? element.clientHeight - 24 : Math.min(550, element.clientHeight - 24)));
     update();
     const observer = new ResizeObserver(update); observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [expandToFit]);
   const drag = React.useRef<{ id: number; x: number; y: number; pan: typeof pan } | null>(null);
   const finish = (event: React.PointerEvent) => {
     if (drag.current?.id !== event.pointerId) return;
@@ -67,12 +67,13 @@ export function UmbraMediaInspectorFrame({ kind, title, remoteMode, items, selec
   isDragging: boolean; onDragOver: React.DragEventHandler; onDragLeave: React.DragEventHandler; onDrop: React.DragEventHandler;
 }) {
   const [showDetails, setShowDetails] = React.useState(true);
+  const compactToolbar = kind === 'visual' && remoteMode === 'phone';
   const selected = items.find(item => item.id === selectedId);
   return <div data-umbra-image-inspector={kind} data-umbra-inspector-frame="" data-umbra-image-inspector-remote-mode={remoteMode} className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-[var(--umbra-bg)] text-[var(--umbra-text)]" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
     <style>{inspectorStyles}</style>{input}
     <header data-umbra-inspector-toolbar="" className="sticky top-0 z-20 flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-[var(--umbra-bg)] p-3">
-      <h2 className="mr-auto min-w-0 text-sm font-bold max-sm:w-full">{title}</h2>
-      <button type="button" className={censorButton} disabled={busy} onClick={onAdd}><ImagePlus size={16} />Add media</button>
+      <h2 className={compactToolbar ? 'sr-only' : 'mr-auto min-w-0 text-sm font-bold max-sm:w-full'}>{title}</h2>
+      <button type="button" className={censorButton} title="Add media" aria-label="Add media" disabled={busy} onClick={onAdd}><ImagePlus size={16} /><span className={compactToolbar ? 'sr-only' : undefined}>Add media</span></button>
       <CensorIconButton title="Remove selected media" disabled={!selected} onClick={() => selected && onRemove(selected.id)}><ImageMinus size={16} /></CensorIconButton>
       <CensorIconButton title="Clear imported media" disabled={!items.length && !busy} onClick={onClear}><Trash2 size={16} /></CensorIconButton>
       {actions}
@@ -81,7 +82,7 @@ export function UmbraMediaInspectorFrame({ kind, title, remoteMode, items, selec
     <div role="status" className="flex min-h-8 shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-1 text-xs text-zinc-500"><span className="min-w-0 break-all">{status || selected?.name || 'Add media to begin'}</span><span className="ml-auto shrink-0">{items.length} media</span></div>
     {error && <p role="alert" className="shrink-0 break-words border-b border-red-300/20 px-3 py-2 text-xs text-red-300">{error}</p>}
     <div className={`inspector-body ${showDetails ? '' : 'without-details'}`}>
-      {selected ? <InspectorPreview key={`${selected.id}:${selected.blobUrl}`} item={selected} /> : <div className="inspector-preview flex min-h-[260px] items-center justify-center p-4 text-center"><button type="button" className={censorButton} disabled={busy} onClick={onAdd}><ImagePlus size={16} />Add media</button></div>}
+      {selected ? <InspectorPreview key={`${selected.id}:${selected.blobUrl}`} item={selected} expandToFit={compactToolbar} /> : <div className="inspector-preview flex min-h-[260px] items-center justify-center p-4 text-center"><button type="button" className={censorButton} disabled={busy} onClick={onAdd}><ImagePlus size={16} />Add media</button></div>}
       {showDetails && <aside data-umbra-inspector-details="" className="inspector-details glass-panel !rounded-none !border-0 !shadow-none">
         <div className="sticky top-0 z-10 border-b border-white/10 bg-[var(--umbra-bg)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-400">{detailsTitle}</div>
         <div className="min-w-0 p-3">{details}</div>

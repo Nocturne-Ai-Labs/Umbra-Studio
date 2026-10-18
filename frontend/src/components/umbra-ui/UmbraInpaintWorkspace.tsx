@@ -2,7 +2,8 @@
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraInpaintLivePreviewStream } from './UmbraInpaintLivePreview';
-import { usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
+import { UmbraPinnedOutputControl, usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
+import { UmbraMobileSettingsSection } from '@/components/umbra-ui/UmbraMobileSettingsSection';
 import { UmbraGenerationActionBar } from '@/components/umbra-ui/UmbraGenerationActionBar';
 import React from 'react';
 import type { BlendMode as PsdBlendMode, Layer as PsdLayer, Psd } from 'ag-psd';
@@ -94,7 +95,6 @@ import { UmbraSeedControls } from '@/components/umbra-ui/UmbraSeedControls';
 import { UmbraTiledVaeControls } from '@/components/umbra-ui/UmbraTiledVaeControls';
 import { UmbraHiresFixControls } from '@/components/umbra-ui/UmbraHiresFixControls';
 import { UmbraDetailerPipelineControls } from '@/components/umbra-ui/UmbraDetailerPipelineControls';
-import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { restoreUmbraUiInpaintProjectModels } from '@/lib/umbraUiInpaintProjectModelRestore';
 import {
   composeUmbraUiPromptWithLoras, isUmbraUiModelOnlyLoraFamily,
@@ -596,6 +596,8 @@ function canvasDocumentHistoryReducer(
 
 export interface UmbraInpaintWorkspaceProps {
   active?: boolean;
+  phoneMode?: boolean;
+  promptHeaderAction?: React.ReactNode;
   capabilities: UmbraUiPipelineCapabilities;
   inpaintAdapter: UmbraUiInpaintAdapter;
   modelFamily: string;
@@ -2433,6 +2435,8 @@ function readPendingInpaintHandoff(): UmbraUiInpaintHandoff | null {
 
 export function UmbraInpaintWorkspace({
   active = true,
+  phoneMode = false,
+  promptHeaderAction,
   capabilities,
   inpaintAdapter,
   modelFamily,
@@ -2518,13 +2522,7 @@ export function UmbraInpaintWorkspace({
   const [mobileToolsExpanded, setMobileToolsExpanded] = React.useState(false);
   const [mobileActionsExpanded, setMobileActionsExpanded] = React.useState(false);
   const mobileToolbarId = React.useId();
-  const [mobileControlsTab, setMobileControlsTab] = React.useState<'generation' | 'inpaint'>(() => {
-    const saved = readDeviceUiResume<{ controlsTab?: 'generation' | 'inpaint' }>('umbra-ui-inpaint');
-    return saved?.controlsTab === 'inpaint' ? 'inpaint' : 'generation';
-  });
-  React.useEffect(() => {
-    writeDeviceUiResume('umbra-ui-inpaint', { controlsTab: mobileControlsTab });
-  }, [mobileControlsTab]);
+  const mobileZoomCenterRef = React.useRef<{ x: number; y: number } | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const imageCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -4535,6 +4533,37 @@ export function UmbraInpaintWorkspace({
       scrollHeight: Math.max(1, viewport.scrollHeight),
     });
   }, []);
+
+  const changeMobileZoom = (nextZoom: number) => {
+    const viewport = viewportRef.current;
+    const image = imageCanvasRef.current;
+    if (!viewport || !image) return;
+    const viewBounds = viewport.getBoundingClientRect();
+    const imageBounds = image.getBoundingClientRect();
+    mobileZoomCenterRef.current = nextZoom === 1 ? { x: 0.5, y: 0.5 } : {
+      x: (viewBounds.left + viewBounds.width / 2 - imageBounds.left) / Math.max(1, imageBounds.width),
+      y: (viewBounds.top + viewBounds.height / 2 - imageBounds.top) / Math.max(1, imageBounds.height),
+    };
+    if (nextZoom === zoom) {
+      viewport.scrollLeft = (viewport.scrollWidth - viewport.clientWidth) / 2;
+      viewport.scrollTop = (viewport.scrollHeight - viewport.clientHeight) / 2;
+      mobileZoomCenterRef.current = null;
+      syncViewportMetrics();
+    } else setZoom(nextZoom);
+  };
+
+  React.useLayoutEffect(() => {
+    const center = mobileZoomCenterRef.current;
+    const viewport = viewportRef.current;
+    const image = imageCanvasRef.current;
+    if (!phoneMode || !center || !viewport || !image) return;
+    mobileZoomCenterRef.current = null;
+    const viewBounds = viewport.getBoundingClientRect();
+    const imageBounds = image.getBoundingClientRect();
+    viewport.scrollLeft += imageBounds.left + imageBounds.width * center.x - viewBounds.left - viewBounds.width / 2;
+    viewport.scrollTop += imageBounds.top + imageBounds.height * center.y - viewBounds.top - viewBounds.height / 2;
+    syncViewportMetrics();
+  }, [displayWidth, displayHeight, phoneMode, syncViewportMetrics, zoom]);
 
   React.useEffect(() => {
     const viewport = viewportRef.current;
@@ -9923,6 +9952,35 @@ export function UmbraInpaintWorkspace({
     && activeCanvasLayer.kind === 'mask'
     && (activeCanvasLayer.frozen || activeCanvasLayer.purpose !== 'inpaint');
   const activeCanvasLayerMutationLocked = !!activeCanvasLayer && (activeCanvasLayer.locked || activeCanvasLayerIsSource);
+  const promptControls = <>
+    <UmbraPositivePromptEditor
+      singleField={phoneMode}
+      headerAction={promptHeaderAction}
+      segments={promptSegments}
+      activeSegmentId={activePromptSegmentId}
+      onChange={onPromptSegmentsChange}
+      onActiveSegmentChange={onActivePromptSegmentChange}
+      onSubmit={() => { void generateSamples(); }}
+      history={canvasDocument?.generation.promptHistory || []}
+      onRememberCurrent={() => { rememberCurrentPrompt(); }}
+      onRestoreHistory={restorePromptHistoryEntry}
+      onRemoveHistory={removePromptHistoryEntry}
+      onClearHistory={clearPromptHistory}
+      accent="rose"
+    />
+    {capabilities.negativePrompt.support === 'adjustable' ? (
+      <UmbraMobileSettingsSection enabled={phoneMode} title="Negative prompt" summary={negativePrompt.trim() ? 'Configured' : 'None'}>
+        <label className="block space-y-1.5">
+          <span className={labelClass}>Negative Prompt</span>
+          <textarea value={negativePrompt} onChange={(event) => onNegativePromptChange(event.target.value)}
+            onKeyDown={handleNegativePromptKeyDown} className={`${inputClass} min-h-16 resize-y leading-relaxed`} />
+        </label>
+      </UmbraMobileSettingsSection>
+    ) : null}
+  </>;
+  const generationLabel = running ? `Generating ${job?.completed || 0}/${job?.total || samples}`
+    : canvasDocument?.pendingJobs.length ? 'Recovering Job' : 'Generate';
+  const generationTitle = generationBlockedReason || (generationBusy ? 'Wait for the current inpaint job to finish.' : 'Generate with the current inpaint settings');
   return (
     <section
       data-umbra-inpaint-workspace=""
@@ -9934,24 +9992,6 @@ export function UmbraInpaintWorkspace({
           : 'grid-cols-[clamp(232px,18vw,280px)_clamp(220px,17vw,260px)_minmax(0,1fr)]',
       )}
     >
-      <div data-umbra-inpaint-mobile-tabs="" className="hidden">
-        <button
-          type="button"
-          data-active={mobileControlsTab === 'generation' ? '1' : '0'}
-          onClick={() => setMobileControlsTab('generation')}
-        >
-          <WandSparkles size={13} />
-          Generation
-        </button>
-        <button
-          type="button"
-          data-active={mobileControlsTab === 'inpaint' ? '1' : '0'}
-          onClick={() => setMobileControlsTab('inpaint')}
-        >
-          <Focus size={13} />
-          Inpaint
-        </button>
-      </div>
       {studioMode ? (
         <UmbraCanvasStudioToolbar
           studio={canvasStudio}
@@ -9963,16 +10003,24 @@ export function UmbraInpaintWorkspace({
       ) : null}
       <aside
         data-umbra-inpaint-generation-sidebar=""
-        data-mobile-active={mobileControlsTab === 'generation' ? '1' : '0'}
         className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-black/15 p-3 custom-scrollbar"
       >
-        <div className="mb-3 flex items-center gap-2">
+        <div className={phoneMode ? 'hidden' : 'mb-3 flex items-center gap-2'}>
           <WandSparkles size={13} className="text-rose-300" />
           <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Generation</h2>
           <span className="ml-auto font-mono text-[8px] uppercase text-zinc-600">{operationMode}</span>
         </div>
 
         <div className="space-y-3">
+          {phoneMode ? <div data-umbra-mobile-inpaint-prompt="" className="space-y-3">
+            {promptControls}
+            {generationBlockedReason ? <p role="status" className="text-[11px] text-zinc-400">{generationBlockedReason}</p> : null}
+            <button type="button" onClick={() => fileInputRef.current?.click()}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-white/15 px-3 text-xs font-semibold text-zinc-200">
+              <Upload size={15} /> {source ? 'Replace Source Image' : 'Open Image'}
+            </button>
+          </div> : null}
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Model & LoRAs" summary={`${modelFamily} · ${loras.filter((lora) => lora.enabled).length} LoRAs`}>
           <label className="block space-y-1.5">
             <span className={labelClass}>Model Pipeline</span>
             <UmbraSelectControl value={modelFamily} onChange={(event) => onModelFamilyChange(event.target.value)} className={inputClass}>
@@ -10010,32 +10058,11 @@ export function UmbraInpaintWorkspace({
             />
           ) : null}
 
-          <UmbraPositivePromptEditor
-            segments={promptSegments}
-            activeSegmentId={activePromptSegmentId}
-            onChange={onPromptSegmentsChange}
-            onActiveSegmentChange={onActivePromptSegmentChange}
-            onSubmit={() => { void generateSamples(); }}
-            history={canvasDocument?.generation.promptHistory || []}
-            onRememberCurrent={() => { rememberCurrentPrompt(); }}
-            onRestoreHistory={restorePromptHistoryEntry}
-            onRemoveHistory={removePromptHistoryEntry}
-            onClearHistory={clearPromptHistory}
-            accent="rose"
-          />
-          {capabilities.negativePrompt.support === 'adjustable' ? (
-            <label className="block space-y-1.5">
-              <span className={labelClass}>Negative Prompt</span>
-              <textarea
-                value={negativePrompt}
-                onChange={(event) => onNegativePromptChange(event.target.value)}
-                onKeyDown={handleNegativePromptKeyDown}
-                className={`${inputClass} min-h-16 resize-y leading-relaxed`}
-              />
-            </label>
-          ) : null}
+          </UmbraMobileSettingsSection>
+          {!phoneMode ? promptControls : null}
 
-          <div className="flex items-center gap-2 border-t border-white/10 pt-3">
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Sampling" summary={`${steps} steps · ${samplerName}`}>
+          <div className={phoneMode ? 'hidden' : 'flex items-center gap-2 border-t border-white/10 pt-3'}>
             <Settings2 size={11} className="text-rose-300" />
             <span className="text-[9px] font-black uppercase tracking-[0.14em] text-zinc-300">Generation Pipeline</span>
           </div>
@@ -10064,6 +10091,8 @@ export function UmbraInpaintWorkspace({
             </div>
           ) : null}
 
+          </UmbraMobileSettingsSection>
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Enhancements" summary="Hires fix & detailers">
           {capabilities.hiresFix.support === 'adjustable' ? (
             <UmbraHiresFixControls
               enabled={hiresFix.enabled}
@@ -10116,6 +10145,8 @@ export function UmbraInpaintWorkspace({
             showStageControls={capabilities.detailerStages.customStages}
           />
 
+          </UmbraMobileSettingsSection>
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Samples & output" summary={`${samples} sample${samples === 1 ? '' : 's'}${running ? ' · Generating' : ''}`}>
           <div className="max-w-24 border-t border-white/10 pt-3">
             <label className="space-y-1.5">
               <span className={labelClass}>Samples</span>
@@ -10139,21 +10170,23 @@ export function UmbraInpaintWorkspace({
               <div className="h-full bg-rose-400 transition-[width] duration-200" style={{ width: `${Math.max(3, progress * 100)}%` }} />
             </div>
           ) : null}
+          {phoneMode ? <UmbraPinnedOutputControl task="Inpaint" value={pinnedOutputFolder} onChange={setPinnedOutputFolder} /> : null}
+          </UmbraMobileSettingsSection>
         </div>
       </aside>
 
       <aside
         data-umbra-inpaint-settings-sidebar=""
-        data-mobile-active={mobileControlsTab === 'inpaint' ? '1' : '0'}
         className="min-h-0 min-w-0 overflow-y-auto border-r border-white/10 bg-[#07090a] p-3 custom-scrollbar"
       >
-        <div className="mb-3 flex items-center gap-2">
+        <div className={phoneMode ? 'hidden' : 'mb-3 flex items-center gap-2'}>
           <Focus size={13} className="text-cyan-300" />
           <h2 className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">Inpaint Settings</h2>
           {source ? <span className="ml-auto font-mono text-[8px] text-zinc-600">{canvasSize.width}x{canvasSize.height}</span> : null}
         </div>
 
         <div className="space-y-3">
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Image & project" summary={source ? `${source.name} · ${source.width} × ${source.height}` : 'No image loaded'}>
           <input
             ref={fileInputRef}
             type="file"
@@ -10164,13 +10197,13 @@ export function UmbraInpaintWorkspace({
               event.target.value = '';
             }}
           />
-          <button
+          {!phoneMode ? <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-500/[0.07] text-[9px] font-black uppercase tracking-[0.14em] text-cyan-100 transition-colors hover:bg-cyan-500/[0.12]"
           >
             <Upload size={12} /> {source ? 'Replace Source Image' : 'Open Image'}
-          </button>
+          </button> : null}
           {source ? (
             <div className="space-y-2 border-y border-white/10 py-2">
               <div className="flex items-center gap-2">
@@ -10258,6 +10291,8 @@ export function UmbraInpaintWorkspace({
             </div>
           </details>
 
+          </UmbraMobileSettingsSection>
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Size & VAE" summary={source ? `${canvasSize.width} × ${canvasSize.height}` : 'Image size & tiled VAE'}>
           {source && capabilities.resolution.support !== 'unsupported' ? (
             <div className="space-y-2.5 border-t border-white/10 pt-3">
               <div className="flex items-center gap-2">
@@ -10294,6 +10329,8 @@ export function UmbraInpaintWorkspace({
             />
           </div>
 
+          </UmbraMobileSettingsSection>
+          <UmbraMobileSettingsSection enabled={phoneMode} title="Mask & blending" summary={`Denoise ${denoise.toFixed(2)} · ${maskFeather}px edge softness`}>
           <div className="space-y-3 border-t border-white/10 pt-3">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
@@ -10473,14 +10510,10 @@ export function UmbraInpaintWorkspace({
                 Denoise
                 <span className="font-mono text-zinc-300">{denoise.toFixed(2)}</span>
               </span>
-              <input type="range" min={0.05} max={1} step={0.01} value={denoise} onChange={(event) => setDenoise(Number(event.target.value))} className="w-full accent-rose-400" />
+              <input aria-label="Inpaint denoise" type="range" min={0.05} max={1} step={0.01} value={denoise} onChange={(event) => setDenoise(Number(event.target.value))} className="w-full accent-rose-400" />
             </label>
           </div>
-
-
-
-
-
+          </UmbraMobileSettingsSection>
         </div>
       </aside>
 
@@ -10493,6 +10526,13 @@ export function UmbraInpaintWorkspace({
         icon={<Paintbrush size={14} />}
         thumbnailUrl={previewStage?.asset.imageUrl || source?.imageUrl}
         tone="rose"
+        dockAction={phoneMode ? <button type="button" data-umbra-mobile-inpaint-generate=""
+          aria-label="Generate Inpaint" disabled={!generationReady || generationBusy} title={generationTitle}
+          onClick={() => void generateSamples()}
+          className="inline-flex min-h-12 max-w-[50%] shrink-0 items-center justify-center gap-2 rounded-md border border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_18%,var(--umbra-panel))] px-4 text-xs font-bold text-[var(--umbra-text)] disabled:cursor-not-allowed disabled:opacity-45">
+          {generationBusy ? <Loader2 size={16} className="shrink-0 animate-spin" /> : <Play size={16} className="shrink-0" />}
+          {generationLabel}
+        </button> : undefined}
       >
         <main
           data-umbra-inpaint-editor=""
@@ -10501,17 +10541,32 @@ export function UmbraInpaintWorkspace({
           className="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-black/25 transition-[padding-right] duration-150 ease-out"
           style={{ paddingRight: layersExpanded ? 'clamp(248px, 22vw, 320px)' : '40px' }}
         >
-        <div data-umbra-inpaint-mobile-job-controls="" className="hidden">
+        <div data-umbra-inpaint-mobile-job-controls="" className="hidden" role="toolbar" aria-label="Inpaint editing tools">
+          {toolButtons.filter((button) => button.id === 'pan' || button.id === 'brush' || (button.id === 'erase' && button.target === 'mask')).map((button) => (
+            <button key={button.id} type="button" title={button.label} aria-label={button.label}
+              aria-pressed={tool === button.id && (!button.target || editTarget === button.target)}
+              disabled={!source} onClick={() => { selectCanvasTool(button.id, button.target); setMobileToolsExpanded(false); }}>
+              {button.icon}
+            </button>
+          ))}
           <button type="button" onClick={() => setMobileToolsExpanded((value) => !value)}
             aria-expanded={mobileToolsExpanded} aria-controls={mobileToolbarId}
             aria-label={mobileToolsExpanded ? 'Hide inpaint tools' : 'Show inpaint tools'}
             title={mobileToolsExpanded ? 'Hide inpaint tools' : 'Show inpaint tools'}>
-            <Settings2 size={16} /><span>Tools</span><ChevronDown size={12} className={mobileToolsExpanded ? 'rotate-180' : ''} />
+            <Settings2 size={18} />
           </button>
           <button type="button" onClick={undoDocument} disabled={documentHistory.past.length <= 0} title="Undo last edit" aria-label="Undo last edit"><Undo2 size={16} /></button>
           <button type="button" onClick={redoDocument} disabled={documentHistory.future.length <= 0} title="Redo last edit" aria-label="Redo last edit"><Redo2 size={16} /></button>
-          <button type="button" onClick={() => setZoom(1)} title="Fit image" aria-label="Fit image"><Maximize2 size={16} /></button>
-          <button
+        </div>
+        <div data-umbra-inpaint-mobile-view-controls="" className="hidden" role="toolbar" aria-label="Image navigation">
+          <div data-umbra-inpaint-mobile-zoom="">
+            <button type="button" disabled={!source || zoom <= 0.25} onClick={() => changeMobileZoom(Math.max(0.25, zoom - 0.25))} title="Zoom out" aria-label="Zoom out"><ZoomOut size={18} /></button>
+            <button type="button" disabled={!source} onClick={() => changeMobileZoom(1)} title="Fit image" aria-label="Fit image"><Maximize2 size={16} /><span>{Math.round(zoom * 100)}%</span></button>
+            <button type="button" disabled={!source || zoom >= 6} onClick={() => changeMobileZoom(Math.min(6, zoom + 0.25))} title="Zoom in" aria-label="Zoom in"><ZoomIn size={18} /></button>
+          </div>
+          <button type="button" disabled={!source} onClick={() => { setLayersExpanded((value) => !value); setMobileToolsExpanded(false); }}
+            title="Layers and results" aria-label="Layers and results" aria-expanded={layersExpanded} aria-controls="umbra-inpaint-results-panel"><Layers3 size={18} /></button>
+          {running ? <button
             type="button"
             onClick={() => void cancelActiveJob()}
             disabled={!running || cancelingJob || !!job?.cancelRequested}
@@ -10519,20 +10574,22 @@ export function UmbraInpaintWorkspace({
             aria-label="Stop all samples"
           >
             <Square size={14} />
-          </button>
+          </button> : null}
         </div>
         <div id={mobileToolbarId} data-umbra-inpaint-toolbar="" className="relative z-30 shrink-0 border-b border-white/10 bg-[#050708]/95 shadow-md shadow-black/35 backdrop-blur-sm">
           <div className="flex min-h-10 min-w-0 flex-wrap items-center gap-1.5 px-2.5 py-1.5 [&>*]:shrink-0">
           {(
             <>
-              <div className="flex items-center gap-1 border border-white/[0.08] bg-black/30 p-0.5" aria-label="Inpaint tools">
-                {toolButtons.map((button) => (
+              <div data-umbra-inpaint-mask-shapes="" className="flex items-center gap-1 border border-white/[0.08] bg-black/30 p-0.5" aria-label="Inpaint tools">
+                {toolButtons.filter((button) => !phoneMode || !(button.id === 'pan' || button.id === 'brush' || (button.id === 'erase' && button.target === 'mask'))).map((button) => (
                   <button
                     key={`${button.id}-${button.target || 'canvas'}`}
                     type="button"
-                    onClick={() => selectCanvasTool(button.id, button.target)}
+                    onClick={() => { selectCanvasTool(button.id, button.target); if (phoneMode) setMobileToolsExpanded(false); }}
                     disabled={button.disabled}
                     title={button.label}
+                    aria-label={button.label}
+                    aria-pressed={tool === button.id && (!button.target || editTarget === button.target)}
                     className={cn(
                       'inline-flex h-8 w-8 items-center justify-center rounded-sm border transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-300/60 disabled:cursor-not-allowed disabled:border-transparent disabled:text-zinc-800',
                       tool === button.id && (!button.target || editTarget === button.target)
@@ -10566,22 +10623,24 @@ export function UmbraInpaintWorkspace({
                   </label>
                 </>
               ) : null}
-              <div className="h-5 w-px bg-white/10" />
+              {!phoneMode ? <><div className="h-5 w-px bg-white/10" />
               <button type="button" onClick={undoDocument} disabled={documentHistory.past.length <= 0} title="Undo last edit" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 disabled:text-zinc-800"><Undo2 size={13} /></button>
-              <button type="button" onClick={redoDocument} disabled={documentHistory.future.length <= 0} title="Redo last edit" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 disabled:text-zinc-800"><Redo2 size={13} /></button>
+              <button type="button" onClick={redoDocument} disabled={documentHistory.future.length <= 0} title="Redo last edit" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 disabled:text-zinc-800"><Redo2 size={13} /></button></> : null}
+              <div data-umbra-inpaint-mask-actions="" className="contents">
               <button type="button" onClick={invertMask} disabled={!source || maskEditingLocked || maskProcessing} title="Invert the active mask" aria-label="Invert active mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-rose-200 disabled:text-zinc-800"><ArrowRightLeft size={13} /></button>
               <button type="button" onClick={() => void adjustActiveMask(-8)} disabled={!source || maskEditingLocked || maskProcessing} title="Shrink mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800"><Minimize2 size={13} /></button>
               <button type="button" onClick={() => void adjustActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title="Grow mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800"><Maximize2 size={13} /></button>
               <button type="button" onClick={() => void featherActiveMask(8)} disabled={!source || maskEditingLocked || maskProcessing} title="Feather mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800">{maskProcessing ? <Loader2 size={13} className="animate-spin" /> : <Focus size={13} />}</button>
               <button type="button" onClick={clearMask} disabled={!source || maskEditingLocked || maskProcessing} title="Clear mask" className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-400 hover:text-red-200 disabled:text-zinc-800"><Trash2 size={13} /></button>
-              <div className="ml-auto flex items-center gap-1 border border-white/[0.06] bg-black/25 p-0.5">
+              </div>
+              {!phoneMode ? <div className="ml-auto flex items-center gap-1 border border-white/[0.06] bg-black/25 p-0.5">
                 <button type="button" onClick={() => void saveCanvasToGallery(false)} disabled={!source || isSavingCanvas || !!fullResolutionOperation} title="Save accepted image to Gallery" className="inline-flex h-8 w-8 items-center justify-center border border-white/10 text-zinc-400 hover:text-cyan-200 disabled:text-zinc-800">{isSavingCanvas ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}</button>
                 <button type="button" onClick={() => void sendCanvasToImg2Img()} disabled={!source || isSavingCanvas || !!fullResolutionOperation} title="Continue accepted image in IMG2IMG" className="inline-flex h-8 w-8 items-center justify-center border border-cyan-300/20 text-cyan-200 disabled:text-zinc-800"><ImagePlus size={12} /></button>
                 <button type="button" onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))} title="Zoom out" className="inline-flex h-8 w-8 items-center justify-center border border-white/10 text-zinc-400"><ZoomOut size={13} /></button>
                 <button type="button" onClick={() => setZoom(1)} title="Fit image" className="inline-flex h-8 w-8 items-center justify-center border border-white/10 text-zinc-400"><Maximize2 size={13} /></button>
                 <button type="button" onClick={() => setZoom((value) => Math.min(6, value + 0.25))} title="Zoom in" className="inline-flex h-8 w-8 items-center justify-center border border-white/10 text-zinc-400"><ZoomIn size={13} /></button>
                 <span className="w-10 text-right font-mono text-[8px] text-zinc-500">{Math.round(zoom * 100)}%</span>
-              </div>
+              </div> : null}
             </>
           )}
           </div>
@@ -10686,6 +10745,7 @@ export function UmbraInpaintWorkspace({
 
         <div
           ref={viewportRef}
+          data-umbra-inpaint-viewport=""
           data-umbra-canvas-studio-viewport={studioMode ? '' : undefined}
           className={cn(
             'relative min-h-0 flex-1 bg-[#08090b]',
@@ -10696,7 +10756,7 @@ export function UmbraInpaintWorkspace({
             backgroundImage: 'linear-gradient(rgba(103,232,249,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(103,232,249,0.055) 1px, transparent 1px)',
             backgroundSize: `${Math.max(4, studioViewport.snapSize * studioViewport.zoom)}px ${Math.max(4, studioViewport.snapSize * studioViewport.zoom)}px`,
             backgroundPosition: `${studioViewport.panX}px ${studioViewport.panY}px`,
-          } : undefined}
+          } : phoneMode ? { touchAction: 'none' } : undefined}
           onPointerDownCapture={studioMode ? beginStudioViewportPan : beginViewportPan}
           onPointerMove={studioMode ? moveStudioViewportPan : moveViewportPan}
           onPointerUp={studioMode ? finishStudioViewportPan : finishViewportPan}
@@ -10842,7 +10902,7 @@ export function UmbraInpaintWorkspace({
               style={studioMode ? {
                 transform: `translate3d(${studioViewport.panX}px, ${studioViewport.panY}px, 0) scale(${studioViewport.zoom})`,
                 transformOrigin: '0 0',
-              } : undefined}
+              } : phoneMode ? { width: Math.max(viewportSize.width, displayWidth + 32), height: Math.max(viewportSize.height, displayHeight + 32) } : undefined}
             >
               {studioMode ? studioAlignmentGuides.map((guide) => {
                 const padding = 12 / Math.max(0.05, studioViewport.zoom);
@@ -10967,7 +11027,7 @@ export function UmbraInpaintWorkspace({
                     <span className="ml-2 shrink-0 font-mono text-cyan-300/55">{Math.round(studioActiveArtboardPosition.x)},{Math.round(studioActiveArtboardPosition.y)}</span>
                   </div>
                 ) : null}
-                {rulersEnabled ? (
+                {rulersEnabled && !phoneMode ? (
                   <>
                     <div className="pointer-events-none absolute -top-5 left-0 z-30 h-4 w-full border-b border-white/15 bg-black/90 font-mono text-[6px] text-zinc-500">
                       {rulerTicks.x.map((value) => <span key={`x-${value}`} className="absolute bottom-0 h-2 border-l border-white/25 pl-0.5" style={{ left: `${(value / canvasSize.width) * 100}%` }}>{Math.round(value)}</span>)}
@@ -11418,8 +11478,8 @@ export function UmbraInpaintWorkspace({
         </div>
         <UmbraGenerationActionBar task="Inpaint" onGenerate={() => void generateSamples()}
           disabled={!generationReady || generationBusy} busy={generationBusy}
-          title={generationBlockedReason || (generationBusy ? 'Wait for the current inpaint job to finish.' : 'Generate with the current inpaint settings')}
-          label={running ? `Generating ${job?.completed || 0}/${job?.total || samples}` : canvasDocument?.pendingJobs.length ? 'Recovering Job' : 'Generate'}
+          title={generationTitle}
+          label={generationLabel}
           folder={pinnedOutputFolder} onFolderChange={setPinnedOutputFolder}>
           <button type="button" data-umbra-inpaint-action-toggle="" className="hidden"
             aria-expanded={mobileActionsExpanded} aria-label={mobileActionsExpanded ? 'Hide image actions' : 'Show image actions'}

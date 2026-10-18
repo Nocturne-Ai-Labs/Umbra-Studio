@@ -71,6 +71,7 @@ import {
 import { ScannerWorkspace } from '@/components/layout/ScannerWorkspace';
 import { WaifuDiffusionWorkspace } from '@/components/layout/WaifuDiffusionWorkspace';
 import {
+  isUmbraUiExtrasToolAvailable,
   normalizeUmbraUiExtrasTool,
   persistUmbraUiExtrasTool,
   readPersistedUmbraUiExtrasTool,
@@ -126,8 +127,8 @@ function ExtrasToolNavigation({
 }) {
   const { language, t } = useI18n();
   const navigationRef = React.useRef<HTMLDivElement>(null);
-  const tools: Array<{ id: UmbraExtrasToolMode; label: string; icon: React.ReactNode }> = [
-    ...(remoteMode === 'phone' ? [] : [{ id: 'manga' as const, label: 'Manga Studio', icon: <BookOpen size={12} /> }]),
+  const allTools: Array<{ id: UmbraExtrasToolMode; label: string; icon: React.ReactNode }> = [
+    { id: 'manga', label: 'Manga Studio', icon: <BookOpen size={12} /> },
     { id: 'upscale', label: t('extras.upscale'), icon: <ImageUp size={12} /> },
     { id: 'censor', label: t('extras.imageCensor'), icon: <EyeOff size={12} /> },
     { id: 'transparency', label: 'Transparency', icon: <Eraser size={12} /> },
@@ -137,6 +138,7 @@ function ExtrasToolNavigation({
     { id: 'metadata-scanner', label: t('extras.metadataScanner'), icon: <ScanSearch size={12} /> },
     { id: 'visual-analysis', label: t('extras.visualAnalysis'), icon: <Sparkles size={12} /> },
   ];
+  const tools = allTools.filter((tool) => isUmbraUiExtrasToolAvailable(tool.id, remoteMode));
 
   React.useLayoutEffect(() => {
     const navigation = navigationRef.current;
@@ -188,6 +190,7 @@ function ExtrasToolNavigation({
           ariaLabel={t('extras.toolPicker')}
           menuTitle={t('extras.toolPicker')}
           menuSubtitle={t('extras.chooseTool')}
+          menuPresentation="anchored"
           leadingIcon={selectedTool.icon}
           buttonClassName="h-11 border-white/10 bg-black/30 px-3 font-black uppercase tracking-[0.08em] text-[var(--umbra-text)]"
         />
@@ -268,7 +271,12 @@ export function UmbraExtrasWorkspace({
 }: UmbraExtrasWorkspaceProps) {
   const showToast = useStore((state) => state.showToast);
   const [sources, setSources] = React.useState<StagedUpscaleSource[]>([]);
-  const [activeTool, setActiveTool] = React.useState<UmbraExtrasToolMode>(readPersistedUmbraUiExtrasTool);
+  const [selectedTool, setSelectedTool] = React.useState<UmbraExtrasToolMode>(readPersistedUmbraUiExtrasTool);
+  // A desktop-only saved selection must never mount its editor on a phone.
+  const activeTool = isUmbraUiExtrasToolAvailable(selectedTool, remoteMode) ? selectedTool : 'upscale';
+  const setActiveTool = React.useCallback((tool: UmbraExtrasToolMode) => {
+    if (isUmbraUiExtrasToolAvailable(tool, remoteMode)) setSelectedTool(tool);
+  }, [remoteMode]);
   const [visitedTools, setVisitedTools] = React.useState<UmbraExtrasToolMode[]>(() => [activeTool]);
   React.useEffect(() => {
     setVisitedTools((current) => current.includes(activeTool) ? current : [...current, activeTool]);
@@ -337,8 +345,8 @@ export function UmbraExtrasWorkspace({
   }, [modelChoices, onModelNameChange, remoteClient, setPlacement, showToast]);
 
   React.useEffect(() => {
-    persistUmbraUiExtrasTool(activeTool);
-  }, [activeTool]);
+    persistUmbraUiExtrasTool(selectedTool);
+  }, [selectedTool]);
 
   React.useEffect(() => {
     const onToolRequest = (event: Event) => {
@@ -348,7 +356,7 @@ export function UmbraExtrasWorkspace({
     };
     window.addEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onToolRequest);
     return () => window.removeEventListener(UMBRA_UI_EXTRAS_TOOL_EVENT, onToolRequest);
-  }, []);
+  }, [setActiveTool]);
 
   React.useEffect(() => {
     setExportSettings((current) => current.longEdge === maxDimension ? current : { ...current, longEdge: maxDimension });
@@ -372,7 +380,7 @@ export function UmbraExtrasWorkspace({
     const onHandoff = (event: Event) => consume((event as CustomEvent).detail);
     window.addEventListener(UMBRA_UI_MEDIA_TOOLS_HANDOFF_EVENT, onHandoff);
     return () => window.removeEventListener(UMBRA_UI_MEDIA_TOOLS_HANDOFF_EVENT, onHandoff);
-  }, []);
+  }, [setActiveTool]);
 
   React.useEffect(() => {
     if (remoteClient) return;
@@ -873,7 +881,7 @@ export function UmbraExtrasWorkspace({
       </section>
 
       <UmbraMobileWorkspaceSheet
-        active={active}
+        active={active && activeTool === 'upscale'}
         title="Upscale Batch"
         subtitle={sources.length > 0
           ? `${sources.length} image${sources.length === 1 ? '' : 's'} staged`

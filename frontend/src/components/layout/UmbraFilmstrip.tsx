@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Filmstrip, type FilmstripImage, type SortDirection, type SortField } from '@/components/filmstrip';
+import { MobileFilmstrip } from '@/components/filmstrip/MobileFilmstrip';
 import { createFilmstripPathMatcher, getFilmstripSelectableImages, reconcileFilmstripSelection, resolveFilmstripSelectedImages, retainVisibleFilmstripSelection } from '@/components/filmstrip/filmstripSelection';
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
@@ -18,6 +19,7 @@ import { isProtectedLivePreview } from '@/lib/livePreviewPrivacy';
 import { fetchGalleryFs } from '@/lib/galleryBridgeFs';
 
 interface UmbraFilmstripProps {
+  compact?: boolean;
   initialHeight?: number;
   minHeight?: number;
   maxHeight?: number;
@@ -494,6 +496,7 @@ function mapFilmstripSortFieldToGallery(sortField: SortField): GallerySortBy | n
 }
 
 export function UmbraFilmstrip({
+  compact = false,
   initialHeight = 180,
   minHeight = 120,
   maxHeight = 600,
@@ -2411,10 +2414,11 @@ export function UmbraFilmstrip({
   const recentGenerationPathSet = useMemo(() => new Set(
     recentGenerationLaneImages.map((image) => pathKey(image.path)).filter(Boolean)
   ), [recentGenerationLaneImages]);
+  const FilmstripView = compact ? MobileFilmstrip : Filmstrip;
 
   return (
     <>
-      <Filmstrip
+      <FilmstripView
         statusMessage={folderLoadError || (deletePending ? 'Deleting selection…' : pathKey(feedFolder) !== pathKey(currentFolder || rootPath) ? 'Loading folder…' : '')}
         statusIsError={Boolean(folderLoadError)}
         unreadFolderMediaCount={folderActivity.total}
@@ -2446,11 +2450,15 @@ export function UmbraFilmstrip({
             return;
           }
           localSelectionPendingRef.current = !feedComplete && Boolean(folderLoadError);
-          setSelectedIds(new Set(displayedImages.map((item) => item.id)));
-          setLastSelectedId(displayedImages.at(-1)?.id || '');
+          const selectionImages = compact ? getFilmstripSelectableImages(
+            recentGenerationsVisible ? recentGenerationLaneImages.slice(0, recentGenerationsExpanded ? 11 : 4) : [], displayedImages,
+          ) : displayedImages;
+          setSelectedIds(new Set(selectionImages.map((item) => item.id)));
+          setLastSelectedId(selectionImages.at(-1)?.id || '');
         }}
         onDelete={onDelete}
         onOpen={onOpen}
+        onOpenFolder={(path) => openPathInGallery(path, 'filmstrip-folder', 'folder')}
         onContextMenuRequest={({ x, y, targetId, ids, images: contextImages }) => {
           const resolvedImages = resolveSelectedImages(ids);
           const mediaItems = (resolvedImages.length > 0 ? resolvedImages : contextImages)

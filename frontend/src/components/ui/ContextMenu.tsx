@@ -2,8 +2,10 @@
 
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
+
+type MenuPresentation = 'anchored' | 'touch-sheet' | 'touch-anchored';
 
 interface ContextMenuProps {
   isOpen: boolean;
@@ -14,7 +16,7 @@ interface ContextMenuProps {
   title?: string;
   titleI18nSkip?: boolean;
   subtitle?: string;
-  presentation?: 'anchored' | 'touch-sheet';
+  presentation?: MenuPresentation;
 }
 
 const MENU_MARGIN = 8;
@@ -128,11 +130,18 @@ function MenuPanel({
   title?: string;
   titleI18nSkip?: boolean;
   subtitle?: string;
-  presentation?: 'anchored' | 'touch-sheet';
+  presentation?: MenuPresentation;
 }) {
   const localRef = useRef<HTMLDivElement | null>(null);
   const panelRef = rootRef || localRef;
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pointerPressRef = useRef<{
+    target: HTMLButtonElement;
+    pointerId: number;
+    x: number;
+    y: number;
+    released: boolean;
+  } | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [openIndex, setOpenIndex] = useState(-1);
   const [submenuStyle, setSubmenuStyle] = useState<React.CSSProperties>({
@@ -142,7 +151,7 @@ function MenuPanel({
   });
 
   useLayoutEffect(() => {
-    if (depth === 0 || !anchorRef?.current || !panelRef.current) return;
+    if (presentation === 'touch-sheet' || depth === 0 || !anchorRef?.current || !panelRef.current) return;
     const updatePosition = () => {
       if (!anchorRef.current || !panelRef.current) return;
       const boundary = getMenuBoundary(boundarySelector);
@@ -163,7 +172,7 @@ function MenuPanel({
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [anchorRef, boundarySelector, depth, items.length, panelRef]);
+  }, [anchorRef, boundarySelector, depth, items.length, panelRef, presentation]);
 
   const focusableIndexes = useMemo(() => (
     items.flatMap((item, index) => (
@@ -206,7 +215,19 @@ function MenuPanel({
     onCloseAll();
   };
 
-  const style = depth === 0 ? rootStyle : submenuStyle;
+  const style = depth === 0 || presentation === 'touch-sheet' ? rootStyle : submenuStyle;
+  const openItem = items[openIndex];
+  // Phone/tablet sheets replace their contents when drilling into a submenu.
+  // Keeping only one panel also prevents hover from putting a command under a tap.
+  if (presentation === 'touch-sheet' && openItem && isMenuCommand(openItem) && openItem.children?.length) {
+    return <MenuPanel key={`${openItem.label}-${openIndex}`} items={openItem.children}
+      boundarySelector={boundarySelector} depth={depth + 1} onCloseAll={onCloseAll}
+      rootStyle={rootStyle} rootRef={rootRef} title={openItem.label} titleI18nSkip={openItem.i18nSkip}
+      presentation="touch-sheet" onCloseSubmenu={() => {
+        setOpenIndex(-1);
+        window.requestAnimationFrame(() => focusItem(openIndex));
+      }} />;
+  }
 
   return (
     <div
@@ -215,10 +236,13 @@ function MenuPanel({
       data-umbra-context-menu-presentation={presentation}
       className={`umbra-context-menu-panel fixed overflow-y-auto ${presentation === 'touch-sheet'
         ? 'umbra-context-menu-touch-sheet min-w-0 max-w-none p-2'
-        : 'min-w-[232px] max-w-[min(336px,calc(100vw-16px))] p-1'
+        : presentation === 'touch-anchored'
+          ? 'umbra-context-menu-touch-anchored min-w-[232px] max-w-[min(336px,calc(100vw-16px))] p-2'
+          : 'min-w-[232px] max-w-[min(336px,calc(100vw-16px))] p-1'
       }`}
       style={{ ...style, zIndex: 10000 + depth * 2 }}
       onClick={(event) => event.stopPropagation()}
+      onScroll={() => { pointerPressRef.current = null; }}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {
         if (event.key === 'ArrowDown') {
@@ -247,7 +271,32 @@ function MenuPanel({
       role="menu"
       aria-orientation="vertical"
     >
-      {depth === 0 && (title || subtitle) ? (
+      {presentation === 'touch-sheet' && depth > 0 && onCloseSubmenu ? (
+        <button type="button" aria-label="Back to previous menu" onFocus={() => setActiveIndex(-1)}
+          onPointerDown={(event) => { pointerPressRef.current = event.button === 0 ? {
+            target: event.currentTarget, pointerId: event.pointerId, x: event.clientX, y: event.clientY, released: false,
+          } : null; }}
+          onPointerCancel={() => { pointerPressRef.current = null; }}
+          onPointerUp={(event) => {
+            const press = pointerPressRef.current;
+            const rect = event.currentTarget.getBoundingClientRect();
+            if (press?.target === event.currentTarget && press.pointerId === event.pointerId
+              && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 12
+              && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) press.released = true;
+            else pointerPressRef.current = null;
+          }}
+          onClick={(event) => {
+            const press = pointerPressRef.current;
+            pointerPressRef.current = null;
+            if ((event.detail > 0 || (event.nativeEvent as PointerEvent).pointerType)
+              && (!press?.released || press.target !== event.currentTarget)) return;
+            onCloseSubmenu();
+          }}
+          className="umbra-context-menu-item flex w-full items-center gap-2 text-left">
+          <ChevronLeft size={16} aria-hidden="true" /> Back
+        </button>
+      ) : null}
+      {(depth === 0 || presentation === 'touch-sheet') && (title || subtitle) ? (
         <div className="umbra-context-menu-header -mx-1 -mt-1 mb-1 px-3 py-2.5">
           {title ? <div data-i18n-skip={titleI18nSkip ? '' : undefined} className="umbra-context-menu-title truncate">{title}</div> : null}
           {subtitle ? <div className="umbra-context-menu-subtitle mt-0.5 truncate">{subtitle}</div> : null}
@@ -265,17 +314,59 @@ function MenuPanel({
               <button
                 ref={(node) => { itemRefs.current[index] = node; }}
                 type="button"
-                onClick={() => activateItem(item, index)}
+                onPointerDown={(event) => {
+                  pointerPressRef.current = event.button === 0 ? {
+                    target: event.currentTarget,
+                    pointerId: event.pointerId,
+                    x: event.clientX,
+                    y: event.clientY,
+                    released: false,
+                  } : null;
+                }}
+                onPointerMove={(event) => {
+                  const press = pointerPressRef.current;
+                  if (press?.pointerId !== event.pointerId || event.pointerType === 'mouse') return;
+                  if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 12) {
+                    pointerPressRef.current = null;
+                  }
+                }}
+                onPointerCancel={() => { pointerPressRef.current = null; }}
+                onPointerUp={(event) => {
+                  const press = pointerPressRef.current;
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  if (press?.target === event.currentTarget && press.pointerId === event.pointerId
+                    && event.clientX >= rect.left && event.clientX <= rect.right
+                    && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+                    press.released = true;
+                  } else {
+                    pointerPressRef.current = null;
+                  }
+                }}
+                onClick={(event) => {
+                  const press = pointerPressRef.current;
+                  pointerPressRef.current = null;
+                  const pointerType = (event.nativeEvent as PointerEvent).pointerType;
+                  // A menu can appear under the opening finger. Require a fresh press
+                  // on this item, including for compatibility clicks and submenus.
+                  if ((event.detail > 0 || pointerType)
+                    && (!press?.released || press.target !== event.currentTarget)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                  }
+                  activateItem(item, index);
+                }}
                 onContextMenu={item.onContextMenu ? (event) => {
                   event.preventDefault();
                   event.stopPropagation();
                   if (!item.disabled) item.onContextMenu?.(event);
                 } : undefined}
                 onPointerEnter={(event) => {
-                  if (event.pointerType === 'touch') return;
+                  if (event.pointerType !== 'mouse' || presentation === 'touch-sheet') return;
                   setActiveIndex(index);
                   setOpenIndex(hasChildren ? index : -1);
                 }}
+                onFocus={() => setActiveIndex(index)}
                 disabled={item.disabled}
                 data-active={isOpen ? 'true' : 'false'}
                 data-danger={item.danger ? 'true' : 'false'}
@@ -375,6 +466,11 @@ export function ContextMenu({
       const boundary = getMenuBoundary(boundarySelector);
       const rect = menuRef.current.getBoundingClientRect();
       const next = clampMenuPosition(position, rect, boundary);
+      if (presentation === 'touch-anchored') {
+        // Top navigation stays attached to its trigger; short screens scroll the choices.
+        next.top = Math.min(Math.max(boundary.top + MENU_MARGIN, position.y), boundary.bottom - MENU_MARGIN);
+        next.maxHeight = Math.max(0, boundary.bottom - MENU_MARGIN - next.top);
+      }
       setStyle({
         left: next.left,
         top: next.top,

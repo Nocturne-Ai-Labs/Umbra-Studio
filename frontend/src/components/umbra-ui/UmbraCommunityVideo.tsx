@@ -6,6 +6,8 @@ import { openUmbraToolsSetup } from '@/lib/openUmbraSetup';
 import { UmbraFrameForge } from './UmbraFrameForge';
 
 const button = 'inline-flex h-8 items-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-300 hover:bg-white/5';
+const DaSiWaActiveContext = React.createContext(true);
+export const useDaSiWaActive = () => React.useContext(DaSiWaActiveContext);
 const required = {
   H3_Prompt_Compiler: ['MiniMaxH3Subject', 'MiniMaxH3RefPromptBuilder'],
   H3_Longshot: ['MiniMaxH3LongShot', 'MiniMaxH3TimelineShot', 'MiniMaxH3Take', 'MiniMaxH3SaveVideo', 'MiniMaxH3LoadVideo'],
@@ -63,18 +65,19 @@ function LongshotStudio() {
 }
 
 // Keep both applications mounted when switching so upstream projects and Umbra drafts survive.
-export function UmbraCommunityVideo({ children }: { children: React.ReactNode }) {
+export function UmbraCommunityVideo({ children, phoneMode = false }: { children: React.ReactNode; phoneMode?: boolean }) {
   const [studio, setStudio] = React.useState<'umbra' | 'longshot' | 'frameforge'>('umbra');
   const [frameForgeVisited, setFrameForgeVisited] = React.useState(false);
   const [visited, setVisited] = React.useState(false);
+  const visibleStudio = phoneMode ? 'umbra' : studio;
   return <>
-    <div role="group" aria-label="Video studio" className="flex shrink-0 gap-2 border-b border-white/10 px-3 py-1.5">
+    {!phoneMode ? <div role="group" aria-label="Video studio" className="flex shrink-0 gap-2 overflow-x-auto border-b border-white/10 px-3 py-1.5">
       <button type="button" className={button} aria-pressed={studio === 'umbra'} onClick={() => setStudio('umbra')}>Umbra / DaSiWa</button>
       <button type="button" className={button} aria-pressed={studio === 'longshot'} onClick={() => { setVisited(true); setStudio('longshot'); }}>Longshot Studio</button>
       <button type="button" className={button} aria-pressed={studio === 'frameforge'} onClick={() => { setFrameForgeVisited(true); setStudio('frameforge'); }}>Frame Forge</button>
-    </div>
-    <div className={studio === 'umbra' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>{children}</div>
-    {visited ? <div className={studio === 'longshot' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><LongshotStudio /></div> : null}
-    {frameForgeVisited ? <div className={studio === 'frameforge' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><UmbraFrameForge /></div> : null}
+    </div> : null}
+    <div className={visibleStudio === 'umbra' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><DaSiWaActiveContext.Provider value={visibleStudio === 'umbra'}>{children}</DaSiWaActiveContext.Provider></div>
+    {visited ? <div className={visibleStudio === 'longshot' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><LongshotStudio /></div> : null}
+    {frameForgeVisited ? <div className={visibleStudio === 'frameforge' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}><UmbraFrameForge /></div> : null}
   </>;
 }

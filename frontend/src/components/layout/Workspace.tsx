@@ -16,6 +16,7 @@ import { governorShouldRun, governorTryAcquire } from '@/lib/loadGovernor';
 import { logDiagnostic } from '@/lib/diagnostics';
 import { cn } from '@/lib/utils';
 import { UmbraFilmstrip } from './UmbraFilmstrip';
+import { MOBILE_FILMSTRIP_HEIGHT } from '@/components/filmstrip/MobileFilmstrip';
 import { ComfyLaunchScreen } from './ComfyLaunchScreen';
 import type { WorkspaceType } from '@/store/useStore';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
@@ -2365,10 +2366,13 @@ export const Workspace = () => {
     return () => window.clearTimeout(timer);
   }, [isRemoteClient, remoteMode]);
 
-  const effectiveShowFilmstrip = showFilmstrip && remoteMode !== 'phone' && !(activeWorkspace === 'umbraui' && mangaActive);
+  const compactFilmstrip = remoteMode === 'phone' || remoteMode === 'tablet';
+  const effectiveShowFilmstrip = showFilmstrip
+    && (!compactFilmstrip || activeWorkspace === 'library')
+    && !(activeWorkspace === 'umbraui' && mangaActive);
 
   const reservedFilmstripHeight = effectiveShowFilmstrip
-    ? Math.max(120, Math.min(420, Math.round(filmstripDockHeight)))
+    ? compactFilmstrip ? MOBILE_FILMSTRIP_HEIGHT : Math.max(120, Math.min(420, Math.round(filmstripDockHeight)))
     : 0;
 
   useEffect(() => {
@@ -2377,10 +2381,12 @@ export const Workspace = () => {
       ? `${reservedFilmstripHeight}px`
       : '0px';
     document.documentElement.style.setProperty('--umbra-filmstrip-toast-offset', offset);
+    document.documentElement.style.setProperty('--umbra-mobile-filmstrip-height', compactFilmstrip ? offset : '0px');
     return () => {
       document.documentElement.style.removeProperty('--umbra-filmstrip-toast-offset');
+      document.documentElement.style.removeProperty('--umbra-mobile-filmstrip-height');
     };
-  }, [effectiveShowFilmstrip, reservedFilmstripHeight]);
+  }, [compactFilmstrip, effectiveShowFilmstrip, reservedFilmstripHeight]);
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-[var(--umbra-bg)]">
@@ -2473,8 +2479,10 @@ export const Workspace = () => {
         <div
           className="absolute inset-x-0 bottom-0 z-[30] transition-all duration-200 ease-out"
           data-appbar-collapsed={isAppBarCollapsed ? '1' : '0'}
+          style={{ bottom: remoteMode === 'phone' && activeWorkspace !== 'comfyui' ? 'var(--umbra-phone-bottom-nav-height, 4.25rem)' : 0 }}
         >
           <UmbraFilmstrip
+            compact={compactFilmstrip}
             initialHeight={180}
             minHeight={120}
             maxHeight={420}

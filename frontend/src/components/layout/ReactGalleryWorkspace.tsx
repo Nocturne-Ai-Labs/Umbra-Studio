@@ -3,6 +3,8 @@
 import { stageMangaImages } from '@/features/manga/mangaMediaHandoff';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
+import { UmbraSelect } from '@/components/ui/UmbraSelect';
+import { buildGalleryBreadcrumbs } from '@/lib/galleryBreadcrumbs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -41,6 +43,7 @@ import {
   ScanSearch,
   Send,
   SkipForward,
+  SlidersHorizontal,
   Pin,
   RefreshCw,
   Search,
@@ -1881,7 +1884,6 @@ function findActiveRoot(folderPath: string, roots: GalleryRootChoice[]): Gallery
 }
 
 type LibraryNavigatorProps = {
-  mobileActive?: boolean;
   multiFolderView: boolean;
   onToggleMultiFolderView?: () => void;
   roots: GalleryRootChoice[];
@@ -2171,6 +2173,7 @@ function LibraryFolderRow({
             className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-white/10 bg-zinc-950/80 text-zinc-400 hover:border-white/20 hover:bg-white/10 hover:text-white"
             aria-label={`Open folder menu for ${node.name || pathLeaf(folderPath) || folderPath}`}
             title="Folder menu"
+            data-umbra-gallery-menu-trigger
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.preventDefault();
@@ -2214,8 +2217,79 @@ function LibraryFolderRow({
   );
 }
 
+function GalleryLibrarySearch({ searchQuery, searchLoading, searchSuggestions, searchSuggestionsOpen, searchSuggestionIndex, onSearchQueryChange, onClearSearch, onSearchFocus, onSearchBlur, onSearchKeyDown, onSearchSuggestionHover, onSearchSuggestionSelect }: Pick<LibraryNavigatorProps,
+  'searchQuery' | 'searchLoading' | 'searchSuggestions' | 'searchSuggestionsOpen' | 'searchSuggestionIndex' | 'onSearchQueryChange' | 'onClearSearch' | 'onSearchFocus' | 'onSearchBlur' | 'onSearchKeyDown' | 'onSearchSuggestionHover' | 'onSearchSuggestionSelect'>) {
+  return (<div className="relative min-w-0 flex-1">
+            <Search size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={searchQuery}
+              onChange={(event) => onSearchQueryChange(event.target.value)}
+              onFocus={onSearchFocus}
+              onBlur={onSearchBlur}
+              onKeyDown={onSearchKeyDown}
+              placeholder="Search library"
+              autoComplete="off"
+              spellCheck={false}
+              aria-expanded={searchSuggestionsOpen}
+              className="h-8 w-full rounded border border-zinc-800 bg-zinc-900/80 pl-8 pr-8 text-xs text-zinc-200 outline-none focus:border-[var(--umbra-accent)]"
+            />
+            {searchLoading ? (
+              <Loader2 size={13} className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-zinc-500" />
+            ) : searchQuery ? (
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onClearSearch}
+                className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-zinc-500 hover:bg-white/10 hover:text-white"
+                title="Clear search"
+              >
+                <X size={13} />
+              </button>
+            ) : null}
+            {searchSuggestionsOpen && searchSuggestions.length > 0 ? (
+              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 overflow-hidden rounded border border-zinc-800 bg-zinc-950/98 shadow-2xl shadow-black/45">
+                {(['tag', 'folder'] as const).map((kind) => {
+                  const entries = searchSuggestions
+                    .map((suggestion, index) => ({ suggestion, index }))
+                    .filter((entry) => entry.suggestion.type === kind);
+                  if (entries.length === 0) return null;
+                  return (
+                    <div key={kind} className="border-b border-zinc-900 last:border-b-0">
+                      <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">
+                        {kind === 'tag' ? 'Tags' : 'Folders'}
+                      </div>
+                      {entries.map(({ suggestion, index }) => (
+                        <button
+                          key={`${suggestion.type}:${suggestion.value}`}
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onMouseEnter={() => onSearchSuggestionHover(index)}
+                          onClick={() => onSearchSuggestionSelect(index)}
+                          className={cn(
+                            'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs',
+                            index === searchSuggestionIndex
+                              ? 'bg-[var(--umbra-accent-glow)] text-white'
+                              : 'text-zinc-300 hover:bg-white/5 hover:text-white',
+                          )}
+                        >
+                          <span className="flex h-5 w-7 shrink-0 items-center justify-center rounded border border-zinc-800 text-[10px] font-semibold text-zinc-500">
+                            {kind === 'tag' ? 'TAG' : 'DIR'}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate">{suggestion.label}</span>
+                            <span className="block truncate text-[11px] text-zinc-600">{suggestion.detail}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>);
+}
+
 function LibraryNavigator({
-  mobileActive = true,
   multiFolderView,
   onToggleMultiFolderView,
   roots,
@@ -2367,6 +2441,7 @@ function LibraryNavigator({
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-white/10 bg-zinc-950/80 text-zinc-400 hover:border-white/20 hover:bg-white/10 hover:text-white"
             aria-label={`Open folder menu for ${pathLeaf(normalized) || normalized}`}
             title="Folder menu"
+            data-umbra-gallery-menu-trigger
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.preventDefault();
@@ -2384,7 +2459,6 @@ function LibraryNavigator({
   return (
     <aside
       data-umbra-gallery-navigator=""
-      data-umbra-gallery-mobile-active={mobileActive ? '1' : '0'}
       className="flex w-[300px] shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-950/96"
     >
       <div className="border-b border-zinc-800/80 px-3 py-3">
@@ -2411,74 +2485,7 @@ function LibraryNavigator({
           ) : null}
         </div>
         <div className="mt-2 flex items-start gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Search size={14} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
-              value={searchQuery}
-              onChange={(event) => onSearchQueryChange(event.target.value)}
-              onFocus={onSearchFocus}
-              onBlur={onSearchBlur}
-              onKeyDown={onSearchKeyDown}
-              placeholder="Search library"
-              autoComplete="off"
-              spellCheck={false}
-              aria-expanded={searchSuggestionsOpen}
-              className="h-8 w-full rounded border border-zinc-800 bg-zinc-900/80 pl-8 pr-8 text-xs text-zinc-200 outline-none focus:border-[var(--umbra-accent)]"
-            />
-            {searchLoading ? (
-              <Loader2 size={13} className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-zinc-500" />
-            ) : searchQuery ? (
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={onClearSearch}
-                className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-zinc-500 hover:bg-white/10 hover:text-white"
-                title="Clear search"
-              >
-                <X size={13} />
-              </button>
-            ) : null}
-            {searchSuggestionsOpen && searchSuggestions.length > 0 ? (
-              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 overflow-hidden rounded border border-zinc-800 bg-zinc-950/98 shadow-2xl shadow-black/45">
-                {(['tag', 'folder'] as const).map((kind) => {
-                  const entries = searchSuggestions
-                    .map((suggestion, index) => ({ suggestion, index }))
-                    .filter((entry) => entry.suggestion.type === kind);
-                  if (entries.length === 0) return null;
-                  return (
-                    <div key={kind} className="border-b border-zinc-900 last:border-b-0">
-                      <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">
-                        {kind === 'tag' ? 'Tags' : 'Folders'}
-                      </div>
-                      {entries.map(({ suggestion, index }) => (
-                        <button
-                          key={`${suggestion.type}:${suggestion.value}`}
-                          type="button"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onMouseEnter={() => onSearchSuggestionHover(index)}
-                          onClick={() => onSearchSuggestionSelect(index)}
-                          className={cn(
-                            'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs',
-                            index === searchSuggestionIndex
-                              ? 'bg-[var(--umbra-accent-glow)] text-white'
-                              : 'text-zinc-300 hover:bg-white/5 hover:text-white',
-                          )}
-                        >
-                          <span className="flex h-5 w-7 shrink-0 items-center justify-center rounded border border-zinc-800 text-[10px] font-semibold text-zinc-500">
-                            {kind === 'tag' ? 'TAG' : 'DIR'}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block truncate">{suggestion.label}</span>
-                            <span className="block truncate text-[11px] text-zinc-600">{suggestion.detail}</span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
+          <GalleryLibrarySearch {...{ searchQuery, searchLoading, searchSuggestions, searchSuggestionsOpen, searchSuggestionIndex, onSearchQueryChange, onClearSearch, onSearchFocus, onSearchBlur, onSearchKeyDown, onSearchSuggestionHover, onSearchSuggestionSelect }} />
           <button
             type="button"
             disabled={!focusedFolder}
@@ -2629,11 +2636,12 @@ function LibraryNavigator({
   );
 }
 
-function GalleryFolderTile({ folder, cardSize, cardHeight, revision, dropTargeted, onOpen, onContextMenu, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
+function GalleryFolderTile({ folder, cardSize, cardHeight, revision, compact = false, dropTargeted, onOpen, onContextMenu, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
   folder: GalleryFolder;
   cardSize: number;
   cardHeight: number;
   revision: number;
+  compact?: boolean;
   dropTargeted: boolean;
   onOpen: () => void;
   onContextMenu: (event: GalleryContextMenuEvent) => void;
@@ -2650,6 +2658,7 @@ function GalleryFolderTile({ folder, cardSize, cardHeight, revision, dropTargete
   useEffect(() => {
     setCover(null);
     setFailedImage(false);
+    if (compact) return;
     const cached = folderCoverCache.get(folder.path);
     if (cached && cached.revision === revision && Date.now() - cached.at < 60_000) {
       setCover(cached.file);
@@ -2678,7 +2687,28 @@ function GalleryFolderTile({ folder, cardSize, cardHeight, revision, dropTargete
       })();
     });
     return () => { controller.abort(); cancel(); releaseSlot?.(); };
-  }, [folder.path, revision]);
+  }, [compact, folder.path, revision]);
+  if (compact) return <div data-umbra-gallery-folder-tile
+    className={cn('flex min-w-0 items-center gap-1 rounded-md border border-white/10 bg-white/[0.025] px-2', dropTargeted && 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)]')}
+    style={{ width: cardSize, height: cardHeight }}
+    onContextMenu={onContextMenu}
+    onPointerDown={longPress.onPointerDown} onPointerMove={longPress.onPointerMove}
+    onPointerUp={longPress.onPointerUp} onPointerCancel={longPress.onPointerCancel}
+    onDragOver={event => { event.stopPropagation(); onDragOver(event); }} onDragLeave={onDragLeave}
+    onDrop={event => { event.stopPropagation(); onDrop(event); }}>
+    <button type="button" aria-label={`Open folder ${folder.name}`} title={folder.path}
+      className="flex h-full min-w-0 flex-1 items-center gap-2 text-left text-xs text-zinc-200"
+      onClick={() => { if (!longPress.consumeSuppressedClick()) onOpen(); }}>
+      <Folder size={22} className="shrink-0 text-[var(--umbra-accent)]" />
+      <span data-i18n-skip className="min-w-0 truncate">{folder.name}</span>
+    </button>
+    <button type="button" data-umbra-gallery-menu-trigger aria-label={`Folder menu for ${folder.name}`} title="Folder actions"
+      className="flex h-11 w-11 shrink-0 items-center justify-center text-zinc-400"
+      onPointerDown={event => event.stopPropagation()}
+      onClick={event => { event.preventDefault(); event.stopPropagation(); onContextMenu(event); }}>
+      <MoreHorizontal size={14} />
+    </button>
+  </div>;
   const protectedMedia = cover?.privacyClass !== 'normal';
   return <div
     role="button"
@@ -2703,9 +2733,9 @@ function GalleryFolderTile({ folder, cardSize, cardHeight, revision, dropTargete
     className={cn('relative flex cursor-pointer flex-col overflow-hidden rounded-lg border bg-zinc-950/90 p-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--umbra-accent)]', dropTargeted ? 'border-[var(--umbra-accent)] ring-2 ring-[var(--umbra-accent)]' : 'border-white/10 hover:border-white/25')}
     style={{ width: cardSize, height: cardHeight }}
   >
-    <div className="mb-1 flex h-5 shrink-0 items-center justify-between px-0.5 text-[10px] text-zinc-400">
+    <div data-umbra-gallery-tile-header className="mb-1 flex h-5 shrink-0 items-center justify-between px-0.5 text-[10px] text-zinc-400">
       <span>FOLDER</span>
-      <button type="button" aria-label={`Folder menu for ${folder.name}`} title="Folder actions" className="flex h-5 w-6 items-center justify-center hover:text-white" onClick={event => { event.stopPropagation(); onContextMenu(event); }} onKeyDown={event => event.stopPropagation()}><MoreHorizontal size={14} /></button>
+      <button type="button" data-umbra-gallery-menu-trigger aria-label={`Folder menu for ${folder.name}`} title="Folder actions" className="flex h-5 w-6 items-center justify-center hover:text-white" onPointerDown={event => event.stopPropagation()} onClick={event => { event.preventDefault(); event.stopPropagation(); onContextMenu(event); }} onKeyDown={event => event.stopPropagation()}><MoreHorizontal size={14} /></button>
     </div>
     <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-zinc-900/60">
       <FolderOpen size={54} className="text-zinc-500" />
@@ -3044,6 +3074,7 @@ function GalleryImageTile({
               className="-mr-0.5 flex h-6 w-6 items-center justify-center rounded border border-white/10 bg-zinc-950/90 text-zinc-400 shadow-sm hover:border-white/20 hover:bg-white/10 hover:text-white"
               aria-label={`Open media menu for ${file.name}`}
               title="Media menu"
+              data-umbra-gallery-menu-trigger
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.preventDefault();
@@ -4855,14 +4886,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     if (typeof document === 'undefined') return 'desktop';
     return document.documentElement.dataset.umbraRemoteMode || 'desktop';
   });
-  const initialGalleryMobileView = initialGalleryDeviceResume?.mobileView === 'media' ? 'media' : 'folders';
-  const [galleryMobileView, setGalleryMobileView] = useState<'folders' | 'media'>(initialGalleryMobileView);
-  const galleryMobileViewRef = useRef<'folders' | 'media'>(initialGalleryMobileView);
+  const [galleryControlsOpen, setGalleryControlsOpen] = useState(false);
   const isPhoneRemote = remoteMode === 'phone';
   const isTabletRemote = remoteMode === 'tablet';
   const isCompactGalleryRemote = isPhoneRemote || isTabletRemote;
   const isRemoteClient = isRemoteGalleryClient();
-  const [mobileGalleryChromeHidden, setMobileGalleryChromeHidden] = useState(false);
 
   const rootPath = DEFAULT_OUTPUT_ROOT;
   const externalRoots = useMemo(() => uniqueNormalizedPaths([
@@ -4980,7 +5008,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const [total, setTotal] = useState(0);
   const loadSeqRef = useRef(0);
   const scrollParentRef = useRef<HTMLDivElement | null>(null);
-  const mobileGalleryChromeScrollTopRef = useRef(0);
   const filesRef = useRef<GalleryFile[]>([]);
   const knownFilesRef = useRef<GalleryFile[]>([]);
   const activeViewerFilesRef = useRef<GalleryFile[]>([]);
@@ -5010,29 +5037,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const currentFolderReconcileTimerRef = useRef<number | null>(null);
   const currentFolderReconcileInFlightRef = useRef<Promise<boolean> | null>(null);
 
-  useEffect(() => {
-    if (isPhoneRemote && galleryMobileView === 'media') return;
-    mobileGalleryChromeScrollTopRef.current = 0;
-    setMobileGalleryChromeHidden(false);
-  }, [galleryMobileView, isPhoneRemote]);
-
-  const handleGalleryMediaScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    if (!isPhoneRemote || galleryMobileView !== 'media') return;
-    const nextScrollTop = Math.max(0, event.currentTarget.scrollTop);
-    const previousScrollTop = mobileGalleryChromeScrollTopRef.current;
-    const scrollDelta = nextScrollTop - previousScrollTop;
-    mobileGalleryChromeScrollTopRef.current = nextScrollTop;
-
-    if (nextScrollTop <= 20) {
-      setMobileGalleryChromeHidden(false);
-      return;
-    }
-    if (scrollDelta >= 12) {
-      setMobileGalleryChromeHidden(true);
-    } else if (scrollDelta <= -8) {
-      setMobileGalleryChromeHidden(false);
-    }
-  }, [galleryMobileView, isPhoneRemote]);
   const currentFolderReconcileFolderRef = useRef('');
   const currentFolderLastReconcileAtRef = useRef(0);
   const treeChildrenRef = useRef<Record<string, GalleryFolderTreeNode[]>>({});
@@ -5074,46 +5078,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   }, []);
 
   useEffect(() => {
-    galleryMobileViewRef.current = galleryMobileView;
-  }, [galleryMobileView]);
-
-  useEffect(() => {
     if (!isTouchRemote) setTouchSelectionMode(false);
   }, [isTouchRemote]);
-
-  const setGalleryMobileViewWithHistory = useCallback((
-    nextView: 'folders' | 'media',
-    options: { pushHistory?: boolean } = {},
-  ) => {
-    const previousView = galleryMobileViewRef.current;
-    markGalleryUiSessionDirty();
-    setGalleryMobileView(nextView);
-    galleryMobileViewRef.current = nextView;
-    if (
-      typeof window !== 'undefined'
-      && isPhoneRemote
-      && nextView === 'media'
-      && previousView !== 'media'
-      && options.pushHistory !== false
-    ) {
-      const historyState = window.history.state && typeof window.history.state === 'object'
-        ? { ...window.history.state }
-        : {};
-      window.history.pushState({ ...historyState, umbraGalleryMobileView: 'media' }, '', window.location.href);
-    }
-  }, [isPhoneRemote, markGalleryUiSessionDirty]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !isPhoneRemote) return;
-    const handleGalleryBack = () => {
-      if (galleryMobileViewRef.current !== 'media') return;
-      markGalleryUiSessionDirty();
-      setGalleryMobileView('folders');
-      galleryMobileViewRef.current = 'folders';
-    };
-    window.addEventListener('popstate', handleGalleryBack);
-    return () => window.removeEventListener('popstate', handleGalleryBack);
-  }, [isPhoneRemote, markGalleryUiSessionDirty]);
 
   useEffect(() => {
     setTrashRetentionDays(clampTrashRetentionDays(trashAutoDeleteSetting));
@@ -5370,11 +5336,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     return Array.from(visible);
   }, [expandedFolders, rootChoices, treeChildrenByPath]);
   const invalidateChangedTreeBranches = useGalleryTreeRefresh({
-    paths: uniqueNormalizedPaths([currentFolder, ...(active ? visibleTreeBranches : [])]).filter(path => !isTrashPath(path)),
+    paths: uniqueNormalizedPaths([currentFolder, ...(active && !isCompactGalleryRemote ? visibleTreeBranches : [])]).filter(path => !isTrashPath(path)),
     backgroundPaths: uniqueNormalizedPaths([
       ...pinnedFolders, ...rootChoices.filter(root => root.kind !== 'trash').map(root => root.path),
     ]).filter(path => !isTrashPath(path)),
-    paused: transferInProgress || (isPhoneRemote && (!active || galleryMobileView !== 'folders')),
+    paused: transferInProgress || (isCompactGalleryRemote && !active),
     refreshMs: active ? 15_000 : 60_000,
     refresh: (path) => loadTreeChildren(path, true, true),
   });
@@ -6072,7 +6038,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     void loadFolder({ folder: currentFolder || rootPath });
   }, [galleryUiSessionHydrated, sortBy, sortOrder]);
 
-  const openFolder = useCallback((folderPath: string, options: { showMedia?: boolean } = {}) => {
+  const openFolder = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);
     if (!normalized) return;
     setQuery('');
@@ -6082,9 +6048,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       folderPath: normalized,
       durationMs: 0,
     });
-    if (isCompactGalleryRemote && options.showMedia !== false) setGalleryMobileViewWithHistory('media');
     void loadFolder({ folder: normalized, source: 'local' });
-  }, [isCompactGalleryRemote, loadFolder, setGalleryMobileViewWithHistory]);
+  }, [loadFolder]);
 
   const confirmEmptyFolderCleanup = useCallback(async () => {
     const pending = emptyFolderCleanupModal;
@@ -6143,7 +6108,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         void loadTreeChildren(folder, true);
       }
       if (deleted.some((folder) => pathIsInsideRoot(currentFolderRef.current, folder))) {
-        openFolder(pending.rootPath, { showMedia: false });
+        openFolder(pending.rootPath);
       } else if (pathsEqual(currentFolderRef.current, pending.rootPath)) {
         void loadFolder({ folder: pending.rootPath, keepSelection: true, forceRefresh: true, preserveScroll: true });
       }
@@ -6198,7 +6163,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const nextFocusedFolder = normalizePath(session.focusedFolder || nextFolder || '');
     const nextSortBy = session.sortBy;
     const nextSortOrder = session.sortOrder;
-    const nextMobileView = session.mobileView;
     const nextExpandedFolders = Array.isArray(session.expandedFolders)
       ? session.expandedFolders.map(normalizePath).filter(Boolean)
       : [];
@@ -6210,10 +6174,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     }
     if (typeof session.groupBySet === 'boolean') {
       setGroupBySet(session.groupBySet);
-    }
-    if (nextMobileView === 'folders' || nextMobileView === 'media') {
-      setGalleryMobileView(nextMobileView);
-      galleryMobileViewRef.current = nextMobileView;
     }
     if (nextExpandedFolders.length > 0) {
       setExpandedFolders((current) => {
@@ -6282,7 +6242,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       sortBy,
       sortOrder,
       groupBySet,
-      mobileView: galleryMobileView,
+      mobileView: 'media',
       updatedAt,
       clientId: galleryUiSessionClientIdRef.current,
     } satisfies GalleryUiSession;
@@ -6309,7 +6269,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         galleryUiSessionSaveTimerRef.current = null;
       }
     };
-  }, [currentFolder, expandedFolders, focusedFolder, galleryMobileView, groupBySet, sortBy, sortOrder, syncUiAcrossDevices]);
+  }, [currentFolder, expandedFolders, focusedFolder, groupBySet, sortBy, sortOrder, syncUiAcrossDevices]);
 
   const selectFile = useCallback((file: GalleryFile, event: React.MouseEvent) => {
     const path = normalizePath(file.path);
@@ -8943,7 +8903,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     const poll = async () => {
       if (disposed) return;
       if (folderSummaryPollInFlightRef.current) return;
-      if ((!active && (!showFilmstrip || isPhoneRemote)) || loading || folderLoadAbortRef.current || transferInProgress || selectAllLoading) return;
+      if ((!active && !showFilmstrip) || loading || folderLoadAbortRef.current || transferInProgress || selectAllLoading) return;
       if (typeof document !== 'undefined' && document.visibilityState && document.visibilityState !== 'visible') return;
       if (Date.now() - lastPollAt < pollInterval) return;
       lastPollAt = Date.now();
@@ -9841,6 +9801,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     return parent && isTrashPath(parent) ? parent : TRASH_ROOT;
   }, [currentFolder, trashMode]);
   const displayFolder = openingFolder || currentFolder;
+  const parentFolder = buildGalleryBreadcrumbs(displayFolder, rootChoices).at(-1)?.parent || '';
   const openingDifferentFolder = Boolean(openingFolder && !pathsEqual(openingFolder, currentFolder));
 
   useEffect(() => {
@@ -9878,10 +9839,14 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     );
   }, [columnCount, effectiveGridWidth, isPhoneRemote]);
   const cardHeight = cardSize + (isPhoneRemote ? PHONE_GRID_CARD_EXTRA_HEIGHT : GRID_CARD_EXTRA_HEIGHT);
+  const folderColumnCount = isTouchRemote ? Math.max(1, Math.floor((effectiveGridWidth - 24 + GRID_GAP) / (160 + GRID_GAP))) : columnCount;
+  const folderCardWidth = isTouchRemote ? Math.max(0, Math.floor((effectiveGridWidth - 24 - GRID_GAP * (folderColumnCount - 1)) / folderColumnCount)) : cardSize;
+  const folderCardHeight = isTouchRemote ? 56 : cardHeight;
 
   const singleFolderExplorer = !multiFolderView && !trashMode && !globalSearchActive && !searchNeedle && !metadataSearchActive && !groupBySet;
   const gridFiles = displayFiles;
-  const showExplorerFolders = singleFolderExplorer && !openingDifferentFolder && !(loading && files.length === 0) && childFolderNodes.length > 0;
+  const showExplorerFolders = (singleFolderExplorer || (isTouchRemote && !folderPreviewMode && !trashMode && !globalSearchActive && !searchNeedle && !metadataSearchActive))
+    && !openingDifferentFolder && !(loading && files.length === 0) && childFolderNodes.length > 0;
   const virtualGridRef = useRef<HTMLDivElement>(null);
   const virtualFolderGridRef = useRef<HTMLDivElement>(null);
   const [gridScrollMargin, setGridScrollMargin] = useState(0);
@@ -9903,9 +9868,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     return () => observer.disconnect();
   }, [archiveCount, currentFolder, gridFiles.length, childFolderNodes.length, showExplorerFolders, singleFolderExplorer, folderPreviewMode, groupBySet, globalSearchActive, loading, openingDifferentFolder]);
   const folderRowVirtualizer = useVirtualizer({
-    count: showExplorerFolders ? Math.ceil(childFolderNodes.length / columnCount) : 0,
+    count: showExplorerFolders ? Math.ceil(childFolderNodes.length / folderColumnCount) : 0,
     getScrollElement: () => scrollParentRef.current,
-    estimateSize: () => cardHeight + GRID_GAP,
+    estimateSize: () => folderCardHeight + GRID_GAP,
     overscan: 4,
     scrollMargin: folderScrollMargin,
   });
@@ -9922,10 +9887,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   useEffect(() => {
     folderRowVirtualizer.measure();
     rowVirtualizer.measure();
-  }, [cardHeight, columnCount, folderRowVirtualizer, rowVirtualizer]);
+  }, [cardHeight, columnCount, folderCardHeight, folderColumnCount, folderRowVirtualizer, rowVirtualizer]);
 
   useEffect(() => {
-    if (!isPhoneRemote || galleryMobileView !== 'media') return;
+    if (!isCompactGalleryRemote) return;
     let frame = 0;
     let secondFrame = 0;
     const measure = () => {
@@ -9941,7 +9906,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       window.cancelAnimationFrame(frame);
       if (secondFrame) window.cancelAnimationFrame(secondFrame);
     };
-  }, [displayFiles.length, galleryMobileView, isPhoneRemote, rowVirtualizer]);
+  }, [displayFiles.length, isCompactGalleryRemote, rowVirtualizer]);
 
   useEffect(() => {
     const pendingPath = normalizePath(pendingRevealPathRef.current);
@@ -10468,7 +10433,9 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       ...(!isPhoneRemote ? [
         { label: 'Metadata & Workflow', icon: <ScanSearch size={14} />, children: analysisItems },
         { label: 'Arrange & Rename', icon: <MoreHorizontal size={14} />, children: arrangeItems },
-      ] satisfies ContextMenuItem[] : []),
+      ] satisfies ContextMenuItem[] : [
+        { label: 'Rename', icon: <MoreHorizontal size={14} />, action: () => void renamePaths(paths) },
+      ] satisfies ContextMenuItem[]),
       {
         label: 'Export & File Tools',
         icon: <Download size={14} />,
@@ -10632,28 +10599,11 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       style={{ minHeight: 0 }}
       data-umbra-react-gallery-root
       data-umbra-gallery-mobile-media-view={isPhoneRemote ? 'grid' : undefined}
-      data-umbra-gallery-mobile-chrome-hidden={isPhoneRemote && galleryMobileView === 'media' && mobileGalleryChromeHidden ? '1' : '0'}
+      data-umbra-gallery-browser={isTouchRemote ? '' : undefined}
+      data-umbra-gallery-controls-open={galleryControlsOpen ? '1' : '0'}
+      data-umbra-gallery-has-metadata-filter={metadataQuery ? '1' : undefined}
     >
-      <div data-umbra-gallery-mobile-switcher="">
-        <button
-          type="button"
-          data-active={galleryMobileView === 'folders' ? '1' : '0'}
-          onClick={() => setGalleryMobileViewWithHistory('folders', { pushHistory: false })}
-        >
-          <FolderOpen size={15} />
-          Library
-        </button>
-        <button
-          type="button"
-          data-active={galleryMobileView === 'media' ? '1' : '0'}
-          onClick={() => setGalleryMobileViewWithHistory('media')}
-        >
-          <Grid3X3 size={15} />
-          Media
-        </button>
-      </div>
-      <LibraryNavigator
-        mobileActive={galleryMobileView === 'folders'}
+      {!isTouchRemote && <LibraryNavigator
         multiFolderView={multiFolderView}
         onToggleMultiFolderView={isPhoneRemote ? undefined : () => {
           setAppSetting('library.multiFolderView', !multiFolderView);
@@ -10697,17 +10647,21 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         onFolderDragLeave={handleFolderDropTargetDragLeave}
         onFolderDrop={handleFolderDropTargetDrop}
         showContextButtons={isTouchRemote}
-      />
+      />}
 
       <main
         data-umbra-gallery-content=""
-        data-umbra-gallery-mobile-active={galleryMobileView === 'media' ? '1' : '0'}
         className="flex min-w-0 flex-1 flex-col"
       >
         <header
           data-umbra-gallery-header=""
           className="flex min-h-14 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-zinc-800/80 bg-zinc-950/90 px-4 py-1"
         >
+          {isTouchRemote && <button type="button" data-umbra-gallery-up disabled={!parentFolder || openingDifferentFolder}
+            aria-label="Up one folder" title="Up one folder" onClick={() => openFolder(parentFolder)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-white/10 text-zinc-300 disabled:opacity-30">
+            <ChevronLeft size={18} />
+          </button>}
           <div data-umbra-gallery-folder-summary="" className="min-w-[min(100%,240px)] flex-1">
             <GalleryBreadcrumbs
               folder={displayFolder}
@@ -10731,7 +10685,44 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             </div>
           </div>
 
+          {isTouchRemote && <button type="button" data-umbra-gallery-folder-actions
+            aria-label="Current folder actions" title="Current folder actions"
+            onClick={(event) => openFolderContextMenu(event, currentFolder)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-white/10 text-zinc-300">
+            <MoreHorizontal size={16} />
+          </button>}
+
+          {isTouchRemote && <div data-umbra-gallery-browser-search>
+            <GalleryLibrarySearch
+              searchQuery={query} searchLoading={searchLoading} searchSuggestions={searchSuggestions}
+              searchSuggestionsOpen={searchSuggestionsOpen && searchSuggestions.length > 0}
+              searchSuggestionIndex={searchSuggestionIndex}
+              onSearchQueryChange={value => { setQuery(value); setSearchSuggestionsOpen(true); }}
+              onClearSearch={clearSearch} onSearchFocus={() => setSearchSuggestionsOpen(true)}
+              onSearchBlur={() => window.setTimeout(() => setSearchSuggestionsOpen(false), 120)}
+              onSearchKeyDown={handleSearchKeyDown} onSearchSuggestionHover={setSearchSuggestionIndex}
+              onSearchSuggestionSelect={applySearchSuggestion}
+            />
+            <UmbraSelect value="" placeholder="Locations" ariaLabel="Locations and pinned folders"
+              leadingIcon={<FolderOpen size={16} />} menuTitle="Locations & pinned folders" menuSubtitle="Jump to a folder"
+              buttonClassName="!h-10 !w-10 !justify-center !px-0 [&>span.min-w-0]:hidden [&>.umbra-select-chevron]:hidden"
+              options={[
+                ...rootChoices.map(root => ({ value: root.path, label: root.label, icon: root.kind === 'trash' ? <Trash2 size={15} /> : <FolderOpen size={15} /> })),
+                ...pinnedFolders.filter(path => !rootChoices.some(root => pathsEqual(root.path, path))).map(path => ({ value: path, label: pathLeaf(path), description: path, icon: <Pin size={15} />, i18nSkip: true })),
+              ]}
+              onValueChange={openFolder} onOptionContextMenu={openFolderContextMenu}
+            />
+            <button type="button" aria-label="Gallery controls" title="Sort and display controls" aria-expanded={galleryControlsOpen}
+              onClick={() => setGalleryControlsOpen(open => !open)}
+              className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded border border-white/10 text-zinc-300', galleryControlsOpen && 'bg-[var(--umbra-accent-glow)]')}>
+              <SlidersHorizontal size={16} />
+            </button>
+          </div>}
+
           <div data-umbra-gallery-sort-actions="" className="flex min-w-0 items-center gap-2">
+            {isTabletRemote && <button type="button" role="switch" aria-label="Multi-folder view" aria-checked={multiFolderView}
+              title="Include subfolder previews" onClick={() => { setAppSetting('library.multiFolderView', !multiFolderView); applyGallerySelection(new Set(), ''); }}
+              className={cn('flex h-8 w-8 items-center justify-center rounded border border-white/10 text-zinc-300', multiFolderView && 'bg-[var(--umbra-accent-glow)]')}><FolderTree size={16} /></button>}
             {!trashMode ? (
               <>
                 <UmbraSelectControl
@@ -10948,7 +10939,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                     className="inline-flex h-7 items-center gap-1.5 rounded border border-zinc-800 px-2 text-xs text-zinc-400 hover:bg-white/5 hover:text-white disabled:opacity-40"
                   >
                     <CheckSquare size={13} />
-                    Select all
+                    Select
                   </button>
                 )
               ) : (
@@ -11025,9 +11016,10 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                         tagFlyoutOpen && 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-white',
                       )}
                       title="Browse tags in the visible folder groups"
+                      aria-label="Browse tags"
                     >
                       {tagFlyoutLoading && tagFlyoutTags.length === 0 ? <Loader2 size={13} className="animate-spin" /> : <Tags size={13} />}
-                      Tags
+                      <span className={isTouchRemote ? 'sr-only' : undefined}>Tags</span>
                     </button>
                     {tagFlyoutOpen ? (
                       <div data-umbra-gallery-tag-flyout="" className="absolute right-0 top-[calc(100%+8px)] z-50 w-80 overflow-hidden rounded border border-zinc-800 bg-zinc-950/98 shadow-2xl shadow-black/50">
@@ -11080,10 +11072,12 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                     type="button"
                     disabled={selectedPaths.size === 0}
                     onClick={deleteSelection}
+                    aria-label="Move selected to Trash"
+                    title="Move selected to Trash"
                     className="inline-flex h-7 items-center gap-1.5 rounded border border-red-500/30 px-2 text-xs text-red-300 hover:bg-red-500/10 hover:text-red-100 disabled:opacity-40"
                   >
                     <Trash2 size={13} />
-                    Trash
+                    <span className={isTouchRemote ? 'sr-only' : undefined}>Trash</span>
                   </button>
                 </>
               )}
@@ -11093,7 +11087,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           <div
             ref={scrollParentRef}
             data-umbra-gallery-scroll=""
-            onScroll={handleGalleryMediaScroll}
             onContextMenu={event => {
               if (!singleFolderExplorer || (event.target as Element).closest('[data-umbra-gallery-tile], [data-gallery-archives], button, input, a')) return;
               event.preventDefault();
@@ -11117,20 +11110,21 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                   key={row.key}
                   className="absolute left-0 right-0 grid"
                   style={{
-                    gridTemplateColumns: `repeat(${columnCount}, minmax(0, ${cardSize}px))`,
+                    gridTemplateColumns: `repeat(${folderColumnCount}, minmax(0, ${folderCardWidth}px))`,
                     gap: GRID_GAP,
-                    height: cardHeight,
+                    height: folderCardHeight,
                     transform: `translateY(${row.start - folderScrollMargin}px)`,
                     justifyContent: isPhoneRemote ? 'center' : undefined,
                   }}
                 >
-                  {childFolderNodes.slice(row.index * columnCount, (row.index + 1) * columnCount).map(folder => {
+                  {childFolderNodes.slice(row.index * folderColumnCount, (row.index + 1) * folderColumnCount).map(folder => {
                     const path = normalizePath(folder.path);
                     return <GalleryFolderTile
                       key={path}
                       folder={folder}
-                      cardSize={cardSize}
-                      cardHeight={cardHeight}
+                      cardSize={folderCardWidth}
+                      cardHeight={folderCardHeight}
+                      compact={isTouchRemote}
                       revision={folderPreviewRefreshVersion}
                       dropTargeted={pathsEqual(dropTargetFolder, path)}
                       onOpen={() => openFolder(path)}
@@ -11899,7 +11893,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         ]}
         onClose={() => setContextMenu(null)}
         boundarySelector={viewerFile ? '[data-umbra-gallery-viewer]' : '[data-umbra-react-gallery-root]'}
-        presentation={viewerFile && (remoteMode === 'tablet' || remoteMode === 'phone') ? 'touch-sheet' : 'anchored'}
+        presentation={isTouchRemote ? 'touch-sheet' : 'anchored'}
         title={contextMenuHeader.title}
         titleI18nSkip={contextMenuHeader.titleI18nSkip}
         subtitle={contextMenuHeader.subtitle}

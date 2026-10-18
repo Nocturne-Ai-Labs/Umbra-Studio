@@ -9,7 +9,7 @@ import { useStore } from '@/store/useStore';
 
 // Keep phone dock overrides local; desktop and tablet retain the contents layout.
 const phoneDockStyles = `
-html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-floating-dock] > [data-umbra-mobile-workspace-sheet-trigger] {
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-floating-dock] > :is([data-umbra-mobile-workspace-sheet-trigger], [data-umbra-mobile-workspace-sheet-dock]) {
   position: fixed !important;
   inset: auto max(0.55rem, env(safe-area-inset-right)) calc(var(--umbra-phone-bottom-nav-height, 4.25rem) + 0.5rem) max(0.55rem, env(safe-area-inset-left)) !important;
   z-index: 195;
@@ -23,7 +23,7 @@ html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet-spacer] 
   flex: 0 0 5rem;
   pointer-events: none;
 }
-html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-floating-dock][data-active="0"] > :is([data-umbra-mobile-workspace-sheet-trigger], [data-umbra-mobile-workspace-sheet-spacer], [data-umbra-mobile-workspace-sheet-backdrop], [data-umbra-mobile-workspace-sheet-panel]) {
+html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-floating-dock][data-active="0"] > :is([data-umbra-mobile-workspace-sheet-trigger], [data-umbra-mobile-workspace-sheet-dock], [data-umbra-mobile-workspace-sheet-spacer], [data-umbra-mobile-workspace-sheet-backdrop], [data-umbra-mobile-workspace-sheet-panel]) {
   display: none !important;
 }
 html[data-umbra-remote-mode="phone"] [data-umbra-mobile-workspace-sheet][data-floating-dock] > [data-umbra-mobile-workspace-sheet-panel] {
@@ -58,7 +58,8 @@ interface UmbraMobileWorkspaceSheetProps {
   thumbnailUrl?: string;
   thumbnailProtected?: boolean;
   tone?: UmbraMobileWorkspaceSheetTone;
-  kind?: 'inpaint';
+  kind?: 'inpaint' | 'video';
+  dockAction?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }
@@ -73,6 +74,7 @@ export function UmbraMobileWorkspaceSheet({
   thumbnailProtected = false,
   tone = 'cyan',
   kind,
+  dockAction,
   children,
   className,
 }: UmbraMobileWorkspaceSheetProps) {
@@ -106,17 +108,7 @@ export function UmbraMobileWorkspaceSheet({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
-  const sheet = (
-    <div
-      data-umbra-mobile-workspace-sheet=""
-      data-floating-dock=""
-      data-active={sheetActive ? '1' : '0'}
-      data-open={open ? '1' : '0'}
-      data-tone={tone}
-      data-kind={kind}
-      className={cn('contents', className)}
-    >
-      <style>{phoneDockStyles}</style>
+  const trigger = (
       <button
         type="button"
         data-umbra-mobile-workspace-sheet-trigger=""
@@ -140,6 +132,25 @@ export function UmbraMobileWorkspaceSheet({
         {badge ? <span data-umbra-mobile-workspace-sheet-badge="">{badge}</span> : null}
         <ChevronUp size={17} />
       </button>
+  );
+
+  const sheet = (
+    <div
+      data-umbra-mobile-workspace-sheet=""
+      data-floating-dock=""
+      data-active={sheetActive ? '1' : '0'}
+      data-open={open ? '1' : '0'}
+      data-tone={tone}
+      data-kind={kind}
+      className={cn('contents', className)}
+    >
+      <style>{phoneDockStyles}</style>
+      {phoneMode && dockAction ? (
+        <div data-umbra-mobile-workspace-sheet-dock="">
+          {trigger}
+          {dockAction}
+        </div>
+      ) : trigger}
 
       {open ? (
         <button

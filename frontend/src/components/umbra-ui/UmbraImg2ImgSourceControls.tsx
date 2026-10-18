@@ -161,6 +161,7 @@ export function UmbraImg2ImgSourceControls({
 
         <div data-umbra-img2img-source-actions className="min-w-0 space-y-2">
           <input
+            aria-label="Source image path"
             value={source.path}
             onChange={(event) => changeSource({
               path: event.target.value,
@@ -250,6 +251,7 @@ export function UmbraImg2ImgSourceControls({
         <div className="grid grid-cols-[minmax(0,1fr)_68px] items-center gap-2">
           <input
             type="range"
+            aria-label="Denoise"
             min="0.01"
             max="1"
             step="0.01"
@@ -258,6 +260,7 @@ export function UmbraImg2ImgSourceControls({
             className="w-full accent-cyan-300"
           />
           <input
+            aria-label="Denoise strength"
             value={denoise.toFixed(2)}
             onChange={(event) => onDenoiseChange(clampDenoise(event.target.value))}
             inputMode="decimal"

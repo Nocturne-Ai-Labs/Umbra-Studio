@@ -1,0 +1,154 @@
+/* Touch Gallery browses folders and media together; desktop retains its tree. */
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] {
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-content] {
+  display: flex;
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-header] {
+  position: relative;
+  top: auto;
+  z-index: 25;
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 4px 8px;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  align-items: center;
+  transform: none;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-folder-summary] {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-path-ticker] {
+  display: none;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-browser-search] {
+  grid-column: 1 / -1;
+  display: flex;
+  min-width: 0;
+  gap: 4px;
+  align-items: center;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-browser-search] input {
+  height: 2.5rem;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-sort-actions] {
+  grid-column: 1 / -1;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+  padding: 4px 0;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser][data-umbra-gallery-controls-open="0"] [data-umbra-gallery-sort-actions],
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser][data-umbra-gallery-controls-open="0"]:not([data-umbra-gallery-has-metadata-filter]) [data-umbra-gallery-metadata-search] {
+  display: none;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-action-bar] {
+  display: flex;
+  position: relative;
+  top: auto !important;
+  z-index: 20;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px !important;
+  max-height: none;
+  overflow: visible;
+  transform: none;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-action-bar] > div:first-child {
+  flex: 1 1 5rem;
+  margin: 0;
+  font-size: 10px;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-action-controls] {
+  display: flex;
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  overflow: visible;
+  padding: 0;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-action-controls] > button,
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-action-controls] > div > button {
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  width: auto;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser][data-umbra-gallery-controls-open="1"] [data-umbra-gallery-action-bar],
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser][data-umbra-gallery-has-metadata-filter] [data-umbra-gallery-action-bar] {
+  display: block;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser][data-umbra-gallery-controls-open="1"] [data-umbra-gallery-action-controls],
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser][data-umbra-gallery-has-metadata-filter] [data-umbra-gallery-action-controls] {
+  width: 100%;
+  margin-top: 4px;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-metadata-search] {
+  flex: 1 1 10rem;
+  min-width: 8rem !important;
+  width: auto;
+  max-width: none;
+  min-height: 2.5rem;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-scroll] {
+  min-height: 0;
+  padding: 8px 12px !important;
+  scroll-padding-top: 8px;
+  overscroll-behavior: contain;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-gallery-folders] {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-folder-tile] {
+  touch-action: pan-y;
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-folder-tile] [data-umbra-gallery-menu-trigger]::before {
+  top: calc((100% - 1.65rem) / 2);
+}
+
+html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-browser] [data-umbra-gallery-folder-tile] [data-umbra-gallery-menu-trigger] > svg {
+  top: calc((100% - 14px) / 2);
+}
