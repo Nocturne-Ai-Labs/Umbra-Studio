@@ -1,3 +1,4 @@
+import { normalizeMossPromptField, type MossPromptField } from '../../../shared/umbra-ui/mossPromptFields';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import {
   extractGenerationParams,
@@ -37,6 +38,7 @@ export interface UmbraUiMediaPromptSegment {
   variantId?: string;
   variantName?: string;
   preserveRepeatedTerms?: true;
+  moss?: MossPromptField;
 }
 
 export interface UmbraUiMediaInpaintSnapshot {
@@ -380,13 +382,14 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
       .map((candidate): UmbraUiMediaPromptSegment | null => {
         const segment = isRecord(candidate) ? candidate : {};
         const text = cleanPromptText(String(segment.text || '').trim());
-        if (!text) return null;
+        if (!text && !normalizeMossPromptField(segment.moss)?.text.trim()) return null;
         return {
           text,
           ...(String(segment.label || '').trim() ? { label: String(segment.label).trim().slice(0, 160) } : {}),
           ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim().slice(0, 80) } : {}),
           ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim().slice(0, 240) } : {}),
           ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim().slice(0, 240) } : {}),
+          ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
           ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
         };
       })
@@ -457,13 +460,14 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
       .map((candidate): UmbraUiMediaPromptSegment | null => {
         const segment = isRecord(candidate) ? candidate : {};
         const text = cleanPromptText(String(segment.text || '').replace(/<lora:[^>]+>/gi, ''));
-        if (!text) return null;
+        if (!text && !normalizeMossPromptField(segment.moss)?.text.trim()) return null;
         return {
           text,
           ...(String(segment.slotLabel || '').trim() ? { label: String(segment.slotLabel).trim() } : {}),
           ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
           ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
           ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim() } : {}),
+          ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
           ...(powerPrompter.source === 'power_prompter' || segment.preserveRepeatedTerms === true
             ? { preserveRepeatedTerms: true as const }
             : {}),

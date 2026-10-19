@@ -1,3 +1,4 @@
+import { normalizeMossPromptField, type MossPromptField } from '../shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './GeneratedImageMetadata';
 import { normalizeImagePipelineSettings, applyImagePipelineSettings, type ImagePipelineSettings } from '../shared/umbra-ui/imagePipelineSettings';
 import { applyFlux3References, flux3LayoutElements, removeFlux3BlankReference } from '../shared/umbra-ui/flux3Edit';
@@ -398,6 +399,7 @@ export interface UmbraUiInpaintPromptSegment {
   variantId: string;
   variantName: string;
   preserveRepeatedTerms?: true;
+  moss?: MossPromptField;
 }
 
 export interface UmbraUiInpaintLora {
@@ -1108,6 +1110,7 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
       variantId: String(segment?.variantId || '').trim(),
       variantName: String(segment?.variantName || '').trim(),
       text: String(segment?.text || '').trim(),
+      ...(normalizeMossPromptField(segment?.moss) ? { moss: normalizeMossPromptField(segment?.moss) } : {}),
       ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     }))
     .filter((segment) => segment.text.length > 0);

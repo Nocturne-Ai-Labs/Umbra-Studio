@@ -1,3 +1,4 @@
+import { normalizeMossPromptField } from '../shared/umbra-ui/mossPromptFields';
 import { normalizeImagePipelineSettings } from '../shared/umbra-ui/imagePipelineSettings';
 import { parseFlux3LayoutRegions } from '../shared/umbra-ui/flux3Edit';
 import { createHash, randomUUID } from 'crypto';
@@ -87,6 +88,7 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
       ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim().slice(0, 160) } : {}),
       ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim().slice(0, 240) } : {}),
       ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim().slice(0, 240) } : {}),
+      ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
       ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });

@@ -1,3 +1,4 @@
+import { normalizeMossPromptField } from '../../../shared/umbra-ui/mossPromptFields';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import type {
   UmbraUiInpaintControlAdapterType,
@@ -761,6 +762,7 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
       ...(String(segment?.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
       ...(String(segment?.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
       ...(String(segment?.variantName || '').trim() ? { variantName: String(segment.variantName).trim() } : {}),
+      ...(normalizeMossPromptField(segment?.moss) ? { moss: normalizeMossPromptField(segment?.moss) } : {}),
       ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     }))
     : [];

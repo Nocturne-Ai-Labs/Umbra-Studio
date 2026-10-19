@@ -1,6 +1,8 @@
+'use client';
+
+import { compileMossPromptFields } from '../../../../shared/umbra-ui/mossPromptFields';
 import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
-'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { translateLegacyUiText } from '@/i18n/legacyUiLocalization';
@@ -674,8 +676,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const promptHistoryDirtyRef = React.useRef(false);
   const promptHistoryRevisionRef = React.useRef(0);
   const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
-  const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
-  const workflowImagePrompt = prompt;
   const activeImagePromptSegments = promptSegments;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [catalogEnabledCSVs, setCatalogEnabledCSVs] = React.useState<string[]>([]);
@@ -837,6 +837,11 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [cfg, setCfg] = React.useState(initialDeviceResume?.cfg || '4');
   const [width, setWidth] = React.useState(initialDeviceResume?.width || '896');
   const [height, setHeight] = React.useState(initialDeviceResume?.height || '1152');
+  const mossJsonEnabled = normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage' && promptSegments.some(segment => segment.moss?.enabled);
+  const prompt = React.useMemo(() => mossJsonEnabled
+    ? compileMossPromptFields(promptSegments, Number(width) || 1024, Number(height) || 1024)
+    : compileUmbraUiPromptSegments(promptSegments), [mossJsonEnabled, promptSegments, width, height]);
+  const workflowImagePrompt = prompt;
   const [imageAspectRatio, setImageAspectRatio] = React.useState<UmbraImageAspectPresetId>(() => (
     initialDeviceResume?.imageAspectRatio
       || inferUmbraImageAspectRatio(Number(initialDeviceResume?.width || 896), Number(initialDeviceResume?.height || 1152))
@@ -2298,7 +2303,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                   ? 'The selected output folder is no longer pinned. Choose a pinned folder or Default output.'
                 : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
                   ? 'Choose a source image for IMG2IMG'
-                  : !workflowImagePrompt.trim()
+                  : !workflowImagePrompt.trim() || (mossJsonEnabled && !promptSegments.some(segment => segment.text.trim() || segment.moss?.text.trim()))
                     ? 'Enter a positive prompt first'
                     : imageCapabilities.resolution.support === 'adjustable'
                       && (!Number.isInteger(Number(width)) || Number(width) < imageWidthMin || Number(width) > imageWidthMax)
@@ -2686,6 +2691,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             variantId: segment.variantId,
             variantName: segment.variantName,
             preserveRepeatedTerms: segment.preserveRepeatedTerms,
+            moss: segment.moss,
           },
         ));
         setPromptSegments(segments);
@@ -2912,7 +2918,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     <div className={phoneImageGeneration ? 'relative space-y-3' : 'relative'}>
       <>
         <UmbraPositivePromptEditor
-        singleField={phoneImageGeneration}
+        mossOutput={normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage' ? { width: Number(width) || 1024, height: Number(height) || 1024 } : undefined}
+        singleField={phoneImageGeneration && !mossJsonEnabled}
         segments={promptSegments}
         activeSegmentId={activePromptSegmentId}
         onChange={setPromptSegments}

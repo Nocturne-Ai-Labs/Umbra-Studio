@@ -1,3 +1,4 @@
+import { normalizeMossPromptField } from './shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './backend/GeneratedImageMetadata';
 import { applyImagePipelineSettings, normalizeImagePipelineSettings, type ImagePipelineSettings } from './shared/umbra-ui/imagePipelineSettings';
 import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
@@ -11476,7 +11477,7 @@ function buildPowerPrompterMetadataSegments(
     const variantId = String(token.variantId || '').trim();
     const card = cardsById.get(variantId) as Record<string, unknown> | undefined;
     const text = String(token.text || card?.text || '').trim();
-    if (!text) return null;
+    if (!text && !normalizeMossPromptField(token.moss)?.text.trim()) return null;
     return {
       order,
       slotId: String(token.slotId || card?.slotId || '').trim(),
@@ -11485,6 +11486,7 @@ function buildPowerPrompterMetadataSegments(
       variantId,
       variantName: String(token.variantName || card?.variantName || '').trim(),
       text,
+      ...(normalizeMossPromptField(token.moss) ? { moss: normalizeMossPromptField(token.moss) } : {}),
       ...(token.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
     };
   }).filter((segment): segment is NonNullable<typeof segment> => segment !== null);

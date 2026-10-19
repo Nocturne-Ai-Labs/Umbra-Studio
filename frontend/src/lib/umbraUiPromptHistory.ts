@@ -1,3 +1,4 @@
+import { normalizeMossPromptField } from '../../../shared/umbra-ui/mossPromptFields';
 import {
   compileUmbraUiPromptSegments,
   type UmbraUiPromptSegment,
@@ -46,6 +47,7 @@ function normalizeHistorySegments(value: unknown, entryIndex: number): UmbraUiPr
       ...(slotType ? { slotType } : {}),
       ...(variantId ? { variantId } : {}),
       ...(variantName ? { variantName } : {}),
+      ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
       ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });
@@ -62,6 +64,7 @@ function promptHistoryEntryKey(
     variantId: normalizeMetadata(segment.variantId).toLowerCase(),
     variantName: normalizeMetadata(segment.variantName).toLowerCase(),
     preserveRepeatedTerms: segment.preserveRepeatedTerms === true,
+    moss: normalizeMossPromptField(segment.moss),
   }));
   return JSON.stringify({
     fields: groupedPrompt,
@@ -90,7 +93,7 @@ export function normalizeUmbraUiPromptHistory(
         key: promptHistoryEntryKey(promptSegments, negativePrompt),
       };
     })
-    .filter((entry) => !!compileUmbraUiPromptSegments(entry.promptSegments))
+    .filter((entry) => !!compileUmbraUiPromptSegments(entry.promptSegments) || entry.promptSegments.some(segment => !!segment.moss?.text.trim()))
     .sort((left, right) => right.createdAt - left.createdAt || left.index - right.index);
 
   const normalized: UmbraUiPromptHistoryEntry[] = [];
@@ -121,7 +124,7 @@ export function recordUmbraUiPromptHistory(
   createdAt = Date.now(),
 ): UmbraUiPromptHistoryEntry[] {
   const normalizedSegments = normalizeHistorySegments(promptSegments, 0);
-  if (!compileUmbraUiPromptSegments(normalizedSegments)) {
+  if (!compileUmbraUiPromptSegments(normalizedSegments) && !normalizedSegments.some(segment => !!segment.moss?.text.trim())) {
     return normalizeUmbraUiPromptHistory(history);
   }
   return normalizeUmbraUiPromptHistory([{
