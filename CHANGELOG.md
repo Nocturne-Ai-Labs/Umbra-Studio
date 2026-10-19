@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.90.26-beta - Image Pipeline Controls and MOSS Prompt Fields
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates** using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then reopen Studio. No new model downloads are required.
+- For MOSS TXT2IMG/IMG2IMG, the **{}** button beside Add positive prompt field enables labeled JSON prompting. Scene/Location, Style/Metadata, Character, Object, Text and custom labels describe content. Bounding-box placement stays in **Edit** mode.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Image Pipeline Controls
+
+- Adjust **Flow Shift** above Detailers when the selected workflow supports it. Reset restores the workflow default; model-specific resolution or shift caps are not introduced.
+- Choose PNG or JPEG and output quality at the bottom of supported image pipeline controls. PNG is lossless and displays 100%; JPEG starts at 90% and is adjustable.
+- Preserve image controls across presets, projects and editing transfers. JPEG outputs retain Umbra generation metadata without re-encoding their pixels during metadata stamping.
+
+### MOSS Prompt Fields
+
+- Toggle structured prompting without losing field descriptions. Purpose labels, exact rendered text and metadata survive save/reload and media handoffs.
+- Regular generation JSON contains content descriptions only. It does not send hidden or previously saved bounding-box coordinates.
+- MOSS layout prompting remains experimental. Focused tests cover serialization, persistence and Edit-only coordinates; fresh GPU inference with the new content-only JSON mode has not been qualified.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: Flow Shift and output encoding controls are visible in supported image pipelines.
+- Improved: MOSS prompts can be organized by purpose using the Positive Prompt header toggle.
+- Fixed: Structured prompt fields no longer expose placement outside Edit mode.
+- Improved: JPEG outputs retain generation identifiers and settings metadata.
+
 ## v0.90.25-beta - Video Studio Projects and Setup Compatibility
 
 ### TL;DR - Setup After Updating
