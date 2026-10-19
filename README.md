@@ -714,6 +714,19 @@ checks native dependencies and runs codec encode/decode tests. Both portable
 packages retain complete source archives, the exact recipe, configuration and
 license notices. Neither packager copies an installed developer FFmpeg binary.
 
+GitHub Actions reuses verified media builds only when the platform, architecture,
+runner/toolchain fingerprint, pinned sources, build recipe and validation code
+match exactly. Cache hits are checked against the complete file inventory and
+source/license policy before the binaries are executed; normal native probes
+and archive validation still run. Cache misses compile from source as before.
+No partial-key fallback or cross-platform cache is used.
+
+Changes to media inputs prime the default-branch cache through a build-only run.
+After a runner/toolchain change or cache eviction, run **Build portable releases**
+on `main` with publication disabled to prime it again before candidate/tag builds.
+The first build for a new key remains a full compilation. Build caches do not
+contain installed tools, model weights, or user data.
+
 Windows portable folder builds:
 
 No-bump update of the current portable folder:
