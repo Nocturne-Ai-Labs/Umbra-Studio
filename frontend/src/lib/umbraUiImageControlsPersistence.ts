@@ -1,3 +1,4 @@
+import type { ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import { normalizePowerPrompterGenerationControls } from '@/lib/powerPrompter';
 import type {
   PowerPrompterDetailerStage,
@@ -18,6 +19,7 @@ import {
 export const UMBRA_UI_IMAGE_CONTROLS_VERSION = 1 as const;
 
 export interface UmbraUiImageGenerationControls {
+  imagePipeline?: ImagePipelineSettings;
   negativePrompt: string;
   seed: number;
   seedMode: PowerPrompterSeedControlMode;
@@ -229,6 +231,7 @@ export function normalizeUmbraUiImageControlsSnapshot(
     imageAspectRatio: aspectRatio,
     imageBaseResolution,
     generation: {
+      imagePipeline: normalizedGeneration.imagePipeline,
       negativePrompt: normalizedGeneration.negativePrompt,
       seed: normalizedGeneration.seed,
       seedMode: normalizedGeneration.controlAfterGenerate,

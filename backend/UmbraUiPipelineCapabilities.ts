@@ -1,3 +1,4 @@
+import { IMAGE_FLOW_SHIFT_CLASSES, IMAGE_SAVE_CLASSES } from '../shared/umbra-ui/imagePipelineSettings';
 import { formatMissingUmbraUiNodes } from '../shared/umbra-ui/runtimeNodeMessages';
 import {
   filterUmbraUiDetailerStages,
@@ -937,6 +938,15 @@ export function deriveUmbraUiTxt2ImgCapabilities(
       ),
       values: [...descriptor.modelSources],
     },
+    flowShift: (() => {
+      const targets = nodes.filter(node => (IMAGE_FLOW_SHIFT_CLASSES as readonly string[]).includes(node.classType) && typeof node.inputs.shift === 'number');
+      return targets.length ? control('adjustable', 'Flow sampling shift.', targets, literalInput(targets, ['shift'])) : unsupported('No adjustable flow shift in this graph.');
+    })(),
+    imageOutput: (() => {
+      const targets = nodes.filter(node => (IMAGE_SAVE_CLASSES as readonly string[]).includes(node.classType)
+        && !Array.isArray(node.inputs.output_format) && !Array.isArray(node.inputs.output_quality));
+      return targets.length ? control('adjustable', 'Saved image format and compression quality.', targets) : unsupported('This graph does not expose image encoding controls.');
+    })(),
     negativePrompt,
     loras,
     seed,

@@ -1,3 +1,4 @@
+import { normalizeImagePipelineSettings } from '../shared/umbra-ui/imagePipelineSettings';
 import { parseFlux3LayoutRegions } from '../shared/umbra-ui/flux3Edit';
 import { createHash, randomUUID } from 'crypto';
 import { copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises';
@@ -111,6 +112,7 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
     modelFamily: String(settings.modelFamily || '').trim().slice(0, 160),
     modelSource: String(settings.modelSource || '').trim().slice(0, 160),
     checkpointName: String(settings.checkpointName || '').trim().replace(/\\/g, '/').slice(0, 4096),
+    imagePipeline: normalizeImagePipelineSettings(settings.imagePipeline),
     workflowResources,
     promptSegments,
     negativePrompt: String(settings.negativePrompt || '').slice(0, 1_000_000),

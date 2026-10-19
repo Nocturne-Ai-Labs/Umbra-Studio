@@ -1,3 +1,4 @@
+import type { ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import type {
   UmbraUiInpaintControlAdapterType,
   UmbraUiInpaintControlMode,
@@ -302,6 +303,7 @@ export interface UmbraUiInpaintSubmitOptions {
   promptSegments: UmbraUiPromptSegment[];
   negativePrompt: string;
   loras: UmbraUiLoraEntry[];
+  imagePipeline?: ImagePipelineSettings;
   workflowResources: Record<string, string>;
   checkpointName: string;
   clipSkip: number;
@@ -357,11 +359,12 @@ export async function submitUmbraUiInpaintJob(options: UmbraUiInpaintSubmitOptio
   form.append('source', options.source, options.sourceName || 'inpaint-source.png');
   form.append('mask', options.mask, 'inpaint-mask.png');
   for (const [key, value] of Object.entries(options)) {
-    if (key === 'layoutRegions' || key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'hiresFix' || key === 'detailerPipeline' || key === 'controlLayers' || key === 'referenceLayers') continue;
+    if (key === 'imagePipeline' || key === 'layoutRegions' || key === 'source' || key === 'sourceName' || key === 'mask' || key === 'promptSegments' || key === 'loras' || key === 'workflowResources' || key === 'tiledVae' || key === 'hiresFix' || key === 'detailerPipeline' || key === 'controlLayers' || key === 'referenceLayers') continue;
     form.append(key, String(value));
   }
   form.append('promptSegments', JSON.stringify(options.promptSegments));
   form.append('loras', JSON.stringify(options.loras));
+  if (options.imagePipeline) form.append('imagePipeline', JSON.stringify(options.imagePipeline));
   form.append('workflowResources', JSON.stringify(options.workflowResources));
   form.append('tiledVae', JSON.stringify(options.tiledVae));
   if (options.hiresFix) form.append('hiresFix', JSON.stringify(options.hiresFix));

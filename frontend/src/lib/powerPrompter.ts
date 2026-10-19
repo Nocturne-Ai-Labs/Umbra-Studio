@@ -1,3 +1,4 @@
+import { normalizeImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../shared/umbra-ui/minimaxH3Defaults';
 import { normalizeMiniMaxH3Guides } from '../../../shared/umbra-ui/minimaxH3Guides';
 import { DEFAULT_MINIMAX_H3_DIRECTOR, normalizeMiniMaxH3Director } from '../../../shared/umbra-ui/minimaxH3Director';
@@ -321,6 +322,7 @@ function normalizeLoraEntries(rawEntries: unknown): PowerPrompterLoraEntry[] {
 }
 
 export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
+  imagePipeline: normalizeImagePipelineSettings(null),
   mediaType: 'image',
   outputOwner: 'power_prompter',
   outputMode: 'txt2img',
@@ -1381,6 +1383,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
     scheduler: normalizeScheduler(controls.scheduler),
     modelType: normalizeGenerationModelType((controls as any).modelType ?? (controls as any).model_type),
     checkpointName: String(controls.checkpointName || '').trim().replace(/\\/g, '/'),
+    imagePipeline: normalizeImagePipelineSettings(controls.imagePipeline),
     workflowResources: normalizePowerPrompterWorkflowResources((controls as any).workflowResources),
     aspectRatio: normalizeAspectRatio(controls.aspectRatio),
     swapDimensions,

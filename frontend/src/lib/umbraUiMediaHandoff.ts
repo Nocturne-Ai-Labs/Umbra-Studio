@@ -1,3 +1,4 @@
+import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import {
   extractGenerationParams,
   extractPrompts,
@@ -74,6 +75,7 @@ export interface UmbraUiMediaInpaintSnapshot {
 }
 
 export interface UmbraUiMediaGenerationSnapshot {
+  imagePipeline?: ImagePipelineSettings;
   positivePrompt: string;
   positivePromptSegments?: UmbraUiMediaPromptSegment[];
   negativePrompt: string;
@@ -365,6 +367,7 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
     hiresFix: value.hiresFix,
     detailerPipeline: value.detailerPipeline,
     outputUpscale: value.outputUpscale,
+    imagePipeline: value.imagePipeline,
     tiledVae: value.tiledVae,
   });
   const resources = isRecord(value.workflowResources)
@@ -401,6 +404,7 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
     seed: boundedNumber(value.seed, 0, Number.MAX_SAFE_INTEGER, true),
     steps: boundedNumber(value.steps, 1, 10_000, true),
     cfg: boundedNumber(value.cfg, 0, 100),
+    ...(isRecord(value.imagePipeline) ? { imagePipeline: normalizeImagePipelineSettings(value.imagePipeline) } : {}),
     clipSkip: boundedNumber(value.clipSkip, 1, 12, true),
     samplerName: String(value.samplerName || '').trim().slice(0, 160),
     scheduler: String(value.scheduler || '').trim().slice(0, 160),
@@ -549,6 +553,7 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     ...(isRecord(generation.outputUpscale)
       ? { outputUpscale: normalizedPowerPrompterGeneration.outputUpscale }
       : {}),
+    ...(isRecord(generation.imagePipeline || inpaint.imagePipeline) ? { imagePipeline: normalizeImagePipelineSettings(generation.imagePipeline || inpaint.imagePipeline) } : {}),
     workflowResources,
     ...(isRecord(tiledVae) ? { tiledVae: normalizedPowerPrompterGeneration.tiledVae } : {}),
     // An explicit current stack (including []) owns the controls. Inline

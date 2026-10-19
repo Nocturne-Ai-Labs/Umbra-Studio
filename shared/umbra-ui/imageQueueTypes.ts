@@ -1,3 +1,4 @@
+import type { ImagePipelineSettings } from './imagePipelineSettings';
 import type { PowerPrompterDetailerStage, PowerPrompterHiresFixControls, PowerPrompterModelType, PowerPrompterOutputUpscaleControls, PowerPrompterSeedControlMode, PowerPrompterSeedIncrement, PowerPrompterTiledVaeControls } from '../power-prompter/types';
 import type { UmbraUiLoraEntry } from '../../frontend/src/lib/umbraUiModels';
 import type { UmbraUiPromptSegment } from '../../frontend/src/lib/umbraUiPromptSegments';
@@ -5,6 +6,7 @@ import type { UmbraUiPromptSegment } from '../../frontend/src/lib/umbraUiPromptS
 export type UmbraQueuePlacement = 'next' | 'end' | 'interrupt';
 
 export interface UmbraImageQueueOptions {
+  imagePipeline?: ImagePipelineSettings;
   prompt: string;
   promptSegments?: UmbraUiPromptSegment[];
   negativePrompt: string;

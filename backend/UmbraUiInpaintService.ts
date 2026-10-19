@@ -1,3 +1,5 @@
+import { stampGeneratedImageMetadata } from './GeneratedImageMetadata';
+import { normalizeImagePipelineSettings, applyImagePipelineSettings, type ImagePipelineSettings } from '../shared/umbra-ui/imagePipelineSettings';
 import { applyFlux3References, flux3LayoutElements, removeFlux3BlankReference } from '../shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from '../shared/umbra-ui/mossLayout';
 import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'fs';
@@ -22,7 +24,6 @@ import {
   inferUmbraUiClassicModelArchitecture,
   inferUmbraUiIpAdapterArchitecture,
 } from '../shared/umbra-ui/inpaintModelCompatibility';
-import { upsertPngTextMetadata } from './PngTextMetadata';
 import { resolveUmbraUiInpaintBaseSeed } from './UmbraUiInpaintSeed';
 
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp']);
@@ -326,6 +327,7 @@ export interface UmbraUiInpaintSettings {
   promptSegments?: UmbraUiInpaintPromptSegment[];
   negativePrompt: string;
   loras?: UmbraUiInpaintLora[];
+  imagePipeline?: ImagePipelineSettings;
   workflowResources?: Record<string, string>;
   checkpointName: string;
   clipSkip: number;
@@ -1074,6 +1076,7 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
     modelFamily: settings.modelFamily,
     modelType: settings.modelSource,
     checkpointName: settings.checkpointName,
+    imagePipeline: normalizeImagePipelineSettings(settings.imagePipeline),
     workflowResources,
     layoutRegions: settings.layoutRegions || [],
     negativePrompt: settings.negativePrompt,
@@ -2087,6 +2090,7 @@ export class UmbraUiInpaintService {
           const powerPrompterMetadata = buildUmbraUiInpaintPowerPrompterMetadata(settings, item, job.total);
           const base = await this.buildBaseWorkflow(settings, item.seed);
           const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
+          applyImagePipelineSettings(graph, settings.imagePipeline);
           if (settings.outputFolder) {
             for (const node of Object.values(graph)) {
               if (!['UmbraLabSaveImage', 'UmbraLabSaveImageSimple'].includes(node.class_type)) continue;
@@ -2151,6 +2155,7 @@ export class UmbraUiInpaintService {
                     promptSegments: settings.promptSegments,
                     negativePrompt: settings.negativePrompt,
                     loras: settings.loras,
+                    imagePipeline: settings.imagePipeline,
                     workflowResources: settings.workflowResources,
                     layoutRegions: settings.layoutRegions || [],
     mossLayout: settings.mossLayout === true,
@@ -3382,7 +3387,7 @@ export class UmbraUiInpaintService {
       ? resolve(declaredFullPath)
       : resolve(join(outputRoot, String(output.subfolder || ''), String(output.filename || '')));
     if (candidate !== outputRoot && !candidate.startsWith(`${outputRoot}${sep}`)) return '';
-    return extname(candidate).toLowerCase() === '.png' ? candidate : '';
+    return ['.png', '.jpg', '.jpeg'].includes(extname(candidate).toLowerCase()) ? candidate : '';
   }
 
   private async stampPowerPrompterMetadata(item: UmbraUiInpaintJobItem): Promise<void> {
@@ -3392,7 +3397,7 @@ export class UmbraUiInpaintService {
     await Promise.all(item.outputs.map(async (output) => {
       const path = this.resolveComfyOutputPath(output);
       if (!path) return;
-      await upsertPngTextMetadata(path, 'umbra_power_prompter', JSON.stringify(metadata)).catch(() => undefined);
+      await stampGeneratedImageMetadata(path, 'umbra_power_prompter', JSON.stringify(metadata)).catch(() => undefined);
     }));
   }
 

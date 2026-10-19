@@ -1,3 +1,5 @@
+import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
+import type { ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 import { Flux3LayoutControls } from './Flux3LayoutControls';
 import { flux3LayoutElements } from '../../../../shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from '../../../../shared/umbra-ui/mossLayout';
@@ -198,6 +200,8 @@ interface UmbraCanvasWorkspaceProps {
   onRefreshModelCatalog: () => void;
   loras: UmbraUiLoraEntry[];
   onLorasChange: (loras: UmbraUiLoraEntry[]) => void;
+  imagePipeline?: ImagePipelineSettings;
+  onImagePipelineChange: (value: ImagePipelineSettings) => void;
   workflowResources: Record<string, string>;
   loraAvailableCount: number;
   onOpenLoraPicker: () => void;
@@ -363,6 +367,8 @@ export function UmbraCanvasWorkspace({
   onRefreshModelCatalog,
   loras,
   onLorasChange,
+  imagePipeline,
+  onImagePipelineChange,
   workflowResources,
   loraAvailableCount,
   onOpenLoraPicker,
@@ -1199,6 +1205,7 @@ export function UmbraCanvasWorkspace({
           modelFamily: inherited.modelFamily,
           modelSource: inherited.modelType,
           checkpointName: inherited.checkpointName,
+          imagePipeline: inherited.imagePipeline,
           workflowResources: { ...(inherited.workflowResources || {}) },
           promptSegments: inherited.positivePromptSegments?.length
             ? inherited.positivePromptSegments.map((segment, index) => ({
@@ -1697,6 +1704,7 @@ export function UmbraCanvasWorkspace({
         modelFamily,
         modelSource,
         checkpointName,
+        imagePipeline,
         workflowResources: { ...workflowResources },
         promptSegments: promptSegments.map((segment) => ({ ...segment })),
         negativePrompt,
@@ -1828,6 +1836,7 @@ export function UmbraCanvasWorkspace({
         promptSegments,
         negativePrompt: capabilities.negativePrompt.support === 'adjustable' ? negativePrompt : '',
         loras: loras.filter((lora) => lora.enabled !== false),
+        imagePipeline,
         workflowResources,
         checkpointName,
         clipSkip: Number(clipSkip) || 1,
@@ -1972,6 +1981,7 @@ export function UmbraCanvasWorkspace({
     submitting,
     tiledVae,
     upsertPendingGeneration,
+    imagePipeline,
     workflowResources,
     editingWorkspace,
   ]);
@@ -2736,6 +2746,7 @@ export function UmbraCanvasWorkspace({
             />
           ) : null}
           <UmbraTiledVaeControls value={tiledVae} onChange={onTiledVaeChange} mode="inpaint" />
+          <UmbraImagePipelineControls section="flow" value={imagePipeline} onChange={onImagePipelineChange} capabilities={capabilities} />
           {capabilities.detailerStages.support === 'adjustable' ? (
             <UmbraDetailerPipelineControls
               stages={detailerPipeline}
@@ -2753,6 +2764,7 @@ export function UmbraCanvasWorkspace({
               showStageControls={capabilities.detailerStages.customStages}
             />
           ) : null}
+          <UmbraImagePipelineControls section="output" value={imagePipeline} onChange={onImagePipelineChange} capabilities={capabilities} />
         </div>
       </aside>
 

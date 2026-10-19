@@ -1,3 +1,4 @@
+import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import type {
   UmbraUiInpaintControlAdapterType,
   UmbraUiInpaintControlMode,
@@ -363,6 +364,7 @@ export interface UmbraCanvasGenerationSettings {
   softInpaintPreservation: number;
   softInpaintTransitionContrast: number;
   softInpaintMaskInfluence: number;
+  imagePipeline?: ImagePipelineSettings;
   tiledVae: PowerPrompterTiledVaeControls;
 }
 
@@ -832,6 +834,7 @@ function normalizeGenerationSettings(value: unknown): UmbraCanvasGenerationSetti
     softInpaintPreservation: clamp(source.softInpaintPreservation ?? 0.5, 0, 1),
     softInpaintTransitionContrast: clamp(source.softInpaintTransitionContrast ?? 2, 0.25, 8),
     softInpaintMaskInfluence: clamp(source.softInpaintMaskInfluence ?? 0, 0, 1),
+    imagePipeline: normalizeImagePipelineSettings(source.imagePipeline),
     tiledVae: {
       enabled: source.tiledVae?.enabled === true,
       tileSize: clamp(Math.round(Number(source.tiledVae?.tileSize) || 512), 128, 2048),
