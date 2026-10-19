@@ -894,6 +894,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [imageGenerationInfoOpen, setImageGenerationInfoOpen] = React.useState(false);
   const [queuedImageGenerationInfo, setQueuedImageGenerationInfo] = React.useState<Record<string, UmbraImageGenerationInfo>>({});
   const [lastImageGenerationInfo, setLastImageGenerationInfo] = React.useState<UmbraImageGenerationInfo | null>(null);
+  const [videoProjectView, setVideoProjectView] = React.useState(false);
   const [videoPreviewJobId, setVideoPreviewJobId] = React.useState<string | null>(null);
   const [videoPreviewRevision, setVideoPreviewRevision] = React.useState(0);
   const videoPreviewJob = videoJobs.find((job) => job.id === videoPreviewJobId)
@@ -2633,6 +2634,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         clearPendingUmbraUiMediaHandoff(handoff);
       }
       if (handoff.mode === 'video') {
+        if (handoff.videoProject) setVideoProjectView(true);
         setActiveMode('video');
         return;
       }
@@ -3934,7 +3936,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         {modeIsMounted('video') ? (
           <div className={activeMode === 'video' ? 'flex min-h-0 min-w-0 flex-col' : 'hidden'} aria-hidden={activeMode !== 'video'}>
             <UmbraCommunityVideo phoneMode={remoteMode === 'phone'}>
-            {videoRoutePolicy === 'dasiwa-only' || remoteMode === 'phone' ? <UmbraOfficialVideoWorkflowPanel
+            {videoProjectView || videoRoutePolicy === 'dasiwa-only' || remoteMode === 'phone' ? <UmbraOfficialVideoWorkflowPanel
+              onUseAdapted={() => setVideoProjectView(false)}
+              onPreviewJob={setVideoPreviewJobId}
               phoneMode={remoteMode === 'phone'}
               active={activeMode === 'video'}
               queueConnected={queueConnected}

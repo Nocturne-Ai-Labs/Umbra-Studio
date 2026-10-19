@@ -8770,3 +8770,53 @@ html[data-umbra-remote-mode] [data-umbra-react-gallery-root][data-umbra-gallery-
 [data-umbra-mobile-filmstrip] .umbra-mobile-filmstrip-tile:hover {
   border-color: color-mix(in srgb, var(--umbra-accent) 50%, transparent);
 }
+
+/* Video Studio disclosures: visible hit areas and direct-child open state.
+   Direct-child selectors keep nested collapsed groups visually independent. */
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.8rem;
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--umbra-text) 12%, transparent);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--umbra-text) 4%, var(--umbra-bg));
+  color: var(--umbra-text);
+}
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details > summary::-webkit-details-marker { display: none; }
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details > summary::marker { content: ''; }
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details > summary::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details[open] > summary::before { transform: rotate(45deg); }
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details > summary::after {
+  content: 'Expand';
+  margin-left: auto;
+  padding-left: 0.5rem;
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  font-weight: 400;
+  opacity: 0.65;
+}
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details[open] > summary::after { content: 'Collapse'; }
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details[open] > summary {
+  border-color: color-mix(in srgb, var(--umbra-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--umbra-accent) 6%, var(--umbra-bg));
+}
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details > summary:hover {
+  border-color: color-mix(in srgb, var(--umbra-accent) 65%, transparent);
+  background: color-mix(in srgb, var(--umbra-accent) 10%, var(--umbra-bg));
+}
+:is([data-umbra-official-video], [data-umbra-video-disclosures]) details > summary:focus-visible {
+  outline: 2px solid var(--umbra-accent);
+  outline-offset: 2px;
+}

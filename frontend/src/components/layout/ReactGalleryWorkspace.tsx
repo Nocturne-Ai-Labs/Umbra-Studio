@@ -3708,23 +3708,9 @@ function GalleryMediaViewer({
           <Grid3X3 size={12} className="text-cyan-300" /> Canvas
         </button>}
         {!isPhoneViewer && !isVideo && <button type="button" onClick={onSendManga} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06]"><ImageIcon size={12} /> Add to Manga Studio</button>}
-        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
-          <Clapperboard size={12} className="text-fuchsia-300" /> IMG2VID / First Frame
+        <button type="button" onClick={() => sendToUmbra('video', isVideo ? 'source_video' : undefined)} className="flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-zinc-300 hover:bg-white/[0.06]">
+          <Clapperboard size={14} /> Send to Video Studio project
         </button>
-        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'middle')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
-          <Clapperboard size={12} className="text-cyan-300" /> Video Middle Frame
-        </button>
-        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
-          <Clapperboard size={12} className="text-amber-300" /> Video Last Frame
-        </button>
-        <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35">
-          <Video size={12} className="text-emerald-300" /> VID2VID Source
-        </button>
-        <div className="my-1 border-t border-white/10" />
-        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'first')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Clapperboard size={12} className="text-fuchsia-300" /> H3 Director First Frame</button>
-        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last', 'last')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Clapperboard size={12} className="text-amber-300" /> H3 Director Last Frame</button>
-        <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'reference_image')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Images size={12} className="text-cyan-300" /> H3 Director Reference</button>
-        <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video', 'motion_video')} className="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-[9px] font-black uppercase tracking-[0.1em] text-zinc-300 hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-35"><Video size={12} className="text-emerald-300" /> H3 Director Motion</button>
       </div>
     </details>
   );
@@ -4094,22 +4080,9 @@ function GalleryMediaViewer({
               <button type="button" disabled={isVideo} onClick={() => sendToUmbra('inpaint')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-rose-400/15 disabled:opacity-30">
                 <Paintbrush size={17} className="shrink-0 text-rose-300" /> Inpaint
               </button>
-              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-fuchsia-400/20 bg-fuchsia-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-fuchsia-400/15 disabled:opacity-30">
-                <Clapperboard size={17} className="shrink-0 text-fuchsia-300" /> Video first frame
+              <button type="button" onClick={() => sendToUmbra('video', isVideo ? 'source_video' : undefined)} className="col-span-2 flex min-h-11 items-center gap-2 rounded border border-white/15 px-3 text-left text-xs">
+                <Clapperboard size={17} /> Send to Video Studio project
               </button>
-              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'middle')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-sky-400/20 bg-sky-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-sky-400/15 disabled:opacity-30">
-                <Clapperboard size={17} className="shrink-0 text-sky-300" /> Video middle frame
-              </button>
-              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-amber-400/15 disabled:opacity-30">
-                <Clapperboard size={17} className="shrink-0 text-amber-300" /> Video last frame
-              </button>
-              <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video')} className="col-span-2 flex min-h-14 items-center justify-center gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 text-xs font-semibold text-zinc-200 active:bg-emerald-400/15 disabled:opacity-30">
-                <Video size={17} className="shrink-0 text-emerald-300" /> Send video to VID2VID
-              </button>
-              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'first')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-fuchsia-400/20 bg-fuchsia-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-fuchsia-400/15 disabled:opacity-30"><Clapperboard size={17} className="shrink-0 text-fuchsia-300" /> H3 first frame</button>
-              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'last', 'last')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-amber-400/15 disabled:opacity-30"><Clapperboard size={17} className="shrink-0 text-amber-300" /> H3 last frame</button>
-              <button type="button" disabled={isVideo} onClick={() => sendToUmbra('video', 'first', 'reference_image')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-cyan-400/15 disabled:opacity-30"><Images size={17} className="shrink-0 text-cyan-300" /> H3 reference</button>
-              <button type="button" disabled={!isVideo} onClick={() => sendToUmbra('video', 'source_video', 'motion_video')} className="flex min-h-14 items-center gap-2.5 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 text-left text-xs font-semibold text-zinc-200 active:bg-emerald-400/15 disabled:opacity-30"><Video size={17} className="shrink-0 text-emerald-300" /> H3 motion reference</button>
             </div>
           </section>
         </div>
@@ -6559,7 +6532,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         h3DirectorRole,
         metadata: metadata || undefined,
       });
-      const label = h3DirectorRole
+      const label = mode === 'video' ? 'Choose a Video Studio project' : h3DirectorRole
         ? `H3 Director ${h3DirectorRole === 'reference_image' ? 'reference image' : h3DirectorRole === 'motion_video' ? 'motion reference' : `${h3DirectorRole} frame`}`
         : mode === 'txt2img'
         ? 'TXT2IMG parameters'
@@ -6574,7 +6547,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
                 : frameRole === 'last'
                   ? 'Video last frame'
                   : 'IMG2VID first frame';
-      addToast({ type: 'success', message: `${label} loaded in Umbra UI` });
+      addToast({ type: 'success', message: mode === 'video' ? label : `${label} loaded in Umbra UI` });
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to send the image to Umbra UI' });
     }
@@ -10323,16 +10296,8 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       ...(isPhoneRemote ? [] : [{ label: 'Canvas', icon: <Grid3X3 size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'canvas') }]),
     ];
     const umbraUiVideoItems: ContextMenuItem[] = [
-      { label: 'Use as First Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first') },
-      { label: 'Use as Middle Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'middle') },
-      { label: 'Use as Last Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'last') },
-      { label: 'VID2VID Source', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video') },
-    ];
-    const h3DirectorItems: ContextMenuItem[] = [
-      { label: 'Use as First Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first', undefined, 'first') },
-      { label: 'Use as Last Frame', icon: <Clapperboard size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'last', undefined, 'last') },
-      { label: 'Add Reference Image', icon: <Images size={14} />, disabled: !targetImagePath, action: () => void sendPathToUmbraUi(targetImagePath, 'video', 'first', undefined, 'reference_image') },
-      { label: 'Add Motion Reference', icon: <Video size={14} />, disabled: !targetVideoPath, action: () => void sendPathToUmbraUi(targetVideoPath, 'video', 'source_video', undefined, 'motion_video') },
+      { label: 'Send to Video Studio project', icon: <Clapperboard size={14} />, disabled: !targetImagePath && !targetVideoPath,
+        action: () => void sendPathToUmbraUi(targetImagePath || targetVideoPath, 'video', targetVideoPath ? 'source_video' : undefined) },
     ];
     const umbraUiExtrasItems: ContextMenuItem[] = [
       ...(!isPhoneRemote && selectedImagePaths.length ? [{ label: selectedImagePaths.length > 1 ? `Add to Manga Studio (${selectedImagePaths.length})` : 'Add to Manga Studio', icon: <ImageIcon size={14} />, action: () => sendPathsToManga(selectedImagePaths) }] : []),
@@ -10412,7 +10377,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
             icon: <Clapperboard size={14} />,
             children: umbraUiVideoItems,
           },
-          { label: 'H3 Director', icon: <Clapperboard size={14} />, children: h3DirectorItems },
           {
             label: 'Extras',
             icon: <Sparkles size={14} />,

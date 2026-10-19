@@ -16,7 +16,7 @@ interface Props {
 }
 
 const inputClass = 'min-h-9 w-full min-w-0 rounded border border-white/15 bg-black/25 px-2 py-1.5 text-xs text-[var(--umbra-text)] outline-none focus:border-[var(--umbra-accent)] disabled:opacity-40';
-const iconClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-white/15 text-zinc-300 hover:bg-white/5 disabled:opacity-30';
+const iconClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-white/15 text-zinc-300 hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-30';
 const labelClass = 'flex min-w-0 flex-col gap-1 text-[11px] text-zinc-400';
 const VIDEO_EXTENSIONS = ['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm'];
 const AUDIO_EXTENSIONS = ['aac', 'flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav'];
@@ -58,11 +58,11 @@ function sourceFrames(file: File, kind: 'video' | 'audio', frameRate: number, si
   });
 }
 
-function NumberField({ label, value, min, max, step = 1, disabled, onChange }: {
-  label: string; value: number; min: number; max?: number; step?: number; disabled: boolean; onChange: (value: number) => void;
+function NumberField({ label, value, min, max, step = 1, disabled, onChange, frameRate }: {
+  label: string; value: number; min: number; max?: number; frameRate?: number; step?: number; disabled: boolean; onChange: (value: number) => void;
 }) {
   return <label className={labelClass}>{label}<input aria-label={label} className={inputClass} type="number" min={min} max={max} step={step}
-    value={value} disabled={disabled} onChange={event => onChange(Number(event.target.value))} /></label>;
+    value={value} disabled={disabled} onChange={event => onChange(Number(event.target.value))} />{frameRate && frameRate > 0 ? <span className="text-[10px] text-zinc-500">{(value / frameRate).toFixed(2)} seconds</span> : null}</label>;
 }
 
 export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled, comfyConnected, durationSeconds, frameRate, onMediaBusyChange }: Props) {
@@ -145,27 +145,29 @@ export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled,
   };
 
   const uploadButton = (destination: 'retake' | 'motion' | 'audio' | 'audioVideo') => <label className={`${iconClass} ${locked || !comfyConnected || (destination !== 'retake' && settings.retake.enabled) ? 'opacity-30' : 'cursor-pointer'}`}
-    title={destination === 'audioVideo' ? 'Add video audio to audio track' : `Add ${destination} ${destination === 'audio' ? 'audio' : 'video'}`} aria-label={`Add ${destination} media`}>
+    title={destination === 'audioVideo' ? 'Add video audio to audio track' : `Add ${destination} ${destination === 'audio' ? 'audio' : 'video'}`} aria-label={`Add ${destination} media`} tabIndex={locked || !comfyConnected || (destination !== 'retake' && settings.retake.enabled) ? -1 : 0} role="button" onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.querySelector<HTMLInputElement>('input:not(:disabled)')?.click(); } }}>
     {destination === 'audioVideo' ? <Film size={15} /> : <Plus size={15} />}<input type="file" className="hidden" accept={destination === 'audio' ? 'audio/*,.aac,.flac,.m4a,.mp3,.ogg,.opus,.wav' : 'video/*,.avi,.m4v,.mkv,.mov,.mp4,.webm'}
       disabled={locked || !comfyConnected || (destination !== 'retake' && settings.retake.enabled)} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file, destination); }} />
   </label>;
 
   return <section aria-label="LTX advanced Director" className="min-w-0 space-y-2 border-b border-white/10 pb-4">
-    <h3 className="text-xs font-semibold">LTX Director</h3>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-xs font-semibold">LTX shot tools</h3><span className="text-[10px] text-zinc-400">{durationSeconds.toFixed(2)}s · {frameRate} fps · {totalFrames} frames</span></div>
+    {busy ? <p role="status" className="text-xs text-[var(--umbra-accent)]">Importing media and reading its duration…</p> : null}
     {error ? <p role="alert" className="text-xs text-red-300">{error}</p> : null}
     {settings.retake.enabled ? <p className="text-[11px] text-zinc-400">Retake uses base video audio; motion and audio lanes are paused.</p> : null}
-    <details className="border-t border-white/10 pt-2"><summary className="cursor-pointer text-xs font-medium">Retake</summary>
+    <details className="border-t border-white/10 pt-2"><summary className="cursor-pointer text-xs font-medium">Retake · repair a clip<span className="text-[10px] text-zinc-400">{settings.retake.enabled ? "Active" : settings.retake.video ? "Ready" : "No source"}</span></summary>
       <div className="mt-3 space-y-3">
+        <p className="text-xs text-zinc-400">Import a base video, choose the portion to regenerate, and describe the change. The source video supplies audio during a retake.</p>
         <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={settings.retake.enabled} disabled={locked || !settings.retake.video}
           onChange={event => patchRetake({ enabled: event.target.checked })} />Retake mode</label>
         <div className="flex min-w-0 items-center gap-2 text-xs"><Film size={16} className="shrink-0" /><span className="min-w-0 flex-1 truncate" title={settings.retake.video?.filename}>{settings.retake.video?.filename || 'No base video'}</span>
           {uploadButton('retake')}{settings.retake.video ? <button type="button" className={iconClass} disabled={locked} title="Remove retake video" aria-label="Remove retake video"
             onClick={() => patchRetake({ enabled: false, video: null })}><Trash2 size={15} /></button> : null}</div>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          <NumberField label="Retake start (frames)" value={settings.retake.startFrame} min={0} disabled={locked} onChange={startFrame => patchRetake({ startFrame })} />
-          <NumberField label="Retake length (frames)" value={settings.retake.lengthFrames} min={1} disabled={locked} onChange={lengthFrames => patchRetake({ lengthFrames })} />
-          <NumberField label="Generate from frame" value={settings.retake.windowStartFrame} min={0} disabled={locked} onChange={windowStartFrame => patchRetake({ windowStartFrame })} />
-          <NumberField label="Generate length (frames)" value={settings.retake.windowLengthFrames} min={1} disabled={locked} onChange={windowLengthFrames => patchRetake({ windowLengthFrames })} />
+          <NumberField frameRate={frameRate} label="Retake start (frames)" value={settings.retake.startFrame} min={0} disabled={locked} onChange={startFrame => patchRetake({ startFrame })} />
+          <NumberField frameRate={frameRate} label="Retake length (frames)" value={settings.retake.lengthFrames} min={1} disabled={locked} onChange={lengthFrames => patchRetake({ lengthFrames })} />
+          <NumberField frameRate={frameRate} label="Generate from frame" value={settings.retake.windowStartFrame} min={0} disabled={locked} onChange={windowStartFrame => patchRetake({ windowStartFrame })} />
+          <NumberField frameRate={frameRate} label="Generate length (frames)" value={settings.retake.windowLengthFrames} min={1} disabled={locked} onChange={windowLengthFrames => patchRetake({ windowLengthFrames })} />
           <NumberField label="Retake strength" value={settings.retake.strength} min={0} max={1} step={0.01} disabled={locked} onChange={strength => patchRetake({ strength })} />
         </div>
         <label className={labelClass}>Retake prompt<input className={inputClass} value={settings.retake.prompt} disabled={locked}
@@ -174,11 +176,12 @@ export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled,
           onChange={event => patchRetake({ globalPrompt: event.target.value })} /></label>
       </div>
     </details>
-    <details className="border-t border-white/10 pt-2"><summary className="cursor-pointer text-xs font-medium">Motion / IC-LoRA</summary>
+    <details className="border-t border-white/10 pt-2"><summary className="cursor-pointer text-xs font-medium">Motion guidance / IC-LoRA<span className="text-[10px] text-zinc-400">{settings.retake.enabled ? "Paused for retake" : settings.motion.enabled ? settings.motion.segments.length ? "On" : "Needs a clip" : "Off"} · {settings.motion.segments.length} clips</span></summary>
       <div className="mt-3 space-y-3">
         <div className="flex items-center justify-between gap-2"><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={settings.motion.enabled} disabled={laneLocked}
           onChange={event => { const enabled = event.target.checked; const audio = latest.current.audio; patch({ motion: { ...latest.current.motion, enabled },
             audio: enabled || !audio.overrideMotion ? audio : { ...audio, overrideMotion: false, enabled: audio.enabledBeforeOverride, enabledBeforeOverride: false } }); }} />Enable motion track</label>{uploadButton('motion')}</div>
+        {!settings.motion.segments.length ? <p className="text-xs text-zinc-500">Add a motion video with the + button. Its movement guides the shot; strength controls how closely it is followed.</p> : null}
         {settings.motion.segments.map((item, index) => <div key={item.id} className="space-y-2 border-t border-white/10 pt-2">
           <div className="flex min-w-0 items-center gap-2 text-xs"><Film size={15} className="shrink-0" /><span className="min-w-0 flex-1 truncate" title={item.filename}>{index + 1}. <span data-i18n-skip="">{item.filename}</span></span>
             <button type="button" className={iconClass} disabled={laneLocked} title="Remove motion clip" aria-label={`Remove motion clip ${index + 1}`}
@@ -186,9 +189,9 @@ export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled,
                 const audio = current.audio; patch({ motion: { ...current.motion, segments }, audio: segments.length || !audio.overrideMotion ? audio
                   : { ...audio, overrideMotion: false, enabled: audio.enabledBeforeOverride, enabledBeforeOverride: false } }); }}><Trash2 size={15} /></button></div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            <NumberField label="Motion start (frames)" value={item.startFrame} min={0} disabled={laneLocked} onChange={startFrame => editMotion(item.id, { startFrame })} />
-            <NumberField label="Motion length (frames)" value={item.lengthFrames} min={1} disabled={laneLocked} onChange={lengthFrames => editMotion(item.id, { lengthFrames })} />
-            <NumberField label="Motion trim-in (frames)" value={item.trimStartFrame} min={0} disabled={laneLocked} onChange={trimStartFrame => editMotion(item.id, { trimStartFrame })} />
+            <NumberField frameRate={frameRate} label="Motion start (frames)" value={item.startFrame} min={0} disabled={laneLocked} onChange={startFrame => editMotion(item.id, { startFrame })} />
+            <NumberField frameRate={frameRate} label="Motion length (frames)" value={item.lengthFrames} min={1} disabled={laneLocked} onChange={lengthFrames => editMotion(item.id, { lengthFrames })} />
+            <NumberField frameRate={frameRate} label="Motion trim-in (frames)" value={item.trimStartFrame} min={0} disabled={laneLocked} onChange={trimStartFrame => editMotion(item.id, { trimStartFrame })} />
             <NumberField label="Motion strength" value={item.strength} min={0} max={1} step={0.01} disabled={laneLocked} onChange={strength => editMotion(item.id, { strength })} />
             <NumberField label="Attention strength" value={item.attentionStrength} min={0} max={1} step={0.01} disabled={laneLocked} onChange={attentionStrength => editMotion(item.id, { attentionStrength })} />
             <label className={labelClass}>Frame sampling<UmbraSelectControl aria-label={`Motion clip ${index + 1} frame sampling`} className={inputClass} value={item.resampleMode} disabled={laneLocked}
@@ -197,7 +200,7 @@ export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled,
         </div>)}
       </div>
     </details>
-    <details className="border-t border-white/10 pt-2"><summary className="cursor-pointer text-xs font-medium">Audio</summary>
+    <details className="border-t border-white/10 pt-2"><summary className="cursor-pointer text-xs font-medium">Audio track<span className="text-[10px] text-zinc-400">{settings.retake.enabled ? "Paused for retake" : settings.audio.overrideMotion ? "From motion video" : settings.audio.enabled ? settings.audio.segments.length ? "On" : "Needs a clip" : "Off"} · {settings.audio.segments.length} clips</span></summary>
       <div className="mt-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap gap-3 text-xs">
           <label className="flex items-center gap-2"><input type="checkbox" checked={settings.audio.enabled} disabled={laneLocked || settings.audio.overrideMotion}
@@ -209,14 +212,15 @@ export function UmbraOfficialLtxDirectorControls({ settings, onChange, disabled,
               enabledBeforeOverride: overrideMotion ? latest.current.audio.enabled : false,
               enabled: overrideMotion ? false : latest.current.audio.enabledBeforeOverride }); }} />Use motion video audio</label>
         </div><div className="flex gap-1">{uploadButton('audio')}{uploadButton('audioVideo')}</div></div>
+        {!settings.audio.segments.length ? <p className="text-xs text-zinc-500">Add an audio file or extract audio from a video using the buttons above.</p> : null}
         {settings.audio.segments.map((item, index) => <div key={item.id} className="space-y-2 border-t border-white/10 pt-2">
           <div className="flex min-w-0 items-center gap-2 text-xs"><Music2 size={15} className="shrink-0" /><span className="min-w-0 flex-1 truncate" title={item.filename}>{index + 1}. <span data-i18n-skip="">{item.filename}</span></span>
             <button type="button" className={iconClass} disabled={laneLocked} title="Remove audio clip" aria-label={`Remove audio clip ${index + 1}`}
               onClick={() => patchAudio({ segments: latest.current.audio.segments.filter(clip => clip.id !== item.id) })}><Trash2 size={15} /></button></div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-            <NumberField label="Audio start (frames)" value={item.startFrame} min={0} disabled={laneLocked} onChange={startFrame => editAudio(item.id, { startFrame })} />
-            <NumberField label="Audio length (frames)" value={item.lengthFrames} min={1} disabled={laneLocked} onChange={lengthFrames => editAudio(item.id, { lengthFrames })} />
-            <NumberField label="Audio trim-in (frames)" value={item.trimStartFrame} min={0} disabled={laneLocked} onChange={trimStartFrame => editAudio(item.id, { trimStartFrame })} />
+            <NumberField frameRate={frameRate} label="Audio start (frames)" value={item.startFrame} min={0} disabled={laneLocked} onChange={startFrame => editAudio(item.id, { startFrame })} />
+            <NumberField frameRate={frameRate} label="Audio length (frames)" value={item.lengthFrames} min={1} disabled={laneLocked} onChange={lengthFrames => editAudio(item.id, { lengthFrames })} />
+            <NumberField frameRate={frameRate} label="Audio trim-in (frames)" value={item.trimStartFrame} min={0} disabled={laneLocked} onChange={trimStartFrame => editAudio(item.id, { trimStartFrame })} />
           </div>
         </div>)}
       </div>

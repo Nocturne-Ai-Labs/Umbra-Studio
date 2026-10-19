@@ -30,6 +30,9 @@ export function UmbraOfficialVideoLoraControls({
   catalog,
   disabled = false,
 }: Props) {
+  const [showUnused, setShowUnused] = React.useState(false);
+  const firstUnused = rows.findIndex(row => row.lora === 'None');
+  const unusedCount = rows.filter(row => row.lora === 'None').length;
   const installed = readOfficialVideoLoraChoices(catalog);
   const choices = installed || [];
   const ltx = workflowId === 'ltx23-50';
@@ -58,13 +61,16 @@ export function UmbraOfficialVideoLoraControls({
           aria-label="Add LoRA slot"
           title="Add LoRA slot"
           disabled={disabled}
-          onClick={() => onChange([...rows, { on: true, lora: 'None', str: 1, vs: 1, as: 1 }])}
+          onClick={() => { setShowUnused(true); onChange([...rows, { on: true, lora: 'None', str: 1, vs: 1, as: 1 }]); }}
         >
           <Plus size={15} />
         </button>
       </div>
       <div className="mt-2 space-y-2">
+        {!rows.length ? <p className="text-xs text-zinc-400">Optional. Add a LoRA for a particular style or subject.</p> : null}
+        {unusedCount > 1 ? <button type="button" className="text-xs text-zinc-400 hover:text-[var(--umbra-text)]" aria-expanded={showUnused} onClick={() => setShowUnused(!showUnused)}>{showUnused ? 'Hide unused slots' : 'Show ' + (unusedCount - 1) + ' more unused slots'}</button> : null}
         {rows.map((row, index) => {
+          if (!showUnused && row.lora === 'None' && index !== firstUnused) return null;
           const missing = row.lora !== 'None' && !choices.includes(row.lora);
           return (
             <UmbraLoraEntryCard

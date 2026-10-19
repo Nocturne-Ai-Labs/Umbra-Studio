@@ -51,9 +51,14 @@ try:
             raise ValueError('requirements override StringZilla wheel policy')
         return result
     parser = req_file.RequirementsFileParser(session, guarded_line)
-    # Impact Pack uses this unnamed official VCS requirement. Its upstream setup.py
-    # declares SAM-2; recognize only that exact source, without resolving metadata.
-    known_sources = {'git+https://github.com/facebookresearch/sam2': 'sam-2'}
+    # Reviewed upstream setup.py identities for legacy WAS and Impact Pack.
+    # Match exact URLs only; never infer package names from arbitrary repositories.
+    known_sources = {
+        'git+https://github.com/facebookresearch/sam2': 'sam-2',
+        'git+https://github.com/WASasquatch/img2texture.git': 'img2texture',
+        'git+https://github.com/WASasquatch/cstr': 'cstr',
+        'git+https://github.com/WASasquatch/ffmpy.git': 'ffmpy',
+    }
     def inspect_reference(requirement):
         if not requirement.link or requirement.link.is_wheel:
             return

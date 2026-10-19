@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.90.25-beta - Video Studio Projects and Setup Compatibility
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Save your work and update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Reopen Studio after updating. No new model downloads are required.
+- If a Python upgrade previously rolled back at **was-node-suite-comfyui**, update Umbra first, then retry **Update Python 3.13** in Setup with ComfyUI stopped. This fixes the dependency guard rejecting three known legacy WAS source packages; unrelated dependency failures still retain the previous environment for recovery.
+- Video Studio projects are saved under `User/UmbraUI/VideoStudioProjects`. Back up `User` and keep source media when moving an installation; project files do not embed imported images or videos.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Video Studio Projects
+
+- Organize imported media and shots in saved projects with autosave, explicit save feedback, undo/redo and protection against conflicting edits in another window.
+- Drag project media onto shots or the timeline, reorder and duplicate shots, and adjust shot durations. Select the appropriate text, image, first/last-frame, reference or video mode supported by the workflow.
+- Edit one shot prompt, optionally refine it with H3 Prompt Forge, and add an overall project prompt. Keep the LoRA stack next to prompting and project selection next to **Workflow & Models**.
+- Browse imported media and recorded generated outputs in the larger project picker. Deleted output files are omitted. Output tracking applies to new project generations; older history is not automatically backfilled.
+- Group workflow settings into models, sampling, frames, mid-generation and output sections, with upscaling and interpolation separated from advanced tuning. LTX controls show clearer motion, audio and retake states with less repeated text and empty space.
+- Continue to use the upstream DaSiWa workflows without changing their node code. The timeline organizes generation shots; it does not automatically render or assemble an entire movie.
+
+### Validation And Limits
+
+- Project persistence, conflict handling, media tracking, mode-specific inputs, continuity isolation and native workflow payloads have focused regression coverage. Browser interaction checks cover editing and layout.
+- The legacy WAS dependency guard has positive and negative regression checks; the three source packages install and import in isolated Windows Python 3.13. Full legacy requirements resolve with the wheel guard enabled.
+- These checks do not qualify every custom-node combination, physical touch interaction or fresh H3/LTX GPU inference. Video retains its beta/experimental status.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Python migration rejected known legacy WAS Node Suite Git dependencies before attempting installation.
+- Improved: Video projects keep media, shot prompts, timing and continuity together with clearer save feedback.
+- Improved: H3 and LTX controls use clearer collapsible sections, mode-specific media slots and more compact prompting layouts.
+
 ## v0.90.24-beta - DaSiWa H3 Workflow Maintenance
 
 ### TL;DR - Setup After Updating
