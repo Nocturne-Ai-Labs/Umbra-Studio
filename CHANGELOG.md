@@ -20,11 +20,13 @@
 - Update Setup's class checks and minimum DaSiWa revision to include the sample-exact Opus segment export fixes.
 - Keep the existing H3 selection key while updating source hashes, provenance and the displayed revision. Stale captures are held rather than silently running a different graph.
 - Preserve the reviewed local Prompt Forge compatibility patch on current DaSiWa nodes, including migration, idempotence and safe refusal of unknown source edits.
+- Verify updater ownership through the lightweight runtime identity endpoint. Slow tool-readiness checks no longer misidentify the correct running installation; startup readiness remains a separate gate and unknown listeners are still held.
 
 ### Fixes And Quality-of-Life Recap
 
 - Improved: Official H3 workflow and Setup prerequisites match the newer upstream continuity graph.
 - Improved: Workflow provenance and revision labels make required recaptures explicit while preserving saved selections.
+- Fixed: Updating could stop before replacing files when a correct installation's readiness check exceeded the ownership timeout.
 
 ## v0.90.23-beta - Umbra Remote Mobile
 
