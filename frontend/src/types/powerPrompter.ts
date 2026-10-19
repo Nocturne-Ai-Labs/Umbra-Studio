@@ -1,3 +1,4 @@
+import type { ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import type { MiniMaxH3Guide } from '../../../shared/umbra-ui/minimaxH3Guides';
 import type { OfficialVideoWorkflowSelection } from '../../../shared/umbra-ui/officialVideoWorkflow';
 import type { MiniMaxH3TurboControls } from '../../../shared/umbra-ui/minimaxH3Turbo';
@@ -314,6 +315,7 @@ export type PowerPrompterOutputOwner = 'power_prompter' | 'umbra_ui';
 export type UmbraUiOutputMode = 'txt2img' | 'img2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
 
 export interface PowerPrompterGenerationControls {
+  imagePipeline?: ImagePipelineSettings;
   officialWorkflow?: OfficialVideoWorkflowSelection;
   mediaType?: PowerPrompterMediaType;
   outputOwner?: PowerPrompterOutputOwner;

@@ -1,3 +1,4 @@
+import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import { UmbraLoraEntryCard } from '@/components/umbra-ui/UmbraLoraEntryCard';
 import { extractUmbraUiLoraTriggerWords, isUmbraUiModelOnlyLoraFamily } from '@/lib/umbraUiModels';
 import { PowerPrompterWorkflowResources } from '@/components/power-prompter/PowerPrompterWorkflowResources';
@@ -9626,6 +9627,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     />
                   ) : null}
 
+                  <UmbraImagePipelineControls section="flow" value={generation.imagePipeline} onChange={imagePipeline => updateGeneration({ imagePipeline })} capabilities={imageCapabilities} />
                   {showDetailerPipeline || showOutputUpscale ? (
                     <UmbraDetailerPipelineControls
                       stages={detailerPipeline}
@@ -9760,9 +9762,8 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                       </UmbraLoraEntryCard>
                     );
                   })}
-
-
                 </div>
+                <UmbraImagePipelineControls section="output" value={generation.imagePipeline} onChange={imagePipeline => updateGeneration({ imagePipeline })} capabilities={imageCapabilities} />
               </div>
             </div>
           </div>

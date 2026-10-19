@@ -1,3 +1,5 @@
+import { normalizeMossPromptField } from '../shared/umbra-ui/mossPromptFields';
+import { normalizeImagePipelineSettings } from '../shared/umbra-ui/imagePipelineSettings';
 import { parseFlux3LayoutRegions } from '../shared/umbra-ui/flux3Edit';
 import { createHash, randomUUID } from 'crypto';
 import { copyFile, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from 'fs/promises';
@@ -86,6 +88,7 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
       ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim().slice(0, 160) } : {}),
       ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim().slice(0, 240) } : {}),
       ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim().slice(0, 240) } : {}),
+      ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
       ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });
@@ -111,6 +114,7 @@ function normalizeGenerationSettings(rawSettings: unknown): Record<string, any> 
     modelFamily: String(settings.modelFamily || '').trim().slice(0, 160),
     modelSource: String(settings.modelSource || '').trim().slice(0, 160),
     checkpointName: String(settings.checkpointName || '').trim().replace(/\\/g, '/').slice(0, 4096),
+    imagePipeline: normalizeImagePipelineSettings(settings.imagePipeline),
     workflowResources,
     promptSegments,
     negativePrompt: String(settings.negativePrompt || '').slice(0, 1_000_000),

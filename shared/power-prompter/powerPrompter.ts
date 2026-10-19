@@ -1,3 +1,4 @@
+import { normalizeImagePipelineSettings } from '../umbra-ui/imagePipelineSettings';
 import type {
   PowerPrompterAutocompleteMode,
   PowerPrompterAutocompleteSettings,
@@ -298,6 +299,7 @@ function normalizeLoraEntries(rawEntries: unknown): PowerPrompterLoraEntry[] {
 }
 
 export const DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
+  imagePipeline: normalizeImagePipelineSettings(null),
   detailerPipeline: [
     {
       id: 'detail-person', enabled: true, label: 'Person', detectorModel: 'segm/person_yolov8m-seg.pt',
@@ -842,6 +844,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
     scheduler: normalizeScheduler(controls.scheduler),
     modelType: normalizeGenerationModelType((controls as any).modelType ?? (controls as any).model_type),
     checkpointName: String(controls.checkpointName || '').trim().replace(/\\/g, '/'),
+    imagePipeline: normalizeImagePipelineSettings(controls.imagePipeline),
     workflowResources: normalizeWorkflowResources((controls as any).workflowResources),
     aspectRatio: normalizeAspectRatio(controls.aspectRatio),
     swapDimensions,

@@ -99,6 +99,8 @@ export const UMBRA_UI_PIPELINE_CAPABILITY_KEYS = [
   'denoise',
   'resolution',
   'hiresFix',
+  'flowShift',
+  'imageOutput',
   'detailerStages',
   'finalModelUpscale',
 ] as const;
@@ -181,6 +183,8 @@ export interface UmbraUiInpaintCanvasCapabilities {
 }
 
 export interface UmbraUiPipelineCapabilities {
+  flowShift: UmbraUiPipelineControlCapability;
+  imageOutput: UmbraUiPipelineControlCapability;
   version: 1;
   modelSources: UmbraUiPipelineModelSourcesCapability;
   negativePrompt: UmbraUiPipelineControlCapability;
@@ -602,6 +606,8 @@ export function createUnsupportedUmbraUiPipelineCapabilities(
       nodeClassTypes: [],
       values: modelSources,
     },
+    flowShift: fallback(),
+    imageOutput: fallback(),
     negativePrompt: fallback(),
     loras: fallback(),
     seed: fallback(),
@@ -766,6 +772,8 @@ export function normalizeUmbraUiPipelineCapabilities(
       ...modelSources,
       values: normalizedModelSources.length > 0 ? normalizedModelSources : fallback.modelSources.values,
     },
+    flowShift: normalizeControlCapability(raw.flowShift, fallback.flowShift),
+    imageOutput: normalizeControlCapability(raw.imageOutput, fallback.imageOutput),
     negativePrompt: normalizeControlCapability(raw.negativePrompt, fallback.negativePrompt),
     loras: normalizeControlCapability(raw.loras, fallback.loras),
     seed: normalizeControlCapability(raw.seed, fallback.seed),

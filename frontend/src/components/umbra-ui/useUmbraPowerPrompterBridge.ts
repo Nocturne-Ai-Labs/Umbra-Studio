@@ -1,5 +1,7 @@
 'use client';
 
+import { normalizeMossPromptField } from '../../../../shared/umbra-ui/mossPromptFields';
+
 import React from 'react';
 import { normalizeOfficialVideoWorkflowSelection, type OfficialVideoWorkflowId, type OfficialVideoBinding } from '../../../../shared/umbra-ui/officialVideoWorkflow';
 import { normalizeVideoRoutePolicy, videoControlsPolicyIssue } from '../../../../shared/umbra-ui/videoRoutePolicy';
@@ -1727,6 +1729,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       seedIncrement: options.seedIncrement,
       steps: toFiniteInteger(options.steps, 35, 1, 10000),
       cfg: toFiniteNumber(options.cfg, 4, 0, 100),
+      imagePipeline: options.imagePipeline,
       clipSkip: toFiniteInteger(options.clipSkip, 1, 1, 12),
       samplerName: String(options.samplerName || 'er_sde').trim() || 'er_sde',
       scheduler: String(options.scheduler || 'simple').trim() || 'simple',
@@ -1798,9 +1801,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
           variantId: String(segment?.variantId || '').trim(),
           variantName: String(segment?.variantName || '').trim(),
           text: String(segment?.text || '').trim(),
+          ...(normalizeMossPromptField(segment?.moss) ? { moss: normalizeMossPromptField(segment?.moss) } : {}),
           ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
         }))
-        .filter((segment) => segment.text.length > 0),
+        .filter((segment) => segment.text.length > 0 || !!segment.moss?.text.trim()),
     };
     return {
       prompt: promptWithLoras,

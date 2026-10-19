@@ -1,3 +1,5 @@
+import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
+import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 'use client';
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -635,6 +637,8 @@ export interface UmbraInpaintWorkspaceProps {
   onRefreshModelCatalog: () => void;
   loras: UmbraUiLoraEntry[];
   onLorasChange: (loras: UmbraUiLoraEntry[], family?: string) => void;
+  imagePipeline?: ImagePipelineSettings;
+  onImagePipelineChange: (settings: ImagePipelineSettings) => void;
   workflowResources: Record<string, string>;
   loraAvailableCount: number;
   onOpenLoraPicker: () => void;
@@ -2474,6 +2478,8 @@ export function UmbraInpaintWorkspace({
   onRefreshModelCatalog,
   loras,
   onLorasChange,
+  imagePipeline,
+  onImagePipelineChange,
   workflowResources,
   loraAvailableCount,
   onOpenLoraPicker,
@@ -3083,6 +3089,7 @@ export function UmbraInpaintWorkspace({
       softInpaintPreservation,
       softInpaintTransitionContrast,
       softInpaintMaskInfluence,
+      imagePipeline,
       tiledVae,
   }), [
     activePromptSegmentId,
@@ -3101,6 +3108,7 @@ export function UmbraInpaintWorkspace({
     softInpaintMaskInfluence,
     softInpaintPreservation,
     softInpaintTransitionContrast,
+    imagePipeline,
     tiledVae,
     fillMode,
     infillColor,
@@ -4101,6 +4109,7 @@ export function UmbraInpaintWorkspace({
     setSoftInpaintTransitionContrast(generation.softInpaintTransitionContrast);
     setSoftInpaintMaskInfluence(generation.softInpaintMaskInfluence);
     onTiledVaeChange(generation.tiledVae);
+    onImagePipelineChange(normalizeImagePipelineSettings(generation.imagePipeline));
   }, [
     onActivePromptSegmentChange,
     onCfgChange,
@@ -7589,6 +7598,7 @@ export function UmbraInpaintWorkspace({
       checkpointName,
       modelFamily,
       modelSource,
+      imagePipeline,
       workflowResources: { ...workflowResources },
       loras: loras.map((lora) => ({
         id: lora.id,
@@ -7675,6 +7685,7 @@ export function UmbraInpaintWorkspace({
     seamlessY,
     source,
     steps,
+    imagePipeline,
     workflowResources,
   ]);
 
@@ -9583,6 +9594,7 @@ export function UmbraInpaintWorkspace({
         promptSegments,
         negativePrompt: capabilities.negativePrompt.support === 'adjustable' ? negativePrompt : '',
         loras: loras.filter((lora) => lora.enabled !== false),
+        imagePipeline,
         workflowResources,
         checkpointName,
         clipSkip: resolveCapabilityNumber(capabilities.clipSkip, Number(clipSkip), 1),
@@ -9753,6 +9765,7 @@ export function UmbraInpaintWorkspace({
     studioArtboardPosition,
     studioMode,
     visibleGenerationRegion,
+    imagePipeline,
     workflowResources,
   ]);
 
@@ -10131,6 +10144,7 @@ export function UmbraInpaintWorkspace({
               showScheduler={capabilities.hiresFix.controls.scheduler}
             />
           ) : null}
+          <UmbraImagePipelineControls section="flow" value={imagePipeline} onChange={onImagePipelineChange} capabilities={capabilities} />
           <UmbraDetailerPipelineControls
             stages={detailerPipeline}
             onStagesChange={onDetailerPipelineChange}
@@ -10172,6 +10186,7 @@ export function UmbraInpaintWorkspace({
           ) : null}
           {phoneMode ? <UmbraPinnedOutputControl task="Inpaint" value={pinnedOutputFolder} onChange={setPinnedOutputFolder} /> : null}
           </UmbraMobileSettingsSection>
+          <UmbraImagePipelineControls section="output" value={imagePipeline} onChange={onImagePipelineChange} capabilities={capabilities} />
         </div>
       </aside>
 

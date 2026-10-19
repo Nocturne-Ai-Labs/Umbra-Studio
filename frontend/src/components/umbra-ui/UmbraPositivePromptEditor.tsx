@@ -2,6 +2,7 @@
 
 import React from 'react';
 import {
+  Braces,
   ArrowDown,
   ArrowUp,
   BookmarkPlus,
@@ -14,6 +15,8 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
+import { MossPromptFieldControls } from './MossPromptFieldControls';
+import { compileMossPromptFields, normalizeMossPromptField } from '../../../../shared/umbra-ui/mossPromptFields';
 import { cn } from '@/lib/utils';
 import { PromptWildcardLibrary } from '@/components/shared/PromptWildcardLibrary';
 import {
@@ -55,6 +58,7 @@ interface UmbraPositivePromptEditorProps {
   onSubmit?: () => void;
   singleField?: boolean;
   headerAction?: React.ReactNode;
+  mossSupported?: boolean;
 }
 
 const MAX_PROMPT_SEGMENTS = 24;
@@ -78,10 +82,12 @@ export function UmbraPositivePromptEditor({
   onSubmit,
   singleField = false,
   headerAction,
+  mossSupported,
 }: UmbraPositivePromptEditorProps) {
+  const mossEnabled = Boolean(mossSupported && sourceSegments.some(segment => segment.moss?.enabled));
   const segments = React.useMemo(
-    () => singleField ? getUmbraUiSinglePromptField(sourceSegments) : sourceSegments,
-    [singleField, sourceSegments],
+    () => singleField && !mossEnabled ? getUmbraUiSinglePromptField(sourceSegments) : sourceSegments,
+    [singleField, mossEnabled, sourceSegments],
   );
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const textareaRefs = React.useRef(new Map<string, HTMLTextAreaElement>());
@@ -92,7 +98,8 @@ export function UmbraPositivePromptEditor({
   const [, forceHistoryRender] = React.useState(0);
   const segmentsRef = React.useRef(segments);
   segmentsRef.current = segments;
-  const compiledPrompt = React.useMemo(() => compileUmbraUiPromptSegments(segments), [segments]);
+  const compiledPrompt = React.useMemo(() => mossEnabled && mossSupported
+    ? compileMossPromptFields(segments) : compileUmbraUiPromptSegments(segments), [segments, mossEnabled, mossSupported]);
   const activeClasses = accent === 'rose'
     ? 'border-rose-300/35 bg-rose-500/[0.045]'
     : accent === 'fuchsia'
@@ -145,8 +152,9 @@ export function UmbraPositivePromptEditor({
     typingCheckpointIdsRef.current.delete(id);
     const current = segmentsRef.current.find((segment) => segment.id === id);
     if (!current) return;
+    if (mossEnabled) return;
     updateSegment(id, normalizeUmbraUiPromptSegmentText(current.text, current.preserveRepeatedTerms === true), 'silent');
-  }, [updateSegment]);
+  }, [updateSegment, mossEnabled]);
 
   const undoField = React.useCallback((id: string) => {
     const current = segmentsRef.current.find((segment) => segment.id === id);
@@ -206,14 +214,14 @@ export function UmbraPositivePromptEditor({
     if (singleField) return;
     const currentSegments = segmentsRef.current;
     if (currentSegments.length >= MAX_PROMPT_SEGMENTS) return;
-    const nextSegment = createUmbraUiPromptSegment();
+    const nextSegment = createUmbraUiPromptSegment('', mossEnabled ? { moss: { enabled: true, purpose: 'item', label: 'object', text: '' } } : {});
     const activeIndex = Math.max(0, currentSegments.findIndex((segment) => segment.id === activeSegmentId));
     const insertAt = currentSegments.length <= 0 ? 0 : activeIndex + 1;
     const next = [...currentSegments.slice(0, insertAt), nextSegment, ...currentSegments.slice(insertAt)];
     emitSegments(next);
     onActiveSegmentChange(nextSegment.id);
     window.requestAnimationFrame(() => textareaRefs.current.get(nextSegment.id)?.focus());
-  }, [activeSegmentId, emitSegments, onActiveSegmentChange, singleField]);
+  }, [activeSegmentId, emitSegments, onActiveSegmentChange, singleField, mossEnabled]);
 
   const insertWildcard = React.useCallback((token: string) => {
     const target = segmentsRef.current.find((segment) => segment.id === activeSegmentId)
@@ -294,6 +302,12 @@ export function UmbraPositivePromptEditor({
           >
             <ListPlus size={14} />
           </button>}
+          {mossSupported && <button type="button" aria-label="MOSS JSON prompting" aria-pressed={mossEnabled} title="MOSS JSON prompting"
+            className={cn('inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border', mossEnabled ? 'border-[var(--accent-color)] text-zinc-100 bg-white/10' : 'border-white/10 text-zinc-400')}
+            onClick={() => emitSegments(sourceSegments.map((segment, index) => ({ ...segment, moss: {
+              ...(normalizeMossPromptField(segment.moss) || { purpose: index === 0 ? 'scene' : 'item', label: 'object', text: '' }), enabled: !mossEnabled,
+            } })))}><Braces size={14} /></button>}
+
         </div>
       </header>
 
@@ -418,8 +432,10 @@ export function UmbraPositivePromptEditor({
                   </button>
                 </div>
               </div>
+              {mossEnabled && <MossPromptFieldControls value={normalizeMossPromptField(segment.moss) || { enabled: true, purpose: 'scene', label: 'object', text: '' }}
+                onChange={moss => emitSegments(segments.map(field => field.id === segment.id ? { ...field, moss } : field))} />}
               <textarea
-                aria-label={singleField ? heading : undefined}
+                aria-label={singleField ? heading : `Prompt field ${index + 1}`}
                 ref={(node) => {
                   if (node) textareaRefs.current.set(segment.id, node);
                   else textareaRefs.current.delete(segment.id);

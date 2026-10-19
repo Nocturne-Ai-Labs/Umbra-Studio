@@ -1,3 +1,4 @@
+import { normalizeMossPromptField, type MossPromptField } from '../../../shared/umbra-ui/mossPromptFields';
 import { normalizePowerPrompterPromptText } from '../../../shared/power-prompter/powerPrompter';
 
 export interface UmbraUiPromptSegment {
@@ -8,6 +9,7 @@ export interface UmbraUiPromptSegment {
   variantId?: string;
   variantName?: string;
   preserveRepeatedTerms?: true;
+  moss?: MossPromptField;
 }
 
 function createSegmentId(): string {
@@ -29,6 +31,7 @@ export function createUmbraUiPromptSegment(
     ...(String(metadata.slotType || '').trim() ? { slotType: String(metadata.slotType).trim() } : {}),
     ...(String(metadata.variantId || '').trim() ? { variantId: String(metadata.variantId).trim() } : {}),
     ...(String(metadata.variantName || '').trim() ? { variantName: String(metadata.variantName).trim() } : {}),
+    ...(normalizeMossPromptField(metadata.moss) ? { moss: normalizeMossPromptField(metadata.moss) } : {}),
     ...(metadata.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
   };
 }

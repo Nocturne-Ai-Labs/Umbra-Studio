@@ -1,5 +1,9 @@
 'use client';
 
+import { compileMossPromptFields } from '../../../../shared/umbra-ui/mossPromptFields';
+import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
+import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
+
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { translateLegacyUiText } from '@/i18n/legacyUiLocalization';
 import { insertCatalogTagsAtCursor } from '@/lib/powerPrompterPromptInsertion';
@@ -225,6 +229,7 @@ function snapshotUmbraImageGenerationInfo(
 }
 
 interface UmbraUiDeviceResume {
+  imagePipeline?: ImagePipelineSettings;
   activeMode?: UmbraGenerationMode;
   txt2imgOutputFolder?: string;
   promptSegments?: UmbraUiPromptSegment[];
@@ -671,8 +676,6 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const promptHistoryDirtyRef = React.useRef(false);
   const promptHistoryRevisionRef = React.useRef(0);
   const promptHistoryWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
-  const prompt = React.useMemo(() => compileUmbraUiPromptSegments(promptSegments), [promptSegments]);
-  const workflowImagePrompt = prompt;
   const activeImagePromptSegments = promptSegments;
   const [negativePrompt, setNegativePrompt] = React.useState(initialDeviceResume?.negativePrompt || '');
   const [catalogEnabledCSVs, setCatalogEnabledCSVs] = React.useState<string[]>([]);
@@ -830,9 +833,15 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [seedMode, setSeedMode] = React.useState<PowerPrompterSeedControlMode>(initialDeviceResume?.seedMode || 'fixed');
   const [seedIncrement, setSeedIncrement] = React.useState<PowerPrompterSeedIncrement>(initialDeviceResume?.seedIncrement || 1);
   const [steps, setSteps] = React.useState(initialDeviceResume?.steps || '35');
+  const [imagePipeline, setImagePipeline] = React.useState(() => normalizeImagePipelineSettings(initialDeviceResume?.imagePipeline));
   const [cfg, setCfg] = React.useState(initialDeviceResume?.cfg || '4');
   const [width, setWidth] = React.useState(initialDeviceResume?.width || '896');
   const [height, setHeight] = React.useState(initialDeviceResume?.height || '1152');
+  const mossJsonEnabled = normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage' && promptSegments.some(segment => segment.moss?.enabled);
+  const prompt = React.useMemo(() => mossJsonEnabled
+    ? compileMossPromptFields(promptSegments)
+    : compileUmbraUiPromptSegments(promptSegments), [mossJsonEnabled, promptSegments]);
+  const workflowImagePrompt = prompt;
   const [imageAspectRatio, setImageAspectRatio] = React.useState<UmbraImageAspectPresetId>(() => (
     initialDeviceResume?.imageAspectRatio
       || inferUmbraImageAspectRatio(Number(initialDeviceResume?.width || 896), Number(initialDeviceResume?.height || 1152))
@@ -965,6 +974,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     setSeedMode(generation.seedMode);
     setSeedIncrement(generation.seedIncrement);
     setSteps(String(generation.steps));
+    setImagePipeline(normalizeImagePipelineSettings(generation.imagePipeline));
     setCfg(String(generation.cfg));
     setClipSkip(String(generation.clipSkip));
     syncImageDimensions(generation.width, generation.height);
@@ -1104,6 +1114,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         checkpointName,
         pipelineModelSelections,
         workflowResourceValues,
+        imagePipeline,
         loras,
         clipSkip,
         seed,
@@ -1186,6 +1197,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     steps,
     width,
     workflowResourceValues,
+    imagePipeline,
   ]);
 
   const imageControlsSnapshot = React.useMemo(() => normalizeUmbraUiImageControlsSnapshot({
@@ -1212,6 +1224,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       modelType,
       checkpointName,
       workflowResources: workflowResourceValues,
+      imagePipeline,
       width: Number(width),
       height: Number(height),
       batchSize,
@@ -1269,6 +1282,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     steps,
     width,
     workflowResourceValues,
+    imagePipeline,
   ]);
 
   React.useEffect(() => {
@@ -1629,6 +1643,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       ? capabilities.denoise.value
       : defaults.denoise;
     if (typeof stepDefault === 'number' && Number.isFinite(stepDefault)) setSteps(String(stepDefault));
+    setImagePipeline(previous => ({ ...previous, flowShift: null }));
     if (typeof guidanceDefault === 'number' && Number.isFinite(guidanceDefault)) setCfg(String(guidanceDefault));
     if (samplerDefault) setSamplerName(samplerDefault);
     if (schedulerDefault) setScheduler(schedulerDefault);
@@ -1747,6 +1762,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     if (inheritedSteps) setSteps(inheritedSteps);
     const inheritedCfg = readNumber('cfg');
     if (inheritedCfg) setCfg(inheritedCfg);
+    if (replace || generation.imagePipeline !== undefined) setImagePipeline(normalizeImagePipelineSettings(generation.imagePipeline));
     const inheritedClipSkip = readNumber('clipSkip') || readNumber('clip_skip');
     if (inheritedClipSkip) setClipSkip(inheritedClipSkip);
     const inheritedWidth = readNumber('width');
@@ -2162,6 +2178,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       modelType,
       checkpointName,
       workflowResources: workflowResourceValues,
+      imagePipeline,
       aspectRatio: 'custom',
       swapDimensions: false,
       width: imageCapabilities.resolution.support === 'adjustable'
@@ -2227,6 +2244,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     steps,
     width,
     workflowResourceValues,
+    imagePipeline,
   ]);
 
   const handleSendGenerationControlsToPowerPrompter = React.useCallback(() => {
@@ -2285,7 +2303,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                   ? 'The selected output folder is no longer pinned. Choose a pinned folder or Default output.'
                 : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
                   ? 'Choose a source image for IMG2IMG'
-                  : !workflowImagePrompt.trim()
+                  : !workflowImagePrompt.trim() || (mossJsonEnabled && !promptSegments.some(segment => segment.text.trim() || segment.moss?.text.trim()))
                     ? 'Enter a positive prompt first'
                     : imageCapabilities.resolution.support === 'adjustable'
                       && (!Number.isInteger(Number(width)) || Number(width) < imageWidthMin || Number(width) > imageWidthMax)
@@ -2342,6 +2360,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         modelType,
         checkpointName,
         workflowResources: workflowResourceValues,
+        imagePipeline,
         clipSkip: imageCapabilities.clipSkip.support === 'adjustable'
           ? Number(clipSkip)
           : controlNumber('1', imageCapabilities.clipSkip.value),
@@ -2483,6 +2502,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     width,
     workflowImagePrompt,
     workflowResourceValues,
+    imagePipeline,
   ]);
 
   const handleImagePromptKeyDown = React.useCallback((
@@ -2671,6 +2691,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             variantId: segment.variantId,
             variantName: segment.variantName,
             preserveRepeatedTerms: segment.preserveRepeatedTerms,
+            moss: segment.moss,
           },
         ));
         setPromptSegments(segments);
@@ -2723,6 +2744,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         scheduler: snapshot.scheduler,
         width: snapshot.width,
         height: snapshot.height,
+        imagePipeline: snapshot.imagePipeline,
         workflowResources: snapshot.workflowResources,
         loras: inheritedLoras,
         hiresFix: snapshot.hiresFix,
@@ -2896,7 +2918,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     <div className={phoneImageGeneration ? 'relative space-y-3' : 'relative'}>
       <>
         <UmbraPositivePromptEditor
-        singleField={phoneImageGeneration}
+        mossSupported={normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage'}
+        singleField={phoneImageGeneration && !mossJsonEnabled}
         segments={promptSegments}
         activeSegmentId={activePromptSegmentId}
         onChange={setPromptSegments}
@@ -3253,6 +3276,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               onRefreshModelCatalog={refreshModelCatalog}
               loras={activeLoras}
               onLorasChange={replaceActiveLoras}
+              imagePipeline={imagePipeline}
+              onImagePipelineChange={setImagePipeline}
               workflowResources={workflowResourceValues}
               loraAvailableCount={loraCatalog.length}
               onOpenLoraPicker={openLoraPicker}
@@ -3394,7 +3419,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             onRefreshModelCatalog={refreshModelCatalog}
             loras={activeLoras}
             onLorasChange={replaceActiveLoras}
-            workflowResources={workflowResourceValues}
+            imagePipeline={imagePipeline}
+              onImagePipelineChange={setImagePipeline}
+              workflowResources={workflowResourceValues}
             loraAvailableCount={loraCatalog.length}
             onOpenLoraPicker={openLoraPicker}
             clipSkip={clipSkip}
@@ -3685,6 +3712,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               mode={activeMode === 'img2img' ? 'img2img' : 'txt2img'}
             /> : null}
 
+            <UmbraImagePipelineControls section="flow" value={imagePipeline} onChange={setImagePipeline} capabilities={imageCapabilities} />
             {imageCapabilities.detailerStages.support === 'adjustable'
               || imageCapabilities.finalModelUpscale.support === 'adjustable' ? (
               <UmbraDetailerPipelineControls
@@ -3705,6 +3733,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               showOutputMaxDimension={imageCapabilities.finalModelUpscale.maxDimension}
               />
             ) : null}
+            <UmbraImagePipelineControls section="output" value={imagePipeline} onChange={setImagePipeline} capabilities={imageCapabilities} />
             </UmbraMobileSettingsSection>
             {phoneImageGeneration ? <UmbraMobileSettingsSection enabled title="Queue & output" summary={`${queueSummary.pending} queued · ${queueSummary.running} running`}>
               {imageQueueControls}

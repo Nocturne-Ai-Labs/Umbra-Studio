@@ -1,3 +1,4 @@
+import type { ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 import type { Flux3LayoutRegion } from '../../../../shared/umbra-ui/flux3Edit';
 import type {
   UmbraUiInpaintControlAdapterType,
@@ -292,6 +293,7 @@ export interface UmbraCanvasGenerationSettingsSnapshot {
   modelFamily: string;
   modelSource: string;
   checkpointName: string;
+  imagePipeline?: ImagePipelineSettings;
   workflowResources: Record<string, string>;
   promptSegments: Array<{
     id: string;

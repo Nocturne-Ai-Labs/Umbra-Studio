@@ -1,7 +1,7 @@
 import {normalizePowerPrompterGenerationControls} from '../../../../shared/power-prompter/powerPrompter';
 import type {UmbraUiPipelineDefaults,UmbraUiPipelineResolutionCapability} from '../../../../shared/umbra-ui/pipelineTypes';
 import type {UmbraImageQueueOptions} from '../../../../shared/umbra-ui/imageQueueTypes';
-export type MangaEnhancements=Pick<UmbraImageQueueOptions,'hiresFix'|'detailerPipeline'|'outputUpscale'|'tiledVae'|'loras'|'clipSkip'>;
+export type MangaEnhancements=Pick<UmbraImageQueueOptions,'imagePipeline'|'hiresFix'|'detailerPipeline'|'outputUpscale'|'tiledVae'|'loras'|'clipSkip'>;
 export interface MangaGenerationSettings {
   prompt:string;negativePrompt:string;modelFamily:string;modelType:'checkpoint'|'diffusers'|'diffusion_model'|'unet'|'gguf';checkpointName:string;
   enhancements?:MangaEnhancements;workflowResources:Record<string,string>;steps:number;cfg:number;seed:number;samplerName:string;scheduler:string;baseResolution:number;samples:number;
@@ -66,7 +66,7 @@ export function parseMangaEnhancements(value:unknown):MangaEnhancements {
   const normalized=normalizePowerPrompterGenerationControls({...raw,detailerPipeline:raw.detailerPipeline || []});
   const tile=raw.tiledVae && typeof raw.tiledVae==='object' ? raw.tiledVae as Record<string,unknown> : {};
   const finite=(value:unknown,fallback:number,min:number,max:number)=>typeof value==='number' && Number.isFinite(value)?Math.max(min,Math.min(max,Math.round(value))):fallback;
-  return {hiresFix:normalized.hiresFix!,detailerPipeline:normalized.detailerPipeline!,outputUpscale:normalized.outputUpscale!,clipSkip:normalized.clipSkip,
+  return {imagePipeline:normalized.imagePipeline,hiresFix:normalized.hiresFix!,detailerPipeline:normalized.detailerPipeline!,outputUpscale:normalized.outputUpscale!,clipSkip:normalized.clipSkip,
     tiledVae:{enabled:tile.enabled===true,tileSize:finite(tile.tileSize,512,64,8192),overlap:finite(tile.overlap,64,0,4096)},
     loras:normalized.loras.map(lora=>{const source=(raw.loras as Array<Record<string,unknown>> || []).find(item=>item.id===lora.id) || {};const words=(value:unknown)=>Array.isArray(value)?value.filter((word):word is string=>typeof word==='string' && word.length<=1000).slice(0,256):[];return {id:lora.id,name:lora.name,enabled:lora.enabled,strengthModel:lora.strengthModel,strengthClip:lora.strengthClip,trainedTags:words(source.trainedTags),triggerWords:words(source.triggerWords),...(typeof source.modelFamilyKey==='string' ? {modelFamilyKey:source.modelFamilyKey.slice(0,256)} : {})};})};
 }

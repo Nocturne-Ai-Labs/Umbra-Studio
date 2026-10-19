@@ -1,3 +1,4 @@
+import { normalizeMossPromptField, type MossPromptField } from './mossPromptFields';
 export const UMBRA_CANVAS_STUDIO_VERSION = 1;
 
 export type UmbraCanvasStudioRegionMode = 'standalone' | 'composite' | 'blend' | 'extend' | 'inpaint';
@@ -15,6 +16,7 @@ export interface UmbraCanvasStudioPromptSegment {
   id: string;
   text: string;
   preserveRepeatedTerms?: true;
+  moss?: MossPromptField;
 }
 
 export type UmbraCanvasStudioGenerationSnapshot = Record<string, unknown>;
@@ -175,6 +177,7 @@ function normalizePromptSegments(value: unknown): UmbraCanvasStudioPromptSegment
     return {
       id: uniqueId(source.id, `prompt-${index + 1}`, seen),
       text: text(source.text, '', 32_768),
+      ...(normalizeMossPromptField(source.moss) ? { moss: normalizeMossPromptField(source.moss) } : {}),
       ...(source.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
     };
   });

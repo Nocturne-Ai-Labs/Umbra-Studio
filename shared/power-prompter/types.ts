@@ -1,3 +1,4 @@
+import type { ImagePipelineSettings } from '../umbra-ui/imagePipelineSettings';
 import type { UmbraUiPipelineSelection } from '../umbra-ui/pipelineTypes';
 
 export type PowerPrompterSourceType = 'tag' | 'character';
@@ -131,6 +132,7 @@ export interface PowerPrompterResolutionSplitControls {
 }
 
 export interface PowerPrompterGenerationControls {
+  imagePipeline?: ImagePipelineSettings;
   hiresFix?: PowerPrompterHiresFixControls;
   detailerPipeline?: PowerPrompterDetailerStage[];
   outputUpscale?: PowerPrompterOutputUpscaleControls;

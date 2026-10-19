@@ -1,3 +1,6 @@
+import { normalizeMossPromptField } from './shared/umbra-ui/mossPromptFields';
+import { stampGeneratedImageMetadata } from './backend/GeneratedImageMetadata';
+import { applyImagePipelineSettings, normalizeImagePipelineSettings, type ImagePipelineSettings } from './shared/umbra-ui/imagePipelineSettings';
 import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from './shared/umbra-ui/mossLayout';
 import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
@@ -172,7 +175,6 @@ import {
 } from './backend/UmbraUiCensorDetectorService';
 import { applyUmbraUiClipSkipToGraph, bypassDisabledUmbraUiOutputUpscale } from './backend/UmbraUiGraphControls';
 import { applyLtx25PromptEnhancerInputs } from './backend/Ltx25PromptEnhancer';
-import { upsertPngTextMetadata } from './backend/PngTextMetadata';
 import { REMOTE_CONNECTIVITY_PATH, createRemoteConnectivityStatus, isHostConnectivityProbeOrigin } from './backend/remoteConnectivity';
 import {
   createUnavailableTailscaleStatus,
@@ -9284,6 +9286,7 @@ function compileUmbraUiPipelineWorkflow(
     assertRequiredPPWorkflowResources(workflowDescriptor.resources, workflowResourceValues);
   }
   applyPPWorkflowResourceValues(promptGraph, workflowDescriptor.resources, workflowResourceValues);
+  if (workflowDescriptor.mediaType === 'image') applyImagePipelineSettings(promptGraph, generation.imagePipeline);
 
   for (const [nodeId, node] of Object.entries(promptGraph) as Array<[string, any]>) {
     const classType = String(node?.class_type || '').trim();
@@ -10340,9 +10343,9 @@ async function emitBackendPowerPrompterSavedOutputs(
       savedAt: new Date().toISOString(),
     };
     const fullpath = String(output.fullpath || '').trim();
-    if (fullpath && extname(fullpath).toLowerCase() === '.png') {
+    if (fullpath && ['.png', '.jpg', '.jpeg'].includes(extname(fullpath).toLowerCase())) {
       try {
-        await upsertPngTextMetadata(
+        await stampGeneratedImageMetadata(
           fullpath,
           'umbra_power_prompter',
           JSON.stringify(outputPowerPrompterMetadata),
@@ -11474,7 +11477,7 @@ function buildPowerPrompterMetadataSegments(
     const variantId = String(token.variantId || '').trim();
     const card = cardsById.get(variantId) as Record<string, unknown> | undefined;
     const text = String(token.text || card?.text || '').trim();
-    if (!text) return null;
+    if (!text && !normalizeMossPromptField(token.moss)?.text.trim()) return null;
     return {
       order,
       slotId: String(token.slotId || card?.slotId || '').trim(),
@@ -11483,6 +11486,7 @@ function buildPowerPrompterMetadataSegments(
       variantId,
       variantName: String(token.variantName || card?.variantName || '').trim(),
       text,
+      ...(normalizeMossPromptField(token.moss) ? { moss: normalizeMossPromptField(token.moss) } : {}),
       ...(token.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
     };
   }).filter((segment): segment is NonNullable<typeof segment> => segment !== null);
@@ -20130,6 +20134,7 @@ interface PowerPrompterDetailerStage {
 }
 
 interface PowerPrompterGenerationControls {
+  imagePipeline?: ImagePipelineSettings;
   officialWorkflow?: OfficialVideoWorkflowSelection;
   mediaType?: PowerPrompterMediaType;
   outputOwner?: 'power_prompter' | 'umbra_ui';
@@ -20238,6 +20243,7 @@ const PP_DEFAULT_DETAILER_PIPELINE: PowerPrompterDetailerStage[] = [
   },
 ];
 const PP_DEFAULT_GENERATION_CONTROLS: PowerPrompterGenerationControls = {
+  imagePipeline: normalizeImagePipelineSettings(null),
   mediaType: 'image',
   outputOwner: 'power_prompter',
   outputMode: 'txt2img',
@@ -21420,6 +21426,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
     scheduler: String((controls as any).scheduler || PP_DEFAULT_GENERATION_CONTROLS.scheduler).trim() || PP_DEFAULT_GENERATION_CONTROLS.scheduler,
     modelType: normalizePPGenerationModelType((controls as any).modelType ?? (controls as any).model_type),
     checkpointName: String((controls as any).checkpointName || '').trim().replace(/\\/g, '/'),
+    imagePipeline: normalizeImagePipelineSettings(controls.imagePipeline),
     workflowResources: normalizePPWorkflowResources((controls as any).workflowResources),
     aspectRatio: normalizePPAspectRatio(controls.aspectRatio),
     swapDimensions,
@@ -21521,6 +21528,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
     scheduler: settings.scheduler,
     modelType: settings.modelSource,
     checkpointName: settings.checkpointName,
+    imagePipeline: normalizeImagePipelineSettings(settings.imagePipeline),
     workflowResources: { ...(settings.workflowResources || {}) },
     aspectRatio: 'custom',
     swapDimensions: false,
@@ -22242,6 +22250,7 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
       promptSegments,
       negativePrompt: String(form.get('negativePrompt') || '').trim(),
       loras,
+      imagePipeline: normalizeImagePipelineSettings(parseInpaintJsonField('imagePipeline', {})),
       workflowResources,
       checkpointName: String(form.get('checkpointName') || '').trim(),
       clipSkip: Math.max(1, Math.min(12, Math.round(finiteNumberOrFallback(form.get('clipSkip'), 1)))),
