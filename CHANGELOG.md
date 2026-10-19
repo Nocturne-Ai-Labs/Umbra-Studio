@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.90.27-beta - Mobile Model Selector Hotfix
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+### Update
+
+Update through **Umbra Setup > Updates** using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then reopen Studio and reload Remote. No new model downloads or ComfyUI/custom-node updates are required.
+
+- Mobile generation previews temporarily hide while a model or LoRA browser is open across workflows using the shared picker. The browser is placed above workspace overlays so its controls remain accessible.
+- Selecting a model, cancelling, or pressing Escape restores the previous preview state. Desktop behavior is unchanged.
+- Validation covers browser component interaction, TypeScript, lint, production build and packaged startup. Physical-device touch and fresh GPU generation are not requalified by this UI-only hotfix.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Mobile generation previews no longer obstruct model and LoRA selection.
+- Fixed: Escape closes the selector without closing the preview underneath it.
+
 ## v0.90.26-beta - Image Pipeline Controls and MOSS Prompt Fields
 
 ### TL;DR - Setup After Updating

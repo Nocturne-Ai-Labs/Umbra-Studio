@@ -102,6 +102,8 @@ export function UmbraMobileWorkspaceSheet({
   React.useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      // Escape belongs to the picker while the preview is temporarily hidden.
+      if (document.querySelector('[data-umbra-model-picker-backdrop]')) return;
       if (event.key === 'Escape') setOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
