@@ -58,7 +58,7 @@ interface UmbraPositivePromptEditorProps {
   onSubmit?: () => void;
   singleField?: boolean;
   headerAction?: React.ReactNode;
-  mossOutput?: { width: number; height: number };
+  mossSupported?: boolean;
 }
 
 const MAX_PROMPT_SEGMENTS = 24;
@@ -82,9 +82,9 @@ export function UmbraPositivePromptEditor({
   onSubmit,
   singleField = false,
   headerAction,
-  mossOutput,
+  mossSupported,
 }: UmbraPositivePromptEditorProps) {
-  const mossEnabled = Boolean(mossOutput && sourceSegments.some(segment => segment.moss?.enabled));
+  const mossEnabled = Boolean(mossSupported && sourceSegments.some(segment => segment.moss?.enabled));
   const segments = React.useMemo(
     () => singleField && !mossEnabled ? getUmbraUiSinglePromptField(sourceSegments) : sourceSegments,
     [singleField, mossEnabled, sourceSegments],
@@ -98,8 +98,8 @@ export function UmbraPositivePromptEditor({
   const [, forceHistoryRender] = React.useState(0);
   const segmentsRef = React.useRef(segments);
   segmentsRef.current = segments;
-  const compiledPrompt = React.useMemo(() => mossEnabled && mossOutput
-    ? compileMossPromptFields(segments, mossOutput.width, mossOutput.height) : compileUmbraUiPromptSegments(segments), [segments, mossEnabled, mossOutput]);
+  const compiledPrompt = React.useMemo(() => mossEnabled && mossSupported
+    ? compileMossPromptFields(segments) : compileUmbraUiPromptSegments(segments), [segments, mossEnabled, mossSupported]);
   const activeClasses = accent === 'rose'
     ? 'border-rose-300/35 bg-rose-500/[0.045]'
     : accent === 'fuchsia'
@@ -214,7 +214,7 @@ export function UmbraPositivePromptEditor({
     if (singleField) return;
     const currentSegments = segmentsRef.current;
     if (currentSegments.length >= MAX_PROMPT_SEGMENTS) return;
-    const nextSegment = createUmbraUiPromptSegment('', mossEnabled ? { moss: { enabled: true, purpose: 'item', label: 'object', text: '', bounds: [0, 0, 100, 100] } } : {});
+    const nextSegment = createUmbraUiPromptSegment('', mossEnabled ? { moss: { enabled: true, purpose: 'item', label: 'object', text: '' } } : {});
     const activeIndex = Math.max(0, currentSegments.findIndex((segment) => segment.id === activeSegmentId));
     const insertAt = currentSegments.length <= 0 ? 0 : activeIndex + 1;
     const next = [...currentSegments.slice(0, insertAt), nextSegment, ...currentSegments.slice(insertAt)];
@@ -302,10 +302,10 @@ export function UmbraPositivePromptEditor({
           >
             <ListPlus size={14} />
           </button>}
-          {mossOutput && <button type="button" aria-label="MOSS JSON prompting" aria-pressed={mossEnabled} title="MOSS JSON prompting"
+          {mossSupported && <button type="button" aria-label="MOSS JSON prompting" aria-pressed={mossEnabled} title="MOSS JSON prompting"
             className={cn('inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border', mossEnabled ? 'border-[var(--accent-color)] text-zinc-100 bg-white/10' : 'border-white/10 text-zinc-400')}
             onClick={() => emitSegments(sourceSegments.map((segment, index) => ({ ...segment, moss: {
-              ...(normalizeMossPromptField(segment.moss) || { purpose: index === 0 ? 'scene' : 'item', label: 'object', text: '', bounds: [0, 0, 100, 100] }), enabled: !mossEnabled,
+              ...(normalizeMossPromptField(segment.moss) || { purpose: index === 0 ? 'scene' : 'item', label: 'object', text: '' }), enabled: !mossEnabled,
             } })))}><Braces size={14} /></button>}
 
         </div>
@@ -432,7 +432,7 @@ export function UmbraPositivePromptEditor({
                   </button>
                 </div>
               </div>
-              {mossEnabled && <MossPromptFieldControls value={normalizeMossPromptField(segment.moss) || { enabled: true, purpose: 'scene', label: 'object', text: '', bounds: [0, 0, 100, 100] }}
+              {mossEnabled && <MossPromptFieldControls value={normalizeMossPromptField(segment.moss) || { enabled: true, purpose: 'scene', label: 'object', text: '' }}
                 onChange={moss => emitSegments(segments.map(field => field.id === segment.id ? { ...field, moss } : field))} />}
               <textarea
                 aria-label={singleField ? heading : `Prompt field ${index + 1}`}

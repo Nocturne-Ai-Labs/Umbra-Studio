@@ -839,8 +839,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [height, setHeight] = React.useState(initialDeviceResume?.height || '1152');
   const mossJsonEnabled = normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage' && promptSegments.some(segment => segment.moss?.enabled);
   const prompt = React.useMemo(() => mossJsonEnabled
-    ? compileMossPromptFields(promptSegments, Number(width) || 1024, Number(height) || 1024)
-    : compileUmbraUiPromptSegments(promptSegments), [mossJsonEnabled, promptSegments, width, height]);
+    ? compileMossPromptFields(promptSegments)
+    : compileUmbraUiPromptSegments(promptSegments), [mossJsonEnabled, promptSegments]);
   const workflowImagePrompt = prompt;
   const [imageAspectRatio, setImageAspectRatio] = React.useState<UmbraImageAspectPresetId>(() => (
     initialDeviceResume?.imageAspectRatio
@@ -2918,7 +2918,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     <div className={phoneImageGeneration ? 'relative space-y-3' : 'relative'}>
       <>
         <UmbraPositivePromptEditor
-        mossOutput={normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage' ? { width: Number(width) || 1024, height: Number(height) || 1024 } : undefined}
+        mossSupported={normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage'}
         singleField={phoneImageGeneration && !mossJsonEnabled}
         segments={promptSegments}
         activeSegmentId={activePromptSegmentId}
