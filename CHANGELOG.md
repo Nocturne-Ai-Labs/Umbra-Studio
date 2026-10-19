@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.90.24-beta - DaSiWa H3 Workflow Maintenance
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update Studio through **Umbra Setup > Updates**. Open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then update the managed DaSiWa custom nodes through Setup. Stop ComfyUI before maintenance and restart it afterward.
+- The official H3 workflow now uses **C-MMH3-33**. Its segment nodes need DaSiWa **0.5.28 or newer**. Existing native captures remain saved, but must be recaptured from the new pinned original before running that revision. Existing model files can be reused; no new model downloads are introduced by this update.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### H3 Workflow Compatibility
+
+- Refresh the unmodified upstream H3 graph to C-MMH3-33 with native continuity segment preparation and decoding for full-timeline and segment-only exports.
+- Update Setup's class checks and minimum DaSiWa revision to include the sample-exact Opus segment export fixes.
+- Keep the existing H3 selection key while updating source hashes, provenance and the displayed revision. Stale captures are held rather than silently running a different graph.
+- Preserve the reviewed local Prompt Forge compatibility patch on current DaSiWa nodes, including migration, idempotence and safe refusal of unknown source edits.
+- Verify updater ownership through the lightweight runtime identity endpoint. Slow tool-readiness checks no longer misidentify the correct running installation; startup readiness remains a separate gate and unknown listeners are still held.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: Official H3 workflow and Setup prerequisites match the newer upstream continuity graph.
+- Improved: Workflow provenance and revision labels make required recaptures explicit while preserving saved selections.
+- Fixed: Updating could stop before replacing files when a correct installation's readiness check exceeded the ownership timeout.
+
 ## v0.90.23-beta - Umbra Remote Mobile
 
 ### TL;DR - Setup After Updating

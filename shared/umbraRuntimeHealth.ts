@@ -7,7 +7,8 @@ export async function inspectUmbraRuntimeHealth(
   port: number,
   bindHost = '127.0.0.1',
 ): Promise<UmbraRuntimeHealth> {
-  return (await inspectUmbraRuntimeStatus(runtimeRoot, port, bindHost)).health;
+  // Ownership must remain available while tool discovery is still warming up.
+  return (await inspectUmbraRuntimeEndpoint(runtimeRoot, port, bindHost, '/api/healthz')).health;
 }
 
 export async function inspectUmbraRuntimeStatus(
@@ -15,9 +16,18 @@ export async function inspectUmbraRuntimeStatus(
   port: number,
   bindHost = '127.0.0.1',
 ): Promise<{ health: UmbraRuntimeHealth; ready: boolean; retryable?: boolean }> {
+  return inspectUmbraRuntimeEndpoint(runtimeRoot, port, bindHost, '/api/healthz/ready');
+}
+
+async function inspectUmbraRuntimeEndpoint(
+  runtimeRoot: string,
+  port: number,
+  bindHost: string,
+  endpoint: '/api/healthz' | '/api/healthz/ready',
+): Promise<{ health: UmbraRuntimeHealth; ready: boolean; retryable?: boolean }> {
   const host = bindHost === '::1' ? '[::1]' : '127.0.0.1';
   try {
-    const response = await fetch(`http://${host}:${port}/api/healthz/ready`, {
+    const response = await fetch(`http://${host}:${port}${endpoint}`, {
       cache: 'no-store', signal: AbortSignal.timeout(1_500),
     });
     const payload = await response.json().catch(() => null) as { runtimeRoot?: unknown } | null;
