@@ -1396,7 +1396,7 @@ export function UmbraVideoGenerationControls({
   }, [showToast]);
 
   const applyHandoff = React.useCallback((detail: UmbraUiMediaHandoff | null) => {
-    if (!detail || detail.mode !== 'video' || !detail.path) return;
+    if (!detail || detail.mode !== 'video' || !detail.path || detail.videoProject) return;
     if (detail.createdAt <= handoffAppliedAtRef.current) return;
     // Restore the actual destination mode before choosing its media slots.
     if (!settingsResolved) {

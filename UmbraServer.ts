@@ -145,6 +145,7 @@ import {
   type UmbraUiLayerUpscaleSettings,
 } from './backend/UmbraUiInpaintService';
 import { UmbraUiCanvasProjectService } from './backend/UmbraUiCanvasProjectService';
+import { VideoStudioProjectService } from './backend/VideoStudioProjectService';
 import { UmbraCanvasStudioConflictError, UmbraUiCanvasStudioProjectService } from './backend/UmbraUiCanvasStudioProjectService';
 import { UmbraUiCensorReviewService } from './backend/UmbraUiCensorReviewService';
 import { handleCensorReviewRoute } from './backend/routes/censorReviewRoutes';
@@ -512,6 +513,7 @@ const umbraUiInpaintService = new UmbraUiInpaintService({
   buildBaseWorkflow: (settings, seed) => buildUmbraUiInpaintBaseWorkflow(settings, seed),
 });
 const umbraUiCanvasProjectService = new UmbraUiCanvasProjectService(USER_DIR);
+const videoStudioProjectService = new VideoStudioProjectService(USER_DIR);
 const umbraUiCanvasStudioProjectService = new UmbraUiCanvasStudioProjectService(USER_DIR);
 const umbraUiCanvasWorkspaceProjectService = new UmbraUiCanvasWorkspaceProjectService(USER_DIR);
 const mangaStudioFiles = new MangaStudioFiles(USER_DIR);
@@ -5761,6 +5763,10 @@ async function upsertUmbraUiVideoReviewPrompt(
     .sort((left, right) => right.createdAt - left.createdAt)
     .slice(0, UMBRA_UI_VIDEO_REVIEW_LIMIT);
   scheduleUmbraUiVideoReviewSave();
+  if (next.generation.officialWorkflow?.captureId && next.outputs.length) {
+    await videoStudioProjectService.recordOutputs(next.generation.officialWorkflow.captureId, next.outputs)
+      .catch(error => console.warn('[Video Studio] Could not index project outputs:', error));
+  }
 }
 
 async function listUmbraUiVideoReviewJobs(limitRaw: unknown): Promise<UmbraUiVideoReviewJob[]> {
@@ -38993,6 +38999,9 @@ const server = Bun.serve<UmbraSocketData>({
         return json({ success: false, error: 'Unsupported Canvas Studio project operation.' }, 405);
       }
 
+      if (path === '/api/video/projects' || path.startsWith('/api/video/projects/')) {
+        return videoStudioProjectService.handle(req);
+      }
       if (path === '/api/umbra-ui/canvas/projects' && method === 'GET') {
         return handleUmbraUiCanvasWorkspaceProjectList();
       }

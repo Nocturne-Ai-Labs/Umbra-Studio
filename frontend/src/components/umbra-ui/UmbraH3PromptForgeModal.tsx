@@ -31,6 +31,7 @@ interface Props {
   onApplyPrompt: (prompt: string) => void;
   onClose: () => void;
   inline?: boolean;
+  useExistingPrompt?: boolean;
   phoneMode?: boolean;
   disabled?: boolean;
   modeOverride?: 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'REF2VA';
@@ -41,13 +42,14 @@ interface Props {
 const fieldClass = 'min-h-9 w-full min-w-0 rounded border border-white/15 bg-black/30 px-2 py-2 text-xs text-zinc-100 outline-none focus:border-fuchsia-300/50';
 const buttonClass = 'inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/15 px-3 text-xs text-zinc-200 hover:border-fuchsia-300/40 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40';
 
-export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose, inline = false, phoneMode = false, disabled = false, referenceNotes, modeOverride, continuity }: Props) {
+export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyConnected, onApplyPrompt, onClose, inline = false, useExistingPrompt = false, phoneMode = false, disabled = false, referenceNotes, modeOverride, continuity }: Props) {
   const [catalog, setCatalog] = React.useState<ForgeCatalog | null>(null);
   const [model, setModel] = React.useState('');
   const [detail, setDetail] = React.useState(5);
   const [creativity, setCreativity] = React.useState('balanced');
   const [computeDevice, setComputeDevice] = useH3ForgeComputeDevice();
   const [brief, setBrief] = React.useState(prompt);
+  const sourceBrief = useExistingPrompt ? prompt : brief;
   const [draft, setDraft] = React.useState('');
   const [drafting, setDrafting] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -111,7 +113,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
   };
 
   const forge = async () => {
-    if (disabled || drafting || !comfyConnected || (!brief.trim() && !continuity) || !model) return;
+    if (disabled || drafting || !comfyConnected || (!sourceBrief.trim() && !continuity) || !model) return;
     const requestId = crypto.randomUUID();
     requestIdRef.current = requestId;
     setDrafting(true);
@@ -133,7 +135,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
       if (requestIdRef.current !== requestId) return;
       const response = await fetch('/comfy/dasiwa/h3/forge', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: requestId, brief: brief.trim(), mode, duration: durationSeconds,
+        body: JSON.stringify({ request_id: requestId, brief: sourceBrief.trim(), mode, duration: durationSeconds,
           model, detail, creativity, references, ...(continuity ? { continuity: { ...continuity, duration_seconds: durationSeconds } } : {}), ...(localModel ? { compute_device: computeDevice } : {}) }),
       });
       const result = await response.json().catch(() => ({})) as H3ForgeResponse;
@@ -149,7 +151,12 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
         throw new Error(h3ForgeFailureMessage(result));
       }
       if (requestIdRef.current !== requestId) return;
-      setDraft(result.simple_prompt);
+      if (useExistingPrompt) {
+        requestIdRef.current = '';
+        setDrafting(false);
+        onApplyPrompt(result.simple_prompt);
+        onClose();
+      } else setDraft(result.simple_prompt);
       if (result.warnings?.length) setError(result.warnings.join(' '));
     } catch (cause) {
       if (requestIdRef.current === requestId) setError(cause instanceof Error ? cause.message : 'Prompt Forge failed.');
@@ -178,9 +185,9 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
           <button type="button" className={buttonClass} title="Close Prompt Forge" aria-label="Close Prompt Forge" disabled={drafting} onClick={onClose}><X size={15} /></button>
         </header>
         <div className="min-h-0 space-y-3 overflow-y-auto p-3">
-          <label className="block text-xs text-zinc-400">Video idea
+          {!useExistingPrompt ? <label className="block text-xs text-zinc-400">Video idea
             <textarea className={`${fieldClass} mt-1 min-h-24 resize-y`} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the shot" />
-          </label>
+          </label> : null}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_80px_minmax(0,1fr)]">
             <div className="min-w-0 text-xs text-zinc-400">Model
               <div className="mt-1 flex min-w-0 gap-1">
@@ -207,7 +214,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
               </UmbraSelectControl>
             </label>
           </div>
-          <p className="text-xs text-zinc-500">Text-only model: describe reference images in your idea or reference notes.</p>
+          <p className="text-xs text-zinc-500">{useExistingPrompt ? 'Uses the current prompt above. Describe reference images there or in reference notes.' : 'Text-only model: describe reference images in your idea or reference notes.'}</p>
           {localModel ? <>
             <UmbraH3ForgeDeviceControl value={computeDevice} onChange={(value) => { setComputeDevice(value); setDraft(''); }} disabled={drafting || !supportsComputeDevice} />
             {!supportsComputeDevice ? <p role="status" className="text-xs text-amber-300">Update DaSiWa H3 nodes in Umbra Setup and restart ComfyUI for local Llama support.</p> : null}
@@ -215,14 +222,14 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
           {error ? <p role="status" className="text-xs text-amber-300">{error}</p> : null}
           <H3ForgeRawResponse raw={rawResponse} />
           <div className="flex gap-2">
-            <button type="button" className={buttonClass} disabled={disabled || !comfyConnected || !model || (!brief.trim() && !continuity) || drafting || (localModel && !supportsComputeDevice)} onClick={() => void forge()}>
-              {drafting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{drafting ? 'Drafting...' : 'Draft prompt'}
+            <button type="button" className={buttonClass} disabled={disabled || !comfyConnected || !model || (!sourceBrief.trim() && !continuity) || drafting || (localModel && !supportsComputeDevice)} onClick={() => void forge()}>
+              {drafting ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}{drafting ? 'Enhancing...' : useExistingPrompt ? 'Enhance prompt' : 'Draft prompt'}
             </button>
             {drafting ? <button type="button" className={buttonClass} onClick={cancel}>Cancel draft</button> : null}
           </div>
           {draft ? <div className="space-y-2 border-t border-white/10 pt-3">
             <label className="block text-xs text-zinc-400">Draft
-              <textarea aria-label="Prompt Forge draft" className={`${fieldClass} mt-1 min-h-40 resize-y`} value={draft} onChange={(event) => setDraft(event.target.value)} />
+              {useExistingPrompt ? <p className="whitespace-pre-wrap text-xs text-zinc-200">{draft}</p> : <textarea aria-label="Prompt Forge draft" className={`${fieldClass} mt-1 min-h-40 resize-y`} value={draft} onChange={(event) => setDraft(event.target.value)} />}
             </label>
             <button type="button" className={buttonClass} disabled={disabled || !draft.trim()} onClick={() => { if (!disabled) { onApplyPrompt(draft.trim()); onClose(); } }}>Use prompt</button>
           </div> : null}
