@@ -11,7 +11,7 @@ type Node = { class_type: string; inputs: Record<string, unknown>; _meta?: Recor
 export type OfficialApiGraph = Record<string, Node>;
 const SOURCE_COMMIT = '143bd6a47d844ddd7a68175db5c5ff3867f5febb';
 export const OFFICIAL_VIDEO_SOURCES = {
-  'h3-26': { name: 'DaSiWa H3 MythicAlchemy C-MMH3-32', sourceCommit: '1d3621410a9a1599d006dc252573de85b481461a', family: 'minimax_h3', sha256: 'cc43599cc5e430b8af778cd0bdd48e367e4e55098e94d760d31b95501f830458', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-32.json' },
+  'h3-26': { name: 'DaSiWa H3 MythicAlchemy C-MMH3-33', sourceCommit: '43bc259f14bdcc790d10234a53321b1c1011c29c', family: 'minimax_h3', sha256: 'cba462ef659ebb9c61d6a62f954164ece0b4b293220e5cdbad747b5ba79a1502', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-33.json' },
   'ltx23-50': { name: 'DaSiWa LTX OmniForge C-LTX23-50', sourceCommit: SOURCE_COMMIT, family: 'ltx23', sha256: 'f4a9e0c3abfff2c4e94525b312c463981090da7e5cb8a41cd479bb9779ab6933', path: 'C-LTX23/DaSiWa LTX OmniForge C-LTX23-50.json' },
 } as const;
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};

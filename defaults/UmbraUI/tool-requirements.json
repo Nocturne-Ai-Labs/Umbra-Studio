@@ -681,7 +681,7 @@
     },
     {
       "id": "official-dasiwa-h3-26",
-      "label": "Official DaSiWa H3 MythicAlchemy C-MMH3-32",
+      "label": "Official DaSiWa H3 MythicAlchemy C-MMH3-33",
       "workflowIds": [
         "h3-26"
       ],
@@ -704,16 +704,14 @@
         "SamplerCustomAdvanced",
         "UNETLoader",
         "UpscaleModelLoader",
-        "VAEDecode",
-        "VAEDecodeAudio",
         "VAELoader"
       ],
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
+          "minimumCommit": "738ed2cd5932951633c84aaffbf196a4dfc0b547",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.16",
+          "version": "0.5.28",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -750,7 +748,6 @@
             "Lable (DaSiWa)"
           ],
           "requiredClasses": [
-            "DaSiWaH3ContinuityAppend",
             "DaSiWaH3ContinuityPublish",
             "DaSiWa_EnhancedVideoCombine",
             "DaSiWa_LTX2LoraLoader",
@@ -764,7 +761,9 @@
             "MiniMaxH3Director",
             "MiniMaxH3DirectorGuide",
             "DaSiWaH3TiledUpscale",
-            "DaSiWa_RTX_FrameGeneration"
+            "DaSiWa_RTX_FrameGeneration",
+            "DaSiWaH3ContinuitySegmentPrepare",
+            "DaSiWaH3ContinuitySegmentDecode"
           ]
         },
         {
@@ -781,9 +780,9 @@
           ]
         }
       ],
-      "sourceSha256": "cc43599cc5e430b8af778cd0bdd48e367e4e55098e94d760d31b95501f830458",
-      "sourceCommit": "1d3621410a9a1599d006dc252573de85b481461a",
-      "notes": "Load the pinned original in native ComfyUI. All serialized classes and frontend assets remain required even for currently bypassed stages; no adapted fallback. Model assets and GPU execution are separate readiness gates. C-MMH3-32 replaces the older Ultimate Upscale stage with DaSiWa Enhanced Upscale and adds optional RTX frame generation. The h3-26 storage key is retained for existing UI selections; source hashes distinguish revisions."
+      "sourceSha256": "cba462ef659ebb9c61d6a62f954164ece0b4b293220e5cdbad747b5ba79a1502",
+      "sourceCommit": "43bc259f14bdcc790d10234a53321b1c1011c29c",
+      "notes": "Load the pinned original in native ComfyUI. All serialized classes and frontend assets remain required even for currently bypassed stages; no adapted fallback. Model assets and GPU execution are separate readiness gates. C-MMH3-33 uses continuity segment prepare/decode for full-timeline and segment-only exports. DaSiWa 0.5.28 is the minimum for sample-exact Opus segment export. The h3-26 storage key is retained; source hashes invalidate captures from previous revisions."
     },
     {
       "id": "official-dasiwa-ltx23-50",
@@ -1007,7 +1006,13 @@
           "repository": "https://github.com/Nocturne-Ai-Labs/Umbra-Nodes",
           "version": "0.1.1",
           "license": "MIT",
-          "requiredClasses": ["UmbraLoadCheckpoint", "UmbraPowerPrompterReader", "UmbraA1111LoraSyntax", "UmbraImageUpscale", "UmbraLabSaveImage"]
+          "requiredClasses": [
+            "UmbraLoadCheckpoint",
+            "UmbraPowerPrompterReader",
+            "UmbraA1111LoraSyntax",
+            "UmbraImageUpscale",
+            "UmbraLabSaveImage"
+          ]
         },
         {
           "name": "comfyui-inpaint-nodes",
@@ -1015,7 +1020,9 @@
           "repository": "https://github.com/Acly/comfyui-inpaint-nodes",
           "version": "1.4.3",
           "license": "GPL-3.0",
-          "requiredClasses": ["INPAINT_ExpandMask"]
+          "requiredClasses": [
+            "INPAINT_ExpandMask"
+          ]
         }
       ]
     },
@@ -1120,7 +1127,7 @@
     },
     {
       "id": "moss-image",
-      "label": "MOSS Image \u2014 generation and masked editing",
+      "label": "MOSS Image — generation and masked editing",
       "optional": true,
       "optIn": true,
       "minimumComfyVersion": "0.41.0",

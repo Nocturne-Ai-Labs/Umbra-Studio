@@ -1,8 +1,8 @@
 {
-  "id": "483071f8-6db6-4be9-8f56-5d1aa17d8cb4",
+  "id": "7017cae3-e80c-44dd-9775-5a06f8207175",
   "revision": 0,
   "last_node_id": 2818,
-  "last_link_id": 6214,
+  "last_link_id": 6215,
   "nodes": [
     {
       "id": 2641,
@@ -466,7 +466,7 @@
       ],
       "size": [
         550,
-        350
+        400
       ],
       "flags": {},
       "order": 16,
@@ -833,7 +833,7 @@
         "euler",
         "simple",
         4,
-        12,
+        10,
         3,
         false,
         false,
@@ -858,7 +858,7 @@
         "sampler_name": "euler",
         "scheduler": "simple",
         "steps": 4,
-        "shift_video": 12,
+        "shift_video": 10,
         "shift_audio": 3,
         "enabled_2": false,
         "enabled_9": false,
@@ -988,13 +988,13 @@
         "Node name for S&R": "DaSiWa_SeedControl"
       },
       "widgets_values": [
-        364309173376484700,
-        "{\"mode\":\"random\",\"last_seed\":\"364309173376484648\",\"recent\":[\"364309173376484648\",\"10692305977776190887\",\"13083858638355460498\",\"15150890465947993888\",\"2009637864198570946\",\"9941078961442708585\",\"15475673862362826013\",\"1373655449285596658\",\"16242992547149887438\",\"13861091875805570926\"]}",
+        18198207011397160000,
+        "{\"mode\":\"random\",\"last_seed\":\"18198207011397161696\",\"recent\":[\"18198207011397161696\",\"14371646594546444493\",\"1176002127602395864\",\"16312356272260500506\",\"10692305977776190887\",\"13083858638355460498\",\"15150890465947993888\",\"2009637864198570946\",\"9941078961442708585\",\"15475673862362826013\"]}",
         ""
       ],
       "widgets_values_named": {
-        "seed_value": 364309173376484700,
-        "seed_control_state": "{\"mode\":\"random\",\"last_seed\":\"364309173376484648\",\"recent\":[\"364309173376484648\",\"10692305977776190887\",\"13083858638355460498\",\"15150890465947993888\",\"2009637864198570946\",\"9941078961442708585\",\"15475673862362826013\",\"1373655449285596658\",\"16242992547149887438\",\"13861091875805570926\"]}",
+        "seed_value": 18198207011397160000,
+        "seed_control_state": "{\"mode\":\"random\",\"last_seed\":\"18198207011397161696\",\"recent\":[\"18198207011397161696\",\"14371646594546444493\",\"1176002127602395864\",\"16312356272260500506\",\"10692305977776190887\",\"13083858638355460498\",\"15150890465947993888\",\"2009637864198570946\",\"9941078961442708585\",\"15475673862362826013\"]}",
         "dasiwa_seed_control_ui": ""
       },
       "color": "#2a363b",
@@ -1009,7 +1009,7 @@
       ],
       "size": [
         610,
-        1260
+        1007.9090909090909
       ],
       "flags": {
         "collapsed": false
@@ -1067,7 +1067,7 @@
         "Auto",
         "Auto",
         "Auto",
-        26,
+        25,
         "Standard",
         false,
         true,
@@ -1079,6 +1079,7 @@
         "192k",
         false,
         false,
+        "",
         ""
       ],
       "widgets_values_named": {
@@ -1086,7 +1087,7 @@
         "codec": "Auto",
         "container": "Auto",
         "bit_depth": "Auto",
-        "quality": 26,
+        "quality": 25,
         "log_level": "Standard",
         "pingpong": false,
         "save_metadata": true,
@@ -1098,6 +1099,7 @@
         "audio_bitrate": "192k",
         "save_first_frame": false,
         "save_last_frame": false,
+        "free_memory_if_needed": "",
         "video_preview": ""
       },
       "color": "#232",
@@ -1217,8 +1219,8 @@
         768,
         5,
         "match",
-        "{\"version\":1,\"items\":[],\"prompt_blocks\":[],\"builder_state\":{\"version\":2,\"mode\":\"REF2VA\",\"duration\":5,\"ref\":{\"subject_definitions\":\"\",\"summary\":\"\",\"retention_analysis\":\"\",\"detailed_description\":\"\",\"soundscape\":\"\",\"music\":\"\"},\"simple_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"prompt_mode\":\"simple\"},\"resolution\":{\"aspect\":\"auto\",\"resolution\":\"auto\",\"input_scaling\":\"Auto\",\"custom_aspect_w\":16,\"custom_aspect_h\":9,\"custom_mp\":0.4,\"custom_width\":1088,\"custom_height\":1984,\"custom_mode\":\"fixed\"},\"resolved_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"field_heights\":{\"simple_prompt\":572.83984375,\"ref_detailed_description\":208.5},\"refmods\":[{\"slot\":1,\"name\":\"\",\"description\":\"\",\"strength\":1,\"enabled\":false}],\"continuity\":{\"version\":3,\"source_kind\":\"checkpoint\",\"source_id\":\"\",\"source_video_id\":\"\",\"source_video\":null,\"use_references\":false,\"operation\":\"new\",\"capture\":false,\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"overlap_frames\":22,\"continuation_prompt\":\"\",\"idea\":\"\"}}",
-        "{\"version\":2,\"mode\":\"REF2VA\",\"duration\":5,\"ref\":{\"subject_definitions\":\"\",\"summary\":\"\",\"retention_analysis\":\"\",\"detailed_description\":\"\",\"soundscape\":\"\",\"music\":\"\"},\"simple_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"prompt_mode\":\"simple\"}",
+        "{\"version\":1,\"items\":[],\"prompt_blocks\":[],\"builder_state\":{\"version\":1,\"mode\":\"REF2VA\",\"imd\":\"\",\"soundscape\":\"\",\"music\":\"\",\"duration\":5,\"ref\":{\"subject_defs\":[],\"summary_types\":[\"reference generation\"],\"summary_text\":\"\",\"retention\":[],\"style_line\":\"\",\"detail\":\"\",\"soundscape\":\"\",\"music\":\"\"}},\"resolution\":{\"aspect\":\"auto\",\"resolution\":\"auto\",\"input_scaling\":\"Auto\",\"custom_aspect_w\":16,\"custom_aspect_h\":9,\"custom_mp\":0.4,\"custom_width\":1088,\"custom_height\":1984,\"custom_mode\":\"fixed\"},\"resolved_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"field_heights\":{\"simple_prompt\":572.83984375,\"ref_detailed_description\":208.5},\"refmods\":[{\"slot\":1,\"name\":\"\",\"description\":\"\",\"strength\":1,\"enabled\":false}],\"continuity\":{\"version\":3,\"output_mode\":\"full\",\"source_kind\":\"checkpoint\",\"source_id\":\"\",\"source_video_id\":\"\",\"source_video\":null,\"use_references\":false,\"operation\":\"new\",\"capture\":false,\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"overlap_frames\":22,\"continuation_prompt\":\"\",\"idea\":\"\"},\"clip_assembly\":{\"version\":1,\"tab\":\"files\",\"rows\":[{\"kind\":\"checkpoint\",\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"clip_id\":\"99b3f6cf14274fed8c730b67f6a6f282\",\"selected\":true},{\"kind\":\"checkpoint\",\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"clip_id\":\"d93ce1dde77342f794c5d2efcb457f35\",\"selected\":true},{\"kind\":\"media\",\"filename\":\"1.webm\",\"trim_start\":0,\"trim_end\":null}],\"repair_transitions\":false,\"audio_policy\":\"preserve\",\"filename_prefix\":\"H3_Joined\",\"context_frames\":22,\"transition_frames\":29,\"transition_prompt\":\"\"}}",
+        "{\"version\":1,\"mode\":\"REF2VA\",\"imd\":\"\",\"soundscape\":\"\",\"music\":\"\",\"duration\":5,\"ref\":{\"subject_defs\":[],\"summary_types\":[\"reference generation\"],\"summary_text\":\"\",\"retention\":[],\"style_line\":\"\",\"detail\":\"\",\"soundscape\":\"\",\"music\":\"\"}}",
         24,
         ""
       ],
@@ -1229,8 +1231,8 @@
         "height": 768,
         "duration": 5,
         "ref_image_size": "match",
-        "timeline_data": "{\"version\":1,\"items\":[],\"prompt_blocks\":[],\"builder_state\":{\"version\":2,\"mode\":\"REF2VA\",\"duration\":5,\"ref\":{\"subject_definitions\":\"\",\"summary\":\"\",\"retention_analysis\":\"\",\"detailed_description\":\"\",\"soundscape\":\"\",\"music\":\"\"},\"simple_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"prompt_mode\":\"simple\"},\"resolution\":{\"aspect\":\"auto\",\"resolution\":\"auto\",\"input_scaling\":\"Auto\",\"custom_aspect_w\":16,\"custom_aspect_h\":9,\"custom_mp\":0.4,\"custom_width\":1088,\"custom_height\":1984,\"custom_mode\":\"fixed\"},\"resolved_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"field_heights\":{\"simple_prompt\":572.83984375,\"ref_detailed_description\":208.5},\"refmods\":[{\"slot\":1,\"name\":\"\",\"description\":\"\",\"strength\":1,\"enabled\":false}],\"continuity\":{\"version\":3,\"source_kind\":\"checkpoint\",\"source_id\":\"\",\"source_video_id\":\"\",\"source_video\":null,\"use_references\":false,\"operation\":\"new\",\"capture\":false,\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"overlap_frames\":22,\"continuation_prompt\":\"\",\"idea\":\"\"}}",
-        "builder_state": "{\"version\":2,\"mode\":\"REF2VA\",\"duration\":5,\"ref\":{\"subject_definitions\":\"\",\"summary\":\"\",\"retention_analysis\":\"\",\"detailed_description\":\"\",\"soundscape\":\"\",\"music\":\"\"},\"simple_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"prompt_mode\":\"simple\"}",
+        "timeline_data": "{\"version\":1,\"items\":[],\"prompt_blocks\":[],\"builder_state\":{\"version\":1,\"mode\":\"REF2VA\",\"imd\":\"\",\"soundscape\":\"\",\"music\":\"\",\"duration\":5,\"ref\":{\"subject_defs\":[],\"summary_types\":[\"reference generation\"],\"summary_text\":\"\",\"retention\":[],\"style_line\":\"\",\"detail\":\"\",\"soundscape\":\"\",\"music\":\"\"}},\"resolution\":{\"aspect\":\"auto\",\"resolution\":\"auto\",\"input_scaling\":\"Auto\",\"custom_aspect_w\":16,\"custom_aspect_h\":9,\"custom_mp\":0.4,\"custom_width\":1088,\"custom_height\":1984,\"custom_mode\":\"fixed\"},\"resolved_prompt\":\"subject_definitions:\\n\\n\\nsummary:\\n\\n\\nretention_analysis:\\n\\n\\ndetailed_description:\\n\\n\\noverall_soundscape:\\n\\n\\nnon_diegetic_music:\\nN/A\",\"field_heights\":{\"simple_prompt\":572.83984375,\"ref_detailed_description\":208.5},\"refmods\":[{\"slot\":1,\"name\":\"\",\"description\":\"\",\"strength\":1,\"enabled\":false}],\"continuity\":{\"version\":3,\"output_mode\":\"full\",\"source_kind\":\"checkpoint\",\"source_id\":\"\",\"source_video_id\":\"\",\"source_video\":null,\"use_references\":false,\"operation\":\"new\",\"capture\":false,\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"overlap_frames\":22,\"continuation_prompt\":\"\",\"idea\":\"\"},\"clip_assembly\":{\"version\":1,\"tab\":\"files\",\"rows\":[{\"kind\":\"checkpoint\",\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"clip_id\":\"99b3f6cf14274fed8c730b67f6a6f282\",\"selected\":true},{\"kind\":\"checkpoint\",\"session\":\"h3_998cd12a79e31d10ce2ae7e18eb03501\",\"clip_id\":\"d93ce1dde77342f794c5d2efcb457f35\",\"selected\":true},{\"kind\":\"media\",\"filename\":\"1.webm\",\"trim_start\":0,\"trim_end\":null}],\"repair_transitions\":false,\"audio_policy\":\"preserve\",\"filename_prefix\":\"H3_Joined\",\"context_frames\":22,\"transition_frames\":29,\"transition_prompt\":\"\"}}",
+        "builder_state": "{\"version\":1,\"mode\":\"REF2VA\",\"imd\":\"\",\"soundscape\":\"\",\"music\":\"\",\"duration\":5,\"ref\":{\"subject_defs\":[],\"summary_types\":[\"reference generation\"],\"summary_text\":\"\",\"retention\":[],\"style_line\":\"\",\"detail\":\"\",\"soundscape\":\"\",\"music\":\"\"}}",
         "frame_rate": 24,
         "minimax_h3_director_ui": ""
       },
@@ -1606,7 +1608,7 @@
         "state": {
           "lastGroupId": 196,
           "lastNodeId": 2818,
-          "lastLinkId": 6214,
+          "lastLinkId": 6215,
           "lastRerouteId": 0
         },
         "revision": 0,
@@ -3260,14 +3262,14 @@
           },
           {
             "id": 2671,
-            "type": "VAEDecode",
+            "type": "DaSiWaH3ContinuitySegmentDecode",
             "pos": [
               5040,
               2730
             ],
             "size": [
-              230,
-              60
+              340,
+              100
             ],
             "flags": {
               "collapsed": false
@@ -3276,8 +3278,8 @@
             "mode": 0,
             "inputs": [
               {
-                "localized_name": "samples",
-                "name": "samples",
+                "localized_name": "latent",
+                "name": "latent",
                 "type": "LATENT",
                 "link": 6159
               },
@@ -3286,20 +3288,40 @@
                 "name": "vae",
                 "type": "VAE",
                 "link": 5863
+              },
+              {
+                "localized_name": "audio_vae",
+                "name": "audio_vae",
+                "type": "VAE",
+                "link": 6130
+              },
+              {
+                "localized_name": "context",
+                "name": "context",
+                "type": "DF_H3_CONTINUITY_CONTEXT",
+                "link": 6215
               }
             ],
             "outputs": [
               {
-                "localized_name": "IMAGE",
-                "name": "IMAGE",
+                "localized_name": "images",
+                "name": "images",
                 "type": "IMAGE",
                 "links": [
                   6127
                 ]
+              },
+              {
+                "localized_name": "audio",
+                "name": "audio",
+                "type": "AUDIO",
+                "links": [
+                  6132
+                ]
               }
             ],
             "properties": {
-              "Node name for S&R": "VAEDecode"
+              "Node name for S&R": "DaSiWaH3ContinuitySegmentDecode"
             }
           },
           {
@@ -3725,50 +3747,6 @@
             "bgcolor": "#533"
           },
           {
-            "id": 2782,
-            "type": "VAEDecodeAudio",
-            "pos": [
-              5040,
-              2840
-            ],
-            "size": [
-              230,
-              60
-            ],
-            "flags": {
-              "collapsed": false
-            },
-            "order": 38,
-            "mode": 0,
-            "inputs": [
-              {
-                "localized_name": "samples",
-                "name": "samples",
-                "type": "LATENT",
-                "link": 6160
-              },
-              {
-                "localized_name": "vae",
-                "name": "vae",
-                "type": "VAE",
-                "link": 6130
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "AUDIO",
-                "name": "AUDIO",
-                "type": "AUDIO",
-                "links": [
-                  6132
-                ]
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "VAEDecodeAudio"
-            }
-          },
-          {
             "id": 2592,
             "type": "BasicGuider",
             "pos": [
@@ -4062,8 +4040,7 @@
                 "name": "continuity_context",
                 "type": "DF_H3_CONTINUITY_CONTEXT",
                 "links": [
-                  6145,
-                  6179
+                  6145
                 ]
               }
             ],
@@ -4135,7 +4112,9 @@
             ],
             "properties": {
               "Node name for S&R": "SamplerCustomAdvanced"
-            }
+            },
+            "widgets_values": [],
+            "widgets_values_named": {}
           },
           {
             "id": 2749,
@@ -4318,17 +4297,17 @@
           },
           {
             "id": 2796,
-            "type": "DaSiWaH3ContinuityAppend",
+            "type": "DaSiWaH3ContinuitySegmentPrepare",
             "pos": [
-              3970,
+              3830,
               2740
             ],
             "size": [
-              310,
-              50
+              340,
+              70
             ],
             "flags": {},
-            "order": 39,
+            "order": 38,
             "mode": 0,
             "inputs": [
               {
@@ -4346,11 +4325,20 @@
             ],
             "outputs": [
               {
-                "localized_name": "cumulative_latent",
-                "name": "cumulative_latent",
+                "localized_name": "render_latent",
+                "name": "render_latent",
                 "type": "LATENT",
                 "links": [
                   6165
+                ]
+              },
+              {
+                "localized_name": "segment_context",
+                "name": "segment_context",
+                "type": "DF_H3_CONTINUITY_CONTEXT",
+                "links": [
+                  6179,
+                  6215
                 ]
               },
               {
@@ -4363,7 +4351,7 @@
               }
             ],
             "properties": {
-              "Node name for S&R": "DaSiWaH3ContinuityAppend"
+              "Node name for S&R": "DaSiWaH3ContinuitySegmentPrepare"
             }
           },
           {
@@ -4378,7 +4366,7 @@
               890
             ],
             "flags": {},
-            "order": 40,
+            "order": 39,
             "mode": 4,
             "inputs": [
               {
@@ -4491,8 +4479,7 @@
                 "name": "latent",
                 "type": "LATENT",
                 "links": [
-                  6159,
-                  6160
+                  6159
                 ]
               },
               {
@@ -4512,7 +4499,7 @@
               "minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
               1,
               0.2,
-              155019124544167,
+              1078369527722347,
               "randomize",
               1,
               0,
@@ -4526,14 +4513,16 @@
               false,
               4.3,
               1,
-              "burn_direction"
+              "burn_direction",
+              true,
+              5
             ],
             "widgets_values_named": {
               "scale": 2,
               "upscale_model": "minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors",
               "steps": 1,
               "denoise": 0.2,
-              "seed": 155019124544167,
+              "seed": 1078369527722347,
               "control_after_generate": "randomize",
               "cfg": 1,
               "sampler_name": 0,
@@ -4547,7 +4536,9 @@
               "spike_guard": false,
               "guard_sensitivity": 4.3,
               "guard_strength": 1,
-              "guard_mode": "burn_direction"
+              "guard_mode": "burn_direction",
+              "enforce_memory_budget": true,
+              "memory_reserve_pct": 5
             }
           },
           {
@@ -4562,7 +4553,7 @@
               280
             ],
             "flags": {},
-            "order": 41,
+            "order": 40,
             "mode": 4,
             "inputs": [
               {
@@ -4623,7 +4614,7 @@
               146
             ],
             "flags": {},
-            "order": 42,
+            "order": 41,
             "mode": 0,
             "inputs": [
               {
@@ -4686,7 +4677,7 @@
               130
             ],
             "flags": {},
-            "order": 43,
+            "order": 42,
             "mode": 4,
             "inputs": [
               {
@@ -4865,8 +4856,8 @@
             "bounding": [
               5030,
               2660,
-              250,
-              260
+              370,
+              190
             ],
             "color": "#3f789e",
             "flags": {}
@@ -5157,14 +5148,14 @@
             "id": 6130,
             "origin_id": 2585,
             "origin_slot": 0,
-            "target_id": 2782,
-            "target_slot": 1,
+            "target_id": 2671,
+            "target_slot": 2,
             "type": "VAE"
           },
           {
             "id": 6132,
-            "origin_id": 2782,
-            "origin_slot": 0,
+            "origin_id": 2671,
+            "origin_slot": 1,
             "target_id": -20,
             "target_slot": 3,
             "type": "AUDIO"
@@ -5198,14 +5189,6 @@
             "origin_id": 2810,
             "origin_slot": 0,
             "target_id": 2671,
-            "target_slot": 0,
-            "type": "LATENT"
-          },
-          {
-            "id": 6160,
-            "origin_id": 2810,
-            "origin_slot": 0,
-            "target_id": 2782,
             "target_slot": 0,
             "type": "LATENT"
           },
@@ -5259,8 +5242,8 @@
           },
           {
             "id": 6179,
-            "origin_id": 2701,
-            "origin_slot": 2,
+            "origin_id": 2796,
+            "origin_slot": 1,
             "target_id": 2810,
             "target_slot": 9,
             "type": "DF_H3_CONTINUITY_CONTEXT"
@@ -5268,7 +5251,7 @@
           {
             "id": 6200,
             "origin_id": 2796,
-            "origin_slot": 1,
+            "origin_slot": 2,
             "target_id": -20,
             "target_slot": 7,
             "type": "DF_H3_CONTINUITY_TICKET"
@@ -5706,6 +5689,14 @@
             "type": "*"
           },
           {
+            "id": 6215,
+            "origin_id": 2796,
+            "origin_slot": 1,
+            "target_id": 2671,
+            "target_slot": 3,
+            "type": "DF_H3_CONTINUITY_CONTEXT"
+          },
+          {
             "id": 5954,
             "origin_id": -10,
             "origin_slot": 26,
@@ -5740,7 +5731,7 @@
         }
       ]
     },
-    "frontendVersion": "1.55.14",
+    "frontendVersion": "1.55.17",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,
     "VHS_MetadataImage": true,
@@ -5750,10 +5741,10 @@
       "outputs": []
     },
     "ds": {
-      "scale": 0.9876597957769864,
+      "scale": 0.6763922783575322,
       "offset": [
-        -5902.115388644315,
-        -2511.791069007815
+        1030.1966052231887,
+        -178.1026189981647
       ]
     }
   },

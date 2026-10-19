@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Refresh the official DaSiWa H3 workflow to C-MMH3-33, including its native continuity segment preparation and decoding. Setup now checks for those nodes and requires the reviewed sample-exact export fixes from DaSiWa 0.5.28 or newer.
+- Retain the existing H3 selection key while refreshing source provenance and the displayed revision. Captures made from the previous workflow must be refreshed before running the new revision.
+
 ## v0.90.23-beta - Umbra Remote Mobile
 
 ### TL;DR - Setup After Updating
