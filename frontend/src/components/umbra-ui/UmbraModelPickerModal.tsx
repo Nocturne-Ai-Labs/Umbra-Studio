@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import {
   Check,
   Database,
@@ -526,7 +527,7 @@ export function UmbraModelPickerModal({
   const remoteMode = getUmbraRemoteMode();
   const isPhoneRemote = remoteMode === 'phone';
 
-  return (
+  const modal = (
     <div
       data-umbra-model-picker-backdrop
       className="fixed inset-0 z-[12200] flex items-center justify-center bg-black/78 p-4 backdrop-blur-sm"
@@ -738,6 +739,9 @@ export function UmbraModelPickerModal({
       </div>
     </div>
   );
+
+  // Escape workspace containment and any preview sheet that launched the picker.
+  return isPhoneRemote ? createPortal(modal, document.body) : modal;
 }
 
 export {

@@ -6410,6 +6410,18 @@ html[data-umbra-remote-mode="phone"] [data-umbra-model-manager-viewer-body] > di
   overflow: visible;
 }
 
+/* Suspend every phone generation preview while the shared model/LoRA browser
+   is mounted. Keep its content and open state intact for automatic restoration.
+   The picker portals to body, so hiding a preview cannot hide the picker. */
+html[data-umbra-remote-mode="phone"]:has([data-umbra-model-picker-backdrop]) [data-umbra-mobile-workspace-sheet] > :is(
+  [data-umbra-mobile-workspace-sheet-trigger],
+  [data-umbra-mobile-workspace-sheet-dock],
+  [data-umbra-mobile-workspace-sheet-backdrop],
+  [data-umbra-mobile-workspace-sheet-panel]
+) {
+  display: none !important;
+}
+
 html[data-umbra-remote-mode="phone"] [data-umbra-model-picker-backdrop] {
   align-items: stretch;
   padding: 0;
