@@ -1,3 +1,4 @@
+import { parsePromptJson } from '@/utils/promptText';
 import { normalizeMossPromptField, type MossPromptField } from '../../../shared/umbra-ui/mossPromptFields';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
 import {
@@ -171,6 +172,7 @@ export function inferModelFamily(modelName: string): string {
 }
 
 function cleanPromptText(value: string): string {
+  if (parsePromptJson(value)) return value;
   return value
     .replace(/\s*,\s*/g, ', ')
     .replace(/(?:,\s*){2,}/g, ', ')
@@ -448,14 +450,15 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   });
   const powerPrompterSegments = Array.isArray(powerPrompter.segments) ? powerPrompter.segments : [];
   const positivePromptWithSyntax = String(prompts.positive || powerPrompter.prompt || '').trim();
-  const syntaxLoras = extractPromptSyntaxLoras(
+  const syntaxLoras = parsePromptJson(positivePromptWithSyntax) ? [] : extractPromptSyntaxLoras(
     positivePromptWithSyntax || powerPrompterSegments.map((candidate) => {
       const segment = isRecord(candidate) ? candidate : {};
       return String(segment.text || '').trim();
     }).filter(Boolean).join(', '),
   );
-  const positivePrompt = cleanPromptText(positivePromptWithSyntax.replace(/<lora:[^>]+>/gi, ''));
-  const positivePromptSegments = powerPrompterSegments.length > 0
+  const structuredPrompt = !!parsePromptJson(positivePromptWithSyntax);
+  const positivePrompt = structuredPrompt ? positivePromptWithSyntax : cleanPromptText(positivePromptWithSyntax.replace(/<lora:[^>]+>/gi, ''));
+  const positivePromptSegments = structuredPrompt ? [{ text: positivePrompt, label: 'JSON prompt' }] : powerPrompterSegments.length > 0
     ? powerPrompterSegments
       .map((candidate): UmbraUiMediaPromptSegment | null => {
         const segment = isRecord(candidate) ? candidate : {};

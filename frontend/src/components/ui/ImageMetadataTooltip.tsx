@@ -1,3 +1,4 @@
+import { PromptText } from '@/components/ui/PromptText';
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -259,7 +260,7 @@ function TooltipContent({ position, prompts, params, metadata }: TooltipContentP
           <div className="tooltip-prompt-label positive">
             <i className="fas fa-plus-circle"></i> Positive
           </div>
-          <div className="tooltip-prompt-text">{prompts.positive}</div>
+          <div className="tooltip-prompt-text"><PromptText value={prompts.positive} /></div>
         </div>
       )}
 
@@ -268,7 +269,7 @@ function TooltipContent({ position, prompts, params, metadata }: TooltipContentP
           <div className="tooltip-prompt-label negative">
             <i className="fas fa-minus-circle"></i> Negative
           </div>
-          <div className="tooltip-prompt-text negative">{prompts.negative}</div>
+          <div className="tooltip-prompt-text negative"><PromptText value={prompts.negative} /></div>
         </div>
       )}
 

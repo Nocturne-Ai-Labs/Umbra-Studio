@@ -1,3 +1,4 @@
+import { PromptText } from '@/components/ui/PromptText';
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -135,9 +136,7 @@ export function MetadataViewer({
                       <Copy size={14} className={copiedField === 'positive' ? 'text-green-400' : ''} />
                     </button>
                   </div>
-                  <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                    {prompts.positive}
-                  </p>
+                  <div className="text-sm text-zinc-300 leading-relaxed"><PromptText value={prompts.positive} /></div>
                 </div>
               )}
 
@@ -157,9 +156,7 @@ export function MetadataViewer({
                       <Copy size={14} className={copiedField === 'negative' ? 'text-green-400' : ''} />
                     </button>
                   </div>
-                  <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
-                    {prompts.negative}
-                  </p>
+                  <div className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap"><PromptText value={prompts.negative} /></div>
                 </div>
               )}
             </div>

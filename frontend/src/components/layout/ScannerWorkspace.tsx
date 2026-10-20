@@ -1,9 +1,10 @@
+import { PromptText } from '@/components/ui/PromptText';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { FileJson, Copy, Download } from 'lucide-react';
 import { UmbraMediaInspectorFrame } from '@/components/umbra-ui/UmbraMediaInspectorFrame';
 import { useStore } from '@/store/useStore';
 import { loadAppSettings, subscribeToAppSettings } from '@/lib/appSettings';
-import { extractMetadataFromFile, extractMetadataFromPath, getComfyUiJsonText, getLegacyGenerationParametersText, getWorkflowJsonExport } from '@/utils/metadata';
+import { extractPrompts, extractMetadataFromFile, extractMetadataFromPath, getComfyUiJsonText, getLegacyGenerationParametersText, getWorkflowJsonExport } from '@/utils/metadata';
 
 interface ScanItem {
   id: string;
@@ -396,9 +397,7 @@ export function ScannerWorkspace({
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.45)]"></span>
                   Positive Prompt
                 </h4>
-                <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">
-                  {parsed.positive}
-                </p>
+                <div className="text-xs text-zinc-300 leading-relaxed"><PromptText value={parsed.positive} /></div>
               </div>
             )}
 
@@ -409,9 +408,7 @@ export function ScannerWorkspace({
                   <span className="h-1.5 w-1.5 rounded-full bg-red-300 shadow-[0_0_10px_rgba(252,165,165,0.45)]"></span>
                   Negative Prompt
                 </h4>
-                <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">
-                  {parsed.negative}
-                </p>
+                <div className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed"><PromptText value={parsed.negative} /></div>
               </div>
             )}
 
@@ -864,6 +861,10 @@ function parseGenerationParams(metadata: any) {
     result.negative = negativeLines.join('\n').trim() || null;
   }
 
+  const savedPrompts = extractPrompts(metadata);
+  result.positive = savedPrompts.positive || (typeof result.positive === 'string' ? result.positive : null);
+  result.negative = savedPrompts.negative || (typeof result.negative === 'string' ? result.negative : null);
+  result.hasParams ||= !!(result.positive || result.negative);
   return result;
 }
 
