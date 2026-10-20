@@ -1,3 +1,4 @@
+import { promptText } from './promptText';
 /**
  * Metadata extraction and manipulation utilities
  * Handles PNG metadata parsing, legacy parameter parsing, and metadata embedding.
@@ -339,12 +340,12 @@ export function extractPrompts(metadata: ImageMetadata): {
   positive: string | null;
   negative: string | null;
 } {
-  let positive = metadata.positive_prompt || null;
-  let negative = metadata.negative_prompt || null;
+  let positive = promptText(metadata.positive_prompt) || null;
+  let negative = promptText(metadata.negative_prompt) || null;
 
   if (metadata.umbra_power_prompter) {
     const powerPrompter = metadata.umbra_power_prompter;
-    if (!positive && powerPrompter.prompt !== undefined) positive = String(powerPrompter.prompt || '').trim() || null;
+    if (!positive && powerPrompter.prompt !== undefined) positive = promptText(powerPrompter.prompt).trim() || null;
     if (!negative && powerPrompter.negativePrompt !== undefined) negative = String(powerPrompter.negativePrompt || '').trim() || null;
     if (!negative && powerPrompter.negative_prompt !== undefined) negative = String(powerPrompter.negative_prompt || '').trim() || null;
   }
@@ -352,8 +353,8 @@ export function extractPrompts(metadata: ImageMetadata): {
   // Try CozyUI metadata
   if (metadata.cozyui) {
     const cozy = metadata.cozyui;
-    if (!positive && cozy.positive) positive = cozy.positive;
-    if (!negative && cozy.negative) negative = cozy.negative;
+    if (!positive && cozy.positive) positive = promptText(cozy.positive);
+    if (!negative && cozy.negative) negative = promptText(cozy.negative);
   }
 
   // Try legacy parameter text as fallback.
@@ -736,7 +737,7 @@ export async function extractMetadataFromFile(file: File, signal?: AbortSignal):
         if (file.type === 'image/png') {
           const original = await extractPngMetadata(file);
           signal?.throwIfAborted();
-          for (const key of ['parameters', 'workflow', 'prompt', 'umbra_api_workflow', 'umbra_power_prompter', 'umbra_inpaint', 'umbra_metadata', 'cozyui'] as const) {
+          for (const key of ['positive_prompt', 'negative_prompt', 'parameters', 'workflow', 'prompt', 'umbra_api_workflow', 'umbra_power_prompter', 'umbra_inpaint', 'umbra_metadata', 'cozyui'] as const) {
             if (metadata[key] === undefined && original?.[key] !== undefined) {
               Object.assign(metadata, { [key]: original[key] });
             }

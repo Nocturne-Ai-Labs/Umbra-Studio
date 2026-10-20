@@ -100,6 +100,7 @@ export const UMBRA_UI_PIPELINE_CAPABILITY_KEYS = [
   'resolution',
   'hiresFix',
   'flowShift',
+  'mossPromptEnhancer',
   'imageOutput',
   'detailerStages',
   'finalModelUpscale',
@@ -183,6 +184,7 @@ export interface UmbraUiInpaintCanvasCapabilities {
 }
 
 export interface UmbraUiPipelineCapabilities {
+  mossPromptEnhancer: UmbraUiPipelineControlCapability;
   flowShift: UmbraUiPipelineControlCapability;
   imageOutput: UmbraUiPipelineControlCapability;
   version: 1;
@@ -607,6 +609,7 @@ export function createUnsupportedUmbraUiPipelineCapabilities(
       values: modelSources,
     },
     flowShift: fallback(),
+    mossPromptEnhancer: unsupportedControl('Prompt enhancement requires a native MOSS pipeline.'),
     imageOutput: fallback(),
     negativePrompt: fallback(),
     loras: fallback(),
@@ -773,6 +776,7 @@ export function normalizeUmbraUiPipelineCapabilities(
       values: normalizedModelSources.length > 0 ? normalizedModelSources : fallback.modelSources.values,
     },
     flowShift: normalizeControlCapability(raw.flowShift, fallback.flowShift),
+    mossPromptEnhancer: normalizeControlCapability(raw.mossPromptEnhancer, fallback.mossPromptEnhancer),
     imageOutput: normalizeControlCapability(raw.imageOutput, fallback.imageOutput),
     negativePrompt: normalizeControlCapability(raw.negativePrompt, fallback.negativePrompt),
     loras: normalizeControlCapability(raw.loras, fallback.loras),

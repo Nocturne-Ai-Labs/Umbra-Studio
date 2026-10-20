@@ -1,3 +1,4 @@
+import { PromptText } from '@/components/ui/PromptText';
 'use client';
 
 import { stageMangaImages } from '@/features/manga/mangaMediaHandoff';
@@ -3326,7 +3327,7 @@ function GalleryMediaViewer({
         if (!response.ok || payload?.success === false) {
           throw new Error(String(payload?.error || `ComfyUI interrupt failed (${response.status})`));
         }
-        addToast({ type: 'success', message: 'Skipped current generation' });
+        addToast({ scope: 'generation', type: 'success', message: 'Skipped current generation' });
       }
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to skip current generation.' });
@@ -3983,14 +3984,14 @@ function GalleryMediaViewer({
                       />
                     </div>
                   ) : (
-                    <div data-i18n-skip="" className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300">{positivePrompt}</div>
+                    <div data-i18n-skip="" className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300"><PromptText value={positivePrompt} /></div>
                   )}
                 </div>
               ) : null}
               {negativePrompt ? (
                 <div className="mt-3">
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Negative</div>
-                  <div data-i18n-skip="" className="custom-scrollbar max-h-56 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-400">{negativePrompt}</div>
+                  <div data-i18n-skip="" className="custom-scrollbar max-h-56 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-400"><PromptText value={negativePrompt} /></div>
                 </div>
               ) : null}
               {workflowJsonExport ? (

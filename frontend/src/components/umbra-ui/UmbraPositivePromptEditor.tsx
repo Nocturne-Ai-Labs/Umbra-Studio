@@ -59,6 +59,8 @@ interface UmbraPositivePromptEditorProps {
   singleField?: boolean;
   headerAction?: React.ReactNode;
   mossSupported?: boolean;
+  renderFieldAction?: (segment: UmbraUiPromptSegment) => React.ReactNode;
+  compiledPromptOverride?: string;
 }
 
 const MAX_PROMPT_SEGMENTS = 24;
@@ -83,6 +85,8 @@ export function UmbraPositivePromptEditor({
   singleField = false,
   headerAction,
   mossSupported,
+  renderFieldAction,
+  compiledPromptOverride,
 }: UmbraPositivePromptEditorProps) {
   const mossEnabled = Boolean(mossSupported && sourceSegments.some(segment => segment.moss?.enabled));
   const segments = React.useMemo(
@@ -98,8 +102,8 @@ export function UmbraPositivePromptEditor({
   const [, forceHistoryRender] = React.useState(0);
   const segmentsRef = React.useRef(segments);
   segmentsRef.current = segments;
-  const compiledPrompt = React.useMemo(() => mossEnabled && mossSupported
-    ? compileMossPromptFields(segments) : compileUmbraUiPromptSegments(segments), [segments, mossEnabled, mossSupported]);
+  const compiledPrompt = React.useMemo(() => compiledPromptOverride ?? (mossEnabled && mossSupported
+    ? compileMossPromptFields(segments) : compileUmbraUiPromptSegments(segments)), [segments, mossEnabled, mossSupported, compiledPromptOverride]);
   const activeClasses = accent === 'rose'
     ? 'border-rose-300/35 bg-rose-500/[0.045]'
     : accent === 'fuchsia'
@@ -434,6 +438,7 @@ export function UmbraPositivePromptEditor({
               </div>
               {mossEnabled && <MossPromptFieldControls value={normalizeMossPromptField(segment.moss) || { enabled: true, purpose: 'scene', label: 'object', text: '' }}
                 onChange={moss => emitSegments(segments.map(field => field.id === segment.id ? { ...field, moss } : field))} />}
+              {renderFieldAction?.(segment)}
               <textarea
                 aria-label={singleField ? heading : `Prompt field ${index + 1}`}
                 ref={(node) => {

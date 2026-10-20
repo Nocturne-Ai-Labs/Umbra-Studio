@@ -2410,7 +2410,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       if (applyLocalPromptRemoval(requestId, [promptIndex])) {
         setQueuePaused(true);
         scheduleRecoverableQueueSnapshotPersist({ paused: true, clearWhenEmpty: true, delayMs: 50 });
-        showToast('Removed queued prompt', 'success');
+        showToast('Removed queued prompt', 'success', 'generation');
       }
       return;
     }
@@ -9099,7 +9099,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         appendToLiveQueue
           ? `Staged ${prompts.length} prompt${prompts.length === 1 ? '' : 's'} behind the active queue`
           : `Started queue with ${liveGroups.length} group${liveGroups.length === 1 ? '' : 's'} staged`,
-        'success'
+        'success', 'generation'
       );
       return true;
     } catch (error: any) {
@@ -9872,7 +9872,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         activeMeta?.targetBridgeId || effectiveQueueTargetBridgeId,
         activeMeta?.queueTargetType || selectedQueueTargetType
       );
-      showToast(targetPaused ? 'Queue paused after current prompt' : 'Queue resumed', 'success');
+      showToast(targetPaused ? 'Queue paused after current prompt' : 'Queue resumed', 'success', 'generation');
     } catch (error: any) {
       showToast(String(error?.message || `Could not confirm queue ${targetPaused ? 'pause' : 'resume'}.`), 'error');
     } finally {
@@ -9897,7 +9897,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       && ((!hasQueuedWork && !hasLiveBackendWork) || (hasCurrentBackendQueueSnapshot()
         && (!hasLiveBackendWork || backendQueueSnapshotPausedRef.current)))) {
       if (options?.silentIfAlreadyPaused !== true) {
-        showToast('Queue is paused for editing.', 'success');
+        showToast('Queue is paused for editing.', 'success', 'generation');
       }
       return true;
     }
@@ -9915,7 +9915,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       await requestQueuePauseToggleThroughWebSocket(true, targetBridgeId, queueTargetType);
       scheduleRecoverableQueueSnapshotPersist({ paused: true, clearWhenEmpty: false, delayMs: 50 });
       if (options?.silentIfAlreadyPaused !== true) {
-        showToast('Queue paused for editing. The current prompt can finish, then edited groups apply safely.', 'success');
+        showToast('Queue paused for editing. The current prompt can finish, then edited groups apply safely.', 'success', 'generation');
       }
       return true;
     } catch (error: any) {
@@ -10299,7 +10299,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         setPrompterPanelMode('queue-manager');
         showToast(
           `Updated live queue group with ${built.prompts.length} prompt${built.prompts.length === 1 ? '' : 's'}.`,
-          'success'
+          'success', 'generation'
         );
         return;
       }
@@ -10549,7 +10549,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         removedSourcePromptIndices.size > 0
           ? `Added edited group and cleared ${sourceRequestRemoved ? 'the old group' : `${removedSourcePromptIndices.size} old queued prompt${removedSourcePromptIndices.size === 1 ? '' : 's'}`}.`
           : `Added edited group with ${built.prompts.length} prompt${built.prompts.length === 1 ? '' : 's'} behind the source group.`,
-        'success'
+        'success', 'generation'
       );
     } catch (error: any) {
       logPowerPrompterDebug('queueEditor:addGroup:error', {
@@ -10636,7 +10636,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         queuePaused: effectiveQueuePaused,
         activeVisualHasLiveDispatch,
       }, { includeQueue: true });
-      showToast('Queue is already dispatching.', 'success');
+      showToast('Queue is already dispatching.', 'success', 'generation');
       return;
     }
     const orderedStagedRequestIds = getQueueRequestOrderFromStackItems(queueStackItemsRef.current)
@@ -10808,7 +10808,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         replaceLocalPausedQueueSnapshot(null);
         void writePersistedPausedQueueSnapshot(null);
         logPowerPrompterDebug('queue:start:admissionObservedWithoutAck', { requestIds: liveRequestIds }, { includeQueue: true });
-        showToast('Queue started; backend state confirmed it.', 'success');
+        showToast('Queue started; backend state confirmed it.', 'success', 'generation');
         return;
       }
       setQueuePaused(true);
@@ -10848,7 +10848,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       if (isLocalPausedQueueSnapshotActive()) {
         logQueueDebug('action:hardStop:localPaused', { action });
         clearLocalPausedQueueSnapshotState();
-        showToast(action === 'clear' ? 'Cleared paused queue.' : 'Canceled paused queue.', 'success');
+        showToast(action === 'clear' ? 'Cleared paused queue.' : 'Canceled paused queue.', 'success', 'generation');
         return;
       }
 
@@ -10902,7 +10902,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         setQueuePaused(false);
         setGenerationPreview((prev) => prev ? { ...prev, status: 'idle', updatedAt: Date.now() } : prev);
         scheduleGenerationPreviewHide();
-        showToast(action === 'clear' ? 'Cleared queue.' : 'Canceled queue.', 'success');
+        showToast(action === 'clear' ? 'Cleared queue.' : 'Canceled queue.', 'success', 'generation');
         return;
       }
 
@@ -10943,7 +10943,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           setQueuePaused(action === 'clear' && backendPausedAfterClear === true);
           setGenerationPreview((prev) => prev ? { ...prev, status: 'idle', updatedAt: Date.now() } : prev);
           scheduleGenerationPreviewHide();
-          showToast(action === 'clear' ? 'Cleared backend queue.' : 'Canceled backend queue.', 'success');
+          showToast(action === 'clear' ? 'Cleared backend queue.' : 'Canceled backend queue.', 'success', 'generation');
           return;
         }
         // Another client may have resumed this queue between our snapshot and
@@ -10968,7 +10968,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           if (typeof clearResult?.paused === 'boolean') backendPausedAfterClear = clearResult.paused;
           if (clearResult?.noMatchingWork === true) {
             if (backendPausedAfterClear !== null) setQueuePaused(backendPausedAfterClear);
-            showToast('Queue already finished. Updating Queue Manager.', 'success');
+            showToast('Queue already finished. Updating Queue Manager.', 'success', 'generation');
             return;
           }
         }
@@ -10982,7 +10982,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           // The backend kept live work paused. Its snapshot already contains
           // the remaining work, so do not clear or prune that local display.
           setQueuePaused(true);
-          showToast('Cleared future jobs. Remaining queue is paused.', 'success');
+          showToast('Cleared future jobs. Remaining queue is paused.', 'success', 'generation');
           return;
         }
 
@@ -11053,7 +11053,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         }
         setQueuePaused(backendPausedAfterClear ?? false);
         logQueueDebug('action:hardStop:clear:end', { activeRequestId: effectiveActiveRequestId, requestIds });
-        showToast(effectiveActiveRequestId ? 'Cleared future queued jobs. Current render will finish.' : 'Cleared queue.', 'success');
+        showToast(effectiveActiveRequestId ? 'Cleared future queued jobs. Current render will finish.' : 'Cleared queue.', 'success', 'generation');
       } else {
         if (!backendControlAcknowledged && requestIds.length > 0) {
           await requestBackendQueueControlThroughWebSocket(
@@ -11081,7 +11081,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
 
         if (interruptSucceeded) {
           logQueueDebug('action:hardStop:cancel:end', { requestIds, interruptSucceeded });
-          showToast('Canceled queue and active generation', 'success');
+          showToast('Canceled queue and active generation', 'success', 'generation');
         } else {
           logQueueDebug('action:hardStop:cancel:end_with_interrupt_error', { requestIds, interruptError });
           showToast(`Queue cleared, but active cancel failed: ${interruptError}`, 'error');
@@ -11125,7 +11125,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       if (isLocalPausedQueueSnapshotActive() && !hasLiveActiveWork) {
         logQueueDebug('action:cancelActive:localPaused');
         clearLocalPausedQueueSnapshotState();
-        showToast('Canceled paused queue', 'success');
+        showToast('Canceled paused queue', 'success', 'generation');
         return;
       }
       const activePromptIndex = activeRunningItem
@@ -11139,7 +11139,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         || (activeVisual?.requestId === activeRequestId ? activeVisual.promptIds[activePromptIndex] : '');
       await requestQueueInterruptActiveThroughWebSocket(activeRequestId, resolvedTargetBridgeId, resolvedQueueTargetType, promptId);
       logQueueDebug('action:cancelActive:end', { activeRequestId, activePromptIndex });
-      showToast('Canceled active job', 'success');
+      showToast('Canceled active job', 'success', 'generation');
     } catch (error: any) {
       logQueueDebug('action:cancelActive:error', { error: String(error?.message || error || '') });
       showToast(String(error?.message || 'Failed to cancel active generation.'), 'error');
@@ -11426,7 +11426,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         setQueuePaused(nextPaused);
         logQueueDebug('action:cancelQueueRequestGroup:activePruned', { requestId, pendingPromptIndices, removalRequestId });
         if (isLocalStagedRequest) {
-          showToast(`Cleared ${pendingPromptIndices.length} staged prompt${pendingPromptIndices.length === 1 ? '' : 's'} from Set ${clampQueueSetId(meta?.setId ?? 1)} group locally.`, 'success');
+          showToast(`Cleared ${pendingPromptIndices.length} staged prompt${pendingPromptIndices.length === 1 ? '' : 's'} from Set ${clampQueueSetId(meta?.setId ?? 1)} group locally.`, 'success', 'generation');
         }
         return;
       }
@@ -11437,7 +11437,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           'cancel', [requestId], meta?.targetBridgeId || effectiveQueueTargetBridgeId,
         );
         logQueueDebug('action:cancelQueueRequestGroup:confirmed', { requestId });
-        showToast(`Canceled Set ${clampQueueSetId(meta?.setId ?? 1)} group`, 'success');
+        showToast(`Canceled Set ${clampQueueSetId(meta?.setId ?? 1)} group`, 'success', 'generation');
         return;
       }
       const nextPaused = queuePausedAfterRemovingWork(
@@ -11449,7 +11449,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
       dropTrackedQueueRequestState([requestId]);
       setQueuePaused(nextPaused);
       logQueueDebug('action:cancelQueueRequestGroup:inactiveDropped', { requestId, isLocalStagedRequest, nextPaused });
-      showToast(`Cleared Set ${clampQueueSetId(meta?.setId ?? 1)} group from the staged list locally`, 'success');
+      showToast(`Cleared Set ${clampQueueSetId(meta?.setId ?? 1)} group from the staged list locally`, 'success', 'generation');
     } catch (error: any) {
       intentionallyCanceledQueueRequestIdsRef.current.delete(requestId);
       pendingQueueCancelScopeRef.current = [];
@@ -12027,7 +12027,7 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           promptCount: prompts.length,
           ageMs: now - lastSubmittedAt,
         });
-        showToast('Ignored duplicate queue submit.', 'success');
+        showToast('Ignored duplicate queue submit.', 'success', 'generation');
         return;
       }
       recentQueueSubmissionSignaturesRef.current.set(submissionSignature, now);

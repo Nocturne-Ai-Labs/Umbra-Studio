@@ -14,3 +14,10 @@ export async function saveUmbraCanvasRequiredRevision<T extends CanvasProjectRev
   if (!saved || (saved.id === required.id && saved.revision >= required.revision) || !canRetry()) return saved;
   return save();
 }
+
+/** Backend normalization can reorder object keys without changing the draft. */
+export function areCanvasDraftSettingsEqual(left: unknown, right: unknown): boolean {
+  const canonical = (value: unknown) => JSON.stringify(value, (_key, entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? Object.fromEntries(Object.entries(entry).sort(([a], [b]) => a.localeCompare(b))) : entry);
+  return canonical(left) === canonical(right);
+}

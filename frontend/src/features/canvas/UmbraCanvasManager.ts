@@ -29,6 +29,8 @@ interface UmbraCanvasManagerCallbacks {
   }>) => void;
   onCropRasterEntity?: (entityId: string, sourceRevision: number, rect: UmbraCanvasRect) => void;
   onCreateLayoutRegion?: (rect: UmbraCanvasRect) => void;
+  onTransformLayoutRegion?: (id: string, rect: UmbraCanvasRect) => void;
+  onSelectLayoutRegion?: (id: string) => void;
   onGenerationBboxChange: (bbox: UmbraCanvasRect) => void;
   onViewportChange: (viewport: UmbraCanvasViewport) => void;
   onMaskStroke: (entityId: string, stroke: UmbraCanvasMaskStroke) => void;
@@ -225,6 +227,9 @@ export class UmbraCanvasManager {
   private samplingPreviewToken = 0;
   private tool: UmbraCanvasTool = 'select';
   private mossLayout = false;
+  private selectedLayoutRegionId = '';
+  private layoutFieldLabels: Record<string, string> = {};
+
   private spacePressed = false;
   private panning = false;
   private panPointerStart: UmbraCanvasViewport | null = null;
@@ -309,9 +314,31 @@ export class UmbraCanvasManager {
     this.bboxRect.draggable(bboxActive);
     this.bboxTransformer.visible(bboxActive);
     this.entityTransformer.visible(tool === 'select');
+    this.renderLayoutRegions();
     for (const node of this.stage.find('.drawable-entity')) node.listening(tool === 'select');
     for (const node of this.stage.find('.mask-entity')) node.listening(tool === 'select');
     this.updateCursor();
+    this.stage.batchDraw();
+  }
+
+  setLayoutFieldLabels(labels: Record<string, string>): void {
+    if (JSON.stringify(labels) === JSON.stringify(this.layoutFieldLabels)) return;
+    this.layoutFieldLabels = labels;
+    this.renderLayoutRegions();
+    this.stage.batchDraw();
+  }
+
+  locateLayoutRegion(id: string): void {
+    const region = this.document?.layoutRegions?.find(entry => entry.id === id);
+    if (!region || !this.mossLayout) return;
+    this.selectedLayoutRegionId = id;
+    this.setTool('select');
+    this.callbacks.onSelectLayoutRegion?.(id);
+    this.updateViewport({ ...this.viewport,
+      x: this.stage.width() / 2 - (region.x + region.width / 2) * this.viewport.scale,
+      y: this.stage.height() / 2 - (region.y + region.height / 2) * this.viewport.scale,
+    }, true);
+    this.renderLayoutRegions();
     this.stage.batchDraw();
   }
 
@@ -528,12 +555,47 @@ export class UmbraCanvasManager {
     this.viewport = project.viewport;
     this.applyViewport();
     this.renderBbox(project.generationBbox);
-    this.layoutGroup.destroyChildren();
-    (project.layoutRegions || []).forEach((region, index) => {
-      this.layoutGroup.add(new Konva.Rect({ ...region, stroke: '#a78bfa', strokeWidth: 2 / this.viewport.scale, dash: [6 / this.viewport.scale, 4 / this.viewport.scale], fill: '#a78bfa0c' }));
-      this.layoutGroup.add(new Konva.Text({ x: region.x + 4, y: region.y + 4, text: this.mossLayout ? `${region.label === 'text' ? 'Text' : 'Object'} ${index + 1}` : '<obj_' + (index + 1) + '>', fill: '#ddd6fe', fontSize: 13 / this.viewport.scale }));
-    });
+    this.renderLayoutRegions();
     void this.renderEntities(project);
+  }
+
+  private renderLayoutRegions(): void {
+    this.layoutGroup.destroyChildren();
+    if (!this.document) return;
+    const editable = this.mossLayout && this.tool === 'select';
+    this.layoutGroup.listening(editable);
+    const accent = getComputedStyle(this.stage.container()).getPropertyValue('--umbra-accent').trim() || '#ff3860';
+    const transformer = new Konva.Transformer({ rotateEnabled: false, flipEnabled: false, keepRatio: false, padding: 2,
+      borderStroke: accent, anchorStroke: accent, anchorFill: '#09090b', anchorSize: 8 });
+    (this.document.layoutRegions || []).forEach((region, index) => {
+      const rect = new Konva.Rect({ x: region.x, y: region.y, width: region.width, height: region.height,
+        name: 'layout-region', regionId: region.id, stroke: region.id === this.selectedLayoutRegionId ? accent : '#a1a1aa', strokeWidth: 2 / this.viewport.scale,
+        dash: [6 / this.viewport.scale, 4 / this.viewport.scale], fill: 'rgba(255,255,255,0.025)', draggable: editable, listening: editable });
+      rect.on('mouseenter', () => { this.stage.container().style.cursor = 'move'; });
+      rect.on('mouseleave', () => this.updateCursor());
+      rect.on('pointerdown', (event) => {
+        event.cancelBubble = true;
+        this.selectedLayoutRegionId = region.id;
+        this.callbacks.onSelectLayoutRegion?.(region.id);
+        for (const box of this.layoutGroup.find('.layout-region')) (box as Konva.Rect).stroke(box.getAttr('regionId') === region.id ? accent : '#a1a1aa');
+        this.entityTransformer.visible(false);
+        transformer.nodes([rect]);
+        this.stage.batchDraw();
+      });
+      const commit = () => this.callbacks.onTransformLayoutRegion?.(region.id, {
+        x: Math.round(rect.x()), y: Math.round(rect.y()),
+        width: Math.max(1, Math.round(rect.width() * rect.scaleX())),
+        height: Math.max(1, Math.round(rect.height() * rect.scaleY())),
+      });
+      rect.on('dragend transformend', commit);
+      this.layoutGroup.add(rect);
+      this.layoutGroup.add(new Konva.Text({ x: region.x + 4, y: region.y + 4,
+        text: this.mossLayout ? `${index + 1} · ${region.promptFieldId ? this.layoutFieldLabels[region.promptFieldId] || 'Missing field' : 'Unlinked'}` : '<obj_' + (index + 1) + '>',
+        fill: '#e4e4e7', fontSize: 12 / this.viewport.scale, width: Math.max(40, region.width - 8), wrap: 'none', ellipsis: true, listening: false }));
+      if (editable && region.id === this.selectedLayoutRegionId) transformer.nodes([rect]);
+    });
+    if (editable) this.layoutGroup.add(transformer);
+    else transformer.destroy();
   }
 
   private bindEvents(): void {
@@ -1069,7 +1131,7 @@ export class UmbraCanvasManager {
       group.scale({ x: this.viewport.scale, y: this.viewport.scale });
     }
     for (const node of this.layoutGroup.getChildren()) {
-      if (node instanceof Konva.Text) node.fontSize(13 / this.viewport.scale);
+      if (node instanceof Konva.Text) node.fontSize(12 / this.viewport.scale);
       if (node instanceof Konva.Rect) node.strokeWidth(2 / this.viewport.scale).dash([6 / this.viewport.scale, 4 / this.viewport.scale]);
     }
     this.drawGrid();

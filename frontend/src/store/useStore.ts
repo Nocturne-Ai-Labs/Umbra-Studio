@@ -175,7 +175,7 @@ interface AppState {
 
   // Toast Notifications
   toast: ToastNotification | null;
-  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  showToast: (message: string, type?: 'success' | 'error' | 'info', scope?: 'generation') => void;
   clearToast: () => void;
 
   // API Bridge Actions
@@ -478,9 +478,9 @@ export const useStore = create<AppState>()(
         })),
 
         toast: null,
-        showToast: (message, type = 'info') => {
+        showToast: (message, type = 'info', scope) => {
           if (get().appSettings.enableToasts === false && type !== 'error') return;
-          useToastStore.getState().addToast({ message, type });
+          useToastStore.getState().addToast({ message, type, scope });
         },
         clearToast: () => {
           set({ toast: null });

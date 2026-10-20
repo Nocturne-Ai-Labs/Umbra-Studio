@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.90.29-beta - MOSS Prompt Enhancement and Edit Layout Polish
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update Studio through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then reopen Studio and reload Remote.
+- To use the optional **MOSS prompt enhancer**, install/update **ComfyUI through Umbra Setup**, then restart ComfyUI through Umbra. This installs the bundled Umbra MOSS node; the enhancer also requires ComfyUI's native TextGenerate support. It reuses your MOSS text encoder, needs no additional model download, and starts disabled.
+- Existing MOSS generation remains available with enhancement disabled. JSON layout boxes apply only in **Edit**, not regular generation.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### MOSS Prompts and Composition
+
+- Shared MOSS image workflow controls now include optional local prompt enhancement, including Manga Studio and supported Canvas/Edit workflows. Enhanced descriptions retain structured labels, exact rendered text and placement metadata.
+- Link an Edit JSON subject field to a composition box, locate or redraw its box, and move or resize it directly. Linked subjects retain their identity when fields are reordered; invalid, duplicate or out-of-frame assignments produce actionable feedback.
+- Subject cards, compact geometry controls and canvas labels make placement easier to follow. Prompt-only edits, field configuration and linked boxes survive project saves, autosave, copies and portable exports.
+- Gallery and Metadata Scanner display JSON prompts with readable formatting. Editing transfers preserve structured prompts instead of flattening them.
+
+### Remote Feedback
+
+- Phone Remote no longer displays routine generation queue/start/complete/cancel popups. Errors and actionable notifications remain visible.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Prompt-only MOSS Edit changes now mark drafts dirty and save correctly across autosave and project transitions.
+- Fixed: Draft recovery, copies and exports retain the matching prompt fields and composition links.
+- Fixed: Invalid JSON bounding boxes and stale or duplicate subject links are rejected before generation.
+- Improved: Structured prompts remain readable in Gallery and Metadata Scanner and intact during editing transfers.
+- Improved: MOSS enhancement is optional and reports missing prerequisites with clear Setup guidance.
+- Improved: Mobile generation feedback is quieter while retaining errors and actions.
+
 ## v0.90.28-beta - Remote Generation Connection Hotfix
 
 **Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**

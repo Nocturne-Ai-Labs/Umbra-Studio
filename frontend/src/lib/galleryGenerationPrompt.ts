@@ -1,3 +1,4 @@
+import { parsePromptJson } from '@/utils/promptText';
 import type { ImageMetadata } from '@/utils/metadata';
 import { buildUmbraUiMediaGenerationSnapshot } from '@/lib/umbraUiMediaHandoff';
 import { buildUmbraUiLoraSyntax } from '@/lib/umbraUiModels';
@@ -78,6 +79,10 @@ export function buildGalleryGenerationPromptDetails(
       variantLabel: segment.variantName,
       promptText: segment.text,
     }));
+
+  if (snapshot?.positivePrompt && parsePromptJson(snapshot.positivePrompt)) {
+    return { ppuid: normalizedText(powerPrompter.ppuid), blocks: [] };
+  }
 
   const promptText = blocks.map((block) => block.promptText).join(', ');
   const loraSyntax = (snapshot?.loras || [])

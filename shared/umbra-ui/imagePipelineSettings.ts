@@ -4,6 +4,7 @@ export interface ImagePipelineSettings {
   flowShift: number | null;
   outputFormat: 'png' | 'jpeg';
   outputQuality: number;
+  mossPromptEnhancer: boolean;
 }
 
 export const IMAGE_FLOW_SHIFT_CLASSES = ['ModelSamplingAuraFlow', 'ModelSamplingSD3'] as const;
@@ -17,6 +18,7 @@ export function normalizeImagePipelineSettings(value: unknown): ImagePipelineSet
     flowShift: shift !== null && Number.isFinite(shift) && shift > 0 ? shift : null,
     outputFormat: raw.outputFormat === 'jpeg' ? raw.outputFormat : 'png',
     outputQuality: Number.isFinite(quality) ? Math.max(1, Math.min(100, Math.round(quality))) : 90,
+    mossPromptEnhancer: raw.mossPromptEnhancer === true,
   };
 }
 

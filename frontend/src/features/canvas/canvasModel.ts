@@ -1,3 +1,4 @@
+import type { MossPromptField } from '../../../../shared/umbra-ui/mossPromptFields';
 import type { ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 import type { Flux3LayoutRegion } from '../../../../shared/umbra-ui/flux3Edit';
 import type {
@@ -303,6 +304,7 @@ export interface UmbraCanvasGenerationSettingsSnapshot {
     variantId?: string;
     variantName?: string;
     preserveRepeatedTerms?: true;
+    moss?: MossPromptField;
   }>;
   negativePrompt: string;
   loras: Array<Record<string, unknown>>;

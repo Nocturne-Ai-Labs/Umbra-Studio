@@ -1,8 +1,10 @@
+import { getMossLayoutFieldName } from '@/lib/mossLayoutPresentation';
 import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import type { ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 import { Flux3LayoutControls } from './Flux3LayoutControls';
 import { flux3LayoutElements } from '../../../../shared/umbra-ui/flux3Edit';
-import { compileMossLayoutPrompt } from '../../../../shared/umbra-ui/mossLayout';
+import { compileMossPromptFields } from '../../../../shared/umbra-ui/mossPromptFields';
+import { bindMossLayoutFields, compileMossLayoutPrompt } from '../../../../shared/umbra-ui/mossLayout';
 import { normalizeUmbraUiModelFamilyKey } from '../../../../shared/umbra-ui/pipelineTypes';
 'use client';
 
@@ -14,6 +16,7 @@ import { useInpaintSamplingPreview } from '@/hooks/useInpaintSamplingPreview';
 import { useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
 import { isProtectedLivePreview } from '@/lib/livePreviewPrivacy';
 import {
+  Pencil,
   ArrowDown,
   ArrowUp,
   BoxSelect,
@@ -161,7 +164,7 @@ import {
 } from './canvasModel';
 import { composeUmbraCanvasAcceptedReplacementBlob, composeUmbraCanvasCutoutBlob, composeUmbraCanvasDrawableRegionBlob, composeUmbraCanvasGenerationRegion, composeUmbraCanvasMaskBlob, composeUmbraCanvasProjectThumbnail, composeUmbraCanvasRasterBlob, composeUmbraCanvasRasterCropBlob, composeUmbraCanvasRasterSourceBlob, type UmbraCanvasCompositeResult } from './canvasCompositor';
 import { releaseUmbraCanvasImageResource, UmbraCanvasManager, type UmbraCanvasTool } from './UmbraCanvasManager';
-import { saveUmbraCanvasRequiredRevision } from './canvasProjectSaveGate';
+import { areCanvasDraftSettingsEqual, saveUmbraCanvasRequiredRevision } from './canvasProjectSaveGate';
 import { useUmbraCanvasStore } from './useUmbraCanvasStore';
 
 interface UmbraCanvasWorkspaceProps {
@@ -481,8 +484,17 @@ export function UmbraCanvasWorkspace({
   const [mediaImportBusy, setMediaImportBusy] = React.useState(false);
   const [compactPanel, setCompactPanel] = React.useState<'generation' | 'inpaint' | 'layers' | ''>('');
   const mossLayout = editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage';
+  const hasMossPromptContent = mossLayout && promptSegments.some(field => field.text.trim() || field.moss?.text.trim());
+  const hasEditableProjectContent = project.entities.length > 0 || !!project.layoutRegions?.length || hasMossPromptContent;
+  const mossDraftDirty = mossLayout && (hasMossPromptContent || !!project.generation.settings)
+    && (!areCanvasDraftSettingsEqual(promptSegments, project.generation.settings?.promptSegments || [])
+      || negativePrompt !== (project.generation.settings?.negativePrompt || ''));
+
+  const [selectedLayoutRegionId, setSelectedLayoutRegionId] = React.useState('');
+  const drawingMossFieldRef = React.useRef<string | null>(null);
   const mossLayoutRef = React.useRef(mossLayout);
   mossLayoutRef.current = mossLayout;
+  React.useEffect(() => { drawingMossFieldRef.current = null; setSelectedLayoutRegionId(''); }, [project.id, mossLayout]);
   const layoutAvailable = mossLayout || (editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'flux3');
   React.useEffect(() => {
     if (editingWorkspace) setCompactPanel('generation');
@@ -589,6 +601,7 @@ export function UmbraCanvasWorkspace({
   const consumedHandoffAtRef = React.useRef(0);
   const mediaImportGateRef = React.useRef(new UmbraCanvasMediaImportGate());
   const recoveredProjectRef = React.useRef(false);
+  const initialRecoveryRef = React.useRef(false);
   const projectRef = React.useRef(project);
   projectRef.current = project;
   jobRef.current = job;
@@ -722,7 +735,15 @@ export function UmbraCanvasWorkspace({
       onGenerationBboxChange: setGenerationBbox,
       onCreateLayoutRegion: (rect) => {
         const current = useUmbraCanvasStore.getState().present;
-        setLayoutRegions([...(current.layoutRegions || []), { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: crypto.randomUUID(), description: '', ...(mossLayoutRef.current ? { label: 'object' as const } : {}) }]);
+        const fieldId = mossLayoutRef.current ? drawingMossFieldRef.current : null;
+        const existing = fieldId ? current.layoutRegions?.find(region => region.promptFieldId === fieldId) : undefined;
+        setLayoutRegions([...(current.layoutRegions || []).filter(region => !existing || region.id !== existing.id), { ...(existing || {}), ...(fieldId ? { promptFieldId: fieldId } : {}), x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: existing?.id || crypto.randomUUID(), description: existing?.description || '', ...(mossLayoutRef.current ? { label: 'object' as const } : {}) }]);
+        if (fieldId) { drawingMossFieldRef.current = null; setTool('select'); }
+      },
+      onSelectLayoutRegion: setSelectedLayoutRegionId,
+      onTransformLayoutRegion: (id, rect) => {
+        const current = useUmbraCanvasStore.getState().present;
+        setLayoutRegions((current.layoutRegions || []).map(region => region.id === id ? { ...region, ...rect } : region));
       },
       onViewportChange: setViewport,
       onMaskStroke: addMaskStroke,
@@ -795,6 +816,12 @@ export function UmbraCanvasWorkspace({
   React.useEffect(() => {
     managerRef.current?.setMossLayout(mossLayout);
   }, [mossLayout]);
+
+  React.useEffect(() => {
+    managerRef.current?.setLayoutFieldLabels(Object.fromEntries(promptSegments
+      .filter(field => field.moss?.enabled && field.moss.purpose === 'item')
+      .map(field => [field.id, getMossLayoutFieldName(field, promptSegments)])));
+  }, [promptSegments]);
 
   React.useEffect(() => {
     managerRef.current?.setLayerSnappingEnabled(layerSnappingEnabled);
@@ -935,6 +962,7 @@ export function UmbraCanvasWorkspace({
           setPreviewStageId(stages[nextIndex].id);
         }
         if (key === 'escape') {
+          drawingMossFieldRef.current = null;
           managerRef.current?.cancelShapeDrawing();
           setTool('select');
           setPreviewStageId('');
@@ -975,10 +1003,36 @@ export function UmbraCanvasWorkspace({
     }
   }, [showToast]);
 
+  const captureMossDraftRef = React.useRef<() => void>(() => undefined);
+  captureMossDraftRef.current = () => {
+    if (!active || !mossLayout || initialRecoveryRef.current) return;
+    const current = useUmbraCanvasStore.getState().present;
+    if (!current.generation.settings && !current.entities.length && !current.layoutRegions?.length && !hasMossPromptContent) return;
+    const snapshot: UmbraCanvasGenerationSettingsSnapshot = {
+      editArea: current.editArea || 'whole', layoutRegions: structuredClone(current.layoutRegions || []),
+      modelFamily, modelSource, checkpointName, imagePipeline, workflowResources: { ...workflowResources },
+      promptSegments: structuredClone(promptSegments), negativePrompt,
+      loras: structuredClone(loras) as unknown as Array<Record<string, unknown>>,
+      clipSkip: Number(clipSkip) || 1, seed, seedMode, seedIncrement, steps: Number(steps) || 20,
+      cfg: cfg.trim() && Number.isFinite(Number(cfg)) ? Number(cfg) : 1,
+      samplerName: resolveUmbraCanvasGenerationChoice(capabilities.sampler, samplerName, 'euler'),
+      scheduler: resolveUmbraCanvasGenerationChoice(capabilities.scheduler, scheduler, 'normal'),
+      denoise, samples: resolveUmbraCanvasSampleCount(samples),
+      tiledVae: { ...tiledVae } as unknown as Record<string, unknown>,
+      hiresFix: { ...hiresFix } as unknown as Record<string, unknown>,
+      detailerPipeline: structuredClone(detailerPipeline) as unknown as Array<Record<string, unknown>>,
+      maskGrow, maskFeather, contextPadding, colorMatch, differentialStrength,
+      softInpaintEnabled, softInpaintPreservation, softInpaintTransitionContrast, softInpaintMaskInfluence,
+    };
+    if (!areCanvasDraftSettingsEqual(current.generation.settings, snapshot)) setGenerationSettings(snapshot);
+  };
   const projectSavePromiseRef = React.useRef<Promise<UmbraCanvasProjectDocument | null> | null>(null);
   const projectTransitionRef = React.useRef(0);
   const deletingProjectIdsRef = React.useRef(new Set<string>());
-  const saveProject = React.useCallback((notify = true): Promise<UmbraCanvasProjectDocument | null> => {
+  const saveProject = React.useCallback((notify = true, captureDraft = notify): Promise<UmbraCanvasProjectDocument | null> => {
+    const initial = useUmbraCanvasStore.getState().present;
+    if (deletingProjectIdsRef.current.has(initial.id) || conflictedProjectId === initial.id) return Promise.resolve(null);
+    if (captureDraft && !projectSavePromiseRef.current) captureMossDraftRef.current();
     const current = useUmbraCanvasStore.getState().present;
     if (deletingProjectIdsRef.current.has(current.id)) return Promise.resolve(null);
     if (projectSavePromiseRef.current) return projectSavePromiseRef.current;
@@ -1014,13 +1068,14 @@ export function UmbraCanvasWorkspace({
 
   const prepareProjectTransition = React.useCallback(async () => {
     const token = ++projectTransitionRef.current;
+    captureMossDraftRef.current();
     const current = useUmbraCanvasStore.getState().present;
     const isCurrent = () => {
       const latest = useUmbraCanvasStore.getState().present;
       return token === projectTransitionRef.current && latest.id === current.id && latest.revision === current.revision;
     };
     if (current.entities.length || current.revision > 0) {
-      const saved = await saveUmbraCanvasRequiredRevision(current, () => saveProject(), isCurrent);
+      const saved = await saveUmbraCanvasRequiredRevision(current, () => saveProject(false, false), isCurrent);
       if (!saved || saved.id !== current.id || saved.revision !== current.revision) return null;
     }
     if (!isCurrent()) return null;
@@ -1028,17 +1083,19 @@ export function UmbraCanvasWorkspace({
   }, [saveProject]);
 
   const exportProject = React.useCallback(async () => {
-    if (archiving || project.entities.length === 0) return;
+    if (archiving || !hasEditableProjectContent) return;
     setArchiving(true);
     try {
-      downloadUmbraCanvasWorkspaceArchive(await exportUmbraCanvasWorkspaceArchive(project), project.name);
+      captureMossDraftRef.current();
+      const current = useUmbraCanvasStore.getState().present;
+      downloadUmbraCanvasWorkspaceArchive(await exportUmbraCanvasWorkspaceArchive(current), current.name);
       showToast('Portable Canvas project exported.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'The Canvas project could not be exported.', 'error');
     } finally {
       setArchiving(false);
     }
-  }, [archiving, project, showToast]);
+  }, [archiving, hasEditableProjectContent, showToast]);
 
   const importProjectArchive = React.useCallback(async (file: File) => {
     if (archiving) return;
@@ -1068,11 +1125,11 @@ export function UmbraCanvasWorkspace({
   }, [archiving, onRestoreGenerationSettings, prepareProjectTransition, replaceProject, resetGenerationTracking, showToast]);
 
   React.useEffect(() => {
-    if (conflictedProjectId === project.id || (project.entities.length === 0 && project.revision === 0)
-      || (lastSavedProject?.id === project.id && lastSavedProject.revision === project.revision) || saving) return;
-    const timer = window.setTimeout(() => void saveProject(false), 30_000);
+    if (initialRecoveryRef.current || conflictedProjectId === project.id || !active || (project.entities.length === 0 && project.revision === 0 && !mossDraftDirty)
+      || (lastSavedProject?.id === project.id && lastSavedProject.revision === project.revision && !mossDraftDirty) || saving) return;
+    const timer = window.setTimeout(() => void saveProject(false, true), 30_000);
     return () => window.clearTimeout(timer);
-  }, [conflictedProjectId, lastSavedProject, project.id, project.entities.length, project.revision, saveProject, saving]);
+  }, [active, conflictedProjectId, lastSavedProject, mossDraftDirty, promptSegments, negativePrompt, project.id, project.entities.length, project.revision, saveProject, saving]);
 
   const openProjectBrowser = React.useCallback(() => {
     setProjectBrowserOpen(true);
@@ -1271,12 +1328,13 @@ export function UmbraCanvasWorkspace({
   }, [mediaImportBusy, onMediaHandoffConsumed, pendingMediaImport]);
 
   const forkProject = React.useCallback(async () => {
-    if (forkingProject || saving || project.entities.length === 0) return;
+    if (forkingProject || saving || !hasEditableProjectContent) return;
     if (useUmbraCanvasStore.getState().present.generation.pending.length > 0) {
       showToast('Wait for pending Canvas generations to finish before copying this project.', 'error');
       return;
     }
     setForkingProject(true);
+    captureMossDraftRef.current();
     const current = useUmbraCanvasStore.getState().present;
     try {
       let forked: UmbraCanvasProjectDocument;
@@ -1312,7 +1370,7 @@ export function UmbraCanvasWorkspace({
     } finally {
       setForkingProject(false);
     }
-  }, [conflictedProjectId, forkingProject, onRestoreGenerationSettings, project.entities.length, refreshProjects, replaceProject, resetGenerationTracking, saveProject, saving, showToast]);
+  }, [conflictedProjectId, forkingProject, hasEditableProjectContent, onRestoreGenerationSettings, refreshProjects, replaceProject, resetGenerationTracking, saveProject, saving, showToast]);
 
   React.useEffect(() => {
     if (!active || recoveredProjectRef.current) return;
@@ -1331,7 +1389,8 @@ export function UmbraCanvasWorkspace({
         // A blank workspace remains usable when recent-project recovery fails.
       }
     };
-    void recover();
+    initialRecoveryRef.current = true;
+    void recover().finally(() => { initialRecoveryRef.current = false; });
   }, [active, loadProject]);
 
   const deleteProject = React.useCallback(async (summary: UmbraCanvasWorkspaceProjectSummary) => {
@@ -1366,10 +1425,10 @@ export function UmbraCanvasWorkspace({
   }, [newProject, refreshProjects, resetGenerationTracking, showToast, submitting]);
 
   const createRestorePoint = React.useCallback(async () => {
-    if (restorePointBusy || saving || project.entities.length === 0) return;
+    if (restorePointBusy || saving || !hasEditableProjectContent) return;
     setRestorePointBusy(true);
     try {
-      const saved = await saveProject(false);
+      const saved = await saveProject(false, true);
       if (!saved) return;
       const fallbackName = `Restore ${new Date().toLocaleString()}`;
       await createUmbraCanvasWorkspaceRestorePoint(saved.id, restorePointName.trim() || fallbackName);
@@ -1381,14 +1440,14 @@ export function UmbraCanvasWorkspace({
     } finally {
       setRestorePointBusy(false);
     }
-  }, [project.entities.length, refreshRestorePoints, restorePointBusy, restorePointName, saveProject, saving, showToast]);
+  }, [hasEditableProjectContent, refreshRestorePoints, restorePointBusy, restorePointName, saveProject, saving, showToast]);
 
   const restoreFromRestorePoint = React.useCallback(async (restorePoint: UmbraCanvasWorkspaceRestorePointSummary) => {
     if (restorePointBusy) return;
     if (!window.confirm(`Restore "${restorePoint.name}"? The current document will be replaced, but this restore point remains available.`)) return;
     setRestorePointBusy(true);
     try {
-      const saved = await saveProject(false);
+      const saved = await saveProject(false, true);
       if (!saved) return;
       const stillCurrent = () => {
         const current = useUmbraCanvasStore.getState().present;
@@ -1672,7 +1731,10 @@ export function UmbraCanvasWorkspace({
       closePreparedRegion();
       return;
     }
-    const compiledPrompt = compileUmbraUiPromptSegments(promptSegments);
+    const compiledPrompt = mossLayout && promptSegments.some(segment => segment.moss?.enabled)
+      ? compileMossPromptFields(promptSegments)
+      : mossLayout && promptSegments.length === 1 && promptSegments[0].text.trim().startsWith('{')
+        ? promptSegments[0].text.trim() : compileUmbraUiPromptSegments(promptSegments);
     if (!compiledPrompt.trim()) {
       showToast('Enter a Canvas prompt before generating.', 'error');
       closePreparedRegion();
@@ -1695,7 +1757,8 @@ export function UmbraCanvasWorkspace({
       const queuedSamples = resolveUmbraCanvasSampleCount(samples);
       const queuedSamplerName = resolveUmbraCanvasGenerationChoice(capabilities.sampler, samplerName, 'euler');
       const queuedScheduler = resolveUmbraCanvasGenerationChoice(capabilities.scheduler, scheduler, 'normal');
-      const layoutRegions = layoutAvailable ? structuredClone(submissionProject.layoutRegions || []) : [];
+      const layoutRegions = mossLayout ? bindMossLayoutFields(submissionProject.layoutRegions || [], promptSegments)
+        : layoutAvailable ? structuredClone(submissionProject.layoutRegions || []) : [];
       if (mossLayout) compileMossLayoutPrompt(compiledPrompt, layoutRegions, preparedRegion.bbox, preparedRegion);
       else if (layoutRegions.length) flux3LayoutElements(layoutRegions, preparedRegion.bbox);
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
@@ -1736,7 +1799,7 @@ export function UmbraCanvasWorkspace({
       const projectToSave = useUmbraCanvasStore.getState().present;
       const saved = await saveUmbraCanvasRequiredRevision(
         projectToSave,
-        () => saveProject(false),
+        () => saveProject(false, false),
         () => {
           const current = useUmbraCanvasStore.getState().present;
           return current.id === projectToSave.id && current.revision === projectToSave.revision
@@ -1751,7 +1814,7 @@ export function UmbraCanvasWorkspace({
         throw new Error('The Canvas project changed while saving. Generate again from the latest layers.');
       }
       const queuedSeed = resolveUmbraUiQueueSeed(seed, seedMode);
-      const promptWithLoras = capabilities.loras.support === 'adjustable'
+      const promptWithLoras = !mossLayout && capabilities.loras.support === 'adjustable'
         ? composeUmbraUiPromptWithLoras(compiledPrompt, loras, isUmbraUiModelOnlyLoraFamily(modelFamily))
         : compiledPrompt;
       const enabledControlLayers = submissionProject.entities.filter(isUmbraCanvasControlEntity).filter((entity) => entity.generationEnabled);
@@ -2136,11 +2199,11 @@ export function UmbraCanvasWorkspace({
         setJob((current) => current?.id === job.id ? canceled : current);
       }
       if (canceled.status === 'canceled') {
-        showToast('Canvas generation canceled.', 'success');
+        showToast('Canvas generation canceled.', 'success', 'generation');
       } else if (canceled.cancelRequested) {
         showToast('Canvas cancellation requested. Waiting for the active sample to stop.', 'info');
       } else {
-        showToast(`Canvas generation is already ${canceled.status}.`, 'info');
+        showToast(`Canvas generation is already ${canceled.status}.`, 'info', 'generation');
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Canvas generation could not be canceled.', 'error');
@@ -2416,6 +2479,7 @@ export function UmbraCanvasWorkspace({
   };
   const cropRasterToGenerationBbox = async (entityId: string) => {
     if (croppingRaster || saving) return;
+    captureMossDraftRef.current();
     const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
     const raster = current.entities.find((entity) => entity.kind === 'raster' && entity.id === entityId);
     if (!raster || raster.locked) return;
@@ -2455,6 +2519,7 @@ export function UmbraCanvasWorkspace({
   };
   const removeRasterBackground = async () => {
     if (backgroundRemovalRequestRef.current || !backgroundRemovalStatus?.available) return;
+    captureMossDraftRef.current();
     const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
     const raster = current.entities.find((entity) => entity.id === current.activeEntityId && entity.kind === 'raster');
     if (!raster || raster.kind !== 'raster' || raster.locked || raster.alphaLocked) return;
@@ -2516,6 +2581,7 @@ export function UmbraCanvasWorkspace({
   };
   const mergeVisibleLayers = async () => {
     if (mergingLayers || saving) return;
+    captureMossDraftRef.current();
     const { present: current, historyEpoch } = useUmbraCanvasStore.getState();
     const currentDrawables = current.entities.filter(isUmbraCanvasDrawableEntity).filter((entity) => entity.visible && entity.generationEnabled);
     if (currentDrawables.length < 2) {
@@ -2565,6 +2631,14 @@ export function UmbraCanvasWorkspace({
     }
   };
 
+  const mossLayoutPreview = React.useMemo(() => {
+    if (!mossLayout) return { prompt: undefined, issue: '' };
+    try {
+      const caption = promptSegments.some(segment => segment.moss?.enabled) ? compileMossPromptFields(promptSegments)
+        : promptSegments.length === 1 && promptSegments[0].text.trim().startsWith('{') ? promptSegments[0].text.trim() : compileUmbraUiPromptSegments(promptSegments);
+      return { prompt: compileMossLayoutPrompt(caption, bindMossLayoutFields(project.layoutRegions || [], promptSegments), project.generationBbox, project.generationBbox), issue: '' };
+    } catch (error) { return { prompt: '', issue: error instanceof Error ? error.message : 'Check the layout boxes.' }; }
+  }, [mossLayout, promptSegments, project.layoutRegions, project.generationBbox]);
   const generationResolutionIssue = getUmbraCanvasGenerationResolutionIssue(project.generationBbox, capabilities.resolution);
   const isMaskBrush = tool === 'mask-brush' || tool === 'mask-eraser';
   const isRasterBrush = tool === 'raster-brush' || tool === 'raster-eraser';
@@ -2581,6 +2655,12 @@ export function UmbraCanvasWorkspace({
   const closePanel = () => {
     setCompactPanel('');
     panelButtonsRef.current[compactPanel || lastPanelRef.current]?.focus();
+  };
+  const locateLayoutBox = (id: string) => {
+    setTool('select');
+    managerRef.current?.locateLayoutRegion(id);
+    const workspace = containerRef.current?.closest('[data-umbra-canvas-workspace]');
+    if (workspace && workspace.clientWidth < 1100) closePanel();
   };
   const onPanelKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -2615,17 +2695,20 @@ export function UmbraCanvasWorkspace({
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <button type="button" title="New Canvas project" aria-label="New Canvas project" onClick={startBlankProject} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100"><Layers3 size={14} /></button>
           <button type="button" title="Canvas projects" aria-label="Canvas projects" onClick={openProjectBrowser} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100"><FolderOpen size={14} /></button>
-          <button type="button" title={saveError ? `Last save failed: ${saveError}` : 'Save Canvas project'} onClick={() => void saveProject()} disabled={saving || (project.entities.length === 0 && project.revision === 0) || conflictedProjectId === project.id} className={cn('inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700', saveError ? 'border-amber-300/35 bg-amber-400/[0.08] text-amber-100' : 'border-cyan-300/20 bg-cyan-500/[0.06] text-cyan-100')}><Save size={14} />{saving ? 'Saving' : conflictedProjectId === project.id ? 'Conflict' : saveError ? 'Retry Save' : 'Save'}</button>
+          <button type="button" title={saveError ? `Last save failed: ${saveError}` : 'Save Canvas project'} onClick={() => void saveProject()} disabled={saving || (project.entities.length === 0 && project.revision === 0 && !mossDraftDirty) || conflictedProjectId === project.id} className={cn('inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700', saveError ? 'border-amber-300/35 bg-amber-400/[0.08] text-amber-100' : 'border-cyan-300/20 bg-cyan-500/[0.06] text-cyan-100')}><Save size={14} />{saving ? 'Saving' : conflictedProjectId === project.id ? 'Conflict' : saveError ? 'Retry Save' : 'Save'}</button>
           {conflictedProjectId === project.id && <button type="button" title="Reload saved project; asks before discarding your draft" aria-label="Reload saved project" onClick={() => void loadProject(project.id)} disabled={saving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-amber-300/35 text-amber-100"><RotateCcw size={14} /></button>}
-          <button type="button" title="Save project as a new copy" aria-label="Save project as a new copy" onClick={() => void forkProject()} disabled={forkingProject || saving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800">{forkingProject ? <LoaderCircle size={14} className="animate-spin" /> : <Copy size={14} />}</button>
-          <button type="button" title="Export portable Canvas project" aria-label="Export portable Canvas project" onClick={() => void exportProject()} disabled={archiving || project.entities.length === 0} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800"><Download size={14} /></button>
+          <button type="button" title="Save project as a new copy" aria-label="Save project as a new copy" onClick={() => void forkProject()} disabled={forkingProject || saving || !hasEditableProjectContent} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800">{forkingProject ? <LoaderCircle size={14} className="animate-spin" /> : <Copy size={14} />}</button>
+          <button type="button" title="Export portable Canvas project" aria-label="Export portable Canvas project" onClick={() => void exportProject()} disabled={archiving || !hasEditableProjectContent} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800"><Download size={14} /></button>
           <button type="button" title="Import portable Canvas project" aria-label="Import portable Canvas project" onClick={() => archiveInputRef.current?.click()} disabled={archiving} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100 disabled:text-zinc-800"><Upload size={14} /></button>
         </div>
       </header>
       {mossLayout ? <div aria-label="MOSS layout mode" className="shrink-0 border-b border-white/10 bg-black/25 px-3 py-2 text-[11px] text-[var(--umbra-text)]">
+        {tool === 'layout' ? <div className="mb-1 flex items-center gap-2 text-rose-200" role="status">
+          <span>Draw {drawingMossFieldRef.current ? `a box for ${promptSegments.find(field => field.id === drawingMossFieldRef.current)?.moss?.label || 'the selected field'}` : 'a layout box'} inside the generation frame.</span>
+          <button type="button" onClick={() => { drawingMossFieldRef.current = null; setTool('select'); }} className="ml-auto rounded border border-white/15 px-2 py-1 text-[10px]">Cancel drawing</button>
+        </div> : null}
         <strong className="mr-2">Layout generation</strong>
-        Creates new artwork from prompts and boxes. Existing images are not edited or used as references.
-        <span className="ml-2 opacity-70">Use IMG2IMG or Inpaint to modify an image.</span>
+        Generates a new composition from prompts and boxes. Imported artwork is not used as a reference.
       </div> : null}
       <div data-umbra-canvas-layout="" className={cn('relative grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)]', compactPanel ? '@min-[1100px]/canvas:grid-cols-[320px_minmax(0,1fr)]' : '')}>
       {compactPanel ? <button type="button" aria-label="Close Canvas side panel" onClick={closePanel} className="absolute inset-0 z-10 bg-black/65 @min-[1100px]/canvas:hidden" /> : null}
@@ -2681,7 +2764,7 @@ export function UmbraCanvasWorkspace({
             options={[{ value: 'whole', label: 'Whole generation box' }, { value: 'mask', label: 'Painted mask + empty space' }]}
             onValueChange={(value) => setEditArea(value === 'mask' ? 'mask' : 'whole')}
           /> : null}
-          {layoutAvailable ? <Flux3LayoutControls moss={mossLayout} regions={project.layoutRegions || []} drawing={tool === 'layout'} onDraw={() => setTool(tool === 'layout' ? 'select' : 'layout')} onAdd={() => {
+          {layoutAvailable && !mossLayout ? <Flux3LayoutControls moss={mossLayout} regions={project.layoutRegions || []} drawing={tool === 'layout'} onDraw={() => setTool(tool === 'layout' ? 'select' : 'layout')} onAdd={() => {
             const current = useUmbraCanvasStore.getState().present;
             const frame = current.generationBbox;
             setLayoutRegions([...(current.layoutRegions || []), { id: crypto.randomUUID(), label: 'object', description: '',
@@ -2787,9 +2870,32 @@ export function UmbraCanvasWorkspace({
             onChange={onPromptSegmentsChange}
             onActiveSegmentChange={onActivePromptSegmentChange}
             accent="rose"
-            heading="Canvas Prompt"
+            heading={mossLayout ? 'Positive Prompt' : 'Canvas Prompt'}
+            mossSupported={mossLayout}
+            compiledPromptOverride={mossLayoutPreview.prompt}
+            renderFieldAction={mossLayout ? segment => {
+              if (!segment.moss?.enabled || segment.moss.purpose !== 'item') return null;
+              const regionIndex = (project.layoutRegions || []).findIndex(region => region.promptFieldId === segment.id);
+              const fieldName = getMossLayoutFieldName(segment, promptSegments);
+              const draw = () => { drawingMossFieldRef.current = segment.id; setTool('layout'); closePanel(); };
+              return <div className="mb-2 flex items-center gap-1.5">
+                {regionIndex >= 0 ? <>
+                  <button type="button" aria-label={`Locate box for ${fieldName}`} title="Select and center the linked box"
+                    onClick={() => locateLayoutBox(project.layoutRegions![regionIndex].id)}
+                    className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--umbra-accent)] px-2 text-[10px] text-[var(--umbra-accent)]"><BoxSelect size={12} />Box {regionIndex + 1}</button>
+                  <button type="button" aria-label={`Redraw box for ${fieldName}`} title="Redraw this box; keep its field link" onClick={draw}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--umbra-border)] text-zinc-400 hover:text-[var(--umbra-text)]"><Pencil size={12} /></button>
+                </> : <button type="button" aria-label={`Draw box for ${fieldName}`} disabled={!segment.text.trim() && !segment.moss.text.trim()} onClick={draw}
+                  title="Place this subject inside the generation frame" className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--umbra-border)] px-2 text-[10px] text-zinc-300 hover:border-[var(--umbra-accent)] disabled:opacity-40"><BoxSelect size={12} />Draw box</button>}
+              </div>;
+            } : undefined}
             onSubmit={() => void prepareGenerationRegion()}
           />
+          {mossLayoutPreview.issue ? <p role="alert" className="text-xs text-amber-200">{mossLayoutPreview.issue}</p> : null}
+          {mossLayout ? <Flux3LayoutControls moss regions={project.layoutRegions || []} promptFields={promptSegments} selectedId={selectedLayoutRegionId}
+            onLocate={locateLayoutBox}
+            drawing={tool === 'layout'} onDraw={() => { drawingMossFieldRef.current = null; setTool(tool === 'layout' ? 'select' : 'layout'); }}
+            onChange={setLayoutRegions} /> : null}
           {capabilities.negativePrompt.support === 'adjustable' ? (
             <label className="block space-y-1.5">
               <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Negative Prompt</span>
@@ -2878,7 +2984,7 @@ export function UmbraCanvasWorkspace({
         </div>
         <div data-umbra-canvas-tool-toolbar="" role="toolbar" aria-label="Canvas editing tools" className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/35 p-2 [&_button]:shrink-0">
           <ToolButton active={tool === 'select'} title="Select and transform; Ctrl-drag an image handle to crop" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
-          {layoutAvailable ? <ToolButton active={tool === 'layout'} title="Draw layout box" icon={<Square size={15} />} onClick={() => setTool('layout')} /> : null}
+          {layoutAvailable ? <ToolButton active={tool === 'layout'} title="Draw layout box" icon={<Square size={15} />} onClick={() => { drawingMossFieldRef.current = null; setTool('layout'); }} /> : null}
           <ToolButton active={tool === 'bbox'} title="Generation bounding box" shortcut="G" icon={<BoxSelect size={15} />} onClick={() => setTool('bbox')} />
           <ToolButton active={tool === 'pan'} title="Pan Canvas" shortcut="H" icon={<Hand size={15} />} onClick={() => setTool('pan')} />
           {UMBRA_CANVAS_RASTER_PAINT_ENABLED ? <ToolButton active={tool === 'raster-brush'} title="Paint active image layer" icon={<Brush size={15} />} onClick={() => activateRasterTool('raster-brush')} /> : null}
@@ -3339,7 +3445,7 @@ export function UmbraCanvasWorkspace({
                     <p className="font-mono text-[7px] uppercase text-zinc-600">Named, durable states for the open project</p>
                   </div>
                   <input value={restorePointName} onChange={(event) => setRestorePointName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void createRestorePoint(); }} maxLength={160} placeholder="Restore point name" aria-label="Restore point name" className="h-8 w-56 rounded-md border border-white/10 bg-black/35 px-2 text-[9px] text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-amber-200/35" />
-                  <button type="button" onClick={() => void createRestorePoint()} disabled={restorePointBusy || saving || project.entities.length === 0} className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-amber-200/20 bg-amber-300/5 px-2.5 text-[8px] font-black uppercase text-amber-100 disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700">{restorePointBusy ? <LoaderCircle size={11} className="animate-spin" /> : <Save size={11} />} Save Point</button>
+                  <button type="button" onClick={() => void createRestorePoint()} disabled={restorePointBusy || saving || !hasEditableProjectContent} className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-amber-200/20 bg-amber-300/5 px-2.5 text-[8px] font-black uppercase text-amber-100 disabled:border-white/10 disabled:bg-transparent disabled:text-zinc-700">{restorePointBusy ? <LoaderCircle size={11} className="animate-spin" /> : <Save size={11} />} Save Point</button>
                 </div>
                 {restorePointsLoading ? <div className="py-8 text-center font-mono text-[8px] uppercase text-zinc-600">Loading restore points</div> : null}
                 {!restorePointsLoading && restorePoints.length === 0 ? <div className="py-8 text-center font-mono text-[8px] uppercase text-zinc-600">No restore points yet</div> : null}

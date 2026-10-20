@@ -7,6 +7,8 @@ export interface Flux3LayoutRegion {
   height: number;
   label?: 'object' | 'text';
   text?: string;
+  promptFieldId?: string;
+  promptItemIndex?: number;
 }
 
 export function bindFlux3LayoutPrompt(graph: Record<string, any>, consumer: any, prompt: string): boolean {
@@ -37,8 +39,12 @@ export function parseFlux3LayoutRegions(value: unknown): Flux3LayoutRegion[] {
       || region.width <= 0 || region.height <= 0) throw new Error('Layout regions need finite coordinates and positive dimensions.');
     if (region.label !== undefined && region.label !== 'object' && region.label !== 'text') throw new Error('Invalid layout item type.');
     if (region.text !== undefined && (typeof region.text !== 'string' || region.text.length > 10_000)) throw new Error('Invalid layout text.');
+    if (region.promptFieldId !== undefined && (typeof region.promptFieldId !== 'string' || !/^[\w-]{1,160}$/.test(region.promptFieldId))) throw new Error('Invalid linked prompt field.');
+    if (region.promptItemIndex !== undefined && (!Number.isInteger(region.promptItemIndex) || region.promptItemIndex < 0 || region.promptItemIndex > 63)) throw new Error('Invalid linked prompt item.');
     return { id, description: region.description, x: region.x, y: region.y, width: region.width, height: region.height,
-      ...(region.label !== undefined ? { label: region.label } : {}), ...(region.text !== undefined ? { text: region.text } : {}) };
+      ...(region.label !== undefined ? { label: region.label } : {}), ...(region.text !== undefined ? { text: region.text } : {}),
+      ...(region.promptFieldId !== undefined ? { promptFieldId: region.promptFieldId } : {}),
+      ...(region.promptItemIndex !== undefined ? { promptItemIndex: region.promptItemIndex } : {}) };
   });
 }
 

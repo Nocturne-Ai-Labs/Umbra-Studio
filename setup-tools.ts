@@ -18,6 +18,7 @@ import { installDaSiWaRequirements } from './setup/DaSiWaRequirements';
 import { ensureDaSiWaForgeComputePatch, removeDaSiWaForgeComputePatchForUpdate } from './setup/DaSiWaForgeCompute';
 import { ensureUmbraHiresVaeScalePatch, removeUmbraHiresVaeScalePatchForUpdate } from './setup/UmbraHiresVaeScale';
 import { syncUmbraAnimaCustomNode } from './backend/AnimaCustomNodeSync';
+import { syncUmbraMossCustomNode } from './backend/MossCustomNodeSync';
 import { readManagedToolRequirements, requirementsForManagedNode } from './setup/ManagedToolRequirements';
 import { readOnboarding } from './setup/Onboarding';
 import { repairManagedNodeCheckout } from './setup/ManagedNodeRepair';
@@ -1303,10 +1304,11 @@ function syncUmbraNodesToComfy(nodesDir: string): boolean {
 function syncUmbraAnimaCpuNode(nodesDir: string): boolean {
     try {
         syncUmbraAnimaCustomNode(ROOT_DIR, nodesDir);
-        log(`${c.green}OK${c.reset}`, 'Umbra Anima custom node installed');
+        syncUmbraMossCustomNode(ROOT_DIR, nodesDir);
+        log(`${c.green}OK${c.reset}`, 'Umbra Anima and MOSS prompt-enhancement nodes installed');
         return true;
     } catch (error) {
-        log(`${c.red}X${c.reset}`, `Failed to install Umbra Anima custom node: ${error instanceof Error ? error.message : String(error)}`);
+        log(`${c.red}X${c.reset}`, `Failed to install bundled Umbra model nodes: ${error instanceof Error ? error.message : String(error)}`);
         return false;
     }
 }

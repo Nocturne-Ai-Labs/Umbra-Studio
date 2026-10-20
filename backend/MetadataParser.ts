@@ -379,6 +379,11 @@ export class MetadataParser {
       } catch { }
     }
 
+    // Saved prompt text is authoritative: graph inputs can contain pre-enhancement
+    // captions or links, while these chunks contain the actual structured prompt.
+    if (chunks.positive_prompt) meta.positive_prompt = chunks.positive_prompt;
+    if (chunks.negative_prompt) meta.negative_prompt = chunks.negative_prompt;
+    if (detected === 'unknown' && (chunks.positive_prompt || chunks.negative_prompt)) detected = 'a1111';
     if (detected !== 'unknown') meta.format = detected;
     return meta;
   }
