@@ -90,7 +90,7 @@ import { ComfyPromptActivity } from './backend/ComfyPromptActivity';
 import { PowerPrompterDispatchDelayControl, resolvePowerPrompterAdmissionDispatchDelay, waitForPowerPrompterDispatchDelay } from './backend/PowerPrompterDispatchDelay';
 import { appendSavedQueueIdSuffix, buildRemainingPowerPrompterQueueSnapshot, getSavedQueueSummaryIndexPath, readSavedQueueSummaryIndex, splitSavedPowerPrompterQueue } from './backend/PowerPrompterSavedQueue';
 import { canInterruptPowerPrompterPrompt, getInterruptedPromptHistoryStatus, getLiveUmbraUiQueueRequestIds, getQueueClearFutureKeepIds, hasLivePowerPrompterQueuePrompts, shouldFinishStoppedPowerPrompterQueue, summarizePowerPrompterQueuePrompts } from './backend/PowerPrompterQueueLifecycle';
-import { isAllowedQueueControlBrowserOrigin, requiresQueueControlBrowserOrigin } from './backend/QueueControlOriginPolicy';
+import { isAllowedQueueControlBrowserOriginWithDiscovery, requiresQueueControlBrowserOrigin } from './backend/QueueControlOriginPolicy';
 import { getSavedQueueAvailability } from './shared/power-prompter/savedQueue';
 import { ThumbnailService } from './backend/ThumbnailService';
 import { CIVITAI_PAGE_TIMEOUT_MS, CIVITAI_METADATA_TIMEOUT_MS, requestCivitaiPage, civitaiPageError } from './backend/CivitaiPageRequest';
@@ -33802,7 +33802,7 @@ const server = Bun.serve<UmbraSocketData>({
     const resolvedOrigin = resolveCorsOrigin(rawOrigin, req);
 
     if (requiresQueueControlBrowserOrigin(path)
-      && !isAllowedQueueControlBrowserOrigin({
+      && !await isAllowedQueueControlBrowserOriginWithDiscovery({
         origin: rawOrigin,
         host: req.headers.get('host'),
         listenerPort: PORT,
@@ -33812,6 +33812,13 @@ const server = Bun.serve<UmbraSocketData>({
           `${os.hostname()}.local`,
         ],
         remoteOrigins: getRemoteConfiguredCorsOrigins(),
+      }, async () => {
+        if (!isTailscaleHostname(rawOrigin)) return [];
+        // Read the local daemon, never trust an address merely because it was
+        // supplied in Host/Origin/forwarded headers. HTTPS URLs are returned
+        // only when Serve targets this exact Umbra listener.
+        const access = await getTailscaleAccessInfo(PORT);
+        return access.connected ? [...access.httpUrls, ...access.httpsUrls] : [];
       })) {
       return new Response('Queue control origin denied', {
         status: 403,

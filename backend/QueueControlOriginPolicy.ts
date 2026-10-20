@@ -77,3 +77,25 @@ export function isAllowedQueueControlBrowserOrigin(input: QueueControlOriginPoli
   if (remoteOrigins.has(origin.origin) && (localTarget || remoteTarget && origin.host === target.host)) return true;
   return false;
 }
+
+/** Resolve locally verified runtime addresses only when saved addresses do not match.
+ * Discovery must never derive trusted origins from request/forwarded headers.
+ * Remote peer verification and session authentication still run after this check.
+ */
+export async function isAllowedQueueControlBrowserOriginWithDiscovery(
+  input: QueueControlOriginPolicyInput,
+  discoverOrigins: () => Promise<Iterable<string>>,
+): Promise<boolean> {
+  if (isAllowedQueueControlBrowserOrigin(input)) return true;
+  if (!input.origin || !parseOrigin(input.origin.trim())) return false;
+  try {
+    const discovered = await discoverOrigins();
+    return isAllowedQueueControlBrowserOrigin({
+      ...input,
+      remoteOrigins: [...(input.remoteOrigins || []), ...discovered],
+    });
+  } catch {
+    // Unavailable discovery must not relax the existing origin policy.
+    return false;
+  }
+}
