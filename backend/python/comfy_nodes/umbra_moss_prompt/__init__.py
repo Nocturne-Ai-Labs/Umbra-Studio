@@ -21,10 +21,10 @@ Keep minimalist requests minimalist. Do not change the medium or turn anime into
 
 def enhance_prompt(prompt, generate):
     """Only caption strings may change; layout geometry and literal text are immutable."""
-    def caption(value, context=""):
-        if not isinstance(value, str) or not value.strip():
-            return value
-        result = generate(value, context).strip()
+    def validate_caption(value, result):
+        if not isinstance(result, str):
+            raise ValueError("MOSS enhancer returned an invalid caption. Disable enhancement or retry.")
+        result = result.strip()
         if not result or result.startswith(("```", "{", "<think>")):
             raise ValueError("MOSS enhancer returned an invalid caption. Disable enhancement or retry.")
         for quoted in re.findall(r'"([^"]+)"|“([^”]+)”', value):
@@ -33,7 +33,7 @@ def enhance_prompt(prompt, generate):
         return result
 
     if not prompt.lstrip().startswith("{"):
-        return caption(prompt)
+        return validate_caption(prompt, generate(prompt, "")) if prompt.strip() else prompt
     try:
         original = json.loads(prompt)
     except json.JSONDecodeError as error:
@@ -41,16 +41,46 @@ def enhance_prompt(prompt, generate):
     if not isinstance(original, dict) or not isinstance(original.get("summary"), dict) or not isinstance(original.get("items"), list):
         raise ValueError("MOSS structured prompt requires summary and items.")
     result = copy.deepcopy(original)
-    if "caption" in result["summary"]:
-        result["summary"]["caption"] = caption(result["summary"]["caption"], "Scene summary; do not introduce additional subjects.")
-    for item in result["items"]:
+    captions = []
+    targets = {}
+
+    def add_caption(key, target, context):
+        value = target.get("caption")
+        if isinstance(value, str) and value.strip():
+            captions.append({"id": key, "caption": value, "context": context})
+            targets[key] = target
+
+    add_caption("summary", result["summary"], "Scene summary; do not introduce additional subjects.")
+    for index, item in enumerate(result["items"]):
         if not isinstance(item, dict):
             raise ValueError("MOSS structured prompt items must be objects.")
         if "caption" in item:
             context = "Structured item: " + str(item.get("label", "object"))
             if "text" in item:
                 context += ". Exact visible text: " + json.dumps(item["text"], ensure_ascii=False)
-            item["caption"] = caption(item["caption"], context)
+            add_caption(str(index), item, context)
+    if captions:
+        # One native generation per node avoids re-entering Qwen's compiled decode
+        # with different caption lengths before ComfyUI resets its execution buffers.
+        context = ('Batch caption enhancement. Override the prose-only output format: return only '
+                   'a JSON object {"captions":[{"id":"...","caption":"..."}]}. '
+                   'Return every input id exactly once, unchanged; enhance each caption independently '
+                   'using its context. No other keys. Do not combine subjects or add scenery to items.')
+        try:
+            enhanced = json.loads(generate(json.dumps({"captions": captions}, ensure_ascii=False), context))
+            entries = enhanced["captions"]
+            if not isinstance(entries, list) or len(entries) != len(captions):
+                raise ValueError("Caption count changed")
+            seen = set()
+            for entry in entries:
+                key = entry["id"]
+                if not isinstance(key, str) or key not in targets or key in seen:
+                    raise ValueError("Caption identity changed")
+                seen.add(key)
+                target = targets[key]
+                target["caption"] = validate_caption(target["caption"], entry["caption"])
+        except (ValueError, KeyError, TypeError) as error:
+            raise ValueError("MOSS enhancer returned invalid structured captions. Disable enhancement or retry.") from error
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 
