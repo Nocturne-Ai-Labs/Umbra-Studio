@@ -22160,9 +22160,10 @@ async function handleUmbraUiInpaintSubmit(req: Request): Promise<Response> {
         slotType: String(segment?.slotType || 'umbra_ui_prompt').trim().slice(0, 160),
         variantId: String(segment?.variantId || '').trim().slice(0, 160),
         variantName: String(segment?.variantName || '').trim().slice(0, 320),
+        ...(normalizeMossPromptField(segment?.moss) ? { moss: normalizeMossPromptField(segment?.moss) } : {}),
         ...(segment?.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
       }))
-      .filter((segment) => segment.text.length > 0);
+      .filter((segment) => segment.text.length > 0 || !!segment.moss?.text.trim());
     const rawLoras = parseInpaintJsonField('loras', []);
     const loras = (Array.isArray(rawLoras) ? rawLoras : [])
       .slice(0, 128)

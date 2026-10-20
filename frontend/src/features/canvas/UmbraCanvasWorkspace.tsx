@@ -2,7 +2,8 @@ import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipe
 import type { ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 import { Flux3LayoutControls } from './Flux3LayoutControls';
 import { flux3LayoutElements } from '../../../../shared/umbra-ui/flux3Edit';
-import { compileMossLayoutPrompt } from '../../../../shared/umbra-ui/mossLayout';
+import { compileMossPromptFields } from '../../../../shared/umbra-ui/mossPromptFields';
+import { bindMossLayoutFields, compileMossLayoutPrompt } from '../../../../shared/umbra-ui/mossLayout';
 import { normalizeUmbraUiModelFamilyKey } from '../../../../shared/umbra-ui/pipelineTypes';
 'use client';
 
@@ -481,8 +482,10 @@ export function UmbraCanvasWorkspace({
   const [mediaImportBusy, setMediaImportBusy] = React.useState(false);
   const [compactPanel, setCompactPanel] = React.useState<'generation' | 'inpaint' | 'layers' | ''>('');
   const mossLayout = editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage';
+  const drawingMossFieldRef = React.useRef<string | null>(null);
   const mossLayoutRef = React.useRef(mossLayout);
   mossLayoutRef.current = mossLayout;
+  React.useEffect(() => { drawingMossFieldRef.current = null; }, [project.id, mossLayout]);
   const layoutAvailable = mossLayout || (editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'flux3');
   React.useEffect(() => {
     if (editingWorkspace) setCompactPanel('generation');
@@ -722,7 +725,14 @@ export function UmbraCanvasWorkspace({
       onGenerationBboxChange: setGenerationBbox,
       onCreateLayoutRegion: (rect) => {
         const current = useUmbraCanvasStore.getState().present;
-        setLayoutRegions([...(current.layoutRegions || []), { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: crypto.randomUUID(), description: '', ...(mossLayoutRef.current ? { label: 'object' as const } : {}) }]);
+        const fieldId = mossLayoutRef.current ? drawingMossFieldRef.current : null;
+        const existing = fieldId ? current.layoutRegions?.find(region => region.promptFieldId === fieldId) : undefined;
+        setLayoutRegions([...(current.layoutRegions || []).filter(region => !existing || region.id !== existing.id), { ...(existing || {}), ...(fieldId ? { promptFieldId: fieldId } : {}), x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: existing?.id || crypto.randomUUID(), description: existing?.description || '', ...(mossLayoutRef.current ? { label: 'object' as const } : {}) }]);
+        if (fieldId) { drawingMossFieldRef.current = null; setTool('select'); }
+      },
+      onTransformLayoutRegion: (id, rect) => {
+        const current = useUmbraCanvasStore.getState().present;
+        setLayoutRegions((current.layoutRegions || []).map(region => region.id === id ? { ...region, ...rect } : region));
       },
       onViewportChange: setViewport,
       onMaskStroke: addMaskStroke,
@@ -1672,7 +1682,10 @@ export function UmbraCanvasWorkspace({
       closePreparedRegion();
       return;
     }
-    const compiledPrompt = compileUmbraUiPromptSegments(promptSegments);
+    const compiledPrompt = mossLayout && promptSegments.some(segment => segment.moss?.enabled)
+      ? compileMossPromptFields(promptSegments)
+      : mossLayout && promptSegments.length === 1 && promptSegments[0].text.trim().startsWith('{')
+        ? promptSegments[0].text.trim() : compileUmbraUiPromptSegments(promptSegments);
     if (!compiledPrompt.trim()) {
       showToast('Enter a Canvas prompt before generating.', 'error');
       closePreparedRegion();
@@ -1695,7 +1708,8 @@ export function UmbraCanvasWorkspace({
       const queuedSamples = resolveUmbraCanvasSampleCount(samples);
       const queuedSamplerName = resolveUmbraCanvasGenerationChoice(capabilities.sampler, samplerName, 'euler');
       const queuedScheduler = resolveUmbraCanvasGenerationChoice(capabilities.scheduler, scheduler, 'normal');
-      const layoutRegions = layoutAvailable ? structuredClone(submissionProject.layoutRegions || []) : [];
+      const layoutRegions = mossLayout ? bindMossLayoutFields(submissionProject.layoutRegions || [], promptSegments)
+        : layoutAvailable ? structuredClone(submissionProject.layoutRegions || []) : [];
       if (mossLayout) compileMossLayoutPrompt(compiledPrompt, layoutRegions, preparedRegion.bbox, preparedRegion);
       else if (layoutRegions.length) flux3LayoutElements(layoutRegions, preparedRegion.bbox);
       const settingsSnapshot: UmbraCanvasGenerationSettingsSnapshot = {
@@ -1751,7 +1765,7 @@ export function UmbraCanvasWorkspace({
         throw new Error('The Canvas project changed while saving. Generate again from the latest layers.');
       }
       const queuedSeed = resolveUmbraUiQueueSeed(seed, seedMode);
-      const promptWithLoras = capabilities.loras.support === 'adjustable'
+      const promptWithLoras = !mossLayout && capabilities.loras.support === 'adjustable'
         ? composeUmbraUiPromptWithLoras(compiledPrompt, loras, isUmbraUiModelOnlyLoraFamily(modelFamily))
         : compiledPrompt;
       const enabledControlLayers = submissionProject.entities.filter(isUmbraCanvasControlEntity).filter((entity) => entity.generationEnabled);
@@ -2565,6 +2579,14 @@ export function UmbraCanvasWorkspace({
     }
   };
 
+  const mossLayoutPreview = React.useMemo(() => {
+    if (!mossLayout) return { prompt: undefined, issue: '' };
+    try {
+      const caption = promptSegments.some(segment => segment.moss?.enabled) ? compileMossPromptFields(promptSegments)
+        : promptSegments.length === 1 && promptSegments[0].text.trim().startsWith('{') ? promptSegments[0].text.trim() : compileUmbraUiPromptSegments(promptSegments);
+      return { prompt: compileMossLayoutPrompt(caption, bindMossLayoutFields(project.layoutRegions || [], promptSegments), project.generationBbox, project.generationBbox), issue: '' };
+    } catch (error) { return { prompt: '', issue: error instanceof Error ? error.message : 'Check the layout boxes.' }; }
+  }, [mossLayout, promptSegments, project.layoutRegions, project.generationBbox]);
   const generationResolutionIssue = getUmbraCanvasGenerationResolutionIssue(project.generationBbox, capabilities.resolution);
   const isMaskBrush = tool === 'mask-brush' || tool === 'mask-eraser';
   const isRasterBrush = tool === 'raster-brush' || tool === 'raster-eraser';
@@ -2623,6 +2645,10 @@ export function UmbraCanvasWorkspace({
         </div>
       </header>
       {mossLayout ? <div aria-label="MOSS layout mode" className="shrink-0 border-b border-white/10 bg-black/25 px-3 py-2 text-[11px] text-[var(--umbra-text)]">
+        {tool === 'layout' ? <div className="mb-1 flex items-center gap-2 text-rose-200" role="status">
+          <span>Draw {drawingMossFieldRef.current ? `a box for ${promptSegments.find(field => field.id === drawingMossFieldRef.current)?.moss?.label || 'the selected field'}` : 'a layout box'} inside the generation frame.</span>
+          <button type="button" onClick={() => { drawingMossFieldRef.current = null; setTool('select'); }} className="ml-auto rounded border border-white/15 px-2 py-1 text-[10px]">Cancel drawing</button>
+        </div> : null}
         <strong className="mr-2">Layout generation</strong>
         Creates new artwork from prompts and boxes. Existing images are not edited or used as references.
         <span className="ml-2 opacity-70">Use IMG2IMG or Inpaint to modify an image.</span>
@@ -2681,7 +2707,7 @@ export function UmbraCanvasWorkspace({
             options={[{ value: 'whole', label: 'Whole generation box' }, { value: 'mask', label: 'Painted mask + empty space' }]}
             onValueChange={(value) => setEditArea(value === 'mask' ? 'mask' : 'whole')}
           /> : null}
-          {layoutAvailable ? <Flux3LayoutControls moss={mossLayout} regions={project.layoutRegions || []} drawing={tool === 'layout'} onDraw={() => setTool(tool === 'layout' ? 'select' : 'layout')} onAdd={() => {
+          {layoutAvailable && !mossLayout ? <Flux3LayoutControls moss={mossLayout} regions={project.layoutRegions || []} drawing={tool === 'layout'} onDraw={() => setTool(tool === 'layout' ? 'select' : 'layout')} onAdd={() => {
             const current = useUmbraCanvasStore.getState().present;
             const frame = current.generationBbox;
             setLayoutRegions([...(current.layoutRegions || []), { id: crypto.randomUUID(), label: 'object', description: '',
@@ -2787,9 +2813,23 @@ export function UmbraCanvasWorkspace({
             onChange={onPromptSegmentsChange}
             onActiveSegmentChange={onActivePromptSegmentChange}
             accent="rose"
-            heading="Canvas Prompt"
+            heading={mossLayout ? 'Positive Prompt' : 'Canvas Prompt'}
+            mossSupported={mossLayout}
+            compiledPromptOverride={mossLayoutPreview.prompt}
+            renderFieldAction={mossLayout ? segment => segment.moss?.enabled && segment.moss.purpose === 'item' ? (
+              <button type="button" aria-label={`Draw bounding box for ${segment.label || segment.moss.label}`} onClick={() => {
+                drawingMossFieldRef.current = segment.id;
+                setTool('layout'); closePanel();
+              }} className="mb-2 flex items-center gap-1.5 rounded border border-rose-300/25 px-2 py-1.5 text-[10px] text-rose-200">
+                <BoxSelect size={12} />{(project.layoutRegions || []).some(region => region.promptFieldId === segment.id) ? 'Redraw bounding box' : 'Draw bounding box'}
+              </button>
+            ) : null : undefined}
             onSubmit={() => void prepareGenerationRegion()}
           />
+          {mossLayoutPreview.issue ? <p role="alert" className="text-xs text-amber-200">{mossLayoutPreview.issue}</p> : null}
+          {mossLayout ? <Flux3LayoutControls moss regions={project.layoutRegions || []} promptFields={promptSegments}
+            drawing={tool === 'layout'} onDraw={() => { drawingMossFieldRef.current = null; setTool(tool === 'layout' ? 'select' : 'layout'); }}
+            onChange={setLayoutRegions} /> : null}
           {capabilities.negativePrompt.support === 'adjustable' ? (
             <label className="block space-y-1.5">
               <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Negative Prompt</span>
