@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.90.28-beta - Remote Generation Connection Hotfix
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+### Update
+
+Update through **Umbra Setup > Updates** using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, reopen Studio, then reload Remote. No model downloads or custom-node updates are required.
+
+- Fixes generation queue connections rejected with **Queue control origin denied** when the active Tailscale address was discovered automatically rather than saved in Remote settings.
+- Queue controls now also recognize addresses verified from the local Tailscale service. HTTPS discovery requires Serve to target this Umbra listener. Existing origin, peer and session checks remain in place.
+- Includes v0.90.27's mobile preview/model-selector fix for users updating from earlier builds.
+- Validation: focused origin regression tests and isolated HTTP/WebSocket checks; packaged Windows/Linux startup checks. No fresh GPU or physical-phone qualification is claimed.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Recognized Tailscale addresses no longer get rejected by the generation queue's origin check simply because they were not saved in settings.
+- Improved: Runtime discovery fails closed when unavailable and does not trust arbitrary forwarded addresses.
+
 ## v0.90.27-beta - Mobile Model Selector Hotfix
 
 **Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
