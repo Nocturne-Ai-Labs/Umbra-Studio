@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { RotateCcw, Sparkles } from 'lucide-react';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
+import { MossSamplingControls } from './MossSamplingControls';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 import type { UmbraUiPipelineCapabilities } from '../../../../shared/umbra-ui/pipelineTypes';
 
@@ -24,11 +25,14 @@ export function UmbraImagePipelineControls({ value, onChange, capabilities, sect
         <span className="flex items-center gap-2 text-xs text-zinc-200"><Sparkles size={14} />Prompt enhancer</span>
         <button type="button" role="switch" aria-label="MOSS prompt enhancer" aria-checked={settings.mossPromptEnhancer}
           title="Enhance captions locally before generation. Keeps JSON layout and text fields intact."
-          className={`relative h-6 w-10 shrink-0 rounded-full border transition-colors ${settings.mossPromptEnhancer ? 'border-[var(--accent-color)] bg-[var(--accent-color)]' : 'border-white/20 bg-white/5'}`}
+          className="inline-flex h-8 w-11 shrink-0 items-center justify-center rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-color)]"
           onClick={() => onChange({ ...settings, mossPromptEnhancer: !settings.mossPromptEnhancer })}>
-          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${settings.mossPromptEnhancer ? 'left-0.5 translate-x-4' : 'left-0.5'}`} />
+          <span aria-hidden="true" className={`relative block h-6 w-10 shrink-0 rounded-full border transition-colors ${settings.mossPromptEnhancer ? 'border-[var(--accent-color)] bg-[var(--accent-color)]' : 'border-white/20 bg-white/5'}`}>
+            <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${settings.mossPromptEnhancer ? 'left-0.5 translate-x-4' : 'left-0.5'}`} />
+          </span>
         </button>
       </div>}
+      {capabilities.mossSampling.support === 'adjustable' && <MossSamplingControls value={settings.mossSampling} onChange={mossSampling => onChange({ ...settings, mossSampling })} />}
       <div className="flex items-center justify-between gap-2">
         <label className={labelClass} htmlFor={id}>Flow shift</label>
         <button type="button" aria-label="Use workflow flow shift" title="Use workflow default" className="rounded p-1 text-zinc-500 hover:text-zinc-200" onClick={() => onChange({ ...settings, flowShift: null })}><RotateCcw size={12} /></button>

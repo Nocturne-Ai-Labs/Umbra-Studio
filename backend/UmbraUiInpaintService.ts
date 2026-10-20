@@ -1,6 +1,7 @@
 import { normalizeMossPromptField, type MossPromptField } from '../shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './GeneratedImageMetadata';
 import { normalizeImagePipelineSettings, applyImagePipelineSettings, type ImagePipelineSettings } from '../shared/umbra-ui/imagePipelineSettings';
+import { applyMossSamplingSettings, assertMossSamplingAvailable } from '../shared/umbra-ui/mossSampling';
 import { applyMossPromptEnhancer, assertMossPromptEnhancerAvailable } from '../shared/umbra-ui/mossPromptEnhancer';
 import { applyFlux3References, flux3LayoutElements, removeFlux3BlankReference } from '../shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from '../shared/umbra-ui/mossLayout';
@@ -2095,6 +2096,8 @@ export class UmbraUiInpaintService {
           const base = await this.buildBaseWorkflow(settings, item.seed);
           const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
           applyImagePipelineSettings(graph, settings.imagePipeline);
+          applyMossSamplingSettings(graph, settings.imagePipeline?.mossSampling);
+          assertMossSamplingAvailable(graph, Object.fromEntries([...nodeTypes].map(type => [type, true])));
           applyMossPromptEnhancer(graph, settings.imagePipeline?.mossPromptEnhancer === true);
           assertMossPromptEnhancerAvailable(graph, Object.fromEntries([...nodeTypes].map(type => [type, true])));
           if (settings.outputFolder) {
@@ -2164,7 +2167,6 @@ export class UmbraUiInpaintService {
                     imagePipeline: settings.imagePipeline,
                     workflowResources: settings.workflowResources,
                     layoutRegions: settings.layoutRegions || [],
-    mossLayout: settings.mossLayout === true,
                     seed: item.seed,
                     seedMode: settings.seedMode,
                     seedIncrement: settings.seedIncrement,

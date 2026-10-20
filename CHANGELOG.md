@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.90.30-beta - MOSS Guidance and Optional Spectrum Acceleration
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, reopen Studio and reload Remote.
+- Existing MOSS sampling is unchanged by default. **Negative-branch skip** exposes the existing layer-22 skip. **Extra guidance** and **Spectrum acceleration** start off; no new model download or Turbo LoRA is required.
+- To try Spectrum, install **MOSS Spectrum acceleration (experimental)** in Setup's custom-node prerequisites, then restart ComfyUI through Umbra when ready. Setup downloads the unmodified GPL-3.0-only node from **Rkkss/ComfyUI-Spectrum-MOSS**. Missing prerequisites are reported before submission.
+- Extra guidance requires current ComfyUI's built-in `SkipLayerGuidanceDiT`. It adds computation during its active interval. Spectrum forecasts features to reduce transformer work and uses extra cache memory; results and speed vary by job. Neither option guarantees a quality improvement.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Shared MOSS Sampling Controls
+
+- MOSS controls above Detailers now expose negative-branch skipping, extra guidance strength/timing, and optional adaptive Spectrum acceleration with GPU/CPU cache placement.
+- Settings persist in presets and projects across Umbra UI, Power Prompter, Manga Studio, Canvas/Edit, inpainting and Remote. Other model families retain their existing graphs.
+- Disabling optional patches removes them from the submitted graph. Spectrum is a separate opt-in Setup dependency and is not required for ordinary MOSS generation.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: PNG metadata stamping now satisfies its declared return contract, and Inpaint metadata no longer repeats the layout-mode property.
+- Improved: MOSS sampling options are visible, editable and saved with projects rather than hidden inside the workflow.
+- Improved: Mobile switches keep a compact track with a separate touch target; cache selection uses the shared Umbra menu.
+- Improved: Missing optional MOSS nodes report the relevant Setup action before generation.
+
 ## v0.90.29-beta - MOSS Prompt Enhancement and Edit Layout Polish
 
 ### TL;DR - Setup After Updating

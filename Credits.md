@@ -787,6 +787,15 @@ Umbra provides an optional Setup installation and embeds their original interfac
 Their source is downloaded directly from upstream on request, not bundled with Umbra;
 their interface and code remain unmodified. No license to their code is asserted by Umbra.
 
+## Optional MOSS acceleration
+
+[ComfyUI-Spectrum-MOSS](https://github.com/Rkkss/ComfyUI-Spectrum-MOSS) by
+**Rkkss and contributors** provides optional experimental MOSS acceleration,
+based on [Spectrum](https://github.com/hanjq17/Spectrum) by Jiaqi Han and collaborators.
+Setup installs the unmodified GPL-3.0-only node directly from upstream on request;
+its code and weights are not bundled with Umbra. ComfyUI's native Skip Layer
+Guidance nodes provide the separate guidance controls.
+
 ## Optional H3 Latent Upscaler
 
 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler)

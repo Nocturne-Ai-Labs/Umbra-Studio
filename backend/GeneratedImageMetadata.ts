@@ -7,7 +7,10 @@ import { embedJpegGenerationMetadata } from './GenerationMetadataExport';
 /** Stamp output identifiers without re-encoding pixels or altering JPEG quality. */
 export async function stampGeneratedImageMetadata(path: string, key: string, value: string): Promise<void> {
   const extension = extname(path).toLowerCase();
-  if (extension === '.png') return upsertPngTextMetadata(path, key, value);
+  if (extension === '.png') {
+    await upsertPngTextMetadata(path, key, value);
+    return;
+  }
   if (extension !== '.jpeg' && extension !== '.jpg') return;
   const image = await readFile(path);
   const temporary = `${path}.${randomUUID()}.metadata.tmp`;
