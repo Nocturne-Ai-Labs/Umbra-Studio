@@ -2,6 +2,25 @@
   "schemaVersion": 1,
   "features": [
     {
+      "id": "moss-spectrum",
+      "label": "MOSS Spectrum acceleration (experimental)",
+      "optional": true,
+      "optIn": true,
+      "workflowIds": ["moss-spectrum"],
+      "minimumComfyVersion": "0.41.0",
+      "minimumComfyCommit": "e087d8f6cb7c6cdb11b59dc7c9bf17c79f8d877d",
+      "modelProfiles": [],
+      "requiredBuiltinClasses": ["SkipLayerGuidanceDiT", "SkipLayerGuidanceDiTSimple"],
+      "customNodes": [{
+        "name": "ComfyUI-Spectrum-MOSS",
+        "minimumCommit": "3fde0674b29342565e7f42a0674af48d65aabc4a",
+        "repository": "https://github.com/Rkkss/ComfyUI-Spectrum-MOSS",
+        "license": "GPL-3.0-only",
+        "requiredClasses": ["SpectrumMOSSImageAdaptive"]
+      }],
+      "notes": "Optional native MOSS feature forecasting by Rkkss. Installed directly from upstream; no weights required. Default off in generation. May change detail and uses cache memory. Restart ComfyUI when ready after installation."
+    },
+    {
       "id": "frameforge-video",
       "label": "Frame Forge â€” H3 video nodes",
       "optional": true,

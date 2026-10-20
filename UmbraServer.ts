@@ -1,6 +1,7 @@
 import { normalizeMossPromptField } from './shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './backend/GeneratedImageMetadata';
 import { applyImagePipelineSettings, normalizeImagePipelineSettings, type ImagePipelineSettings } from './shared/umbra-ui/imagePipelineSettings';
+import { applyMossSamplingSettings, assertMossSamplingAvailable } from './shared/umbra-ui/mossSampling';
 import { applyMossPromptEnhancer, assertMossPromptEnhancerAvailable } from './shared/umbra-ui/mossPromptEnhancer';
 import { syncUmbraMossCustomNode } from './backend/MossCustomNodeSync';
 import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
@@ -9658,6 +9659,7 @@ function compileUmbraUiPipelineWorkflow(
 
   if (workflowDescriptor.mediaType === 'image') {
     bypassDisabledUmbraUiOutputUpscale(promptGraph);
+    applyMossSamplingSettings(promptGraph, generation.imagePipeline?.mossSampling);
     applyMossPromptEnhancer(promptGraph, generation.imagePipeline?.mossPromptEnhancer === true);
     applyUmbraUiClipSkipToGraph(promptGraph, supportsClipSkip ? generation.clipSkip : 1);
     applyPPTiledVaeToGraph(promptGraph, generation.tiledVae);
@@ -11990,6 +11992,7 @@ async function runBackendPowerPrompterPipelineQueue(
         resolveWulverLoraNames(queuedWorkflow.promptGraph, objectInfo);
         assertAnima38TextEncoderRetentionAvailable(queuedWorkflow.promptGraph, objectInfo);
         assertMossPromptEnhancerAvailable(queuedWorkflow.promptGraph, objectInfo);
+        assertMossSamplingAvailable(queuedWorkflow.promptGraph, objectInfo);
       }
       const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
         ? injectUmbraExtendedContinuationPreview(
@@ -21590,6 +21593,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   resolveWulverLoraNames(compiled.promptGraph, objectInfo);
   assertAnima38TextEncoderRetentionAvailable(compiled.promptGraph, objectInfo);
   assertMossPromptEnhancerAvailable(compiled.promptGraph, objectInfo);
+  assertMossSamplingAvailable(compiled.promptGraph, objectInfo);
   return compiled;
 }
 

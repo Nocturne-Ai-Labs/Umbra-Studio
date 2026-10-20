@@ -1,3 +1,4 @@
+import { normalizeMossSamplingSettings, type MossSamplingSettings } from './mossSampling';
 /** Image-only controls shared by every generation surface and persisted preset. */
 export interface ImagePipelineSettings {
   /** null preserves the selected workflow's own shift (including when switching families). */
@@ -5,6 +6,7 @@ export interface ImagePipelineSettings {
   outputFormat: 'png' | 'jpeg';
   outputQuality: number;
   mossPromptEnhancer: boolean;
+  mossSampling: MossSamplingSettings;
 }
 
 export const IMAGE_FLOW_SHIFT_CLASSES = ['ModelSamplingAuraFlow', 'ModelSamplingSD3'] as const;
@@ -19,6 +21,7 @@ export function normalizeImagePipelineSettings(value: unknown): ImagePipelineSet
     outputFormat: raw.outputFormat === 'jpeg' ? raw.outputFormat : 'png',
     outputQuality: Number.isFinite(quality) ? Math.max(1, Math.min(100, Math.round(quality))) : 90,
     mossPromptEnhancer: raw.mossPromptEnhancer === true,
+    mossSampling: normalizeMossSamplingSettings(raw.mossSampling),
   };
 }
 
