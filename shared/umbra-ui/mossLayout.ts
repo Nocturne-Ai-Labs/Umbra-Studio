@@ -19,6 +19,15 @@ export function compileMossLayoutPrompt(caption: string, regions: Flux3LayoutReg
       throw new Error('Existing JSON boxes must use abs_centralized yxyx coordinates.');
     }
   }
+  document.items.forEach((item: Record<string, unknown>, index: number) => {
+    if (item.bbox === undefined) return;
+    const box = item.bbox;
+    if (!Array.isArray(box) || box.length !== 4 || !box.every(value => typeof value === 'number' && Number.isFinite(value))
+      || box[0] >= box[2] || box[1] >= box[3]
+      || box[0] < -output.height / 2 || box[2] > output.height / 2 || box[1] < -output.width / 2 || box[3] > output.width / 2) {
+      throw new Error(`JSON item ${index + 1} needs a valid yxyx box inside the output image.`);
+    }
+  });
   const items = document.items.map((item: Record<string, unknown>) => ({ ...item }));
   const linkedItems = new Set<number>();
   parseFlux3LayoutRegions(regions).forEach((region, index) => {
