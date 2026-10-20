@@ -985,10 +985,33 @@ export function UmbraCanvasWorkspace({
     }
   }, [showToast]);
 
+  const captureMossDraftRef = React.useRef<() => void>(() => undefined);
+  captureMossDraftRef.current = () => {
+    if (!active || !mossLayout) return;
+    const current = useUmbraCanvasStore.getState().present;
+    const snapshot: UmbraCanvasGenerationSettingsSnapshot = {
+      editArea: current.editArea || 'whole', layoutRegions: structuredClone(current.layoutRegions || []),
+      modelFamily, modelSource, checkpointName, imagePipeline, workflowResources: { ...workflowResources },
+      promptSegments: structuredClone(promptSegments), negativePrompt,
+      loras: structuredClone(loras) as unknown as Array<Record<string, unknown>>,
+      clipSkip: Number(clipSkip) || 1, seed, seedMode, seedIncrement, steps: Number(steps) || 20,
+      cfg: cfg.trim() && Number.isFinite(Number(cfg)) ? Number(cfg) : 1,
+      samplerName: resolveUmbraCanvasGenerationChoice(capabilities.sampler, samplerName, 'euler'),
+      scheduler: resolveUmbraCanvasGenerationChoice(capabilities.scheduler, scheduler, 'normal'),
+      denoise, samples: resolveUmbraCanvasSampleCount(samples),
+      tiledVae: { ...tiledVae } as unknown as Record<string, unknown>,
+      hiresFix: { ...hiresFix } as unknown as Record<string, unknown>,
+      detailerPipeline: structuredClone(detailerPipeline) as unknown as Array<Record<string, unknown>>,
+      maskGrow, maskFeather, contextPadding, colorMatch, differentialStrength,
+      softInpaintEnabled, softInpaintPreservation, softInpaintTransitionContrast, softInpaintMaskInfluence,
+    };
+    if (JSON.stringify(current.generation.settings) !== JSON.stringify(snapshot)) setGenerationSettings(snapshot);
+  };
   const projectSavePromiseRef = React.useRef<Promise<UmbraCanvasProjectDocument | null> | null>(null);
   const projectTransitionRef = React.useRef(0);
   const deletingProjectIdsRef = React.useRef(new Set<string>());
-  const saveProject = React.useCallback((notify = true): Promise<UmbraCanvasProjectDocument | null> => {
+  const saveProject = React.useCallback((notify = true, captureDraft = true): Promise<UmbraCanvasProjectDocument | null> => {
+    if (captureDraft && !projectSavePromiseRef.current) captureMossDraftRef.current();
     const current = useUmbraCanvasStore.getState().present;
     if (deletingProjectIdsRef.current.has(current.id)) return Promise.resolve(null);
     if (projectSavePromiseRef.current) return projectSavePromiseRef.current;
@@ -1750,7 +1773,7 @@ export function UmbraCanvasWorkspace({
       const projectToSave = useUmbraCanvasStore.getState().present;
       const saved = await saveUmbraCanvasRequiredRevision(
         projectToSave,
-        () => saveProject(false),
+        () => saveProject(false, false),
         () => {
           const current = useUmbraCanvasStore.getState().present;
           return current.id === projectToSave.id && current.revision === projectToSave.revision
