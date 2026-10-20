@@ -1,3 +1,4 @@
+import { getMossLayoutFieldName } from '@/lib/mossLayoutPresentation';
 import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import type { ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 import { Flux3LayoutControls } from './Flux3LayoutControls';
@@ -15,6 +16,7 @@ import { useInpaintSamplingPreview } from '@/hooks/useInpaintSamplingPreview';
 import { useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
 import { isProtectedLivePreview } from '@/lib/livePreviewPrivacy';
 import {
+  Pencil,
   ArrowDown,
   ArrowUp,
   BoxSelect,
@@ -482,10 +484,11 @@ export function UmbraCanvasWorkspace({
   const [mediaImportBusy, setMediaImportBusy] = React.useState(false);
   const [compactPanel, setCompactPanel] = React.useState<'generation' | 'inpaint' | 'layers' | ''>('');
   const mossLayout = editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage';
+  const [selectedLayoutRegionId, setSelectedLayoutRegionId] = React.useState('');
   const drawingMossFieldRef = React.useRef<string | null>(null);
   const mossLayoutRef = React.useRef(mossLayout);
   mossLayoutRef.current = mossLayout;
-  React.useEffect(() => { drawingMossFieldRef.current = null; }, [project.id, mossLayout]);
+  React.useEffect(() => { drawingMossFieldRef.current = null; setSelectedLayoutRegionId(''); }, [project.id, mossLayout]);
   const layoutAvailable = mossLayout || (editingWorkspace && normalizeUmbraUiModelFamilyKey(modelFamily) === 'flux3');
   React.useEffect(() => {
     if (editingWorkspace) setCompactPanel('generation');
@@ -730,6 +733,7 @@ export function UmbraCanvasWorkspace({
         setLayoutRegions([...(current.layoutRegions || []).filter(region => !existing || region.id !== existing.id), { ...(existing || {}), ...(fieldId ? { promptFieldId: fieldId } : {}), x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)), id: existing?.id || crypto.randomUUID(), description: existing?.description || '', ...(mossLayoutRef.current ? { label: 'object' as const } : {}) }]);
         if (fieldId) { drawingMossFieldRef.current = null; setTool('select'); }
       },
+      onSelectLayoutRegion: setSelectedLayoutRegionId,
       onTransformLayoutRegion: (id, rect) => {
         const current = useUmbraCanvasStore.getState().present;
         setLayoutRegions((current.layoutRegions || []).map(region => region.id === id ? { ...region, ...rect } : region));
@@ -805,6 +809,12 @@ export function UmbraCanvasWorkspace({
   React.useEffect(() => {
     managerRef.current?.setMossLayout(mossLayout);
   }, [mossLayout]);
+
+  React.useEffect(() => {
+    managerRef.current?.setLayoutFieldLabels(Object.fromEntries(promptSegments
+      .filter(field => field.moss?.enabled && field.moss.purpose === 'item')
+      .map(field => [field.id, getMossLayoutFieldName(field, promptSegments)])));
+  }, [promptSegments]);
 
   React.useEffect(() => {
     managerRef.current?.setLayerSnappingEnabled(layerSnappingEnabled);
@@ -945,6 +955,7 @@ export function UmbraCanvasWorkspace({
           setPreviewStageId(stages[nextIndex].id);
         }
         if (key === 'escape') {
+          drawingMossFieldRef.current = null;
           managerRef.current?.cancelShapeDrawing();
           setTool('select');
           setPreviewStageId('');
@@ -2627,6 +2638,12 @@ export function UmbraCanvasWorkspace({
     setCompactPanel('');
     panelButtonsRef.current[compactPanel || lastPanelRef.current]?.focus();
   };
+  const locateLayoutBox = (id: string) => {
+    setTool('select');
+    managerRef.current?.locateLayoutRegion(id);
+    const workspace = containerRef.current?.closest('[data-umbra-canvas-workspace]');
+    if (workspace && workspace.clientWidth < 1100) closePanel();
+  };
   const onPanelKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     // Portaled selectors own Escape even though React bubbles through the inspector.
@@ -2673,8 +2690,7 @@ export function UmbraCanvasWorkspace({
           <button type="button" onClick={() => { drawingMossFieldRef.current = null; setTool('select'); }} className="ml-auto rounded border border-white/15 px-2 py-1 text-[10px]">Cancel drawing</button>
         </div> : null}
         <strong className="mr-2">Layout generation</strong>
-        Creates new artwork from prompts and boxes. Existing images are not edited or used as references.
-        <span className="ml-2 opacity-70">Use IMG2IMG or Inpaint to modify an image.</span>
+        Generates a new composition from prompts and boxes. Imported artwork is not used as a reference.
       </div> : null}
       <div data-umbra-canvas-layout="" className={cn('relative grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)]', compactPanel ? '@min-[1100px]/canvas:grid-cols-[320px_minmax(0,1fr)]' : '')}>
       {compactPanel ? <button type="button" aria-label="Close Canvas side panel" onClick={closePanel} className="absolute inset-0 z-10 bg-black/65 @min-[1100px]/canvas:hidden" /> : null}
@@ -2839,18 +2855,27 @@ export function UmbraCanvasWorkspace({
             heading={mossLayout ? 'Positive Prompt' : 'Canvas Prompt'}
             mossSupported={mossLayout}
             compiledPromptOverride={mossLayoutPreview.prompt}
-            renderFieldAction={mossLayout ? segment => segment.moss?.enabled && segment.moss.purpose === 'item' ? (
-              <button type="button" aria-label={`Draw bounding box for ${segment.label || segment.moss.label}`} onClick={() => {
-                drawingMossFieldRef.current = segment.id;
-                setTool('layout'); closePanel();
-              }} className="mb-2 flex items-center gap-1.5 rounded border border-rose-300/25 px-2 py-1.5 text-[10px] text-rose-200">
-                <BoxSelect size={12} />{(project.layoutRegions || []).some(region => region.promptFieldId === segment.id) ? 'Redraw bounding box' : 'Draw bounding box'}
-              </button>
-            ) : null : undefined}
+            renderFieldAction={mossLayout ? segment => {
+              if (!segment.moss?.enabled || segment.moss.purpose !== 'item') return null;
+              const regionIndex = (project.layoutRegions || []).findIndex(region => region.promptFieldId === segment.id);
+              const fieldName = getMossLayoutFieldName(segment, promptSegments);
+              const draw = () => { drawingMossFieldRef.current = segment.id; setTool('layout'); closePanel(); };
+              return <div className="mb-2 flex items-center gap-1.5">
+                {regionIndex >= 0 ? <>
+                  <button type="button" aria-label={`Locate box for ${fieldName}`} title="Select and center the linked box"
+                    onClick={() => locateLayoutBox(project.layoutRegions![regionIndex].id)}
+                    className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--umbra-accent)] px-2 text-[10px] text-[var(--umbra-accent)]"><BoxSelect size={12} />Box {regionIndex + 1}</button>
+                  <button type="button" aria-label={`Redraw box for ${fieldName}`} title="Redraw this box; keep its field link" onClick={draw}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--umbra-border)] text-zinc-400 hover:text-[var(--umbra-text)]"><Pencil size={12} /></button>
+                </> : <button type="button" aria-label={`Draw box for ${fieldName}`} disabled={!segment.text.trim() && !segment.moss.text.trim()} onClick={draw}
+                  title="Place this subject inside the generation frame" className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--umbra-border)] px-2 text-[10px] text-zinc-300 hover:border-[var(--umbra-accent)] disabled:opacity-40"><BoxSelect size={12} />Draw box</button>}
+              </div>;
+            } : undefined}
             onSubmit={() => void prepareGenerationRegion()}
           />
           {mossLayoutPreview.issue ? <p role="alert" className="text-xs text-amber-200">{mossLayoutPreview.issue}</p> : null}
-          {mossLayout ? <Flux3LayoutControls moss regions={project.layoutRegions || []} promptFields={promptSegments}
+          {mossLayout ? <Flux3LayoutControls moss regions={project.layoutRegions || []} promptFields={promptSegments} selectedId={selectedLayoutRegionId}
+            onLocate={locateLayoutBox}
             drawing={tool === 'layout'} onDraw={() => { drawingMossFieldRef.current = null; setTool(tool === 'layout' ? 'select' : 'layout'); }}
             onChange={setLayoutRegions} /> : null}
           {capabilities.negativePrompt.support === 'adjustable' ? (
@@ -2941,7 +2966,7 @@ export function UmbraCanvasWorkspace({
         </div>
         <div data-umbra-canvas-tool-toolbar="" role="toolbar" aria-label="Canvas editing tools" className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/35 p-2 [&_button]:shrink-0">
           <ToolButton active={tool === 'select'} title="Select and transform; Ctrl-drag an image handle to crop" shortcut="V" icon={<MousePointer2 size={15} />} onClick={() => setTool('select')} />
-          {layoutAvailable ? <ToolButton active={tool === 'layout'} title="Draw layout box" icon={<Square size={15} />} onClick={() => setTool('layout')} /> : null}
+          {layoutAvailable ? <ToolButton active={tool === 'layout'} title="Draw layout box" icon={<Square size={15} />} onClick={() => { drawingMossFieldRef.current = null; setTool('layout'); }} /> : null}
           <ToolButton active={tool === 'bbox'} title="Generation bounding box" shortcut="G" icon={<BoxSelect size={15} />} onClick={() => setTool('bbox')} />
           <ToolButton active={tool === 'pan'} title="Pan Canvas" shortcut="H" icon={<Hand size={15} />} onClick={() => setTool('pan')} />
           {UMBRA_CANVAS_RASTER_PAINT_ENABLED ? <ToolButton active={tool === 'raster-brush'} title="Paint active image layer" icon={<Brush size={15} />} onClick={() => activateRasterTool('raster-brush')} /> : null}
