@@ -2874,7 +2874,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     setQueueControlBusy('skip');
     try {
       await skipActiveUmbraJob();
-      showToast('Skipped the current Umbra UI generation.', 'success');
+      showToast('Skipped the current Umbra UI generation.', 'success', 'generation');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to skip the current generation.', 'error');
     } finally {
@@ -2886,7 +2886,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     setQueueControlBusy('stop');
     try {
       await stopAllUmbraJobs();
-      showToast('Stop requested for Umbra UI generations.', 'success');
+      showToast('Stop requested for Umbra UI generations.', 'success', 'generation');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Failed to stop Umbra UI generations.', 'error');
     } finally {

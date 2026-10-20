@@ -680,7 +680,7 @@ export interface UmbraInpaintWorkspaceProps {
   onTiledVaeChange: (value: PowerPrompterTiledVaeControls) => void;
   onImg2imgDetailersEnabledChange: (enabled: boolean) => void;
   comfyConnected: boolean;
-  showToast: (message: string, type: 'success' | 'error') => void;
+  showToast: (message: string, type: 'success' | 'error', scope?: 'generation') => void;
 }
 
 const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-rose-300/45';
@@ -4859,9 +4859,9 @@ export function UmbraInpaintWorkspace({
       terminalNoticeRef.current = job.id;
       dispatchCanvasDocument({ type: 'remove_pending_job', jobId: terminalTransition.removePendingJobId });
       jobStageContextsRef.current.delete(job.id);
-      if (job.status === 'canceled') showToast('Inpaint job canceled.', 'success');
+      if (job.status === 'canceled') showToast('Inpaint job canceled.', 'success', 'generation');
       else if (job.completed > 0 && job.failed > 0) showToast(`${job.completed} inpaint samples completed; ${job.failed} failed.`, 'error');
-      else if (job.completed > 0) showToast(`${job.completed} inpaint sample${job.completed === 1 ? '' : 's'} completed.`, 'success');
+      else if (job.completed > 0) showToast(`${job.completed} inpaint sample${job.completed === 1 ? '' : 's'} completed.`, 'success', 'generation');
       else showToast(job.items.find((item) => item.error)?.error || 'The inpaint job failed.', 'error');
       if (terminalTransition.shouldClearActiveJob) setJob(null);
     }

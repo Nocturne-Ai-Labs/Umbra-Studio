@@ -2136,11 +2136,11 @@ export function UmbraCanvasWorkspace({
         setJob((current) => current?.id === job.id ? canceled : current);
       }
       if (canceled.status === 'canceled') {
-        showToast('Canvas generation canceled.', 'success');
+        showToast('Canvas generation canceled.', 'success', 'generation');
       } else if (canceled.cancelRequested) {
         showToast('Canvas cancellation requested. Waiting for the active sample to stop.', 'info');
       } else {
-        showToast(`Canvas generation is already ${canceled.status}.`, 'info');
+        showToast(`Canvas generation is already ${canceled.status}.`, 'info', 'generation');
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Canvas generation could not be canceled.', 'error');

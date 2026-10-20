@@ -3327,7 +3327,7 @@ function GalleryMediaViewer({
         if (!response.ok || payload?.success === false) {
           throw new Error(String(payload?.error || `ComfyUI interrupt failed (${response.status})`));
         }
-        addToast({ type: 'success', message: 'Skipped current generation' });
+        addToast({ scope: 'generation', type: 'success', message: 'Skipped current generation' });
       }
     } catch (error) {
       addToast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to skip current generation.' });

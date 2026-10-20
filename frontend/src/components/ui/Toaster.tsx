@@ -2,6 +2,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { shouldShowToast } from '@/lib/toastVisibility';
 import { useToastStore } from '@/store/useToastStore';
 import { useStore } from '@/store/useStore';
 import { getUmbraRemoteMode } from '@/utils/hostOnly';
@@ -20,7 +21,7 @@ export function Toaster() {
     return () => window.removeEventListener('umbra:remote-mode-change', updateMode);
   }, []);
 
-  const eligibleToasts = toasts.filter((toast) => enableToasts || toast.type === 'error');
+  const eligibleToasts = toasts.filter((toast) => shouldShowToast(toast, { enableToasts, isPhoneRemote }));
   const visibleToasts = [...eligibleToasts.filter((toast) => toast.type !== 'error'), ...eligibleToasts.filter((toast) => toast.type === 'error')].slice(isPhoneRemote ? -1 : -3);
 
   return (

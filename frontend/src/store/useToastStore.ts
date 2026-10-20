@@ -20,6 +20,7 @@ export interface Toast {
   message: string;
   type?: 'success' | 'error' | 'info';
   duration?: number;
+  scope?: 'generation';
   action?: {
     label: string;
     onClick: () => void;
