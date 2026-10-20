@@ -942,6 +942,10 @@ export function deriveUmbraUiTxt2ImgCapabilities(
       const targets = nodes.filter(node => (IMAGE_FLOW_SHIFT_CLASSES as readonly string[]).includes(node.classType) && typeof node.inputs.shift === 'number');
       return targets.length ? control('adjustable', 'Flow sampling shift.', targets, literalInput(targets, ['shift'])) : unsupported('No adjustable flow shift in this graph.');
     })(),
+    mossPromptEnhancer: (() => {
+      const targets = nodes.filter(node => node.classType === 'CLIPLoader' && node.inputs.type === 'moss_image');
+      return targets.length ? control('adjustable', 'Enhance captions locally with the MOSS text encoder.', targets) : unsupported('Requires a native MOSS pipeline.');
+    })(),
     imageOutput: (() => {
       const targets = nodes.filter(node => (IMAGE_SAVE_CLASSES as readonly string[]).includes(node.classType)
         && !Array.isArray(node.inputs.output_format) && !Array.isArray(node.inputs.output_quality));

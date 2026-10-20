@@ -1,6 +1,7 @@
 import { normalizeMossPromptField, type MossPromptField } from '../shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './GeneratedImageMetadata';
 import { normalizeImagePipelineSettings, applyImagePipelineSettings, type ImagePipelineSettings } from '../shared/umbra-ui/imagePipelineSettings';
+import { applyMossPromptEnhancer, assertMossPromptEnhancerAvailable } from '../shared/umbra-ui/mossPromptEnhancer';
 import { applyFlux3References, flux3LayoutElements, removeFlux3BlankReference } from '../shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from '../shared/umbra-ui/mossLayout';
 import { closeSync, fsyncSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'fs';
@@ -2094,6 +2095,8 @@ export class UmbraUiInpaintService {
           const base = await this.buildBaseWorkflow(settings, item.seed);
           const graph = this.buildWorkflow(base.promptGraph, sourceInputName, maskInputName, uploadedControlLayers, uploadedReferenceLayers, source.name, settings, item.seed, nodeTypes);
           applyImagePipelineSettings(graph, settings.imagePipeline);
+          applyMossPromptEnhancer(graph, settings.imagePipeline?.mossPromptEnhancer === true);
+          assertMossPromptEnhancerAvailable(graph, Object.fromEntries([...nodeTypes].map(type => [type, true])));
           if (settings.outputFolder) {
             for (const node of Object.values(graph)) {
               if (!['UmbraLabSaveImage', 'UmbraLabSaveImageSimple'].includes(node.class_type)) continue;

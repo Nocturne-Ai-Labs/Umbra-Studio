@@ -1,6 +1,8 @@
 import { normalizeMossPromptField } from './shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './backend/GeneratedImageMetadata';
 import { applyImagePipelineSettings, normalizeImagePipelineSettings, type ImagePipelineSettings } from './shared/umbra-ui/imagePipelineSettings';
+import { applyMossPromptEnhancer, assertMossPromptEnhancerAvailable } from './shared/umbra-ui/mossPromptEnhancer';
+import { syncUmbraMossCustomNode } from './backend/MossCustomNodeSync';
 import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from './shared/umbra-ui/mossLayout';
 import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
@@ -9656,6 +9658,7 @@ function compileUmbraUiPipelineWorkflow(
 
   if (workflowDescriptor.mediaType === 'image') {
     bypassDisabledUmbraUiOutputUpscale(promptGraph);
+    applyMossPromptEnhancer(promptGraph, generation.imagePipeline?.mossPromptEnhancer === true);
     applyUmbraUiClipSkipToGraph(promptGraph, supportsClipSkip ? generation.clipSkip : 1);
     applyPPTiledVaeToGraph(promptGraph, generation.tiledVae);
     if (Object.values(promptGraph).some((node: any) => node?.class_type === 'Anima38BV2Loader')) {
@@ -11986,6 +11989,7 @@ async function runBackendPowerPrompterPipelineQueue(
         resolveAnima38LoraNames(queuedWorkflow.promptGraph, objectInfo);
         resolveWulverLoraNames(queuedWorkflow.promptGraph, objectInfo);
         assertAnima38TextEncoderRetentionAvailable(queuedWorkflow.promptGraph, objectInfo);
+        assertMossPromptEnhancerAvailable(queuedWorkflow.promptGraph, objectInfo);
       }
       const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
         ? injectUmbraExtendedContinuationPreview(
@@ -18058,6 +18062,11 @@ async function startComfyUIProcess() {
       }
     }
 
+    try {
+      syncUmbraMossCustomNode(ROOT_DIR, join(config.cwd, 'custom_nodes'));
+    } catch (error) {
+      return { success: false, error: `Could not install the MOSS prompt enhancer: ${error instanceof Error ? error.message : String(error)}` };
+    }
     applyComfyFrontendCompatibilityPatches(config.cwd || '');
 
     const securityApply = applyComfySecurityLevelSetting(config.cwd || '');
@@ -21580,6 +21589,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   resolveAnima38LoraNames(compiled.promptGraph, objectInfo);
   resolveWulverLoraNames(compiled.promptGraph, objectInfo);
   assertAnima38TextEncoderRetentionAvailable(compiled.promptGraph, objectInfo);
+  assertMossPromptEnhancerAvailable(compiled.promptGraph, objectInfo);
   return compiled;
 }
 
