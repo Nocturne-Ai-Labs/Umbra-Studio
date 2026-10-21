@@ -7,7 +7,7 @@ import { resolveComfyEndpoint } from '../backend/comfyEndpoint';
 import { compareUmbraVersions } from '../shared/appUpdate';
 import { isUmbraShutdownMarkerForProcess, readUmbraShutdownMarker } from '../shared/umbraShutdownMarker';
 import type { inspectManagedDependencies } from './ManagedDependencyStatus';
-import { BACKGROUND_COMPATIBILITY_RECIPE, BACKGROUND_COMPATIBILITY_VERSION } from '../setup/BackgroundRemovalCompatibility';
+import { BACKGROUND_COMPATIBILITY_RECIPE, BACKGROUND_COMPATIBILITY_VERSION, backgroundCompatibilityNeedsAutomaticRepair } from '../setup/BackgroundRemovalCompatibility';
 
 type DependencyStatus = ReturnType<typeof inspectManagedDependencies>;
 export type ManagedRepairStep = {
@@ -81,19 +81,22 @@ export function createManagedWorkflowRepairPlan(status: DependencyStatus, featur
   }
   if (featureId === 'background-removal-compatibility') steps.length = 0;
   const compatibility = status.backgroundCompatibility;
-  if (compatibility && ['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId)) {
-    steps.push({ kind: 'package', target: 'BackgroundRemoval', pins: [BACKGROUND_COMPATIBILITY_VERSION, 'albumentationsx==2.4.11'],
-      installedVersion: compatibility.versions['transparent-background'] || '', installedCommit: '', requiredVersion: BACKGROUND_COMPATIBILITY_VERSION,
+  const includeBackground = featureId === 'background-removal-compatibility'
+    || featureId === 'all-managed-dependencies' && compatibility && (compatibility.verified || backgroundCompatibilityNeedsAutomaticRepair(compatibility));
+  if (compatibility && includeBackground) {
+    const validateInstalled = compatibility.status === 'validation-required';
+    steps.push({ kind: 'package', target: 'BackgroundRemoval', pins: validateInstalled ? [] : [BACKGROUND_COMPATIBILITY_VERSION, 'albumentationsx==2.4.11'],
+      installedVersion: compatibility.versions['transparent-background'] || '', installedCommit: '', requiredVersion: validateInstalled ? '' : BACKGROUND_COMPATIBILITY_VERSION,
       requiredCommits: [], installedFrontendVersion: '', requiredFrontendVersion: '', filesVerified: true,
       pythonDependenciesVerified: compatibility.verified, verified: compatibility.verified, runtimeReadiness: 'unverified' });
   }
   const holds = featureId === 'background-removal-compatibility' ? []
     : [...new Set(feature.runtimePackages.map((dependency) => `${dependency.detail} ${dependency.reason}`))];
-  if (compatibility && !compatibility.verified && ['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId)) holds.push(compatibility.detail);
+  if (compatibility && !compatibility.verified && featureId === 'background-removal-compatibility' && compatibility.status !== 'validation-required') holds.push(compatibility.detail);
   // Consent remains bound to the build's declared requirements, independent of repair progress.
   const id = createHash('sha256').update(JSON.stringify({ featureId, requirementsHash: status.requirementsHash, core: [feature.minimumComfyVersion, feature.minimumFrontendVersion],
     nodes: feature.customNodes.map((node) => ({ name: node.name, pin: node.minimumCommit, assets: node.frontendAssets, classes: node.requiredClasses, frontendClasses: node.requiredFrontendClasses })),
-    ...(['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId) ? { backgroundRecipe: BACKGROUND_COMPATIBILITY_RECIPE } : {}) })).digest('hex');
+    ...(['all-managed-dependencies', 'background-removal-compatibility'].includes(featureId) ? { backgroundRecipe: BACKGROUND_COMPATIBILITY_RECIPE, backgroundUpdatePolicy: 'preserve-optional-v1' } : {}) })).digest('hex');
   return { id, featureId, label: feature.label, workflowIds: feature.workflowIds, steps, holds,
     requirementsHash: status.requirementsHash, featureIds: features.map((entry) => entry.id),
     modelProfiles: featureId === 'background-removal-compatibility' ? [] : [...new Set(features.flatMap((entry) => entry.modelProfiles))],
@@ -238,7 +241,13 @@ export async function runManagedWorkflowRepair(plan: ManagedRepairPlan, state: M
     for (const step of plan.steps) {
       const currentPlan = hooks.inspect ? createManagedWorkflowRepairPlan(hooks.inspect(), plan.featureId) : plan;
       if (currentPlan.id !== plan.id) throw new Error('Managed requirements changed. Review and approve the new repair plan.');
-      const current = currentPlan.steps.find((entry) => entry.target === step.target)!;
+      const current = currentPlan.steps.find((entry) => entry.target === step.target);
+      if (!current && step.kind === 'package' && plan.featureId === 'all-managed-dependencies') {
+        state.lines.push('Existing background package versions changed during maintenance; preserved without blocking the remaining update. Background preprocessing remains separately verifiable.');
+        state.updatedAt = new Date().toISOString(); state.lines = state.lines.slice(-80); await hooks.persist(state);
+        continue;
+      }
+      if (!current) throw new Error('The managed repair steps changed. Refresh the current repair plan.');
       state.priorVersions[step.target] ??= step.kind === 'node' ? step.installedCommit : step.installedVersion;
       state.priorCommits ??= {};
       state.priorCommits[step.target] ??= step.installedCommit;
@@ -288,7 +297,7 @@ export async function preflightManagedWorkflowRepair(plan: ManagedRepairPlan, st
   }
   const features = repairFeatures(status, plan.featureId);
   if (!features.length) return ['The declared workflow repair plan changed. Review the current plan.'];
-  if (['all-managed-dependencies', 'background-removal-compatibility'].includes(plan.featureId) && status.backgroundCompatibility && !status.backgroundCompatibility.verified) issues.push(status.backgroundCompatibility.detail);
+  if (plan.featureId === 'background-removal-compatibility' && status.backgroundCompatibility && !status.backgroundCompatibility.verified) issues.push(status.backgroundCompatibility.detail);
   if (plan.featureId === 'background-removal-compatibility') {
     const objectInfo = await get('/object_info');
     // The optional Essentials suite is not installed by this repair.
