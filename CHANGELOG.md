@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.90.31-beta - Setup Update Compatibility Hotfix
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Close and reopen Setup after the app update, then retry the ComfyUI maintenance operation that was held.
+- No new model downloads are needed. Unfamiliar background-removal package versions are preserved instead of failing an otherwise unrelated Umbra or ComfyUI update.
+- Background removal keeps its own readiness check. Its dedicated compatibility action can verify existing packages without installing, removing or downgrading them; a failed verification does not claim the feature is ready.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Setup Reliability
+
+- Removed the hard version-whitelist refusal from automatic background-package maintenance. The optional check now reports that existing packages were preserved and allows the requested update to continue.
+- All-managed dependency maintenance no longer forces unfamiliar optional background packages into its installation plan. Actual background dependency problems remain visible in the dedicated feature check.
+- If another maintenance step changes package versions, Setup preserves the new combination instead of crashing or forcing the old version pins. Existing checksum-pinned repairs remain available for their known package combination.
+- Verification of other installed combinations uses synthetic preprocessing and records the matching Python environment, versions and source fingerprint. Changed packages invalidate that evidence. No segmentation model download is required for this check.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Optional background/augmentation version differences no longer fail unrelated updater operations.
+- Fixed: Package versions changing during maintenance no longer cause a missing-step crash in the all-managed plan.
+- Improved: Existing background packages can be verified without forcing package downgrades or removals.
+- Improved: Update completion and optional background-feature readiness are reported separately.
+
 ## v0.90.30-beta - MOSS Guidance and Optional Spectrum Acceleration
 
 ### TL;DR - Setup After Updating
