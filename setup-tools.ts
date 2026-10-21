@@ -25,7 +25,7 @@ import { repairManagedNodeCheckout } from './setup/ManagedNodeRepair';
 import { repairManagedComfyCheckout } from './setup/ManagedComfyCore';
 import { inspectManagedDependencies, inspectManagedNode } from './updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from './shared/appUpdate';
-import { inspectBackgroundRemovalCompatibility, prepareComfyRebuildBackgroundPackages, repairBackgroundRemovalCompatibility } from './setup/BackgroundRemovalCompatibility';
+import { backgroundCompatibilityNeedsAutomaticRepair, inspectBackgroundRemovalCompatibility, prepareComfyRebuildBackgroundPackages, repairBackgroundRemovalCompatibility } from './setup/BackgroundRemovalCompatibility';
 import { assertManagedDependencyRepairIdle } from './updater/ManagedDependencyRepair';
 import { prepareManagedDependencyInstallPolicy } from './updater/ManagedDependencyInstallPolicy';
 import { pathToFileURL } from 'node:url';
@@ -3128,7 +3128,7 @@ async function main() {
     } else if (arg === 'update-comfyui') {
         await updateTool('comfyui');
     } else if (arg === 'background-compatibility') {
-        await repairBackgroundPackages();
+        await repairBackgroundPackages(true);
     } else if (arg === 'managed-comfyui') {
         await repairManagedComfyCore();
     } else if (arg === 'update-python-aitoolkit') {
@@ -3231,10 +3231,14 @@ async function rebuildComfyPython(): Promise<void> {
     });
 }
 
-async function repairBackgroundPackages(): Promise<void> {
+async function repairBackgroundPackages(required = false): Promise<void> {
     const status = inspectBackgroundRemovalCompatibility(ROOT_DIR);
     if (status.verified) return;
-    if (status.status !== 'repair-required') throw new Error(status.detail);
+    if (!required && !backgroundCompatibilityNeedsAutomaticRepair(status)) {
+        log('->', `Optional background preprocessing: ${status.detail} Continuing the requested update without changing these packages.`);
+        return;
+    }
+    if (status.status === 'held') throw new Error(status.detail);
     let servers: Record<string, any> = {};
     const settingsPath = join(ROOT_DIR, 'User', 'Config', 'settings.json');
     if (existsSync(settingsPath)) servers = JSON.parse(readFileSync(settingsPath, 'utf8')).servers || {};
@@ -3242,7 +3246,7 @@ async function repairBackgroundPackages(): Promise<void> {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('The managed Umbra port is unverified; background package repair is held.');
     const assertIdle = () => assertManagedDependencyRepairIdle({ runtimeRoot: ROOT_DIR, origin: `http://127.0.0.1:${port}` });
     await assertIdle();
-    const policy = process.env.PIP_CONSTRAINT ? null : prepareManagedDependencyInstallPolicy(ROOT_DIR, readManagedToolRequirements(MANAGED_SOURCE_ROOT).flatMap((feature) => feature.runtimePackages || []));
+    const policy = process.env.PIP_CONSTRAINT || status.status === 'validation-required' ? null : prepareManagedDependencyInstallPolicy(ROOT_DIR, readManagedToolRequirements(MANAGED_SOURCE_ROOT).flatMap((feature) => feature.runtimePackages || []));
     const prior = process.env.PIP_CONSTRAINT;
     if (policy) process.env.PIP_CONSTRAINT = pathToFileURL(policy.path).href;
     try {

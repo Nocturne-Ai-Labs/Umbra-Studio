@@ -7,6 +7,7 @@ import { managedChildPath } from './ManagedToolRequirements';
 
 export const BACKGROUND_COMPATIBILITY_VERSION = '1.3.4+umbra.1';
 export const BACKGROUND_COMPATIBILITY_RECIPE = 'transparent-background-1.3.4-albumentationsx-2.4.11-v1';
+const INSTALLED_BACKGROUND_RECIPE = 'installed-background-preprocessing-v1';
 const BACKGROUND_WHEEL = 'transparent_background-1.3.4-py3-none-any.whl';
 const BACKGROUND_SHA = 'aa823962e124ae06ea16eb722c18d00cafdda2eda729e9d84d1ab038f62a1d32';
 const AUGMENTATION_WHEEL = 'albumentationsx-2.4.11-py3-none-any.whl';
@@ -16,7 +17,7 @@ const CORE_WHEEL = 'albucore-0.2.18-py3-none-any.whl';
 const CORE_SHA = '515dc6aae53b999a5e0359aced9afac2ac73967e7b3f78bc5cde09107eb83449';
 
 export type BackgroundCompatibilityStatus = {
-  status: 'not-needed' | 'ready' | 'repair-required' | 'held';
+  status: 'not-needed' | 'ready' | 'repair-required' | 'validation-required' | 'held';
   verified: boolean; detail: string; versions: Record<string, string>;
   legacyConsumers: string[];
 };
@@ -81,6 +82,20 @@ function verifiedEvidence(runtimeRoot: string, value: BackgroundSnapshot): boole
   } catch { return false; }
 }
 
+function verifiedInstalledEvidence(runtimeRoot: string, value: BackgroundSnapshot): boolean {
+  try {
+    const evidence = JSON.parse(readFileSync(evidencePath(runtimeRoot), 'utf8'));
+    return evidence.schemaVersion === 1 && evidence.recipe === INSTALLED_BACKGROUND_RECIPE
+      && evidence.fingerprint === fingerprint(value) && evidence.preprocessing === true;
+  } catch { return false; }
+}
+
+// Optional background packages must not hold an unrelated updater operation.
+// Preserve unfamiliar installs; explicit background repair can validate them.
+export function backgroundCompatibilityNeedsAutomaticRepair(status: BackgroundCompatibilityStatus): boolean {
+  return status.status === 'repair-required';
+}
+
 function pendingRepair(runtimeRoot: string): boolean {
   try {
     const evidence = JSON.parse(readFileSync(evidencePath(runtimeRoot), 'utf8'));
@@ -127,7 +142,10 @@ export function inspectBackgroundRemovalCompatibility(runtimeRoot: string, optio
     }
     if ((versions.albumentationsx !== '2.4.11' && !missingX && !(pending && !versions.albumentationsx)) || versions.albucore !== '0.2.18'
       || (!['1.3.4', BACKGROUND_COMPATIBILITY_VERSION].includes(versions['transparent-background']) && !(pending && !versions['transparent-background']))) {
-      return result('held', 'This background / augmentation package combination is outside the reviewed compatibility recipe. No dependency downgrade or removal is allowed.');
+      if (verifiedInstalledEvidence(runtimeRoot, value)) {
+        return result('ready', 'Installed background packages passed preprocessing verification. Existing package versions were preserved.');
+      }
+      return result('validation-required', 'Existing background package versions were preserved. Background preprocessing has not been verified; this does not block updating ComfyUI or Umbra.');
     }
     if (versions['transparent-background'] === BACKGROUND_COMPATIBILITY_VERSION && !versions.albumentations
       && value.utilsSha === PATCHED_UTILS_SHA && !legacyConsumers.length && verifiedEvidence(runtimeRoot, value)) {
@@ -222,6 +240,32 @@ export async function prepareComfyRebuildBackgroundPackages(sourceRoot: string, 
 export async function repairBackgroundRemovalCompatibility(sourceRoot: string, runtimeRoot: string, hooks: BackgroundRepairHooks): Promise<void> {
   const before = inspectBackgroundRemovalCompatibility(runtimeRoot, hooks.probe);
   if (before.verified) return;
+  if (before.status === 'validation-required') {
+    await hooks.assertIdle();
+    const baseline = snapshot(runtimeRoot, hooks.probe);
+    if (JSON.stringify(baseline.versions) !== JSON.stringify(before.versions) || baseline.issues.length) throw new Error('Background packages changed before verification. Refresh their status.');
+    const python = pythonPath(runtimeRoot);
+    const env: NodeJS.ProcessEnv = { ...process.env, NO_ALBUMENTATIONS_UPDATE: '1', ALBUMENTATIONS_OFFLINE: '1', ALBUMENTATIONS_NO_TELEMETRY: '1' };
+    hooks.log?.('Verifying the existing background packages without installing, removing or downgrading dependencies.');
+    const checked = hooks.runPython ? hooks.runPython(python, ['-I', '-c', PREPROCESS_SMOKE], { env, cwd: runtimeRoot })
+      : spawnSync(python, ['-I', '-c', PREPROCESS_SMOKE], { env, cwd: runtimeRoot, encoding: 'utf8', windowsHide: true, timeout: 60000, maxBuffer: 4000000 });
+    if (checked.status !== 0 || checked.error || !String(checked.stdout || '').includes('UMBRA_BACKGROUND_PREPROCESS_OK')) {
+      hooks.log?.(String(checked.stderr || checked.stdout || 'Background preprocessing did not finish.'));
+      throw new Error('Background preprocessing failed with the existing packages. No dependencies were changed. ComfyUI and Umbra updates can continue independently.');
+    }
+    const after = snapshot(runtimeRoot, hooks.probe);
+    const expected = { versions: before.versions, legacyConsumers: before.legacyConsumers };
+    if (after.issues.length || fingerprint(after) !== fingerprint(baseline)
+      || JSON.stringify({ versions: after.versions, legacyConsumers: after.legacyConsumers }) !== JSON.stringify(expected)) {
+      throw new Error('Background packages changed during preprocessing verification. Refresh their status before retrying.');
+    }
+    const evidence = evidencePath(runtimeRoot);
+    mkdirSync(join(runtimeRoot, 'User', 'Config'), { recursive: true });
+    writeFileSync(evidence, JSON.stringify({ schemaVersion: 1, recipe: INSTALLED_BACKGROUND_RECIPE, fingerprint: fingerprint(after), preprocessing: true, verifiedAt: new Date().toISOString() }));
+    if (!inspectBackgroundRemovalCompatibility(runtimeRoot, hooks.probe).verified) throw new Error('Background packages changed during final verification. Refresh and retry.');
+    hooks.log?.('Existing background preprocessing verified; all dependency versions were preserved.');
+    return;
+  }
   if (before.status !== 'repair-required') throw new Error(before.detail);
   await hooks.assertIdle();
   const cacheRoot = managedChildPath(runtimeRoot, 'User/Cache/BackgroundCompatibility');
