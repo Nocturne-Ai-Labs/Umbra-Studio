@@ -11,6 +11,7 @@ import { showInFileExplorer } from '@/utils/fileExplorer';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { DatasetTree } from './components/DatasetTree';
 import { CaptionEditor } from './components/CaptionEditor';
+import { CaptionExportDialog } from './components/CaptionExportDialog';
 import { DatasetLightbox } from './components/DatasetLightbox';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { useDatasets } from './hooks/useDatasets';
@@ -114,6 +115,7 @@ function extractNativeDroppedImages(dataTransfer: DataTransfer): DroppedImage[] 
 }
 
 export function DatasetsTab() {
+  const [exportDataset, setExportDataset] = useState<string | null>(null);
   const { t } = useI18n();
   const { showToast } = useStore();
   const {
@@ -653,11 +655,10 @@ export function DatasetsTab() {
     const success = await saveCaption(selectedDataset, selectedConcept, imageName, caption);
     if (success && activeConcept.current === conceptKey) {
       // Update local state
-      const tags = caption.split(',').map(tag => tag.trim()).filter(Boolean);
       setImages(prev => prev.map(img =>
-        img.filename === imageName ? { ...img, caption, tags } : img
+        img.filename === imageName ? { ...img, caption } : img
       ));
-      setFocusedImage(previous => previous?.filename === imageName ? { ...previous, caption, tags } : previous);
+      setFocusedImage(previous => previous?.filename === imageName ? { ...previous, caption } : previous);
     }
     return success;
   };
@@ -725,13 +726,14 @@ export function DatasetsTab() {
           .filter((entry) => entry.success && typeof entry.caption === 'string')
           .map((entry) => [entry.filename, entry.caption || ''])
       );
-      if (captionByName.size > 0) {
+      if (autoTag) {
+        await loadImages();
+      } else if (captionByName.size > 0) {
         setImages(prev => prev.map(img => (
           captionByName.has(img.filename)
             ? {
               ...img,
               caption: captionByName.get(img.filename) || '',
-              tags: (captionByName.get(img.filename) || '').split(',').map(tag => tag.trim()).filter(Boolean),
             }
             : img
         )));
@@ -739,7 +741,6 @@ export function DatasetsTab() {
           ? {
             ...prev,
             caption: captionByName.get(prev.filename) || '',
-            tags: (captionByName.get(prev.filename) || '').split(',').map(tag => tag.trim()).filter(Boolean),
           }
           : prev
         );
@@ -750,7 +751,7 @@ export function DatasetsTab() {
       const updated = payload?.updated || 0;
       const failed = payload?.failed || 0;
       showToast(
-        failed > 0 ? `Updated ${updated} caption${updated === 1 ? '' : 's'}, ${failed} failed` : `Updated ${updated} caption${updated === 1 ? '' : 's'}`,
+        `${autoTag ? 'Saved sources for' : 'Updated captions for'} ${updated} images${failed ? `, ${failed} failed` : ''}`,
         failed > 0 ? 'error' : 'success'
       );
     } catch (error: any) {
@@ -1019,6 +1020,7 @@ export function DatasetsTab() {
 
           {selectedConcept && (
             <div className="flex flex-wrap items-center gap-1.5">
+              <button type="button" disabled={autoTagging || !selectedDataset} onClick={() => setExportDataset(selectedDataset)} className="umbra-icon-button rounded border border-white/10 px-2 py-1 text-xs">Training export</button>
               <button
                 onClick={() => selectedDataset && void createDatasetZip(selectedDataset)}
                 disabled={!selectedDataset || Boolean(archivingDataset)}
@@ -1231,7 +1233,7 @@ export function DatasetsTab() {
                   onClick={() => void handleBatchCaption(true)}
                   disabled={autoTagging || images.length === 0}
                   className="flex h-8 items-center gap-1.5 rounded border border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] px-2 text-xs font-bold uppercase tracking-[0.12em] text-[var(--umbra-text)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                  title={captionMode === 'natural' ? 'Replace captions with new natural-language captions' : 'Replace captions with newly generated tags'}
+                  title={captionMode === 'natural' ? 'Save a separate description source; existing .txt stays unchanged' : 'Save a separate tag source; existing .txt stays unchanged'}
                 >
                   {autoTagging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                   {selectedImages.size > 0
@@ -1387,7 +1389,7 @@ export function DatasetsTab() {
                   />
                 </label>
                 <p className="min-w-0 flex-1 text-[10px] leading-relaxed text-zinc-500">
-                  Runs locally and writes factual prose captions, including explicit content. The model loads once for the selected batch.
+                  Runs locally and saves a separate description source. The model loads once for the selected batch. Existing .txt files stay intact; use Training export to combine descriptions and tags.
                 </p>
                 <div className="h-8 min-w-[120px] rounded border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
                   <span className="block text-[9px] text-zinc-600">Saved</span>
@@ -1563,6 +1565,7 @@ export function DatasetsTab() {
       <ContextMenu isOpen={Boolean(imageContextMenu)} position={{ x: imageContextMenu?.x || 0, y: imageContextMenu?.y || 0 }} items={imageContextItems} onClose={() => setImageContextMenu(null)} />
 
       {/* Modals */}
+      {exportDataset && <CaptionExportDialog dataset={exportDataset} onClose={() => setExportDataset(null)} />}
       {/* Rename Dataset Modal */}
       {renameDatasetTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">

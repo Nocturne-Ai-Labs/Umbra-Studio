@@ -62,11 +62,20 @@ export function CaptionEditor({
         <DatasetRedownloadButton image={image} busy={isRedownloading} onRedownload={onRedownload} />
       </div>
 
+      <div className="custom-scrollbar max-h-60 shrink-0 space-y-2 overflow-y-auto border-b border-white/10 p-3 text-xs">
+        <p className="font-bold uppercase tracking-widest text-zinc-400">Paired sources</p>
+        {image.captionSourceError && <p role="alert" className="text-red-300">{image.captionSourceError}</p>}
+        {(['natural', 'tags'] as const).map(kind => {
+          const source = image.captionSources?.[kind];
+          return <details key={kind}><summary className="cursor-pointer rounded border border-white/10 p-2">{kind === 'natural' ? 'Description' : 'Generated tags'} · {source?.error ? 'Failed' : source?.text ? 'Saved' : 'Missing'}</summary><p className="mt-1 whitespace-pre-wrap break-words text-zinc-400" data-i18n-skip="">{source?.error || source?.text || 'Run this caption mode to save its source separately.'}</p></details>;
+        })}
+        <p className="text-zinc-500">Use Training export to combine sources. Source history is preserved; image identity is checked during export.</p>
+      </div>
       {/* Caption editor */}
       <div className="flex-1 flex flex-col p-3 space-y-2 min-h-0">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">
-            Caption
+            Training caption (.txt)
           </span>
           {isDirty && (
             <span className="rounded border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-amber-300">Unsaved</span>

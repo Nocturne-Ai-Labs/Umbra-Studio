@@ -57,6 +57,7 @@ import { parseTaggerNumber } from './backend/TaggerNumericOptions';
 import { MAX_DATASET_CONCEPT_SETTINGS_REQUEST_BYTES, readDatasetConceptSettingsText, serializeDatasetConceptSettings } from './backend/DatasetConceptSettingsFile';
 import { isRecoverableUiSessionKey, readUiSessionConfigValue } from './backend/UiSessionConfigRecovery';
 import { checkDatasetCaptionSize, DatasetCaptionTooLargeError, MAX_DATASET_CAPTION_REQUEST_BYTES, readExistingDatasetCaption } from './backend/DatasetCaptionFile';
+import { captionMediaIdentity, captionSourceSidecar, readCaptionRecord, saveCaptionAttempt, normalizeCaptionExportOptions, previewCaptionExport, exportDatasetCaptions } from './backend/DatasetCaptionSources';
 import { createReadStream, createWriteStream, existsSync, statSync, realpathSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { Readable } from 'node:stream';
@@ -16466,7 +16467,7 @@ async function runWaifuTagger(options: WaifuTaggerRunOptions): Promise<any> {
 async function runPixaiTaggerBatch(
   imagePaths: string[],
   options: Omit<WaifuTaggerRunOptions, 'imagePath' | 'modelRepo'>,
-): Promise<Map<string, { result?: any; error?: string }>> {
+): Promise<Map<string, { result?: any; error?: string; raw?: unknown }>> {
   const scriptCandidates = [
     join(ROOT_DIR, 'backend', 'python', 'pixai_tagger.py'),
     join(ROOT_DIR, 'resources', 'app', 'backend', 'python', 'pixai_tagger.py'),
@@ -16502,7 +16503,7 @@ async function runPixaiTaggerBatch(
       const parsed = parseJsonFromProcessOutput(run.stdout);
       if (!Array.isArray(parsed?.results)) throw new Error('PixAI tagger returned no image results.');
       return new Map(parsed.results.map((entry: any) => [String(entry.filename || ''), {
-        result: entry.result, error: entry.error,
+        result: entry.result, error: entry.error, raw: entry,
       }]));
     }
     throw new Error(`PixAI tagger failed. ${failures.slice(-2).join(' | ')}`);
@@ -36419,6 +36420,22 @@ const server = Bun.serve<UmbraSocketData>({
         }
       }
 
+      // Review a training export, then write a new independent folder; source captions stay intact.
+      const captionExportMatch = path.match(/^\/api\/datasets\/([^/]+)\/caption-export$/);
+      if (captionExportMatch && method === 'POST') {
+        try {
+          const name = sanitizeDatasetSegment(decodeURIComponent(captionExportMatch[1]));
+          const datasetPath = name ? resolveDatasetPathSafe(name) : null;
+          if (!datasetPath || !existsSync(datasetPath)) return json({ error: 'Dataset not found' }, 404);
+          const body = await readJsonObject(req, false, 64 * 1024);
+          if (!body || !['preview', 'export'].includes(String(body.action))) return json({ error: 'Choose preview or export.' }, 400);
+          const options = normalizeCaptionExportOptions(body.options || {});
+          if (body.action === 'preview') return json(await previewCaptionExport(datasetPath, options));
+          if (typeof body.revision !== 'string') return json({ error: 'Review a preview before exporting.' }, 409);
+          return json(await exportDatasetCaptions(datasetPath, join(USER_DIR, 'Exports', 'Datasets'), options, body.revision));
+        } catch (error: any) { return json({ error: error.message }, 409); }
+      }
+
       // Create or replace a maximum-compression, lossless dataset share archive.
       const datasetArchiveMatch = path.match(/^\/api\/datasets\/([^/]+)\/archive$/);
       if (datasetArchiveMatch && method === 'POST') {
@@ -36605,9 +36622,22 @@ const server = Bun.serve<UmbraSocketData>({
                 });
                 if (captionStat?.isFile() && captionStat.size <= 1024 * 1024) {
                   caption = await fs.readFile(captionPath, 'utf-8');
-                  tags = caption.split(',').map(t => t.trim()).filter(Boolean);
                 }
 
+                let captionSources;
+                let captionSourceError = '';
+                try {
+                  const record = await readCaptionRecord(conceptPath, f);
+                  if (record) {
+                    const tagSource = record.sources.tags?.at(-1);
+                    captionSources = {
+                      id: record.id,
+                      natural: record.sources.natural?.at(-1) ? { text: record.sources.natural.at(-1)!.text, error: record.sources.natural.at(-1)!.error, producer: record.sources.natural.at(-1)!.producer } : undefined,
+                      tags: tagSource ? { text: tagSource.text, error: tagSource.error, producer: tagSource.producer } : undefined,
+                    };
+                    if (tagSource && !tagSource.error) tags = tagSource.text.split(',').map(t => t.trim()).filter(Boolean);
+                  }
+                } catch (error: any) { captionSourceError = error.message; }
                 return {
                   filename: f,
                   path: datasetConceptImagePath(datasetName, conceptFolder, f, conceptPath === resolveDatasetPathSafe(datasetName)),
@@ -36615,6 +36645,8 @@ const server = Bun.serve<UmbraSocketData>({
                   revision: imageStat.mtimeMs,
                   caption,
                   tags,
+                  captionSources,
+                  captionSourceError,
                 };
               }
           );
@@ -36749,6 +36781,7 @@ const server = Bun.serve<UmbraSocketData>({
             sidecars.add(`${img}.txt`);
             sidecars.add(`${img}.json`);
             sidecars.add(booruSourceSidecar(img));
+            sidecars.add(captionSourceSidecar(img));
           }
           for (const sidecar of sidecars) {
             const sidecarStat = await fs.lstat(join(conceptPath, sidecar)).catch((error: NodeJS.ErrnoException) => {
@@ -36965,7 +36998,7 @@ const server = Bun.serve<UmbraSocketData>({
             return json({ error: 'No images found to caption' }, 400);
           }
 
-          for (const filename of imageFiles) {
+          if (!autoTag) for (const filename of imageFiles) {
             const sibling = findDatasetImageStemSibling(filename, allFiles);
             if (sibling) return json({ error: datasetImageStemCollisionMessage(filename, sibling) }, 409);
           }
@@ -36997,14 +37030,21 @@ const server = Bun.serve<UmbraSocketData>({
             console.warn('[Datasets] Failed to persist concept auto-tag settings:', error);
           });
 
-          const naturalCaptionResults = new Map<string, { caption?: string; error?: string }>();
+          const identities = new Map<string, Awaited<ReturnType<typeof captionMediaIdentity>>>();
+          if (autoTag) for (const filename of imageFiles) {
+            await readCaptionRecord(conceptPath, filename);
+            identities.set(filename, await captionMediaIdentity(conceptPath, filename));
+          }
+          const naturalCaptionResults = new Map<string, { caption?: string; error?: string; raw?: unknown }>();
+          let batchError = '';
           const pixaiResults = autoTag && captionMode === 'tags' && modelRepo === PIXAI_TAGGER_REPO
             ? await runPixaiTaggerBatch(imageFiles.map((filename) => join(conceptPath, filename)), {
               generalThreshold, characterThreshold, ratingThreshold,
               generalMcutEnabled, characterMcutEnabled, maxTags,
-            })
+            }).catch((error) => { batchError = String(error.message || error); return null; })
             : null;
           if (autoTag && captionMode === 'natural') {
+            try {
             const naturalRun = await runNaturalCaptioner({
               imagePaths: imageFiles.map((filename) => join(conceptPath, filename)),
               modelRepo: naturalModelRepo,
@@ -37015,9 +37055,10 @@ const server = Bun.serve<UmbraSocketData>({
               const filename = String(entry?.filename || '').trim();
               if (!filename) continue;
               naturalCaptionResults.set(filename, entry?.success
-                ? { caption: String(entry?.caption || '').trim() }
-                : { error: String(entry?.error || 'Natural caption failed') });
+                ? { caption: String(entry?.caption || '').trim(), raw: entry }
+                : { error: String(entry?.error || 'Natural caption failed'), raw: entry });
             }
+            } catch (error: any) { batchError = String(error.message || error); }
           }
 
           const results: Array<{
@@ -37038,9 +37079,14 @@ const server = Bun.serve<UmbraSocketData>({
           for (const filename of imageFiles) {
             const imagePath = join(conceptPath, filename);
             const captionPath = datasetCaptionPath(conceptPath, filename);
-
+            let rawProducer: unknown;
+            let sourceSaved = false;
+            const sourceSettings = captionMode === 'natural'
+              ? { model: naturalModelRepo, device: naturalDevice, maxNewTokens: naturalMaxNewTokens, triggerTags, prependTags }
+              : { model: modelRepo, generalThreshold, characterThreshold, ratingThreshold, generalMcutEnabled, characterMcutEnabled, maxTags, includeGeneralTags, includeStyleTags, includeCharacterTags, includeCopyrightTags, includeArtistTags, includeMetaTags, includeRatingTags, replaceUnderscoresWithSpaces, triggerTags, prependTags };
             try {
-              const existingCaption = preserveExisting ? await readExistingDatasetCaption(captionPath) : '';
+              const existingCaption = await readExistingDatasetCaption(captionPath);
+              if (batchError) throw new Error(batchError);
               const existingTags = preserveExisting && captionMode === 'tags'
                 ? parseExistingCaptionTags(existingCaption)
                 : [];
@@ -37050,6 +37096,7 @@ const server = Bun.serve<UmbraSocketData>({
                 const result = pixaiResults
                   ? (() => {
                     const entry = pixaiResults.get(filename);
+                    rawProducer = entry?.raw;
                     if (entry?.error) throw new Error(entry.error);
                     if (!entry?.result) throw new Error('PixAI tagger returned no result for this image.');
                     return entry.result;
@@ -37064,6 +37111,7 @@ const server = Bun.serve<UmbraSocketData>({
                   characterMcutEnabled,
                   maxTags,
                 });
+                rawProducer ??= result;
                 if (result && typeof result === 'object' && result.error) {
                   throw new Error(String(result.error));
                 }
@@ -37091,6 +37139,7 @@ const server = Bun.serve<UmbraSocketData>({
               let tagCount = 0;
               if (captionMode === 'natural') {
                 const naturalResult = naturalCaptionResults.get(filename);
+                rawProducer = naturalResult?.raw;
                 if (autoTag && (!naturalResult || naturalResult.error || !naturalResult.caption)) {
                   throw new Error(naturalResult?.error || 'Natural caption result was missing');
                 }
@@ -37105,15 +37154,29 @@ const server = Bun.serve<UmbraSocketData>({
                 caption = mergedTags.join(', ');
                 tagCount = mergedTags.length;
               }
+              if (autoTag && !caption.trim()) throw new Error('No usable caption text was produced. Review the model output and caption filters before retrying.');
               checkDatasetCaptionSize(caption);
-              await writeTextFileAtomic(captionPath, caption, false);
+              if (autoTag) {
+                await saveCaptionAttempt(conceptPath, filename, identities.get(filename)!, captionMode, {
+                  at: new Date().toISOString(), producer: captionMode === 'natural' ? naturalModelRepo : modelRepo,
+                  settings: sourceSettings, text: caption, raw: rawProducer,
+                }, existingCaption);
+                sourceSaved = true;
+              } else await writeTextFileAtomic(captionPath, caption, false);
               results.push({
                 filename,
                 success: true,
-                caption,
+                caption: autoTag ? existingCaption : caption,
                 tagCount,
               });
             } catch (error: any) {
+              if (autoTag && !sourceSaved) {
+                try { await saveCaptionAttempt(conceptPath, filename, identities.get(filename)!, captionMode, {
+                  at: new Date().toISOString(), producer: captionMode === 'natural' ? naturalModelRepo : modelRepo,
+                  settings: sourceSettings, text: '', raw: rawProducer ?? null, error: error?.message || 'Caption generation failed',
+                }, await readExistingDatasetCaption(captionPath)); }
+                catch (recordError: any) { error = new Error(`${error.message}; source record not saved: ${recordError.message}`); }
+              }
               results.push({
                 filename,
                 success: false,

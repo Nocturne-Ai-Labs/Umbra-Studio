@@ -90,6 +90,7 @@ def main() -> int:
     for entry in images:
         filename = str(entry.get("filename") or "") if isinstance(entry, dict) else ""
         image_path = str(entry.get("path") or "") if isinstance(entry, dict) else ""
+        generated_text = None
         try:
             with Image.open(image_path) as source:
                 image = source.convert("RGB")
@@ -119,9 +120,9 @@ def main() -> int:
                 caption = normalize_caption(generated_text)
                 if not caption:
                     raise RuntimeError("The model returned an empty caption")
-                results.append({"filename": filename, "success": True, "caption": caption})
+                results.append({"filename": filename, "success": True, "caption": caption, "raw": generated_text, "instruction": CAPTION_INSTRUCTION})
         except Exception as exc:
-            results.append({"filename": filename, "success": False, "error": str(exc)})
+            results.append({"filename": filename, "success": False, "error": str(exc), "raw": generated_text, "instruction": CAPTION_INSTRUCTION})
 
     payload = {
         "success": any(result.get("success") for result in results),

@@ -73,6 +73,8 @@ export interface DatasetImage {
   tags?: string[]; // Original booru tags if available
   canRedownload?: boolean;
   revision?: number;
+  captionSources?: { id: string; natural?: { text: string; producer: string; error?: string }; tags?: { text: string; producer: string; error?: string } };
+  captionSourceError?: string;
 }
 
 // Booru source configuration
