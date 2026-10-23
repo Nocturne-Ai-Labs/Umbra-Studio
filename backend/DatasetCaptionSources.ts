@@ -45,7 +45,21 @@ export async function readCaptionRecord(conceptPath: string, filename: string): 
   }
   return record;
 }
-export async function saveCaptionAttempt(conceptPath: string, filename: string, media: CaptionRecord['media'], kind: CaptionSourceKind, attempt: CaptionAttempt, existingCaption: string) {
+// One server owns these records; serialize read/append/replace per image so
+// overlapping caption/tagger requests retain both histories.
+const pendingCaptionWrites = new Map<string, Promise<CaptionRecord>>();
+export function saveCaptionAttempt(...args: Parameters<typeof persistCaptionAttempt>): Promise<CaptionRecord> {
+  const path = resolve(args[0], captionSourceSidecar(args[1]));
+  const key = process.platform === 'win32' ? path.toLowerCase() : path;
+  const previous = pendingCaptionWrites.get(key) || Promise.resolve();
+  const operation = previous.catch(() => undefined).then(() => persistCaptionAttempt(...args));
+  const tracked = operation.finally(() => {
+    if (pendingCaptionWrites.get(key) === tracked) pendingCaptionWrites.delete(key);
+  });
+  pendingCaptionWrites.set(key, tracked);
+  return tracked;
+}
+async function persistCaptionAttempt(conceptPath: string, filename: string, media: CaptionRecord['media'], kind: CaptionSourceKind, attempt: CaptionAttempt, existingCaption: string) {
   const currentMedia = await captionMediaIdentity(conceptPath, filename);
   if (media.sha256 !== currentMedia.sha256) throw new Error('Image changed during caption generation. Output was not associated with the changed image.');
   let record = await readCaptionRecord(conceptPath, filename);
