@@ -1,7 +1,7 @@
 import { normalizeUmbraUiImageControlsSnapshot, type UmbraUiImageControlsSnapshot } from '@/lib/umbraUiImageControlsPersistence';
 import { createUmbraUiPromptSegment, migrateLegacyUmbraUiAgentPrompt, type UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
 
-export type ImageWorkspace = 'image' | 'img2img' | 'inpaint' | 'canvas' | 'edit';
+export type ImageWorkspace = 'image' | 'img2img' | 'ref2img' | 'inpaint' | 'canvas' | 'edit';
 export interface ImageWorkspaceDraft {
   controls: UmbraUiImageControlsSnapshot;
   promptSegments: UmbraUiPromptSegment[];
@@ -10,7 +10,11 @@ export interface ImageWorkspaceDraft {
 export type ImageWorkspaceDrafts = Partial<Record<ImageWorkspace, ImageWorkspaceDraft>>;
 
 export function isImageWorkspace(mode: string): mode is ImageWorkspace {
-  return mode === 'image' || mode === 'img2img' || mode === 'inpaint' || mode === 'canvas' || mode === 'edit';
+  return mode === 'image' || mode === 'img2img' || mode === 'ref2img' || mode === 'inpaint' || mode === 'canvas' || mode === 'edit';
+}
+
+export function resolveImageWorkspaceDraftKey(mode: string, imageVariant: 'img2img' | 'ref2img'): string {
+  return mode === 'img2img' ? imageVariant : mode;
 }
 
 export function usesInpaintWorkspacePipeline(mode: string): boolean {
@@ -42,7 +46,9 @@ export function normalizeImageWorkspaceDrafts(value: unknown): ImageWorkspaceDra
 
 export function createImageWorkspaceDraft(mode?: ImageWorkspace): ImageWorkspaceDraft {
   return {
-    controls: normalizeUmbraUiImageControlsSnapshot(mode === 'edit'
+    controls: normalizeUmbraUiImageControlsSnapshot(mode === 'ref2img'
+      ? { modelFamily: 'MOSS Image', generation: { modelType: 'diffusion_model', steps: 50, cfg: 3, samplerName: 'euler', scheduler: 'sgm_uniform', width: 1024, height: 1024 } }
+      : mode === 'edit'
       ? { modelFamily: 'FLUX.3', generation: { modelType: 'diffusion_model', steps: 16, cfg: 1, samplerName: 'euler', scheduler: 'simple' } }
       : { modelFamily: 'Anima', generation: {} })!,
     promptSegments: [createUmbraUiPromptSegment()],

@@ -355,6 +355,12 @@ export function listUmbraUiRef2ImgPipelineGraphIssues(
     if (encoder && (JSON.stringify(sampler.inputs.positive) !== JSON.stringify([encoder.id, 0])
       || JSON.stringify(sampler.inputs.negative) !== JSON.stringify([encoder.id, 1]))) issues.push('visual positive and negative conditioning');
   }
+  for (const detailer of nodes.filter(node => node.classType === 'UmbraImageDetailer')) {
+    if (encoder && (JSON.stringify(detailer.inputs.positive) !== JSON.stringify([encoder.id, 0])
+      || JSON.stringify(detailer.inputs.negative) !== JSON.stringify([encoder.id, 1]))) issues.push('visual detailer conditioning');
+  }
+  if (encoder && !nodes.some(node => node.classType === 'CLIPLoader' && node.inputs.type === 'moss_image'
+    && collectGraphDependencyIds(encoder.id, nodeMap).has(node.id))) issues.push('native MOSS vision encoder loader');
   const outputs = nodes.filter(node => node.classType === 'UmbraLabSaveImage');
   if (!outputs.length || (source && !outputs.every(output => collectGraphDependencyIds(output.id, nodeMap).has(source.id)))) {
     issues.push('reference-conditioned saved output');

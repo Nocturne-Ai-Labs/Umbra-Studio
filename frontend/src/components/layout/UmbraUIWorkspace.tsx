@@ -110,7 +110,7 @@ import {
 import { stageUmbraUiUpscaleHandoff } from '@/lib/umbraUiUpscale';
 import { readDeviceUiResume, writeDeviceUiResume } from '@/lib/deviceUiResume';
 import { restoreUmbraImg2ImgSource } from '@/lib/umbraImg2ImgSourceResume';
-import { isImageWorkspace, normalizeImageWorkspaceDrafts, stageImageWorkspaceNavigation, usesInpaintWorkspacePipeline, type ImageWorkspaceDraft } from '@/lib/umbraUiWorkspaceDrafts';
+import { isImageWorkspace, normalizeImageWorkspaceDrafts, resolveImageWorkspaceDraftKey, stageImageWorkspaceNavigation, usesInpaintWorkspacePipeline, type ImageWorkspaceDraft } from '@/lib/umbraUiWorkspaceDrafts';
 import { readUserConfigStrict, readUserConfigWithRetry, writeUserConfig } from '@/lib/userConfig';
 import {
   resolveUmbraUiInpaintControlAvailability,
@@ -869,6 +869,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     path: '', originalPath: '', name: '', imageUrl: '', width: 0, height: 0, ...(initialDeviceResume?.referenceSource || {}),
   }));
   const referenceMode = activeMode === 'img2img' && img2imgVariant === 'ref2img';
+  const activeImageDraftKey = resolveImageWorkspaceDraftKey(activeMode, img2imgVariant);
+  const activeImageDraftKeyRef = React.useRef(activeImageDraftKey);
+  activeImageDraftKeyRef.current = activeImageDraftKey;
   const img2imgSource = img2imgVariant === 'ref2img' ? referenceSource : standardImg2imgSource;
   const setImg2imgSource = img2imgVariant === 'ref2img' ? setReferenceSource : setStandardImg2imgSource;
   const [img2imgDenoise, setImg2imgDenoise] = React.useState(initialDeviceResume?.img2imgDenoise ?? 0.3);
@@ -1031,7 +1034,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           imageControlsPersistedFingerprintRef.current = getUmbraUiImageControlsFingerprint(snapshot);
           applyPersistedImageControls(snapshot);
         }
-        const mode = activeModeRef.current;
+        const mode = activeImageDraftKeyRef.current;
         const draft = isImageWorkspace(mode) ? workspaceDraftsRef.current[mode] : undefined;
         if (draft) restoreWorkspaceDraft(draft);
         imageControlsSaveEnabledRef.current = true;
@@ -1109,7 +1112,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       });
   }, [promptHistory]);
 
-  const lastDeviceResumeModeRef = React.useRef(activeMode);
+  const lastDeviceResumeModeRef = React.useRef(activeImageDraftKey);
   React.useEffect(() => {
     const save = () => {
       writeDeviceUiResume<UmbraUiDeviceResume>('umbra-ui', {
@@ -1159,8 +1162,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         tiledVae,
       });
     };
-    if (lastDeviceResumeModeRef.current !== activeMode) {
-      lastDeviceResumeModeRef.current = activeMode;
+    if (lastDeviceResumeModeRef.current !== activeImageDraftKey) {
+      lastDeviceResumeModeRef.current = activeImageDraftKey;
       save();
       return;
     }
@@ -1168,6 +1171,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     return () => window.clearTimeout(timer);
   }, [
     activeMode,
+    activeImageDraftKey,
     activePromptSegmentId,
     batchSize,
     cfg,
@@ -1328,39 +1332,41 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     activePromptSegmentId,
   }) : null, [imageControlsSnapshot, promptSegments, activePromptSegmentId]);
 
-  const lastWorkspaceDraftModeRef = React.useRef(activeMode);
+  const lastWorkspaceDraftModeRef = React.useRef(activeImageDraftKey);
   React.useEffect(() => {
-    const modeChanged = lastWorkspaceDraftModeRef.current !== activeMode;
-    lastWorkspaceDraftModeRef.current = activeMode;
+    const modeChanged = lastWorkspaceDraftModeRef.current !== activeImageDraftKey;
+    lastWorkspaceDraftModeRef.current = activeImageDraftKey;
     if (!imageControlsHydrated) return;
-    if (isImageWorkspace(activeMode) && currentWorkspaceDraft) {
-      workspaceDraftsRef.current[activeMode] = structuredClone(currentWorkspaceDraft);
+    if (isImageWorkspace(activeImageDraftKey) && currentWorkspaceDraft) {
+      workspaceDraftsRef.current[activeImageDraftKey] = structuredClone(currentWorkspaceDraft);
     }
     if (modeChanged) {
       writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
       return;
     }
-    if (!isImageWorkspace(activeMode) || !currentWorkspaceDraft) return;
+    if (!isImageWorkspace(activeImageDraftKey) || !currentWorkspaceDraft) return;
     const timer = window.setTimeout(() => {
       writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [activeMode, currentWorkspaceDraft, imageControlsHydrated]);
+  }, [activeImageDraftKey, currentWorkspaceDraft, imageControlsHydrated]);
 
   // Navigation restores a destination draft. Explicit media handoffs continue
   // to use setActiveMode and apply the settings the user chose to transfer.
-  const navigateWorkspace = React.useCallback((mode: UmbraGenerationMode) => {
-    if (mode === activeMode || !imageControlsHydrated) return;
+  const navigateWorkspace = React.useCallback((mode: UmbraGenerationMode, variant = img2imgVariant) => {
+    const destinationKey = resolveImageWorkspaceDraftKey(mode, variant);
+    if (destinationKey === activeImageDraftKey || !imageControlsHydrated) return;
     const destinationDraft = stageImageWorkspaceNavigation(
       workspaceDraftsRef.current,
-      activeMode,
+      activeImageDraftKey,
       currentWorkspaceDraft,
-      mode,
+      destinationKey,
     );
     if (destinationDraft) restoreWorkspaceDraft(destinationDraft);
     writeDeviceUiResume('umbra-ui-workspace-drafts', workspaceDraftsRef.current);
+    if (mode === 'img2img') setImg2imgVariant(variant);
     setActiveMode(mode);
-  }, [activeMode, currentWorkspaceDraft, imageControlsHydrated, restoreWorkspaceDraft]);
+  }, [activeImageDraftKey, img2imgVariant, currentWorkspaceDraft, imageControlsHydrated, restoreWorkspaceDraft]);
 
   React.useEffect(() => {
     if (canvasEnabled || (activeMode !== 'canvas' && activeMode !== 'edit')) return;
@@ -1846,7 +1852,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       }
       if (generation.outputMode === 'ref2img' || generation.outputMode === 'img2img') setImg2imgVariant(generation.outputMode);
       const denoise = Number(img2img.denoise);
-      if (Number.isFinite(denoise)) setImg2imgDenoise(Math.max(0.01, Math.min(1, denoise)));
+      if (generation.outputMode !== 'ref2img' && Number.isFinite(denoise)) setImg2imgDenoise(Math.max(0.01, Math.min(1, denoise)));
     }
   }, [activeLoraFamilyKey, syncImageDimensions]);
 
@@ -1861,6 +1867,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   React.useEffect(() => {
     const applyHandoff = (handoff: UmbraUiPowerPrompterHandoff | null) => {
       if (!handoff) return;
+      if (handoff.target === 'img2img') setImg2imgVariant('img2img');
       setActiveMode(handoff.target === 'inpaint'
         ? 'inpaint'
         : handoff.target === 'img2img'
@@ -3082,8 +3089,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               ]}
               onValueChange={(nextValue) => {
                 if (nextValue === 'img2img' || nextValue === 'ref2img') {
-                  setImg2imgVariant(nextValue);
-                  navigateWorkspace('img2img');
+                  navigateWorkspace('img2img', nextValue);
                 } else navigateWorkspace(nextValue as UmbraGenerationMode);
               }}
               ariaLabel={t('nav.umbraUiWorkspace')}
@@ -3132,8 +3138,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               ]}
               onValueChange={(value) => {
                 if (value === 'img2img' || value === 'ref2img') {
-                  setImg2imgVariant(value);
-                  navigateWorkspace('img2img');
+                  navigateWorkspace('img2img', value);
                 }
               }}
               buttonClassName={cn('h-full min-h-8 rounded-none border-0 bg-transparent px-3 text-[10px] font-black uppercase tracking-[0.11em]',
