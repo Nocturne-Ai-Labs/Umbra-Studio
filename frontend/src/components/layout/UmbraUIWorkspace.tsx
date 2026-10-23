@@ -254,6 +254,8 @@ interface UmbraUiDeviceResume {
   imageAspectRatio?: UmbraImageAspectPresetId;
   imageBaseResolution?: number;
   batchSize?: number;
+  img2imgVariant?: 'img2img' | 'ref2img';
+  referenceSource?: UmbraImg2ImgSourceValue;
   img2imgSource?: UmbraImg2ImgSourceValue;
   img2imgDenoise?: number;
   replaceImg2ImgSourceOnComplete?: boolean;
@@ -292,13 +294,13 @@ function readPersistedUmbraGenerationMode(): UmbraGenerationMode {
 }
 
 function getUmbraUiPipelineModelSelectionKey(
-  feature: 'txt2img' | 'img2img' | 'inpainting',
+  feature: 'txt2img' | 'img2img' | 'ref2img' | 'inpainting',
   modelFamily: string,
   modelType: PowerPrompterModelType,
 ): string {
   // TXT2IMG and IMG2IMG intentionally share a model selection. Inpaint uses
   // distinct compatible models, even when it has the same family label.
-  const scope = feature === 'inpainting' ? 'inpaint' : 'image';
+  const scope = feature === 'inpainting' ? 'inpaint' : feature === 'ref2img' ? 'reference' : 'image';
   const family = normalizeUmbraUiModelFamilyKey(modelFamily) || 'unknown';
   return `${scope}:${family}:${modelType}`;
 }
@@ -853,7 +855,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const [batchSize, setBatchSize] = React.useState(
     Math.max(1, Math.min(64, Math.round(initialDeviceResume?.batchSize || 1))),
   );
-  const [img2imgSource, setImg2imgSource] = React.useState<UmbraImg2ImgSourceValue>(() => restoreUmbraImg2ImgSource({
+  const [standardImg2imgSource, setStandardImg2imgSource] = React.useState<UmbraImg2ImgSourceValue>(() => restoreUmbraImg2ImgSource({
     path: '',
     originalPath: '',
     name: '',
@@ -862,6 +864,13 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     height: 0,
     ...(initialDeviceResume?.img2imgSource || {}),
   }));
+  const [img2imgVariant, setImg2imgVariant] = React.useState<'img2img' | 'ref2img'>(initialDeviceResume?.img2imgVariant === 'ref2img' ? 'ref2img' : 'img2img');
+  const [referenceSource, setReferenceSource] = React.useState<UmbraImg2ImgSourceValue>(() => restoreUmbraImg2ImgSource({
+    path: '', originalPath: '', name: '', imageUrl: '', width: 0, height: 0, ...(initialDeviceResume?.referenceSource || {}),
+  }));
+  const referenceMode = activeMode === 'img2img' && img2imgVariant === 'ref2img';
+  const img2imgSource = img2imgVariant === 'ref2img' ? referenceSource : standardImg2imgSource;
+  const setImg2imgSource = img2imgVariant === 'ref2img' ? setReferenceSource : setStandardImg2imgSource;
   const [img2imgDenoise, setImg2imgDenoise] = React.useState(initialDeviceResume?.img2imgDenoise ?? 0.3);
   const [replaceImg2ImgSourceOnComplete, setReplaceImg2ImgSourceOnComplete] = React.useState(
     initialDeviceResume?.replaceImg2ImgSourceOnComplete === true,
@@ -1127,7 +1136,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         imageAspectRatio,
         imageBaseResolution,
         batchSize,
-        img2imgSource,
+        img2imgSource: standardImg2imgSource,
+        referenceSource,
+        img2imgVariant,
         img2imgDenoise,
         replaceImg2ImgSourceOnComplete,
         samplerName,
@@ -1179,6 +1190,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     hiresUpscaler,
     img2imgDenoise,
     img2imgSource,
+    standardImg2imgSource,
+    referenceSource,
+    img2imgVariant,
     loras,
     modelFamily,
     modelType,
@@ -1358,7 +1372,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     (mode: UmbraGenerationMode) => activeMode === mode || mountedModes.has(mode),
     [activeMode, mountedModes],
   );
-  const activeImageFeature = activeMode === 'img2img' ? 'img2img' : 'txt2img';
+  const activeImageFeature = activeMode === 'img2img' ? img2imgVariant : 'txt2img';
   const inpaintWorkspaceActive = activeMode === 'inpaint';
   const inpaintModelControlsActive = usesInpaintWorkspacePipeline(activeMode);
   const imageModelFamilies = React.useMemo(
@@ -1820,7 +1834,8 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       const sourceImagePath = String(img2img.sourceImagePath || '').trim().replace(/\\/g, '/');
       const sourceImageName = String(img2img.sourceImageName || '').trim().replace(/\\/g, '/');
       if (sourceImagePath || sourceImageName || replace) {
-        setImg2imgSource({
+        const setSource = generation.outputMode === 'ref2img' ? setReferenceSource : setStandardImg2imgSource;
+        setSource({
           path: sourceImagePath,
           originalPath: '',
           name: sourceImageName,
@@ -1829,6 +1844,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           height: 0,
         });
       }
+      if (generation.outputMode === 'ref2img' || generation.outputMode === 'img2img') setImg2imgVariant(generation.outputMode);
       const denoise = Number(img2img.denoise);
       if (Number.isFinite(denoise)) setImg2imgDenoise(Math.max(0.01, Math.min(1, denoise)));
     }
@@ -1919,7 +1935,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeMode, img2imgSource.name, img2imgSource.path, showToast]);
+  }, [activeMode, img2imgVariant, img2imgSource.name, img2imgSource.path, setImg2imgSource, showToast]);
 
   React.useEffect(() => {
     if (promptSegments.some((segment) => segment.id === activePromptSegmentId)) return;
@@ -2302,7 +2318,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                 : imageOutputFolderUnavailable
                   ? 'The selected output folder is no longer pinned. Choose a pinned folder or Default output.'
                 : activeMode === 'img2img' && !img2imgSource.path && !img2imgSource.name
-                  ? 'Choose a source image for IMG2IMG'
+                  ? referenceMode ? 'Choose a reference image for Reference2IMG' : 'Choose a source image for IMG2IMG'
                   : !workflowImagePrompt.trim() || (mossJsonEnabled && !promptSegments.some(segment => segment.text.trim() || segment.moss?.text.trim()))
                     ? 'Enter a positive prompt first'
                     : imageCapabilities.resolution.support === 'adjustable'
@@ -2380,9 +2396,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         batchSize,
         outputMode: activeImageFeature,
         outputFolder: activeImageOutputFolder,
-        sourceImagePath: activeImageFeature === 'img2img' ? img2imgSource.path : '',
-        sourceImageName: activeImageFeature === 'img2img' ? img2imgSource.name : '',
-        denoise: img2imgDenoise,
+        sourceImagePath: activeMode === 'img2img' ? img2imgSource.path : '',
+        sourceImageName: activeMode === 'img2img' ? img2imgSource.name : '',
+        denoise: referenceMode ? 1 : img2imgDenoise,
         hiresFix: {
           enabled: imageCapabilities.hiresFix.support === 'adjustable' && !!effectiveHiresResizeMode && hiresEnabled,
           upscaler: imageCapabilities.hiresFix.controls.upscaler ? hiresUpscaler : 'Latent',
@@ -2415,7 +2431,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       };
       const requestId = await queueImage(queueOptions);
       const generationInfo = snapshotUmbraImageGenerationInfo(
-        selectedImageWorkflow?.name || `${modelFamily} ${activeImageFeature === 'img2img' ? 'IMG2IMG' : 'TXT2IMG'}`,
+        selectedImageWorkflow?.name || `${modelFamily} ${activeImageFeature === 'ref2img' ? 'Reference2IMG' : activeImageFeature === 'img2img' ? 'IMG2IMG' : 'TXT2IMG'}`,
         queueOptions,
       );
       setLastImageGenerationInfo(generationInfo);
@@ -2458,6 +2474,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     }
   }, [
     activeImageFeature,
+    referenceMode,
     batchSize,
     cfg,
     checkpointName,
@@ -2554,7 +2571,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       const replacedPath = String(payload?.path || originalPath).trim() || originalPath;
       const revision = String(payload?.revision || Date.now()).trim();
       const replacedFolderPath = replacedPath.replace(/[\\/][^\\/]+$/, '');
-      setImg2imgSource((current) => {
+      setStandardImg2imgSource((current) => {
         const currentPath = String(current.originalPath || current.path || '').replace(/\\/g, '/');
         if (currentPath !== originalPath.replace(/\\/g, '/')) return current;
         return {
@@ -2660,9 +2677,10 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
       }
       if (handoff.mode === 'txt2img') setActiveMode('image');
       if (handoff.mode === 'img2img') {
+        setImg2imgVariant('img2img');
         setActiveMode('img2img');
         setReplaceImg2ImgSourceOnComplete(false);
-        setImg2imgSource({
+        setStandardImg2imgSource({
           path: handoff.path,
           originalPath: handoff.originalSourcePath || handoff.path,
           name: '',
@@ -2897,7 +2915,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   const phoneImageGeneration = remoteMode === 'phone' && (activeMode === 'image' || activeMode === 'img2img');
   const imageQueueDisabled = isQueueing || !!imageQueueBlockReason;
   const imageQueueTitle = imageQueueBlockReason || (activeMode === 'img2img'
-    ? 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
+    ? referenceMode ? 'Generate a new image using this visual reference' : 'Queue this source through the locked Umbra UI IMG2IMG pipeline'
     : 'Queue this image through the locked Umbra UI pipeline');
   const mobilePromptCatalogAction = remoteMode === 'phone' ? (
     <UmbraMobilePromptCatalog
@@ -2955,7 +2973,12 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
 
   const img2imgSourceControls = (
     <UmbraImg2ImgSourceControls
+      key={img2imgVariant}
       source={img2imgSource}
+      referenceOnly={referenceMode}
+      referenceSettingsDisabled={!imageControlsHydrated}
+      referenceSettings={imagePipeline.mossReference}
+      onReferenceSettingsChange={(mossReference) => setImagePipeline(current => ({ ...current, mossReference }))}
       denoise={img2imgDenoise}
       replaceSourceOnComplete={replaceImg2ImgSourceOnComplete}
       onSourceChange={setImg2imgSource}
@@ -2991,7 +3014,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             ? 'Select a model first'
             : 'Apply this TXT2IMG pipeline, model, LoRAs, seed, resolution, hires fix, detailers, and upscale settings to the active PPCard'}
       isQueueing={isQueueing}
-      queueLabel={activeMode === 'img2img' ? 'Generate IMG2IMG' : 'Generate Image'}
+      queueLabel={activeMode === 'img2img' ? referenceMode ? 'Generate Reference2IMG' : 'Generate IMG2IMG' : 'Generate Image'}
       queueDisabled={imageQueueDisabled}
       queueTitle={imageQueueTitle}
       showGenerateButton={false}
@@ -3045,18 +3068,24 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         {remoteMode === 'phone' ? (
           <div data-umbra-ui-mobile-mode-picker="" className="min-w-0 flex-1">
             <UmbraSelect
-              value={activeMode}
+              value={activeMode === 'img2img' ? img2imgVariant : activeMode}
               options={[
                 { value: 'image', label: 'TXT2IMG', icon: <ImageIcon size={14} /> },
                 { value: 'prompter', label: 'Prompter', icon: <Notebook size={14} /> },
                 { value: 'img2img', label: 'IMG2IMG', icon: <Images size={14} /> },
+                { value: 'ref2img', label: 'Reference2IMG', icon: <Images size={14} />, description: 'MOSS visual-reference generation' },
                 { value: 'inpaint', label: 'Inpaint', icon: <Paintbrush size={14} /> },
                 { value: 'video', label: 'Video', icon: <Clapperboard size={14} />, badge: 'BETA' },
                 { value: 'extras', label: 'Extras', icon: <ImageUp size={14} /> },
                 { value: 'comfyui', label: 'ComfyUI', icon: <img src={comfyLogo} alt="" className="h-4 w-4" /> },
                 { value: 'queue', label: 'Queue Manager', icon: <ListOrdered size={14} /> },
               ]}
-              onValueChange={(nextValue) => navigateWorkspace(nextValue as UmbraGenerationMode)}
+              onValueChange={(nextValue) => {
+                if (nextValue === 'img2img' || nextValue === 'ref2img') {
+                  setImg2imgVariant(nextValue);
+                  navigateWorkspace('img2img');
+                } else navigateWorkspace(nextValue as UmbraGenerationMode);
+              }}
               ariaLabel={t('nav.umbraUiWorkspace')}
               menuTitle="Umbra UI"
               menuSubtitle={t('nav.chooseWorkspace')}
@@ -3093,17 +3122,24 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
           >
             <Notebook size={13} /> Prompter
           </button>
-          <button
-            type="button"
-            data-umbra-ui-mode="img2img"
-            onClick={() => navigateWorkspace('img2img')}
-            className={cn(
-              'inline-flex items-center gap-2 border-l border-white/10 px-3 text-[10px] font-black uppercase tracking-[0.11em] transition-colors',
-              activeMode === 'img2img' ? 'bg-cyan-500/[0.12] text-cyan-100' : 'text-zinc-600 hover:text-zinc-300',
-            )}
-          >
-            <Images size={13} /> IMG2IMG
-          </button>
+          <div data-umbra-ui-mode="img2img" className="self-stretch border-l border-white/10">
+            <UmbraSelect
+              ariaLabel="Image workspace" menuTitle="Image workspace"
+              value={img2imgVariant} leadingIcon={<Images size={13} />}
+              options={[
+                { value: 'img2img', label: 'IMG2IMG', description: 'Transform a source image with adjustable denoise.' },
+                { value: 'ref2img', label: 'Reference2IMG', description: 'Generate from a visual reference. MOSS support available.' },
+              ]}
+              onValueChange={(value) => {
+                if (value === 'img2img' || value === 'ref2img') {
+                  setImg2imgVariant(value);
+                  navigateWorkspace('img2img');
+                }
+              }}
+              buttonClassName={cn('h-full min-h-8 rounded-none border-0 bg-transparent px-3 text-[10px] font-black uppercase tracking-[0.11em]',
+                activeMode === 'img2img' ? 'bg-[color-mix(in_srgb,var(--umbra-accent)_12%,transparent)] text-[var(--umbra-accent)]' : 'text-zinc-500 hover:text-zinc-300')}
+            />
+          </div>
           <button
             type="button"
             data-umbra-ui-mode="inpaint"
@@ -3509,7 +3545,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
 
           <div className="space-y-3">
             {phoneImageGeneration && activeMode === 'img2img' ? (
-              <UmbraMobileSettingsSection enabled title="Source image & strength" summary={`${img2imgSource.name || img2imgSource.path.split(/[\\/]/).pop() || 'Choose an image'} · Denoise ${img2imgDenoise.toFixed(2)}`}>
+              <UmbraMobileSettingsSection enabled title={referenceMode ? "Visual reference" : "Source image & strength"} summary={`${img2imgSource.name || img2imgSource.path.split(/[\\/]/).pop() || 'Choose an image'} · ${referenceMode ? 'Vision reference' : `Denoise ${img2imgDenoise.toFixed(2)}`}`}>
                 {img2imgSourceControls}
               </UmbraMobileSettingsSection>
             ) : null}
@@ -3738,7 +3774,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
             {phoneImageGeneration ? <UmbraMobileSettingsSection enabled title="Queue & output" summary={`${queueSummary.pending} queued · ${queueSummary.running} running`}>
               {imageQueueControls}
               <UmbraPinnedOutputControl
-                task={activeMode === 'img2img' ? 'IMG2IMG' : 'TXT2IMG'}
+                task={activeMode === 'img2img' ? referenceMode ? 'Reference2IMG' : 'IMG2IMG' : 'TXT2IMG'}
                 value={activeMode === 'img2img' ? img2imgOutputFolder : activeTxt2imgOutputFolder}
                 onChange={activeMode === 'img2img' ? setImg2imgOutputFolder : setTxt2imgOutputFolder}
               />
@@ -3768,7 +3804,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         <UmbraMobileWorkspaceSheet
           active={activeMode === 'image' || activeMode === 'img2img'}
           className={phoneImageGeneration ? 'umbra-phone-image-preview' : undefined}
-          title={activeMode === 'img2img' ? 'IMG2IMG Preview' : 'Image Preview'}
+          title={activeMode === 'img2img' ? referenceMode ? 'Reference2IMG Preview' : 'IMG2IMG Preview' : 'Image Preview'}
           subtitle={queueSummary.running > 0
             ? `Generating ${queueSummary.activePosition}/${queueSummary.activeTotal}`
             : queueSummary.pending > 0
@@ -3800,7 +3836,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
               ? <ImageIcon size={13} className="text-zinc-500" />
               : <Clapperboard size={13} className="text-fuchsia-300/70" />}
             <span className="text-[11px] font-black uppercase tracking-[0.14em] text-zinc-300">
-              {activeMode === 'img2img' ? 'IMG2IMG Preview' : activeMode === 'image' ? 'Preview' : 'Video Queue'}
+              {activeMode === 'img2img' ? referenceMode ? 'Reference2IMG Preview' : 'IMG2IMG Preview' : activeMode === 'image' ? 'Preview' : 'Video Queue'}
             </span>
             <span className="ml-auto font-mono text-[10px] text-zinc-500">{queueSummary.completed} outputs</span>
           </div>
@@ -3896,7 +3932,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
                 /> : null}
                 {!phoneImageGeneration && (activeMode === 'image' || activeMode === 'img2img') && (
                   <div data-umbra-ui-preview-output="" className="min-w-0 max-w-full">
-                    <UmbraPinnedOutputControl task={activeMode === 'image' ? 'TXT2IMG' : 'IMG2IMG'}
+                    <UmbraPinnedOutputControl task={activeMode === 'image' ? 'TXT2IMG' : referenceMode ? 'Reference2IMG' : 'IMG2IMG'}
                       value={activeMode === 'image' ? activeTxt2imgOutputFolder : img2imgOutputFolder}
                       onChange={activeMode === 'image' ? setTxt2imgOutputFolder : setImg2imgOutputFolder} />
                   </div>

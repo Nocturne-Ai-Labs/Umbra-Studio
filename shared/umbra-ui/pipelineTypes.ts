@@ -4,6 +4,7 @@ export const UMBRA_UI_PIPELINE_TARGET_PREFIX = 'pipeline:';
 export type UmbraUiPipelineFeature =
   | 'txt2img'
   | 'img2img'
+  | 'ref2img'
   | 'inpainting'
   | 'txt2vid'
   | 'img2vid'
@@ -341,6 +342,8 @@ export function normalizeUmbraUiPipelineFeature(value: unknown): UmbraUiPipeline
     text_to_image: 'txt2img',
     text2image: 'txt2img',
     image: 'txt2img',
+    reference_to_image: 'ref2img',
+    reference2image: 'ref2img',
     im2img: 'img2img',
     image_to_image: 'img2img',
     image2image: 'img2img',
@@ -358,7 +361,7 @@ export function normalizeUmbraUiPipelineFeature(value: unknown): UmbraUiPipeline
     extras: 'upscale',
   };
   const candidate = aliases[normalized] || normalized;
-  return ['txt2img', 'img2img', 'inpainting', 'txt2vid', 'img2vid', 'ref2vid', 'vid2vid', 'upscale'].includes(candidate)
+  return ['txt2img', 'img2img', 'ref2img', 'inpainting', 'txt2vid', 'img2vid', 'ref2vid', 'vid2vid', 'upscale'].includes(candidate)
     ? candidate as UmbraUiPipelineFeature
     : null;
 }

@@ -15,7 +15,7 @@ export function readUmbraUiGenerationMediaKind(value: unknown): UmbraUiRequestMe
     || outputMode === 'ref2vid' || outputMode === 'vid2vid') return 'video';
   if (mediaType === 'image') return 'image';
   if (mediaType) return null;
-  if (outputMode === 'txt2img' || outputMode === 'img2img') return 'image';
+  if (outputMode === 'txt2img' || outputMode === 'img2img' || outputMode === 'ref2img') return 'image';
   return null;
 }
 

@@ -1145,6 +1145,60 @@
       ]
     },
     {
+      "id": "moss-reference",
+      "label": "MOSS Image — Reference2IMG (vision reference)",
+      "optional": true,
+      "optIn": true,
+      "minimumComfyVersion": "0.41.0",
+      "minimumComfyCommit": "e087d8f6cb7c6cdb11b59dc7c9bf17c79f8d877d",
+      "modelProfiles": [
+        "moss-image",
+        "moss-image-base"
+      ],
+      "workflowIds": [
+        "[Umbra UI] MOSS Image Reference to Image Pipeline"
+      ],
+      "requiredBuiltinClasses": [
+        "CLIPLoader",
+        "VAELoader",
+        "EmptyFlux2LatentImage",
+        "ModelSamplingAuraFlow",
+        "SkipLayerGuidanceDiTSimple",
+        "VAEDecode",
+        "LoadImage"
+      ],
+      "customNodes": [
+        {
+          "name": "Umbra-Nodes",
+          "minimumCommit": "1a6aba4ac9021c0c0eb54e156c41bc4c4c856828",
+          "repository": "https://github.com/Nocturne-Ai-Labs/Umbra-Nodes",
+          "version": "0.1.1",
+          "license": "MIT",
+          "webDirectory": "./web",
+          "requiredClasses": [
+            "UmbraLoadCheckpoint",
+            "UmbraPowerPrompterReader",
+            "UmbraA1111LoraSyntax",
+            "UmbraKSamplerHiResFix",
+            "UmbraImageDetailer",
+            "UmbraImageUpscale",
+            "UmbraLabSaveImage"
+          ],
+          "requiredPatch": "UmbraHiresVaeScale.patch"
+        },
+        {
+          "name": "ComfyUI-MOSSImageTextEncoder",
+          "minimumCommit": "289170a5a057a4484d755e7473c7148aab294884",
+          "repository": "https://github.com/ThetaCursed/ComfyUI-MOSSImageTextEncoder",
+          "license": "MIT",
+          "requiredClasses": [
+            "TextEncodeMOSSImageVision"
+          ]
+        }
+      ],
+      "notes": "Optional visual-reference conditioning by ThetaCursed and contributors. Installed unmodified from upstream. Generates a new image from empty latents, not an instruction edit or img2img. Reuses MOSS Base/SFT and the FLUX2 VAE; Qwen3.5 must include working vision weights. FP8 vision weights may require a compatible BF16/FP16/INT8 encoder. Restart ComfyUI when ready after installation."
+    },
+    {
       "id": "moss-image",
       "label": "MOSS Image — generation and masked editing",
       "optional": true,
@@ -1205,7 +1259,7 @@
           ]
         }
       ],
-      "notes": "Native ComfyUI MOSS architecture (merged 2026-10-16). Base and SFT share one family. Supports Manga Studio, img2img and Canvas masked inpainting; no released instruction-edit model. Model files are separate Setup downloads."
+      "notes": "Native ComfyUI MOSS architecture (merged 2026-10-16). Base and SFT share one family. Supports Manga Studio, img2img and Canvas masked inpainting. Vision-reference generation has a separate optional Reference2IMG prerequisite; instruction-edit adapters are not part of this profile. Model files are separate Setup downloads."
     }
   ]
 }

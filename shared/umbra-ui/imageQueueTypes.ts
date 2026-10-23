@@ -30,7 +30,7 @@ export interface UmbraImageQueueOptions {
   outputUpscale: PowerPrompterOutputUpscaleControls;
   tiledVae: PowerPrompterTiledVaeControls;
   loras: UmbraUiLoraEntry[];
-  outputMode?: 'txt2img' | 'img2img';
+  outputMode?: 'txt2img' | 'img2img' | 'ref2img';
   outputFolder?: string;
   sourceImagePath?: string;
   sourceImageName?: string;

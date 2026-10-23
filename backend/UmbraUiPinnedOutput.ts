@@ -13,7 +13,7 @@ export async function assertUmbraUiPinnedOutputAvailable(requested: unknown, pin
   if (!available) throw new Error(`The pinned output folder is unavailable. ${PINNED_OUTPUT_RECOVERY}`);
 }
 
-export type UmbraPinnedOutputTask = 'txt2img' | 'img2img' | 'inpainting' | 'canvas' | 'Video' | 'Upscaled' | 'Censored' | 'Watermarked' | 'GIF';
+export type UmbraPinnedOutputTask = 'txt2img' | 'img2img' | 'ref2img' | 'inpainting' | 'canvas' | 'Video' | 'Upscaled' | 'Censored' | 'Watermarked' | 'GIF';
 
 export function resolveUmbraPinnedTaskFolder(requested: unknown, pins: unknown, resolveCandidate: (value: string) => string, task: UmbraPinnedOutputTask, allowedRoots: string[]): string {
   const root = resolveAuthorizedPinnedOutputRoot(requested, pins, resolveCandidate, allowedRoots);

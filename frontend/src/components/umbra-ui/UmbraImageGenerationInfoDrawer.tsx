@@ -117,6 +117,10 @@ export function UmbraImageGenerationInfoDrawer({
                   <DetailRow label="Scheduler" value={options.scheduler} />
                   <DetailRow label="Clip Skip" value={options.clipSkip} />
                   {options.outputMode === 'img2img' ? <DetailRow label="Denoise" value={options.denoise?.toFixed(3) || '0'} /> : null}
+                  {options.outputMode === 'ref2img' ? <>
+                    <DetailRow label="Reference weight" value={options.imagePipeline?.mossReference?.imageWeight ?? 1} />
+                    <DetailRow label="Vision megapixels" value={options.imagePipeline?.mossReference?.visionMegapixels ?? 1} />
+                  </> : null}
                   {options.outputFolder ? <DetailRow label="Output Folder" value={options.outputFolder} /> : null}
                 </div>
               </section>

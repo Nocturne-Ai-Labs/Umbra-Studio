@@ -1341,7 +1341,7 @@ export function normalizePowerPrompterGenerationControls(rawControls: unknown): 
   const swapRaw = controls.swapDimensions as unknown;
   const swapDimensions = swapRaw === true || String(swapRaw || '').trim().toLowerCase() === 'on';
   const outputModeRaw = String((controls as any).outputMode || '').trim().toLowerCase();
-  const outputMode = (['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
+  const outputMode = (['txt2img', 'img2img', 'ref2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
     .find((candidate) => candidate === outputModeRaw) || 'txt2img';
   const tiledVaeDefaults = DEFAULT_POWER_PROMPTER_GENERATION_CONTROLS.tiledVae!;
   const rawTiledVae = (controls as any).tiledVae;

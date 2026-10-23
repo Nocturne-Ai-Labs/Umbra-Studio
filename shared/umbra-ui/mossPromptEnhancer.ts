@@ -19,18 +19,24 @@ export function applyMossPromptEnhancer(graph: Record<string, any>, enabled: boo
       inputs: { clip: [clip[0], 0], prompt: [lora[0], 2], seed: reader ? [reader[0], 3] : 0 },
       _meta: { title: 'MOSS Prompt Enhancer', umbra_role: 'moss_prompt_enhancer' },
     };
-    const encodeId = allocate('umbra_moss_enhanced_encode');
-    graph[encodeId] = { class_type: 'CLIPTextEncode', inputs: { clip: [lora[0], 1], text: [id, 0] },
-      _meta: { title: 'MOSS Enhanced Positive Prompt' } };
-    for (const node of Object.values(graph)) {
-      for (const [name, input] of Object.entries(node.inputs || {})) {
-        if (Array.isArray(input) && input[0] === lora[0] && input[1] === 3) node.inputs[name] = [encodeId, 0];
+    const visionNodes = Object.values(graph).filter(node => node?.class_type === 'TextEncodeMOSSImageVision');
+    if (visionNodes.length) {
+      // Enhance the text, keeping the visual conditioning intact.
+      for (const node of visionNodes) node.inputs.prompt = [id, 0];
+    } else {
+      const encodeId = allocate('umbra_moss_enhanced_encode');
+      graph[encodeId] = { class_type: 'CLIPTextEncode', inputs: { clip: [lora[0], 1], text: [id, 0] },
+        _meta: { title: 'MOSS Enhanced Positive Prompt' } };
+      for (const node of Object.values(graph)) {
+        for (const [name, input] of Object.entries(node.inputs || {})) {
+          if (Array.isArray(input) && input[0] === lora[0] && input[1] === 3) node.inputs[name] = [encodeId, 0];
+        }
       }
     }
     enhancer = [id, graph[id]];
   }
   const source = Object.entries(graph).find(([, node]) => node?.class_type === 'LoadImage'
-    && (node._meta?.umbra_role === 'img2img_source' || node._meta?.title === 'Umbra Inpaint Working Image'));
+    && (node._meta?.umbra_role === 'reference_image' || node._meta?.umbra_role === 'img2img_source' || node._meta?.title === 'Umbra Inpaint Working Image'));
   if (source) enhancer[1].inputs.image = [source[0], 0];
   // Inpaint/Canvas can create their save node after the base graph was compiled.
   for (const node of Object.values(graph)) {
