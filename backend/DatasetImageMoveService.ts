@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { booruSourceSidecar } from './BooruDownloadService';
 import { copyFileExclusive } from './FsTransferCopy';
+import { captionSourceSidecar } from './DatasetCaptionSources';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif']);
 
@@ -53,7 +54,7 @@ export async function moveDatasetImages(fromPath: string, toPath: string, filena
       throw new Error(`Destination already contains an image named ${base}.`);
     }
     const associatedNames = new Set([
-      `${base}.txt`, `${base}.json`, `${name}.txt`, `${name}.json`, booruSourceSidecar(name),
+      `${base}.txt`, `${base}.json`, `${name}.txt`, `${name}.json`, booruSourceSidecar(name), captionSourceSidecar(name),
     ].map(other => other.toLowerCase()));
     if (allDestinationNames.some(other => associatedNames.has(other.toLowerCase()))) {
       throw new Error(`Destination already contains data associated with ${name}.`);
@@ -68,6 +69,7 @@ export async function moveDatasetImages(fromPath: string, toPath: string, filena
     await add(`${base}.json`, hasRemainingSibling);
     await add(`${name}.json`);
     await add(booruSourceSidecar(name));
+    await add(captionSourceSidecar(name));
   }
 
   const created: MoveEntry[] = [];

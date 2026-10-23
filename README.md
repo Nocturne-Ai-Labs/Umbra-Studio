@@ -567,6 +567,34 @@ default. Repository checkouts and GitHub core packages keep the model weights
 out of Git and install exact revisions from
 `defaults/DataForge/model-manifest.json` using the steps above.
 
+### Dataset Caption Sources and Training Export
+
+In **Data Forge > Datasets**, captioning saves descriptions and generated tags
+as separate sources for each exact image. Running one producer does not replace
+the other or overwrite an existing training `.txt`. Per-image
+`<filename>.umbra-caption.json` records retain raw outputs, generation settings,
+failure history, the original caption, and a SHA-256 media identity. Existing
+unclassified `.txt` files are preserved, not guessed to be descriptions or tags.
+
+Use **Training export** to review natural-language-only, tags-only, or combined
+captions. Combined exports expose source order, separator, tag label and optional
+underscore conversion. Missing/failed sources, changed images and stale previews
+block export. A successful export creates a new folder under
+`User/Exports/Datasets/`, containing unchanged image bytes and exactly one `.txt`
+per image in `images/`, separate source records, and `caption-export.json` mapping
+export names back to their original paths and identities. Filename collisions
+are avoided without duplicating samples. The existing **Create ZIP** action
+continues to archive the original dataset and its source records.
+
+AI Toolkit reads one configured caption extension (normally `.txt`); two
+sidecars do not combine automatically. For descriptions or combined captions,
+disable `shuffle_tokens` and set `token_dropout_rate` to `0` so comma-based tag
+processing does not scramble or drop prose. Whole-caption dropout remains a
+separate trainer option; the loader may adjust comma spacing. Exports flatten
+concept folders, so configure repeats/weights in the trainer. The export does
+not edit training jobs, validate tokenizer truncation, or assert that combined
+captions improve MOSS training.
+
 Python helpers use virtual environments:
 
 - Managed tools such as ComfyUI use tool-local venvs, for example `Tools/ComfyUI/venv/`.

@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.90.32-beta - Paired Dataset Captions and Training Export
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then reopen Studio and reload Remote. No new model downloads are required for pairing or export; generating descriptions/tags still requires the corresponding existing caption/tagger models.
+- In **Data Forge > Datasets**, generated descriptions and tags now save as separate sources **without replacing existing `.txt` captions**. Use **Training export**, choose natural-language, tags, or combined content, and review the preview to create a new training folder. Manual caption Save and prefix-only Apply remain explicit actions.
+- Point your trainer at the exported **images** folder. For combined prose/tags, disable caption/token shuffling and set token dropout to zero to retain order. Concept folders are flattened; configure repeats/weights in your trainer. Existing jobs and datasets are not automatically migrated or modified.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Paired Caption Sources and Reviewed Training Exports
+
+- Natural-language descriptions and WD/PixAI tags retain separate raw outputs, settings, attempt history and a stable image identity. Running one source does not erase the other; existing unclassified captions are preserved.
+- Training export offers natural-only, tags-only, or combined captions, with source order, separator, tag label and tag-only underscore conversion. Every exported image has one matching `.txt`; original image bytes are copied unchanged.
+- Preview detects missing/failed sources, changed images and stale selections before exporting. Raw source records and a filename mapping are retained outside the trainer image folder. Interrupted exports stay marked incomplete rather than being reported ready.
+- Source records follow image moves and remain in full dataset archives. Imports avoid orphan-record filename collisions. No training configuration or model weights are changed by this feature.
+
+### Validation Scope
+
+- Targeted caption pairing/export regressions, isolated API/UI checks, frontend build/lint, pipeline audit, and Windows/Linux packaged startup and upgrade checks. Caption fixtures are synthetic; this release does not claim fresh caption-model inference, training quality, tokenizer truncation or new GPU generation qualification.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Generating tags or descriptions no longer overwrites the other source or an existing training caption.
+- Fixed: Changed images, failed source attempts and stale previews cannot silently produce a ready training export.
+- Improved: Caption source status and export content are selectable and reviewable before creating a separate training folder.
+- Improved: Export filenames avoid collisions, preserve original media bytes, and retain source provenance and interruption markers.
+
 ## v0.90.31-beta - Setup Update Compatibility Hotfix
 
 ### TL;DR - Setup After Updating

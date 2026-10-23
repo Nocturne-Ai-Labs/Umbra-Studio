@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { copyFileExclusive } from './FsTransferCopy';
 import { booruSourceSidecar } from './BooruDownloadService';
+import { captionSourceSidecar } from './DatasetCaptionSources';
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.avif'];
 
@@ -29,6 +30,7 @@ export async function saveDatasetImportedImage(conceptPath: string, baseName: st
             `${stem}.txt`, `${stem}.json`,
             `${stem}${extension}.txt`, `${stem}${extension}.json`,
             booruSourceSidecar(`${stem}${extension}`),
+            ...IMAGE_EXTENSIONS.map(ext => captionSourceSidecar(`${stem}${ext}`)),
           ].map(name => name.toLowerCase()),
         );
         if ((await fs.readdir(conceptPath)).some(name => occupiedNames.has(name.toLowerCase()))) continue;
