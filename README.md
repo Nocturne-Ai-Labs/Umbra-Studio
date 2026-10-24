@@ -713,6 +713,20 @@ packaging. The native CI steps in
 empty output/work folders for each build attempt. The example paths below live
 in the ignored dependency cache; keep your application publish root separate.
 
+Routine builds reuse a verified native media bundle from
+`.bun-tmp/media-build-cache`; `UMBRA_MEDIA_CACHE_ROOT` can select a dedicated
+build-cache directory. Cache identity includes the target architecture, host
+platform, pinned sources, recipe, release workflow and verification code. Every
+reuse checks the complete file inventory and runs FFmpeg/ffprobe. A missing or
+invalid bundle falls back to the native source build. App-only changes do not
+invalidate this cache. Keep the cache separate from application/runtime data.
+
+CI fills the default-branch cache when media build inputs change, allowing later
+release tags to reuse it. First builds, evicted caches and changed media inputs
+still require compilation. To inspect the cache without packaging, run
+`bun scripts/prepare-media-runtime.ts --check-cache` (exit 0 means verified;
+exit 1 means a native build is needed).
+
 On Windows, install MSYS2 and open its **UCRT64** shell in the repository. Install
 these compiler/build tools, then build the media pair:
 

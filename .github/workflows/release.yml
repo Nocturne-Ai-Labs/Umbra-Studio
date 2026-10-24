@@ -13,6 +13,15 @@ on:
         required: false
         type: string
   push:
+    # Populate default-branch caches: tag-scoped caches cannot serve later tags.
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - 'defaults/MediaTools/source-build-manifest.json'
+      - 'scripts/build-media-from-source.sh'
+      - 'scripts/prepare-media-runtime.ts'
+      - 'scripts/media-build-cache.ts'
+      - 'shared/bundledMediaRuntime.ts'
     tags:
       - 'v*'
 
@@ -21,6 +30,8 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
+    env:
+      UMBRA_MEDIA_CACHE_ROOT: ${{ github.workspace }}/.bun-tmp/media-build-cache
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -32,7 +43,21 @@ jobs:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
         run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
+      - name: Identify native media build inputs
+        id: media-key
+        shell: pwsh
+        run: '"key=$(bun scripts/prepare-media-runtime.ts --cache-key)" >> $env:GITHUB_OUTPUT'
+      - name: Restore verified native media cache
+        uses: actions/cache@v4
+        with:
+          path: .bun-tmp/media-build-cache/bundles
+          key: media-v1-${{ steps.media-key.outputs.key }}
+      - name: Verify cached native media
+        id: media-check
+        continue-on-error: true
+        run: bun scripts/prepare-media-runtime.ts --check-cache
       - name: Install native Windows media build tools
+        if: steps.media-check.outcome != 'success'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -46,14 +71,18 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-python
       - name: Build Windows media from pinned sources
+        if: steps.media-check.outcome != 'success'
         shell: msys2 {0}
         run: |
           source_root="$(cygpath -u "$GITHUB_WORKSPACE")"
           bash scripts/build-media-from-source.sh win32 "$source_root/release/media-source-win32" "$source_root/release/media-work-win32"
+      - name: Select freshly built Windows media
+        if: steps.media-check.outcome != 'success'
+        shell: pwsh
+        run: '"UMBRA_MEDIA_SOURCE_BUILD=$env:GITHUB_WORKSPACE/release/media-source-win32" >> $env:GITHUB_ENV'
       - name: Build Windows BAT portable folder
         shell: pwsh
         env:
-          UMBRA_MEDIA_SOURCE_BUILD: ${{ github.workspace }}\release\media-source-win32
           UMBRA_PUBLISH_ROOT: ${{ github.workspace }}\release\windows-bat\Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
@@ -100,11 +129,14 @@ jobs:
         with:
           name: umbra-studio-windows
           path: artifacts/*
+          compression-level: 0
 
   linux:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+    env:
+      UMBRA_MEDIA_CACHE_ROOT: ${{ github.workspace }}/.bun-tmp/media-build-cache
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -116,13 +148,29 @@ jobs:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
         run: node scripts/verify-release-identity.mjs
       - run: bun install --frozen-lockfile
+      - name: Identify native media build inputs
+        id: media-key
+        run: echo "key=$(bun scripts/prepare-media-runtime.ts --cache-key)" >> "$GITHUB_OUTPUT"
+      - name: Restore verified native media cache
+        uses: actions/cache@v4
+        with:
+          path: .bun-tmp/media-build-cache/bundles
+          key: media-v1-${{ steps.media-key.outputs.key }}
+      - name: Verify cached native media
+        id: media-check
+        continue-on-error: true
+        run: bun scripts/prepare-media-runtime.ts --check-cache
       - name: Install native Linux media build tools
+        if: steps.media-check.outcome != 'success'
         run: sudo apt-get update && sudo apt-get install -y build-essential nasm cmake pkg-config python3 meson ninja-build
       - name: Build Linux media from pinned sources
+        if: steps.media-check.outcome != 'success'
         run: bash scripts/build-media-from-source.sh linux "$GITHUB_WORKSPACE/release/media-source-linux" "$GITHUB_WORKSPACE/release/media-work-linux"
+      - name: Select freshly built Linux media
+        if: steps.media-check.outcome != 'success'
+        run: echo "UMBRA_MEDIA_SOURCE_BUILD=$GITHUB_WORKSPACE/release/media-source-linux" >> "$GITHUB_ENV"
       - name: Build Linux portable folder
         env:
-          UMBRA_MEDIA_SOURCE_BUILD: ${{ github.workspace }}/release/media-source-linux
           UMBRA_LINUX_PUBLISH_ROOT: ${{ github.workspace }}/release/linux/Umbra Studio
           UMBRA_WEBAPP_CLEAN_RELEASE: '1'
           UMBRA_BUNDLE_DATA_FORGE_MODELS: '0'
@@ -153,6 +201,7 @@ jobs:
         with:
           name: umbra-studio-linux
           path: artifacts/*
+          compression-level: 0
 
   validate:
     needs: [windows, linux]

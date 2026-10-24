@@ -171,7 +171,9 @@ function copyExplicitFile(source, target) {
 }
 
 function run(command, args, label) {
+  const started = performance.now();
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false });
+  console.log(`[linux-publish] ${label}: ${((performance.now() - started) / 1000).toFixed(1)}s`);
   if (result.status !== 0) {
     throw new Error(`[linux-publish] ${label} failed with status ${result.status ?? 1}`);
   }
