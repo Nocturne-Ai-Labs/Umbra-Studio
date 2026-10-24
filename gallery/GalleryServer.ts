@@ -197,6 +197,8 @@ const sidebarWorker = new AsyncWorkerQueue(SIDEBAR_WORKER_CONCURRENCY, 128);
 const galleryWorker = new AsyncWorkerQueue(GALLERY_WORKER_CONCURRENCY, 160);
 const filmstripWorker = new AsyncWorkerQueue(FILMSTRIP_WORKER_CONCURRENCY, 128);
 const metadataWorker = new AsyncWorkerQueue(METADATA_WORKER_CONCURRENCY, 64);
+// Original media must not queue behind native thumbnail decodes or folder scans.
+const originalMediaWorker = new AsyncWorkerQueue(8, 128);
 const mediaStatWorker = new AsyncWorkerQueue(8, 128);
 const treeWatchWorker = new AsyncWorkerQueue(2, 256);
 const treeChanges = new GalleryTreeChanges({
@@ -2451,8 +2453,7 @@ async function handleImage(req: Request, reqUrl: URL): Promise<Response> {
       || reqUrl.searchParams.get('worker')
       || reqUrl.searchParams.get('source'),
     );
-    const laneWorker = getLaneWorker(lane);
-    const stat = await laneWorker.run(`media-open:${filePath}`, async () => {
+    const stat = await originalMediaWorker.run(`media-open:${filePath}`, async () => {
       const stat = await fs.stat(filePath);
       return {
         size: stat.size,
@@ -2665,6 +2666,7 @@ const server = Bun.serve({
           gallery: galleryWorker.stats(),
           filmstrip: filmstripWorker.stats(),
           metadata: metadataWorker.stats(),
+          originalMedia: originalMediaWorker.stats(),
         },
         cache: {
           thumbnails: thumbnailCache.size,

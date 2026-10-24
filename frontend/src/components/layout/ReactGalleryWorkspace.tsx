@@ -3224,6 +3224,7 @@ function GalleryMediaViewer({
   const viewerTotal = Math.max(files.length, Math.trunc(Number(totalCount || 0)));
   const imageSrc = useMemo(() => (file ? imageUrl(file, { lane: 'gallery', remoteOriginals: remoteViewerOriginals }) : ''), [file, remoteViewerOriginals]);
   const stillSrc = useMemo(() => (file ? thumbnailUrl(file, { lane: 'gallery' }) : ''), [file]);
+  const [loadedViewerSource, setLoadedViewerSource] = useState('');
   const isVideo = file?.type === 'video';
   const isNsfw = file?.privacyClass === 'nsfw';
   const isGif = file?.type === 'gif';
@@ -3254,7 +3255,8 @@ function GalleryMediaViewer({
   ] as Array<[string, unknown]>).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== ''), [metadataParams]);
 
   useEffect(() => {
-    if (!isPhoneViewer || viewerIndex < 0 || typeof window === 'undefined') return;
+    if (!isPhoneViewer || viewerIndex < 0 || typeof window === 'undefined'
+      || !imageSrc || loadedViewerSource !== imageSrc) return;
 
     const candidates: GalleryFile[] = [];
     for (let offset = 1; offset <= MOBILE_VIEWER_PRELOAD_RADIUS; offset += 1) {
@@ -3313,7 +3315,7 @@ function GalleryMediaViewer({
         oldest.load();
       }
     }
-  }, [files, isPhoneViewer, remoteViewerOriginals, viewerIndex]);
+  }, [files, imageSrc, isPhoneViewer, loadedViewerSource, remoteViewerOriginals, viewerIndex]);
 
   const handleSkipLivePreview = useCallback(async () => {
     if (skipLivePreviewBusy) return;
@@ -3872,7 +3874,7 @@ function GalleryMediaViewer({
             } : undefined}
           >
             {isVideo ? (
-              <video data-umbra-nsfw-media={isNsfw ? '' : undefined} key={imageSrc} src={imageSrc} controls autoPlay playsInline preload="metadata" className="h-full max-h-full w-full max-w-full object-contain" />
+              <video data-umbra-nsfw-media={isNsfw ? '' : undefined} key={imageSrc} src={imageSrc} controls autoPlay playsInline preload="metadata" onLoadedMetadata={() => setLoadedViewerSource(imageSrc)} className="h-full max-h-full w-full max-w-full object-contain" />
             ) : (
               <div
                 className="flex flex-none items-center justify-center"
@@ -3882,6 +3884,10 @@ function GalleryMediaViewer({
                   data-umbra-nsfw-media={isNsfw ? '' : undefined}
                   key={imageSrc || stillSrc}
                   src={isGif ? imageSrc : imageSrc || stillSrc}
+                  loading="eager"
+                  decoding="async"
+                  fetchPriority="high"
+                  onLoad={() => setLoadedViewerSource(imageSrc)}
                   alt={file.name}
                   draggable={false}
                   className="h-full max-h-full w-full max-w-full object-contain"
