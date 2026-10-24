@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.90.33-beta - MOSS Reference2IMG and Faster Gallery Loading
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then reopen Studio and reload Remote. Gallery improvements require no new models.
+- To use **IMG2IMG > Reference2IMG**, select **MOSS Image**, install the optional **MOSS Image — Reference2IMG** prerequisites in Setup, and restart ComfyUI when its queue is idle. This installs ThetaCursed's unmodified visual-reference encoder extension. Existing MOSS Base/SFT diffusion weights and the FLUX2 VAE are reused; the Qwen3.5 text encoder must contain working vision weights. Some FP8 encoders need a compatible BF16, FP16 or INT8 alternative; any replacement encoder download depends on the chosen file. No model weights are bundled or automatically replaced.
+- Reference2IMG uses the image as visual prompting while generating from an empty latent. It does not preserve or edit source pixels; ordinary IMG2IMG and Edit remain separate.
+- MOSS Reference2IMG is released for community testing: graph, persistence and handoff regressions passed, but fresh GPU inference, reference fidelity and GPU memory usage have not been validated for this release.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### MOSS Visual Reference Workflow
+
+- Added a dedicated MOSS Reference2IMG pipeline using the text encoder's vision conditioning, including separate reference weight and vision input size controls. Output size remains user-controlled.
+- Shared generation settings, LoRAs, sampling, detailers, presets, queue receipts and output metadata remain available. Visual conditioning is validated through detailer stages as well as the base sampler.
+- Ordinary IMG2IMG and Reference2IMG preserve separate drafts. Explicit IMG2IMG handoffs select the intended flow rather than inheriting reference routing; reference jobs cannot replace the original image.
+- Credits identify ThetaCursed and the optional encoder extension's MIT license. Extension code and weights remain upstream-managed downloads.
+
+### Gallery and Release Build Performance
+
+- Full-resolution media uses a dedicated bounded queue, avoiding delays behind thumbnail decoding and folder scans. Opened images have high fetch priority, and phone neighbor prefetch waits for the selected media to load. Original image bytes, quality, range responses and cache validation are retained.
+- Windows and Linux packaging reuse verified, content-addressed native media bundles when their build inputs match. Cold builds and changed media inputs still compile from pinned sources. Licenses, corresponding source, checksums, executable probes and archive validation remain required.
+- Release artifact upload avoids recompressing finished ZIPs, and packaging logs individual phase durations. Full warm CI timing will be reported from measured runs rather than inferred from local cache timings.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Original Gallery media no longer waits behind thumbnail work before response headers can be sent.
+- Fixed: Switching between IMG2IMG and Reference2IMG no longer mixes their saved prompt/settings drafts or routes explicit handoffs to the wrong variant.
+- Fixed: Reference workflow validation detects missing visual conditioning in detailers and incompatible encoder wiring.
+- Improved: MOSS can use an image as a visual prompt through a separate Reference2IMG selection.
+- Improved: Repeated release builds can reuse verified media tools instead of recompiling them for every application change.
+
 ## v0.90.32-beta - Paired Dataset Captions and Training Export
 
 ### TL;DR - Setup After Updating
