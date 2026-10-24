@@ -5,6 +5,10 @@ import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import policy from '../defaults/MediaTools/source-build-manifest.json';
 import { verifyBundledMediaRuntime } from '../shared/bundledMediaRuntime';
+import { mediaBuildCacheKey, readMediaBuildCache, writeMediaBuildCache } from './media-build-cache';
+
+const sourceRoot = resolve(import.meta.dir, '..');
+const defaultCacheRoot = () => resolve(process.env.UMBRA_MEDIA_CACHE_ROOT || join(sourceRoot, '.bun-tmp', 'media-build-cache'));
 
 function assertLocal(root: string, target: string) {
   const rel = relative(root, target);
@@ -18,8 +22,11 @@ function assertLocal(root: string, target: string) {
 }
 const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
-export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = resolve(import.meta.dir, '../node_modules/.cache/umbra-media-source')) {
+export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = defaultCacheRoot()) {
   if (!policy.platforms.includes(process.platform) || process.arch !== 'x64') throw new Error('Pinned-source media bundle requires Windows or Linux x64.');
+  const cacheKey = mediaBuildCacheKey(sourceRoot);
+  const recipe = resolve(import.meta.dir, 'build-media-from-source.sh');
+  if (hash(recipe) !== policy.recipeSha256) throw new Error('Media build recipe differs from pinned policy.');
   const root = resolve(runtimeRoot);
   const target = join(root, 'Runtime', 'FFmpeg', process.platform);
   assertLocal(root, target);
@@ -27,7 +34,9 @@ export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = resol
   const stage = await mkdtemp(join(dirname(target), '.prepare-'));
   let previous = '';
   try {
-    const prebuilt = process.env.UMBRA_MEDIA_SOURCE_BUILD;
+    const cached = !process.env.UMBRA_MEDIA_SOURCE_BUILD ? readMediaBuildCache(cacheRoot, cacheKey) : null;
+    const prebuilt = process.env.UMBRA_MEDIA_SOURCE_BUILD || (cached ? join(cached, 'Runtime', 'FFmpeg', process.platform) : '');
+    if (cached) console.log('[media-runtime] Reusing verified pinned-source media build.');
     if (prebuilt) {
       // Inspect every source entry before copy; cpSync must never follow build-tree links.
       const inspect = (path: string) => {
@@ -89,12 +98,25 @@ export async function prepareMediaRuntime(runtimeRoot: string, cacheRoot = resol
       throw error;
     }
     if (previous) { assertLocal(root, previous); rmSync(previous, { recursive: true, force: true }); }
+    if (!cached) {
+      try { writeMediaBuildCache(cacheRoot, cacheKey, root); }
+      catch (error) { console.warn(`[media-runtime] Package verified; build cache could not be saved: ${String(error)}`); }
+    }
     console.log(`[media-runtime] Bundled source-built FFmpeg ${policy.version}, ffprobe and complete corresponding sources for ${process.platform}.`);
     return target;
   } finally { if (existsSync(stage)) { assertLocal(root, stage); rmSync(stage, { recursive: true, force: true }); } }
 }
 
 if (import.meta.main) {
+  if (Bun.argv.includes('--cache-key')) {
+    console.log(mediaBuildCacheKey(sourceRoot));
+    process.exit(0);
+  }
+  if (Bun.argv.includes('--check-cache')) {
+    const cached = readMediaBuildCache(defaultCacheRoot(), mediaBuildCacheKey(sourceRoot));
+    console.log(cached ? '[media-runtime] Verified reusable media cache.' : '[media-runtime] No reusable media cache; native build required.');
+    process.exit(cached ? 0 : 1);
+  }
   const index = Bun.argv.indexOf('--root');
   if (index < 0 || !Bun.argv[index + 1]) throw new Error('An explicit --root package destination is required.');
   await prepareMediaRuntime(Bun.argv[index + 1]);

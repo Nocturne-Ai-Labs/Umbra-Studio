@@ -42,6 +42,7 @@ const QUEUE_MANAGER_EDITOR_ENABLED = true;
 
 const UMBRA_QUEUE_ACTIVITY_TONES: Record<UmbraQueueActivity['feature'], string> = {
   txt2img: 'border-cyan-300/25 bg-cyan-500/[0.055] text-cyan-100',
+  ref2img: 'border-sky-300/25 bg-sky-500/[0.055] text-sky-100',
   img2img: 'border-sky-300/25 bg-sky-500/[0.055] text-sky-100',
   inpaint: 'border-rose-300/25 bg-rose-500/[0.055] text-rose-100',
   canvas: 'border-fuchsia-300/25 bg-fuchsia-500/[0.055] text-fuchsia-100',

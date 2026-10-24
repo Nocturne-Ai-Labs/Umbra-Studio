@@ -15,6 +15,10 @@ export interface UmbraImg2ImgSourceValue {
 
 interface UmbraImg2ImgSourceControlsProps {
   source: UmbraImg2ImgSourceValue;
+  referenceOnly?: boolean;
+  referenceSettingsDisabled?: boolean;
+  referenceSettings?: { imageWeight: number; visionMegapixels: number };
+  onReferenceSettingsChange?: (settings: { imageWeight: number; visionMegapixels: number }) => void;
   denoise: number;
   replaceSourceOnComplete: boolean;
   onSourceChange: (source: UmbraImg2ImgSourceValue) => void;
@@ -59,6 +63,10 @@ function comfyInputPreviewUrl(filename: string): string {
 
 export function UmbraImg2ImgSourceControls({
   source,
+  referenceOnly = false,
+  referenceSettingsDisabled = false,
+  referenceSettings = { imageWeight: 1, visionMegapixels: 1 },
+  onReferenceSettingsChange,
   denoise,
   replaceSourceOnComplete,
   onSourceChange,
@@ -70,7 +78,7 @@ export function UmbraImg2ImgSourceControls({
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = React.useState(false);
   const uploadGenerationRef = React.useRef(0);
-  const sourceIdentity = JSON.stringify([source.path, source.originalPath, source.name, source.imageUrl]);
+  const sourceIdentity = JSON.stringify([referenceOnly, source.path, source.originalPath, source.name, source.imageUrl]);
   const sourceRevisionRef = React.useRef({ identity: sourceIdentity, revision: 0 });
   React.useLayoutEffect(() => {
     if (sourceRevisionRef.current.identity !== sourceIdentity) {
@@ -83,12 +91,12 @@ export function UmbraImg2ImgSourceControls({
   }, []);
   const changeSource = React.useCallback((nextSource: UmbraImg2ImgSourceValue) => {
     sourceRevisionRef.current = {
-      identity: JSON.stringify([nextSource.path, nextSource.originalPath, nextSource.name, nextSource.imageUrl]),
+      identity: JSON.stringify([referenceOnly, nextSource.path, nextSource.originalPath, nextSource.name, nextSource.imageUrl]),
       revision: sourceRevisionRef.current.revision + 1,
     };
-    if (!nextSource.originalPath) onReplaceSourceOnCompleteChange(false);
+    if (!referenceOnly && !nextSource.originalPath) onReplaceSourceOnCompleteChange(false);
     onSourceChange(nextSource);
-  }, [onReplaceSourceOnCompleteChange, onSourceChange]);
+  }, [onReplaceSourceOnCompleteChange, onSourceChange, referenceOnly]);
   const previewUrl = source.imageUrl || (source.name
     ? comfyInputPreviewUrl(source.name)
     : source.path
@@ -113,7 +121,7 @@ export function UmbraImg2ImgSourceControls({
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.success === false || !payload?.sourcePath || !payload?.filename) {
-        throw new Error(String(payload?.error || 'Failed to upload the IMG2IMG source.'));
+        throw new Error(String(payload?.error || (referenceOnly ? 'Failed to upload the reference image.' : 'Failed to upload the IMG2IMG source.')));
       }
       const path = String(payload.sourcePath).replace(/\\/g, '/');
       const name = String(payload.filename);
@@ -121,7 +129,7 @@ export function UmbraImg2ImgSourceControls({
       changeSource({ path, originalPath: '', name, imageUrl: comfyInputPreviewUrl(name), width: 0, height: 0 });
     } catch (error) {
       if (uploadGeneration === uploadGenerationRef.current && sourceRevision === sourceRevisionRef.current.revision) {
-        showToast(error instanceof Error ? error.message : 'Failed to upload the IMG2IMG source.', 'error');
+        showToast(error instanceof Error ? error.message : referenceOnly ? 'Failed to upload the reference image.' : 'Failed to upload the IMG2IMG source.', 'error');
       }
     } finally {
       if (uploadGeneration === uploadGenerationRef.current) {
@@ -129,14 +137,14 @@ export function UmbraImg2ImgSourceControls({
         if (inputRef.current) inputRef.current.value = '';
       }
     }
-  }, [changeSource, showToast, uploading]);
+  }, [changeSource, referenceOnly, showToast, uploading]);
   const canReplaceSource = Boolean(source.path && source.originalPath && source.imageUrl.startsWith('/api/fs/image?'));
 
   return (
-    <section data-umbra-img2img-source className="border border-cyan-300/20 bg-cyan-500/[0.035] p-3">
+    <section data-umbra-img2img-source className="border border-white/10 bg-black/25 p-3">
       <div className="mb-2.5 flex items-center gap-2">
-        <ImageIcon size={13} className="text-cyan-300" />
-        <h3 className="text-[11px] font-black uppercase tracking-[0.13em] text-zinc-200">Source Image</h3>
+        <ImageIcon size={13} className="text-[var(--umbra-accent)]" />
+        <h3 className="text-[11px] font-black uppercase tracking-[0.13em] text-zinc-200">{referenceOnly ? 'Visual Reference' : 'Source Image'}</h3>
         {source.width > 0 && source.height > 0 ? (
           <span className="ml-auto font-mono text-[10px] text-zinc-500">{source.width} x {source.height}</span>
         ) : null}
@@ -147,7 +155,7 @@ export function UmbraImg2ImgSourceControls({
           {previewUrl ? (
             <img
               src={previewUrl}
-              alt="IMG2IMG source"
+              alt={referenceOnly ? "MOSS visual reference" : "IMG2IMG source"}
               className="h-full w-full object-contain"
               onLoad={(event) => {
                 const nextWidth = event.currentTarget.naturalWidth;
@@ -161,7 +169,7 @@ export function UmbraImg2ImgSourceControls({
 
         <div data-umbra-img2img-source-actions className="min-w-0 space-y-2">
           <input
-            aria-label="Source image path"
+            aria-label={referenceOnly ? "Reference image path" : "Source image path"}
             value={source.path}
             onChange={(event) => changeSource({
               path: event.target.value,
@@ -208,7 +216,7 @@ export function UmbraImg2ImgSourceControls({
               onClick={() => changeSource({ path: '', originalPath: '', name: '', imageUrl: '', width: 0, height: 0 })}
               disabled={!source.path && !source.name}
               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:border-red-300/25 hover:text-red-300 disabled:opacity-30"
-              title="Clear IMG2IMG source"
+              title={referenceOnly ? "Clear reference image" : "Clear IMG2IMG source"}
             >
               <X size={12} />
             </button>
@@ -216,6 +224,7 @@ export function UmbraImg2ImgSourceControls({
         </div>
       </div>
 
+      {!referenceOnly ? <>
       <label
         className={cn(
           'mt-3 flex min-h-9 items-center gap-2 border bg-black/20 px-2.5 transition-colors',
@@ -268,6 +277,26 @@ export function UmbraImg2ImgSourceControls({
           />
         </div>
       </div>
+      </> : (
+        <div className="mt-3 space-y-3 border-t border-white/10 pt-3">
+          <p className="text-[11px] leading-relaxed text-zinc-400">Generate a new image guided by this reference and your prompt. MOSS reads the reference through its vision encoder; it does not preserve the original pixels.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1 text-[11px] text-zinc-300" title="Adjusts reference pixel contrast before vision encoding; not an edit strength.">
+              <span>Reference weight</span>
+              <input type="number" disabled={referenceSettingsDisabled} aria-label="Reference weight" min="0" max="2" step="0.05"
+                value={referenceSettings.imageWeight} className={inputClass}
+                onChange={event => { const n = event.currentTarget.valueAsNumber; if (Number.isFinite(n)) onReferenceSettingsChange?.({ ...referenceSettings, imageWeight: Math.max(0, Math.min(2, n)) }); }} />
+            </label>
+            <label className="space-y-1 text-[11px] text-zinc-300" title="Downsizes large references for vision encoding. Does not limit output resolution.">
+              <span>Vision megapixels</span>
+              <input type="number" disabled={referenceSettingsDisabled} aria-label="Vision megapixels" min="0.1" max="8" step="0.1"
+                value={referenceSettings.visionMegapixels} className={inputClass}
+                onChange={event => { const n = event.currentTarget.valueAsNumber; if (Number.isFinite(n)) onReferenceSettingsChange?.({ ...referenceSettings, visionMegapixels: Math.max(0.1, Math.min(8, n)) }); }} />
+            </label>
+          </div>
+          <p className="text-[10px] leading-relaxed text-zinc-500">Requires MOSS Reference2IMG in Umbra Setup and a Qwen3.5 encoder with working vision weights. FP8 vision encoders may need a compatible BF16, FP16 or INT8 alternative.</p>
+        </div>
+      )}
     </section>
   );
 }

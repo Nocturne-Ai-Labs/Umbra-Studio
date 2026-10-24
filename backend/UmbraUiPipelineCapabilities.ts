@@ -332,6 +332,42 @@ export function listUmbraUiImg2ImgPipelineGraphIssues(
   return Array.from(new Set(issues));
 }
 
+export function listUmbraUiRef2ImgPipelineGraphIssues(
+  promptGraph: Record<string, unknown>,
+): string[] {
+  const nodes = listPipelineNodes(promptGraph);
+  const nodeMap = new Map(nodes.map(node => [node.id, node] as const));
+  const issues: string[] = [];
+  const sources = nodes.filter(node => hasNodeRole(node, 'reference_image'));
+  const encoders = nodes.filter(node => node.classType === 'TextEncodeMOSSImageVision');
+  const samplers = nodes.filter(node => node.classType === 'UmbraKSamplerHiResFix');
+  if (sources.length !== 1 || sources[0]?.classType !== 'LoadImage') issues.push('one reference_image LoadImage');
+  if (encoders.length !== 1) issues.push('one MOSS visual conditioning encoder');
+  const source = sources[0];
+  const encoder = encoders[0];
+  if (encoder && source && connectedNodeId(encoder, 'image') !== source.id) issues.push('reference-to-vision binding');
+  if (nodes.some(node => node.classType === 'VAEEncode')) issues.push('Reference2IMG must not encode source latents');
+  if (samplers.length !== 1) issues.push('one base generation sampler');
+  for (const sampler of samplers) {
+    const latent = nodeMap.get(connectedNodeId(sampler, 'latent_image'));
+    if (latent?.classType !== 'EmptyFlux2LatentImage') issues.push('empty base latent');
+    if (sampler.inputs.denoise !== 1) issues.push('full base denoise');
+    if (encoder && (JSON.stringify(sampler.inputs.positive) !== JSON.stringify([encoder.id, 0])
+      || JSON.stringify(sampler.inputs.negative) !== JSON.stringify([encoder.id, 1]))) issues.push('visual positive and negative conditioning');
+  }
+  for (const detailer of nodes.filter(node => node.classType === 'UmbraImageDetailer')) {
+    if (encoder && (JSON.stringify(detailer.inputs.positive) !== JSON.stringify([encoder.id, 0])
+      || JSON.stringify(detailer.inputs.negative) !== JSON.stringify([encoder.id, 1]))) issues.push('visual detailer conditioning');
+  }
+  if (encoder && !nodes.some(node => node.classType === 'CLIPLoader' && node.inputs.type === 'moss_image'
+    && collectGraphDependencyIds(encoder.id, nodeMap).has(node.id))) issues.push('native MOSS vision encoder loader');
+  const outputs = nodes.filter(node => node.classType === 'UmbraLabSaveImage');
+  if (!outputs.length || (source && !outputs.every(output => collectGraphDependencyIds(output.id, nodeMap).has(source.id)))) {
+    issues.push('reference-conditioned saved output');
+  }
+  return [...new Set(issues)];
+}
+
 export function listUmbraUiVid2VidPipelineGraphIssues(
   promptGraph: Record<string, unknown>,
 ): string[] {
@@ -640,7 +676,7 @@ export function deriveUmbraUiTxt2ImgCapabilities(
 
   const unifiedPromptNodes = nodes.filter((node) => node.classType === 'UmbraPowerPrompter');
   const negativeEncoderNodes = nodes.filter((node) => (
-    (node.classType === 'TextEncodeQwenImage21' && hasInput(node, 'negative_prompt'))
+    (['TextEncodeQwenImage21', 'TextEncodeMOSSImageVision'].includes(node.classType) && hasInput(node, 'negative_prompt'))
     || (node.classType === 'Anima38BV2Prompt' && node.role === 'negative_prompt' && hasInput(node, 'prompt'))
     || ((node.role === 'negative_prompt' || /negative/i.test(node.title))
     && /^CLIPTextEncode/.test(node.classType)

@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   listUmbraUiImg2ImgPipelineGraphIssues,
+  listUmbraUiRef2ImgPipelineGraphIssues,
   listUmbraUiInpaintPipelineGraphIssues,
   listUmbraUiVid2VidPipelineGraphIssues,
 } from '../backend/UmbraUiPipelineCapabilities';
@@ -83,6 +84,9 @@ for (const fileName of files) {
       const previous = pipelineSlots.get(slot);
       if (previous) failures.push(`${fileName}: pipeline slot ${slot} is already declared by ${previous}`);
       else pipelineSlots.set(slot, fileName);
+    }
+    if (feature === 'ref2img') {
+      for (const issue of listUmbraUiRef2ImgPipelineGraphIssues(graph)) failures.push(`${fileName}: Reference2IMG: ${issue}`);
     }
     if (feature === 'img2img') {
       img2imgCount += 1;

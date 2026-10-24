@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 export type UmbraQueueActivityFeature =
   | 'txt2img'
   | 'img2img'
+  | 'ref2img'
   | 'inpaint'
   | 'canvas'
   | 'video'
@@ -235,6 +236,7 @@ export function isUmbraQueueActivityTerminal(status: UmbraQueueActivityStatus): 
 export function getUmbraQueueActivityFeatureLabel(feature: UmbraQueueActivityFeature): string {
   if (feature === 'txt2img') return 'TXT2IMG';
   if (feature === 'img2img') return 'IMG2IMG';
+  if (feature === 'ref2img') return 'Reference2IMG';
   if (feature === 'inpaint') return 'Inpaint';
   if (feature === 'canvas') return 'Canvas';
   if (feature === 'video') return 'Video';
@@ -250,6 +252,7 @@ function resolveControllerFeature(value: unknown): UmbraQueueActivityFeature {
   const feature = String(value || '').trim().toLowerCase();
   if (feature === 'txt2img') return 'txt2img';
   if (feature === 'img2img') return 'img2img';
+  if (feature === 'ref2img') return 'ref2img';
   if (feature === 'inpainting') return 'inpaint';
   if (feature === 'upscale') return 'upscale';
   if (feature === 'txt2vid' || feature === 'img2vid' || feature === 'ref2vid' || feature === 'vid2vid') return 'video';

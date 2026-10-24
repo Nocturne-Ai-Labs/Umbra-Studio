@@ -1,5 +1,8 @@
 export function formatMissingUmbraUiNodes(missing: string[]): string {
   const message = `ComfyUI is missing required node classes: ${missing.join(', ') || 'unknown node class'}.`;
+  if (missing.includes('TextEncodeMOSSImageVision')) {
+    return `${message} Install MOSS Reference2IMG in Umbra Setup (ComfyUI-MOSSImageTextEncoder), then restart ComfyUI when ready. Use a Qwen3.5 encoder containing vision weights.`;
+  }
   if (missing.some((name) => name === 'MiniMaxH3Director' || name === 'MiniMaxH3DirectorGuide')) {
     return `${message} Install or update the separate ComfyUI-DaSiWa-Nodes extension through Umbra's managed custom-node setup, then restart ComfyUI.`;
   }

@@ -713,6 +713,20 @@ packaging. The native CI steps in
 empty output/work folders for each build attempt. The example paths below live
 in the ignored dependency cache; keep your application publish root separate.
 
+Routine builds reuse a verified native media bundle from
+`.bun-tmp/media-build-cache`; `UMBRA_MEDIA_CACHE_ROOT` can select a dedicated
+build-cache directory. Cache identity includes the target architecture, host
+platform, pinned sources, recipe, release workflow and verification code. Every
+reuse checks the complete file inventory and runs FFmpeg/ffprobe. A missing or
+invalid bundle falls back to the native source build. App-only changes do not
+invalidate this cache. Keep the cache separate from application/runtime data.
+
+CI fills the default-branch cache when media build inputs change, allowing later
+release tags to reuse it. First builds, evicted caches and changed media inputs
+still require compilation. To inspect the cache without packaging, run
+`bun scripts/prepare-media-runtime.ts --check-cache` (exit 0 means verified;
+exit 1 means a native build is needed).
+
 On Windows, install MSYS2 and open its **UCRT64** shell in the repository. Install
 these compiler/build tools, then build the media pair:
 
@@ -819,3 +833,9 @@ source package. User-facing help is maintained inside Umbra Studio.
 Umbra Studio is owned and published by **Nocturne AI Labs** and developed by
 **Minokai**. The canonical repository is
 [Nocturne-Ai-Labs/Umbra-Studio](https://github.com/Nocturne-Ai-Labs/Umbra-Studio).
+
+### MOSS Reference2IMG
+
+Use the **IMG2IMG** workspace selector to choose **Reference2IMG**, select MOSS Image, import a reference and describe the new image. This conditions MOSS through Qwen3.5 vision while starting from an empty latent; it does not edit or preserve source pixels. Ordinary IMG2IMG remains available in the same selector.
+
+Install **MOSS Image — Reference2IMG** in Umbra Setup and restart ComfyUI when ready. This optional extension reuses the MOSS Base/SFT diffusion model and FLUX2 VAE. Its Qwen3.5 encoder must contain working vision weights; some FP8 encoders need a compatible BF16, FP16 or INT8 alternative. Reference weight adjusts the input pixels before encoding; vision megapixels controls reference downsampling independently of output size. Both controls are saved in presets. Generation uses the shared queue, LoRA stack, sampling, detailer and output controls.

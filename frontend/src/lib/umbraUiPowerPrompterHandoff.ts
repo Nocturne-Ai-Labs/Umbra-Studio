@@ -63,7 +63,7 @@ export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPow
     prompt,
     ...(positivePromptSegments.length > 0 ? { positivePromptSegments } : {}),
     modelFamily,
-    generation: normalizeRecord(source.generation),
+    generation: { ...normalizeRecord(source.generation), outputMode: target === 'img2img' ? 'img2img' : target === 'inpaint' ? 'inpainting' : 'txt2img' },
     sourceFile: String(source.sourceFile || '').trim(),
     createdAt: Number.isFinite(Number(source.createdAt)) ? Number(source.createdAt) : Date.now(),
   };

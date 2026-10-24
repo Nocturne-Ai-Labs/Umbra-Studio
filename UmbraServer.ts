@@ -292,6 +292,7 @@ import {
   deriveUmbraUiTxt2ImgCapabilities,
   resolveUmbraUiResolutionNodeLimits,
   listUmbraUiImg2ImgPipelineGraphIssues,
+  listUmbraUiRef2ImgPipelineGraphIssues,
   listUmbraUiInpaintPipelineGraphIssues,
   listUmbraUiVid2VidPipelineGraphIssues,
   getUmbraUiResourceSelectionIssue,
@@ -8000,7 +8001,7 @@ function getPPApiNodeRole(node: any): string {
   return String(node?._meta?.umbra_role || '').trim().toLowerCase();
 }
 
-const UMBRA_UI_OUTPUT_MODES = new Set(['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'pose', 'extras']);
+const UMBRA_UI_OUTPUT_MODES = new Set(['txt2img', 'img2img', 'ref2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'pose', 'extras']);
 
 function getUmbraUiOutputMode(generation: PowerPrompterGenerationControls): string {
   if (generation.video?.family === 'minimax_h3' && generation.video.minimaxH3.director.imageInpaint) return 'inpainting';
@@ -9251,7 +9252,7 @@ function compileUmbraUiPipelineWorkflow(
   const umbraUiOutputMode = getUmbraUiOutputMode(generation);
   const prompterOutputMode = activeImagePipeline?.feature || umbraUiOutputMode;
   const isPrompterOutput = options.queueOrigin === 'power_prompter' && prompterOutputMode === 'txt2img';
-  const requestedPinnedOutputFolder = isPrompterOutput || (isUmbraUiOutput && (umbraUiOutputMode === 'txt2img' || umbraUiOutputMode === 'img2img'))
+  const requestedPinnedOutputFolder = isPrompterOutput || (isUmbraUiOutput && (umbraUiOutputMode === 'txt2img' || umbraUiOutputMode === 'img2img' || umbraUiOutputMode === 'ref2img'))
     ? generation.outputFolder
     : '';
   const pinnedOutputFolder = resolveUmbraUiPinnedOutputFolder(
@@ -9269,10 +9270,11 @@ function compileUmbraUiPipelineWorkflow(
   });
   let pinnedOutputFolderApplied = false;
   const isImg2Img = isUmbraUiOutput && umbraUiOutputMode === 'img2img';
+  const isReference2Img = isUmbraUiOutput && umbraUiOutputMode === 'ref2img';
   const isVid2Vid = isUmbraUiOutput && umbraUiOutputMode === 'vid2vid';
   const img2img = generation.img2img || PP_DEFAULT_GENERATION_CONTROLS.img2img!;
-  if (isImg2Img && !String(img2img.sourceImageName || '').trim()) {
-    throw new Error('IMG2IMG source image was not staged in ComfyUI. Choose the source image again.');
+  if ((isImg2Img || isReference2Img) && !String(img2img.sourceImageName || '').trim()) {
+    throw new Error(`${isReference2Img ? 'Reference2IMG reference' : 'IMG2IMG source'} image was not staged in ComfyUI. Choose the image again.`);
   }
   if (isVid2Vid && !String(generation.video?.sourceVideoName || '').trim()) {
     throw new Error('VID2VID source video was not staged in ComfyUI. Choose the source video again.');
@@ -9298,6 +9300,10 @@ function compileUmbraUiPipelineWorkflow(
     const videoRole = getPPApiNodeRole(node);
     if (videoRole) videoRoleEntries.set(videoRole, { id: nodeId, node });
     if (applyPPVideoRoleToApiNode(videoRole, node, generation, activePrompt)) continue;
+    if (isReference2Img && videoRole === 'reference_image') {
+      setPPApiNodeInput(node, 'image', img2img.sourceImageName);
+      continue;
+    }
     if (isImg2Img && videoRole === 'img2img_source') {
       setPPApiNodeInput(node, 'image', img2img.sourceImageName);
       continue;
@@ -9622,7 +9628,7 @@ function compileUmbraUiPipelineWorkflow(
         applyUmbraUiPrompterOutputLayout(classType, node, prompterOutputLayout);
         if (pinnedOutputFolder) pinnedOutputFolderApplied = true;
       } else if (isUmbraUiOutput) {
-        setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder ? resolveUmbraPinnedTaskFolder(requestedPinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, umbraUiOutputMode === 'img2img' ? 'img2img' : 'txt2img', getGalleryTransferAllowedRoots()) : `Umbra UI/${umbraUiOutputMode}`);
+        setPPApiNodeInput(node, 'output_folder', pinnedOutputFolder ? resolveUmbraPinnedTaskFolder(requestedPinnedOutputFolder, settingsManager.getAppSettings()['library.pinnedFolders'], resolvePathCandidate, umbraUiOutputMode === 'ref2img' ? 'ref2img' : umbraUiOutputMode === 'img2img' ? 'img2img' : 'txt2img', getGalleryTransferAllowedRoots()) : `Umbra UI/${umbraUiOutputMode}`);
         setPPApiNodeInput(node, 'save_to_yyyy_mm_dd_folder', true);
         setPPApiNodeInput(node, 'save_to_set_subfolder', false);
         setPPApiNodeInput(node, 'set_subfolder', '');
@@ -10390,7 +10396,7 @@ async function emitBackendPowerPrompterSavedOutputs(
       umbra_power_prompter: outputPowerPrompterMetadata,
     };
   }));
-  if (generation?.outputOwner === 'umbra_ui' && ['txt2img','img2img'].includes(generation.outputMode)) {
+  if (generation?.outputOwner === 'umbra_ui' && ['txt2img','img2img','ref2img'].includes(generation.outputMode)) {
     try { umbraImageOutputReceipts.record(requestId, stampedOutputs.map(output => String(output.fullpath || ''))); }
     catch (error) { appendPowerPrompterQueueLog('image_output_receipt_save_failed', {requestId,error:String(error)}); }
   }
@@ -20151,7 +20157,7 @@ interface PowerPrompterGenerationControls {
   officialWorkflow?: OfficialVideoWorkflowSelection;
   mediaType?: PowerPrompterMediaType;
   outputOwner?: 'power_prompter' | 'umbra_ui';
-  outputMode?: 'txt2img' | 'img2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
+  outputMode?: 'txt2img' | 'img2img' | 'ref2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
   outputFolder?: string;
   img2img?: {
     sourceImagePath: string;
@@ -21383,7 +21389,7 @@ function normalizePPGenerationControls(rawControls: unknown): PowerPrompterGener
     ? rawTiledVae as Record<string, unknown>
     : {};
   const outputModeRaw = String((controls as any).outputMode || '').trim().toLowerCase();
-  const outputMode = (['txt2img', 'img2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
+  const outputMode = (['txt2img', 'img2img', 'ref2img', 'img2vid', 'ref2vid', 'txt2vid', 'vid2vid', 'inpainting', 'extras'] as const)
     .find((candidate) => candidate === outputModeRaw) || 'txt2img';
   const rawCfg = (controls as any).cfg;
   const cfg = rawCfg == null || (typeof rawCfg === 'string' && !rawCfg.trim())
@@ -25444,7 +25450,7 @@ function describeUmbraUiPipelines(
       ...(inpaintAdapter === 'native_edit' && (rawPipeline.instructionEditing ?? rawPipeline.instruction_editing) === true ? { instructionEditing: true } : {}),
       ...(hasDefaults ? { defaults } : {}),
     };
-    if (feature === 'txt2img' || feature === 'img2img' || feature === 'inpainting') {
+    if (feature === 'txt2img' || feature === 'img2img' || feature === 'ref2img' || feature === 'inpainting') {
       descriptor.capabilities = deriveUmbraUiTxt2ImgCapabilities(promptGraph, descriptor);
     }
     if (feature === 'inpainting') {
@@ -25625,7 +25631,9 @@ function validatePPApiWorkflowDocument(
   for (const pipeline of descriptor.umbraUiPipelines || []) {
     const issues = pipeline.feature === 'inpainting'
       ? listUmbraUiInpaintPipelineGraphIssues(promptGraph, pipeline)
-      : pipeline.feature === 'img2img'
+      : pipeline.feature === 'ref2img'
+        ? listUmbraUiRef2ImgPipelineGraphIssues(promptGraph)
+        : pipeline.feature === 'img2img'
         ? listUmbraUiImg2ImgPipelineGraphIssues(promptGraph)
         : pipeline.feature === 'vid2vid'
           ? listUmbraUiVid2VidPipelineGraphIssues(promptGraph)
@@ -25954,7 +25962,7 @@ function attachUmbraUiPipelineReadiness(
     ...descriptor,
     umbraUiPipelines: descriptor.umbraUiPipelines.map((pipeline) => {
       const graphCapabilities = pipeline.capabilities
-        || (pipeline.feature === 'txt2img' || pipeline.feature === 'img2img'
+        || (pipeline.feature === 'txt2img' || pipeline.feature === 'img2img' || pipeline.feature === 'ref2img'
           ? deriveUmbraUiTxt2ImgCapabilities({}, pipeline)
           : undefined);
       const capabilities = graphCapabilities ? {

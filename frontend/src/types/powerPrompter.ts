@@ -312,7 +312,7 @@ export interface PowerPrompterImg2ImgControls {
 }
 
 export type PowerPrompterOutputOwner = 'power_prompter' | 'umbra_ui';
-export type UmbraUiOutputMode = 'txt2img' | 'img2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
+export type UmbraUiOutputMode = 'txt2img' | 'img2img' | 'ref2img' | 'img2vid' | 'ref2vid' | 'txt2vid' | 'vid2vid' | 'inpainting' | 'extras';
 
 export interface PowerPrompterGenerationControls {
   imagePipeline?: ImagePipelineSettings;

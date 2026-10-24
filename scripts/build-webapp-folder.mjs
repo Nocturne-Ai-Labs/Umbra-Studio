@@ -427,7 +427,9 @@ function removeLegacyRootShortcut(linkPath) {
 }
 
 function run(command, args, label) {
+  const started = performance.now();
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false });
+  console.log(`[webapp-publish] ${label}: ${((performance.now() - started) / 1000).toFixed(1)}s`);
   if (result.status !== 0) {
     throw new Error(`[webapp-publish] ${label} failed with status ${result.status ?? 1}`);
   }

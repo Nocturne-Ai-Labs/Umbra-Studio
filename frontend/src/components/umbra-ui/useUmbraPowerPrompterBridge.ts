@@ -1647,7 +1647,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       });
     const modelFamily = String(options.modelFamily || '').trim();
     const promptWithLoras = composeUmbraUiPromptWithLoras(prompt, enabledLoras, isUmbraUiModelOnlyLoraFamily(modelFamily));
-    const feature: UmbraUiPipelineFeature = options.outputMode === 'img2img' ? 'img2img' : 'txt2img';
+    const feature: UmbraUiPipelineFeature = options.outputMode === 'ref2img' ? 'ref2img' : options.outputMode === 'img2img' ? 'img2img' : 'txt2img';
     const pipelineMatch = resolveUmbraUiPipeline(workflows, feature, modelFamily, options.modelType);
     if (!pipelineMatch.workflow || !pipelineMatch.pipeline) {
       throw new Error(pipelineMatch.error || 'No compatible image pipeline is available.');
@@ -1717,11 +1717,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       outputMode: feature,
       outputFolder: String(options.outputFolder || '').trim().replace(/\\/g, '/'),
       img2img: {
-        sourceImagePath: feature === 'img2img'
+        sourceImagePath: feature === 'img2img' || feature === 'ref2img'
           ? String(options.sourceImagePath || '').trim().replace(/\\/g, '/') : '',
-        sourceImageName: feature === 'img2img'
+        sourceImageName: feature === 'img2img' || feature === 'ref2img'
           ? String(options.sourceImageName || '').trim().replace(/\\/g, '/') : '',
-        denoise: toFiniteNumber(options.denoise, 0.3, 0.01, 1),
+        denoise: feature === 'ref2img' ? 1 : toFiniteNumber(options.denoise, 0.3, 0.01, 1),
       },
       negativePrompt: String(options.negativePrompt || '').trim(),
       seed: toFiniteInteger(options.seed, 0, 0, Number.MAX_SAFE_INTEGER),
@@ -1810,8 +1810,8 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       prompt: promptWithLoras,
       promptEntry,
       generation,
-      styleName: String(options.styleName || (feature === 'img2img' ? 'Umbra UI IMG2IMG' : 'Umbra UI Image')).trim()
-        || (feature === 'img2img' ? 'Umbra UI IMG2IMG' : 'Umbra UI Image'),
+      styleName: String(options.styleName || (feature === 'ref2img' ? 'Umbra UI Reference2IMG' : feature === 'img2img' ? 'Umbra UI IMG2IMG' : 'Umbra UI Image')).trim()
+        || (feature === 'ref2img' ? 'Umbra UI Reference2IMG' : feature === 'img2img' ? 'Umbra UI IMG2IMG' : 'Umbra UI Image'),
       modelFamily,
       feature,
     };
@@ -1823,11 +1823,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
       throw new Error('Umbra UI is still connecting to the queue service.');
     }
     let preparedOptions = options;
-    if (options.outputMode === 'img2img') {
+    if (options.outputMode === 'img2img' || options.outputMode === 'ref2img') {
       const sourceImagePath = String(options.sourceImagePath || '').trim();
       const currentSourceImageName = String(options.sourceImageName || '').trim();
-      if (!sourceImagePath && !currentSourceImageName) throw new Error('Choose a source image for IMG2IMG.');
-      const sourceImageName = await ensureUmbraUiQueuedMedia('image', sourceImagePath, currentSourceImageName, 'IMG2IMG source');
+      if (!sourceImagePath && !currentSourceImageName) throw new Error(options.outputMode === 'ref2img' ? 'Choose a reference image for Reference2IMG.' : 'Choose a source image for IMG2IMG.');
+      const sourceImageName = await ensureUmbraUiQueuedMedia('image', sourceImagePath, currentSourceImageName, options.outputMode === 'ref2img' ? 'Reference2IMG reference' : 'IMG2IMG source');
       preparedOptions = { ...options, sourceImagePath, sourceImageName };
     }
     const prepared = prepareImageQueueRequest(preparedOptions);
