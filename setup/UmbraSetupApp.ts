@@ -1,4 +1,6 @@
 import { SetupJobLogStore, redactSetupOutput, validSetupJobId, MAX_SETUP_LOG_LINES, type SetupLogStatus } from './SetupJobLogs';
+import { createSetupInspector } from './SetupInspection';
+import { launchVisibleWindowsUmbra } from '../shared/visibleUmbraLaunch';
 import { cleanupLegacyUmbraUpdater } from '../shared/legacyUmbraUpdater';
 import {
   existsSync,
@@ -269,7 +271,7 @@ async function runModelInstall(
   );
 }
 
-async function launchUmbra(runtimeRoot: string): Promise<void> {
+async function launchUmbra(runtimeRoot: string, port: number): Promise<void> {
   const windowsLauncher = process.platform === 'win32'
     ? resolveUmbraWindowsLauncher(runtimeRoot)
     : null;
@@ -277,6 +279,10 @@ async function launchUmbra(runtimeRoot: string): Promise<void> {
     ? windowsLauncher?.launcherPath || ''
     : join(runtimeRoot, 'start-umbra.sh');
   if (!launcher || !existsSync(launcher)) throw new Error('Umbra Studio launcher is missing.');
+  if (windowsLauncher) {
+    launchVisibleWindowsUmbra({ runtimeRoot, command: windowsLauncher.command, args: windowsLauncher.args, port });
+    return;
+  }
   const child = spawn(
     process.platform === 'win32' ? windowsLauncher!.command : launcher,
     process.platform === 'win32' ? windowsLauncher!.args : [],
@@ -285,6 +291,7 @@ async function launchUmbra(runtimeRoot: string): Promise<void> {
       detached: true,
       stdio: 'ignore',
       windowsHide: false,
+      env: { ...process.env, UMBRA_ROOT: runtimeRoot, UMBRA_PORT: String(port) },
     },
   );
   await new Promise<void>((done, fail) => {
@@ -297,6 +304,25 @@ async function launchUmbra(runtimeRoot: string): Promise<void> {
 async function main() {
   const runtimeRoot = resolve(readArg('--root', process.env.UMBRA_ROOT || process.cwd()));
   const sourceRoot = resolve(readArg('--source', join(runtimeRoot, 'resources', 'app')));
+  const inspection = readArg('--inspect');
+  if (inspection) {
+    try {
+      assertOnboardingPaths(runtimeRoot);
+      let result: unknown;
+      if (inspection === 'onboarding') result = await inspectOnboarding(sourceRoot, runtimeRoot);
+      else if (inspection === 'dependencies') {
+        const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
+        result = { success: true, ...status, frameforge: inspectFrameForge(runtimeRoot),
+          maintenanceTools: inspectToolMaintenance(runtimeRoot), sharedSupport: sharedSupportCatalog(sourceRoot),
+          repairPlans: managedWorkflowRepairPlans(status) };
+      } else throw new Error('Unknown Setup inspection.');
+      console.log(JSON.stringify({ success: true, result }));
+    } catch (error) {
+      console.log(JSON.stringify({ success: false, error: redactSetupOutput(error instanceof Error ? error.message : String(error)) }));
+      process.exitCode = 1;
+    }
+    return;
+  }
   const sessionPath = readArg('--session');
   const bootstrap = join(sourceRoot, 'launcher', 'UmbraUpdaterBootstrap.js');
   // Run outside replaceable application files so the shared app survives an update.
@@ -358,9 +384,11 @@ async function main() {
     } finally { installationPreparing = false; }
   };
   let updateController: Awaited<ReturnType<typeof createUmbraUpdateController>> | null = null;
+  const inspector = createSetupInspector({ entrypoint: Bun.main, runtimeRoot, sourceRoot });
   const setupBusy = () => installationPreparing || activeJob?.phase === 'running' || jobLogs.hasLiveJobs() || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit');
   const hasRunningInstaller = () => installationPreparing || activeJob?.phase === 'running' || jobLogs.hasLiveJobs() || updateController?.isBusy() === true;
-  const closeSetup = () => { updateController?.close(); server.stop(true); process.exit(0); };
+  const closeSetup = () => { inspector.close(); updateController?.close(); server.stop(true); process.exit(0); };
+  process.once('exit', () => inspector.close());
   const snapshotNeedsReopen = () => {
     try { return !!sourceFingerprint && sourceFingerprint !== setupSourceFingerprint(sourceRoot); }
     catch { return true; }
@@ -407,7 +435,7 @@ async function main() {
         catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
       }
       if (url.pathname === '/api/onboarding' && request.method === 'GET') {
-        try { return json(await inspectOnboarding(sourceRoot, runtimeRoot)); }
+        try { return json(await inspector.inspect('onboarding')); }
         catch (error) { return json({ success: false, error: (error as Error).message }, 500); }
       }
       if (url.pathname === '/api/onboarding' && request.method === 'POST') {
@@ -442,9 +470,8 @@ async function main() {
       }
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
         try {
-          const status = inspectManagedDependencies(sourceRoot, runtimeRoot);
-          return json({ success: true, ...status, frameforge: inspectFrameForge(runtimeRoot), maintenanceTools: inspectToolMaintenance(runtimeRoot), sharedSupport: sharedSupportCatalog(sourceRoot), repairState: managedRepairState,
-            repairPlans: managedWorkflowRepairPlans(status) });
+          const status = await inspector.inspect<Record<string, unknown>>('dependencies');
+          return json({ ...status, repairState: managedRepairState });
         }
         catch (error) { return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500); }
       }
@@ -734,7 +761,7 @@ async function main() {
               runtimeRoot, port: Number(target.port), host: target.hostname === '[::1]' ? '::1' : '127.0.0.1',
               launch: () => {
                 if (hasRunningInstaller()) throw new Error('Wait for the current operation to finish.');
-                return launchUmbra(runtimeRoot);
+                return launchUmbra(runtimeRoot, Number(target.port));
               },
             });
           }

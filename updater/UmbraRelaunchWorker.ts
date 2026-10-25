@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { dirname, join, resolve, sep } from 'node:path';
 import { resolveUmbraWindowsLauncher } from '../shared/portableLauncher';
+import { launchVisibleWindowsUmbra } from '../shared/visibleUmbraLaunch';
 import { ensureUmbraRuntimeReady, UMBRA_LAUNCH_READY_TIMEOUT_MS } from '../shared/umbraRuntimeLaunch';
 import { inspectUmbraRuntimeHealth } from '../shared/umbraRuntimeHealth';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
@@ -64,52 +65,13 @@ function log(request: UmbraRelaunchRequest, message: string) {
   }
 }
 
-function quotePowerShellLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 function launchWindowsUmbraStudio(
   request: UmbraRelaunchRequest,
   command: string,
   args: string[],
 ): UmbraLaunchHandle {
-  const runtimeRoot = resolve(request.runtimeRoot);
-  const launchArgs = args.map(quotePowerShellLiteral).join(', ');
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    `$process = Start-Process -FilePath ${quotePowerShellLiteral(command)} `
-      + `-ArgumentList @(${launchArgs}) `
-      + `-WorkingDirectory ${quotePowerShellLiteral(runtimeRoot)} -WindowStyle Hidden -PassThru`,
-    '[Console]::Out.Write($process.Id)',
-  ].join('; ');
-  const result = spawnSync('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-Command',
-    script,
-  ], {
-    cwd: runtimeRoot,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 15_000,
-    env: {
-      ...process.env,
-      UMBRA_ROOT: runtimeRoot,
-      UMBRA_PORT: String(request.appPort),
-      UMBRA_HOST: request.appHost || '127.0.0.1',
-      UMBRA_UPDATER_RELAUNCH: '1',
-      UMBRA_TERMINAL_MODE: 'visible',
-      UMBRA_PAUSE_ON_EXIT: '0',
-    },
-  });
-  const pid = Number.parseInt(String(result.stdout || '').trim(), 10);
-  if (result.status !== 0 || !Number.isFinite(pid) || pid <= 0) {
-    const detail = String(result.stderr || result.stdout || result.error?.message || '').trim();
-    throw new Error(`Umbra Studio launcher did not start${detail ? `: ${detail}` : '.'}`);
-  }
-  return { pid };
+  return launchVisibleWindowsUmbra({ runtimeRoot: request.runtimeRoot, command, args,
+    port: request.appPort, host: request.appHost, relaunch: true });
 }
 
 export function launchUmbraStudio(request: UmbraRelaunchRequest): UmbraLaunchHandle {

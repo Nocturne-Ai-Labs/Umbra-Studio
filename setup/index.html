@@ -18,6 +18,12 @@
       --danger: #ff6b77;
     }
     * { box-sizing: border-box; }
+    .setup-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; color: var(--muted); }
+    .setup-loading[hidden] { display: none; }
+    .setup-loading-indicator { width: 14px; height: 14px; flex: none; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: setup-spin 1s linear infinite; }
+    .setup-loading[data-error="true"] .setup-loading-indicator { animation: none; border-color: var(--danger); }
+    @keyframes setup-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .setup-loading-indicator { animation: none; } }
     html, body { min-height: 100%; }
     body {
       margin: 0;
@@ -266,6 +272,11 @@
         </nav>
       </aside>
       <div id="setup-content">
+      <div id="setup-loading" class="setup-loading" role="status" aria-live="polite">
+        <span class="setup-loading-indicator" aria-hidden="true"></span>
+        <span id="setup-loading-message">Checking installation…</span>
+        <button id="setup-loading-retry" class="button" type="button" hidden>Retry</button>
+      </div>
       <section id="updates-panel" class="panel" role="tabpanel" aria-labelledby="tab-updates" hidden>
         <!-- UPDATE_PANEL -->
       </section>
@@ -691,6 +702,9 @@
     }));
 
     document.getElementById('launch').addEventListener('click', async () => {
+      setBusy(true);
+      status.textContent = tr('launchingUmbra');
+      status.classList.remove('error');
       try {
         await api('/api/language', { method: 'POST', body: JSON.stringify({ language: language.value }) });
         setSetupLanguage(language.value);
@@ -699,6 +713,7 @@
         setupClosed = true;
         status.textContent = tr('launchingUmbra');
       } catch (error) {
+        setBusy(false);
         status.textContent = error.message;
         status.classList.add('error');
       }

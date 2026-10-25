@@ -305,9 +305,9 @@ function loadOnboarding() {
 }
 function renderOnboardingProgress(job) {
   if (job && job.phase !== 'running' && onboardingCompletedJob !== job.id) {
-    onboardingCompletedJob = job.id; void loadOnboarding().catch(modelError);
+    onboardingCompletedJob = job.id; refreshSetupTab('general');
   }
 }
 document.getElementById('language')?.addEventListener('change', renderOnboarding);
 window.addEventListener('focus', () => { if (onboardingFocusedStage === 5 && !onboardingBusy) void loadOnboarding().catch(modelError); });
-void loadOnboarding().catch(modelError);
+registerSetupLoader('general', loadOnboarding);
