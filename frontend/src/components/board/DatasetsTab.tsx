@@ -22,8 +22,8 @@ import { DatasetRedownloadButton } from './components/DatasetRedownloadButton';
 import { DatasetThumbnail } from './components/DatasetThumbnail';
 import { createConceptSettingsSession, type ConceptSaveStatus } from './conceptSettingsSession';
 import { browseDatasetImages, selectDatasetImageRange, type DatasetCaptionFilter, type DatasetImageSort } from './datasetBrowse';
+import { DATASET_IMAGE_ACCEPT, isDatasetImageFile, isExternalDatasetFileDrag, prepareDatasetFileImport, uploadDatasetImage } from './datasetFileImport';
 
-const IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|webp)$/i;
 const DATASET_IMAGE_PAGE_SIZE = 120;
 const WAIFU_MODEL_OPTIONS = [
   { id: 'SmilingWolf/wd-vit-tagger-v3', label: 'wd-vit' },
@@ -64,10 +64,6 @@ const DEFAULT_CONCEPT_SETTINGS: DatasetConceptSettings = {
   replaceUnderscoresWithSpaces: false,
 };
 
-function isNativeImageFile(file: File): boolean {
-  return file.type.startsWith('image/') || IMAGE_FILE_PATTERN.test(file.name);
-}
-
 function formatArchiveBytes(value: number): string {
   const bytes = Math.max(0, Number(value) || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -97,13 +93,13 @@ function getDroppedImageUrl(dataTransfer: DataTransfer): string {
 function hasNativeImageDrop(dataTransfer: DataTransfer): boolean {
   const types = Array.from(dataTransfer.types || []);
   if (types.includes('application/json')) return false;
-  if (Array.from(dataTransfer.files || []).some(isNativeImageFile)) return true;
+  if (Array.from(dataTransfer.files || []).some(isDatasetImageFile)) return true;
   return types.some((type) => ['Files', 'text/uri-list', 'text/plain', 'text/html', 'text/x-moz-url'].includes(type));
 }
 
 function extractNativeDroppedImages(dataTransfer: DataTransfer): DroppedImage[] {
   const images: DroppedImage[] = Array.from(dataTransfer.files || [])
-    .filter(isNativeImageFile)
+    .filter(isDatasetImageFile)
     .map((file): DroppedImage => ({ kind: 'file', file, name: file.name, type: file.type }));
 
   const url = getDroppedImageUrl(dataTransfer);
@@ -193,6 +189,10 @@ export function DatasetsTab() {
   const [moveToConcept, setMoveToConcept] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const importInProgress = useRef(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const externalDragDepth = useRef(0);
+  const [externalDropActive, setExternalDropActive] = useState(false);
+  const [importFeedback, setImportFeedback] = useState<{ text: string; error: boolean } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [nativeDropActive, setNativeDropActive] = useState(false);
@@ -234,19 +234,7 @@ export function DatasetsTab() {
 
   const importDroppedImage = async (img: any, dataset: string, concept: string) => {
     if (img?.kind === 'file' && img.file instanceof File) {
-      const formData = new FormData();
-      formData.append('dataset', dataset);
-      formData.append('concept', concept);
-      formData.append('image', img.file, img.name || img.file.name || 'image.png');
-
-      const response = await fetch('/api/datasets/import-uploaded-image', {
-        method: 'POST',
-        body: formData,
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error || 'Failed to import dropped image');
-      }
+      await uploadDatasetImage(img.file, dataset, concept);
       return;
     }
 
@@ -285,15 +273,18 @@ export function DatasetsTab() {
     }
   };
 
-  const importDroppedImages = async (droppedImages: any[]) => {
+  const importDroppedImages = async (droppedImages: any[], skipped = 0) => {
     if (!selectedDataset || !selectedConcept || droppedImages.length === 0 || importInProgress.current) return;
 
     const dataset = selectedDataset;
     const concept = selectedConcept;
+    const destination = dataset === concept ? dataset : `${dataset} / ${concept}`;
     importInProgress.current = true;
     setIsImporting(true);
+    setImportFeedback({ text: `Importing 0 of ${droppedImages.length} images to ${destination}…`, error: false });
     try {
       let imported = 0;
+      let completed = 0;
       const failures: string[] = [];
       for (const img of droppedImages) {
         try {
@@ -302,25 +293,59 @@ export function DatasetsTab() {
         } catch (error) {
           failures.push(error instanceof Error ? error.message : 'Image import failed');
         }
+        completed++;
+        setImportFeedback({ text: `Importing ${completed} of ${droppedImages.length} images to ${destination}…`, error: false });
       }
       const refreshed = await loadImages();
+      await fetchDatasets();
+      const summary = `Imported ${imported} of ${droppedImages.length} images to ${destination}.${skipped ? ` Skipped ${skipped} unsupported or empty file${skipped === 1 ? '' : 's'}.` : ''}`;
       if (refreshed === null && activeConcept.current === conceptKey) {
-        showToast(`Imported ${imported} of ${droppedImages.length} images, but could not refresh the concept.`, 'error');
+        setImportFeedback({ text: `${summary} Refresh the folder to see your images.${failures.length ? ` ${failures[0]}` : ''}`, error: true });
         return;
       }
-      if (failures.length > 0) {
-        showToast(`Imported ${imported} of ${droppedImages.length} images. ${failures[0]}`, 'error');
-      } else {
-        showToast(`Imported ${imported} image${imported === 1 ? '' : 's'} to ${concept}`, 'success');
-      }
+      setImportFeedback({ text: `${summary}${failures.length ? ` ${failures.length} failed. ${failures[0]}` : ''}`, error: failures.length > 0 });
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Could not refresh imported images', 'error');
+      setImportFeedback({ text: error instanceof Error ? error.message : 'Could not refresh imported images', error: true });
     } finally {
       importInProgress.current = false;
       setIsImporting(false);
       setNativeDropActive(false);
     }
   };
+
+  const importExternalFiles = async (files: Iterable<File>) => {
+    if (importInProgress.current) {
+      showToast('An import is already running. Wait for it to finish before adding more images.', 'info');
+      return;
+    }
+    if (!selectedDataset || !selectedConcept) {
+      setImportFeedback({ text: 'Choose a dataset folder first, then drop your images again.', error: true });
+      setFolderRailOpen(true);
+      return;
+    }
+    const { images: droppedImages, skipped } = prepareDatasetFileImport(files);
+    if (!droppedImages.length) {
+      setImportFeedback({ text: 'No supported images found. Drop PNG, JPEG, WebP, GIF, BMP or AVIF files. Open folders on your computer and select their images first.', error: true });
+      return;
+    }
+    await importDroppedImages(droppedImages, skipped);
+  };
+
+  const handleExternalDrag = (event: DragEvent<HTMLDivElement>) => {
+    if (!isExternalDatasetFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = selectedDataset && selectedConcept && !isImporting ? 'copy' : 'none';
+    if (event.type === 'dragenter') externalDragDepth.current++;
+    setExternalDropActive(true);
+  };
+
+  useEffect(() => {
+    const resetDrag = () => { externalDragDepth.current = 0; setExternalDropActive(false); setNativeDropActive(false); };
+    window.addEventListener('dragend', resetDrag);
+    window.addEventListener('blur', resetDrag);
+    return () => { window.removeEventListener('dragend', resetDrag); window.removeEventListener('blur', resetDrag); };
+  }, []);
 
   const handleNativeDragOver = (e: DragEvent<HTMLDivElement>) => {
     if (!selectedDataset || !selectedConcept || !hasNativeImageDrop(e.dataTransfer)) return false;
@@ -336,6 +361,7 @@ export function DatasetsTab() {
     e.preventDefault();
     e.stopPropagation();
 
+    setNativeDropActive(false);
     const droppedImages = extractNativeDroppedImages(e.dataTransfer);
     await importDroppedImages(droppedImages);
     return true;
@@ -918,7 +944,40 @@ export function DatasetsTab() {
   };
 
   return (
-    <div data-umbra-datasets-workspace className="relative flex h-full min-h-0 overflow-hidden bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
+    <div
+      data-umbra-datasets-workspace
+      className="relative flex h-full min-h-0 overflow-hidden bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
+      style={{ fontFamily: 'var(--font-family)' }}
+      onDragEnterCapture={handleExternalDrag}
+      onDragOverCapture={handleExternalDrag}
+      onDragLeaveCapture={event => {
+        if (!externalDragDepth.current) return;
+        event.stopPropagation();
+        externalDragDepth.current = Math.max(0, externalDragDepth.current - 1);
+        if (!externalDragDepth.current) setExternalDropActive(false);
+      }}
+      onDropCapture={event => {
+        if (!isExternalDatasetFileDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        externalDragDepth.current = 0;
+        setExternalDropActive(false);
+        void importExternalFiles(Array.from(event.dataTransfer.files));
+      }}
+    >
+      <input ref={importInputRef} type="file" multiple accept={DATASET_IMAGE_ACCEPT} aria-label="Choose dataset images to import" className="hidden" onChange={event => {
+        const files = Array.from(event.currentTarget.files || []);
+        event.currentTarget.value = '';
+        if (files.length) void importExternalFiles(files);
+      }} />
+      {externalDropActive && <div className="pointer-events-none absolute inset-1 z-[60] flex items-center justify-center rounded border-2 border-dashed border-[var(--umbra-accent)] bg-[var(--umbra-bg)]/90 p-6 backdrop-blur-sm">
+        <div className="max-w-md text-center">
+          <Upload size={28} className="mx-auto mb-3 text-[var(--umbra-accent)]" />
+          <p className="text-sm font-semibold">{isImporting ? 'Import in progress' : selectedDataset && selectedConcept ? 'Drop images to import' : 'Choose a dataset folder first'}</p>
+          <p className="mt-2 break-words text-xs text-zinc-400">{isImporting ? 'Wait for the current import to finish.' : selectedConcept ? `${selectedDataset}${selectedConcept !== selectedDataset ? ` / ${selectedConcept}` : ''}` : 'Use the folder list, then drag your images here.'}</p>
+          {!isImporting && selectedConcept && <p className="mt-3 text-[11px] text-zinc-500">PNG · JPEG · WebP · GIF · BMP · AVIF</p>}
+        </div>
+      </div>}
       {folderRailOpen && <button type="button" aria-label="Dismiss dataset folders" onClick={() => setFolderRailOpen(false)} className="absolute inset-0 z-20 bg-black/60 lg:hidden" />}
       {captionPaneOpen && <button type="button" aria-label="Dismiss caption panel" onClick={() => setCaptionPaneOpen(false)} className="absolute inset-0 z-20 bg-black/60 xl:hidden" />}
       {/* Left sidebar - Dataset tree */}
@@ -979,9 +1038,10 @@ export function DatasetsTab() {
               <span className="truncate" title={selectedDataset || undefined}>{selectedDataset || 'Datasets'}</span>
               {selectedConcept && selectedConcept !== selectedDataset && <><ChevronRight size={12} className="shrink-0 text-zinc-600" /><span className="truncate" title={selectedConcept}>{selectedConcept}</span></>}
             </div>
-            <div className="mt-1 truncate text-[11px] text-zinc-500" title={selectedConceptPath || undefined}>{selectedConcept ? `${images.length} images loaded` : 'Select a dataset folder'}</div>
+            <div className="mt-1 truncate text-[11px] text-zinc-500" title={selectedConceptPath || undefined}>{selectedConcept ? `${images.length} images loaded · Drop images to import` : 'Select a dataset folder'}</div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
+            <button type="button" disabled={!selectedConcept || isImporting} title={selectedConcept ? 'Import images from your device, or drag them into this workspace' : 'Choose a dataset folder first'} onClick={() => importInputRef.current?.click()} className="forge-button forge-button-primary">{isImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}Import images</button>
             {selectedConcept && <>
               <button type="button" aria-expanded={tagSettingsOpen} aria-controls="dataset-tag-settings" onClick={() => setTagSettingsOpen(value => !value)} className="forge-button"><Sparkles size={14} />Caption tools<ChevronDown size={12} className={tagSettingsOpen ? 'rotate-180' : ''} /></button>
               <button type="button" disabled={autoTagging || !selectedDataset} onClick={() => setExportDataset(selectedDataset)} className="forge-button forge-button-primary"><FileOutput size={14} />Training export</button>
@@ -993,6 +1053,11 @@ export function DatasetsTab() {
             <button type="button" aria-label="Refresh dataset view" disabled={isLoadingImages || isLoadingDatasets} onClick={() => { void fetchDatasets(); if (selectedConcept) void loadImages(); }} className="forge-button forge-button-icon"><RefreshCw size={15} className={isLoadingImages || isLoadingDatasets ? 'animate-spin' : ''} /></button>
           </div>
         </header>
+        {importFeedback && <div role={importFeedback.error ? 'alert' : 'status'} className={`flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2 text-xs ${importFeedback.error ? 'bg-red-500/10 text-red-200' : 'umbra-surface-soft text-[var(--umbra-text)]'}`}>
+          {isImporting ? <Loader2 size={14} className="shrink-0 animate-spin text-[var(--umbra-accent)]" /> : <Upload size={14} className="shrink-0" />}
+          <span className="min-w-0 flex-1 break-words">{importFeedback.text}</span>
+          {!isImporting && <button type="button" aria-label="Dismiss import status" onClick={() => setImportFeedback(null)} className="umbra-icon-button shrink-0 rounded p-1"><X size={14} /></button>}
+        </div>}
         {datasetError && !selectedConcept && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200"><span>{datasetError}</span><button type="button" onClick={() => void fetchDatasets()} className="umbra-icon-button shrink-0 rounded px-2 py-1">Retry folders</button></div>}
         {selectedConcept && <div className="umbra-surface-soft flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
           <div className="flex min-w-[160px] flex-1 items-center rounded border border-white/10 focus-within:border-[var(--umbra-accent)]">
@@ -1317,6 +1382,7 @@ export function DatasetsTab() {
             }
           }}
           onDragLeave={(e) => {
+            if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
             setNativeDropActive(false);
             dropHandlers.onDragLeave(e);
           }}
@@ -1345,16 +1411,6 @@ export function DatasetsTab() {
             </div>
           )}
 
-          {/* Importing overlay */}
-          {isImporting && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="text-center">
-                <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-[var(--umbra-accent)]" />
-                <p className="text-white font-medium">Importing images...</p>
-              </div>
-            </div>
-          )}
-
           {isLoadingImages ? (
             <div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-zinc-500">
               <Loader2 size={18} className="animate-spin" /> Loading concept images
@@ -1371,8 +1427,10 @@ export function DatasetsTab() {
               {!folderRailOpen && <button type="button" onClick={() => setFolderRailOpen(true)} className="umbra-icon-button rounded px-3 py-2 text-xs">Browse folders</button>}
             </div>
           ) : images.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-center text-sm text-zinc-500">
-              <p>Drop images here, or collect them with Booru downloader</p>
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-zinc-500">
+              <Upload size={24} />
+              <p>Drop images from your computer here</p>
+              <button type="button" disabled={isImporting} onClick={() => importInputRef.current?.click()} className="forge-button">Browse images</button>
             </div>
           ) : browsedImages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-zinc-500"><p>No matching images</p><button type="button" className="umbra-icon-button rounded px-3 py-2 text-xs" onClick={() => { setImageQuery(''); setCaptionFilter('all'); }}>Clear filters</button></div>
