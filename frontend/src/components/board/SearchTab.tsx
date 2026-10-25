@@ -1,16 +1,18 @@
-import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { Plus, X, Star, Download, CheckSquare, Square, Loader2, Pencil, History, SlidersHorizontal } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { Plus, X, Star, Download, CheckSquare, Square, Loader2, History, SlidersHorizontal, Search, FolderOpen } from 'lucide-react';
 import { SourceSelector } from './components/SourceSelector';
 import { SearchInput } from './components/SearchInput';
 import { ImageGrid } from './components/ImageGrid';
 import { ApiKeysModal } from './components/ApiKeysModal';
 import { BoardLightbox } from './components/BoardLightbox';
+import { DownloadDestinationPanel } from './components/DownloadDestinationPanel';
+import { CollectionSettings } from './components/CollectionSettings';
 import { useBoardStore } from './hooks/useBoardStore';
 import { useBooru } from './hooks/useBooru';
 import { useDatasets } from './hooks/useDatasets';
 import { useApiKeys } from './hooks/useApiKeys';
 import type { BooruPost } from './types';
+import { DEFAULT_COLLECTION_OPTIONS, collectionOptionsError, filterCollectionPosts, collectionDownloadBatch, collectionSelectionAfterChange, validCollectionDestination, type CollectionOptions } from './collectionOptions';
 
 interface SearchTabProps {
   onDownload: (posts: BooruPost[], dataset: string, concepts: string[]) => void;
@@ -30,19 +32,25 @@ export function SearchTab({ onDownload }: SearchTabProps) {
     removeFavorite,
     addSearchHistory,
   } = useBoardStore();
+  const activeTab = searchTabs.find(t => t.id === activeSearchTabId) || searchTabs[0];
 
   const { search, error: searchError } = useBooru();
   const { config: apiKeyConfig } = useApiKeys();
-  const { datasets, renameDataset, createConcept, error: datasetError } = useDatasets();
+  const { datasets, renameDataset, createDataset, fetchDatasets, hasLoaded, isLoading: foldersLoading, error: datasetError } = useDatasets();
   const [datasetActionError, setDatasetActionError] = useState('');
 
-  const [selectedDataset, setSelectedDataset] = useState<string>('');
-  const [enabledConcepts, setEnabledConcepts] = useState<Set<string>>(new Set());
+  const selectedDataset = activeTab?.downloadDestination?.dataset || '';
+  const enabledConcepts = useMemo(() => new Set(activeTab?.downloadDestination?.concepts || []), [activeTab?.downloadDestination]);
+  const setSelectedDataset = (name: string) => {
+    if (!activeTab || name === selectedDataset) return;
+    const selected = datasets.find(dataset => dataset.name === name);
+    updateSearchTab(activeTab.id, { downloadDestination: { dataset: name, concepts: selected?.layout === 'flat' ? [name] : [] } });
+  };
   const [isCreatingConcept, setIsCreatingConcept] = useState(false);
   const [showNewConceptModal, setShowNewConceptModal] = useState(false);
   const [newConceptName, setNewConceptName] = useState('');
-  const [newConceptRepeats, setNewConceptRepeats] = useState(10);
-  const [newConceptIsReg, setNewConceptIsReg] = useState(false);
+  const [destinationOpen, setDestinationOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1280);
+  const [checkingDestination, setCheckingDestination] = useState(false);
 
   // Dataset modals
   const [showRenameDatasetModal, setShowRenameDatasetModal] = useState(false);
@@ -50,8 +58,14 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   const [isRenamingDataset, setIsRenamingDataset] = useState(false);
 
   useEffect(() => {
-    if (datasetError) setDatasetActionError(datasetError);
-  }, [datasetError]);
+    if (!hasLoaded || foldersLoading || datasetError || isRenamingDataset) return;
+    for (const tab of useBoardStore.getState().searchTabs) {
+      const valid = validCollectionDestination(tab.downloadDestination, datasets);
+      if (JSON.stringify(valid) !== JSON.stringify(tab.downloadDestination)) {
+        updateSearchTab(tab.id, { downloadDestination: valid });
+      }
+    }
+  }, [datasets, hasLoaded, foldersLoading, datasetError, isRenamingDataset, updateSearchTab]);
 
   // API Keys modal
   const [showApiKeysModal, setShowApiKeysModal] = useState(false);
@@ -76,15 +90,16 @@ export function SearchTab({ onDownload }: SearchTabProps) {
     }
   }, [activeSearchTabId, searchTabs, setActiveSearchTab]);
 
-  // Reset enabled concepts when dataset changes
-  useEffect(() => {
-    const selected = datasets.find(dataset => dataset.name === selectedDataset);
-    setEnabledConcepts(selected?.layout === 'flat' ? new Set([selected.name]) : new Set());
-  }, [selectedDataset, datasets]);
-
-  const activeTab = searchTabs.find(t => t.id === activeSearchTabId) || searchTabs[0];
-
-  const filteredResults = activeTab?.results || [];
+  const collection = activeTab?.collection || DEFAULT_COLLECTION_OPTIONS;
+  const collectionError = collectionOptionsError(collection);
+  const filteredResults = useMemo(() => filterCollectionPosts(activeTab?.results || [], collection), [activeTab?.results, collection]);
+  const downloadBatch = useMemo(() => collectionDownloadBatch(activeTab?.results || [], activeTab?.selected || new Set(), collection), [activeTab?.results, activeTab?.selected, collection]);
+  const updateCollection = (patch: Partial<CollectionOptions>) => {
+    if (!activeTab) return;
+    const next = { ...collection, ...patch };
+    updateSearchTab(activeTab.id, { collection: next, selected: collectionSelectionAfterChange(activeTab.results, activeTab.selected, next) });
+    setLightboxOpen(false);
+  };
 
   // Perform search
   const doSearch = useCallback(async (append = false, tagsOverride?: string) => {
@@ -207,46 +222,59 @@ export function SearchTab({ onDownload }: SearchTabProps) {
 
   // Toggle concept enabled/disabled
   const toggleConcept = (folder: string) => {
-    setEnabledConcepts(prev => {
-      const next = new Set(prev);
-      if (next.has(folder)) {
-        next.delete(folder);
-      } else {
-        next.add(folder);
-      }
-      return next;
-    });
+    if (!activeTab) return;
+    const next = new Set(enabledConcepts);
+    if (next.has(folder)) next.delete(folder);
+    else next.add(folder);
+    updateSearchTab(activeTab.id, { downloadDestination: { dataset: selectedDataset, concepts: [...next] } });
   };
 
-  // Handle download to all enabled concepts
+  // Recheck the folder catalog before queueing; folders may have changed in Datasets.
   const handleDownload = async () => {
-    if (!activeTab || !selectedDataset || enabledConcepts.size === 0) return;
-
-    const selectedPosts = filteredResults.filter(p => activeTab.selected.has(p.id));
-    if (selectedPosts.length === 0) return;
-
-    onDownload(selectedPosts, selectedDataset, Array.from(enabledConcepts));
-    selectNone();
+    if (!activeTab || checkingDestination) return;
+    setDatasetActionError('');
+    setCheckingDestination(true);
+    try {
+      const catalog = await fetchDatasets();
+      const state = useBoardStore.getState();
+      const tab = state.searchTabs.find(item => item.id === activeTab.id);
+      if (!tab || state.activeSearchTabId !== tab.id) return;
+      if (!catalog) {
+        setDatasetActionError('Could not verify the download folder. Refresh folders and try again.');
+        return;
+      }
+      const destination = validCollectionDestination(tab.downloadDestination, catalog);
+      if (!destination?.concepts.length || JSON.stringify(destination) !== JSON.stringify(tab.downloadDestination)) {
+        updateSearchTab(tab.id, { downloadDestination: destination });
+        setDatasetActionError('The destination changed. Choose a download folder again; your media selection is kept.');
+        setDestinationOpen(true);
+        return;
+      }
+      const posts = collectionDownloadBatch(tab.results, tab.selected, tab.collection || DEFAULT_COLLECTION_OPTIONS);
+      if (!posts.length) return;
+      onDownload(posts, destination.dataset, destination.concepts);
+      const queued = new Set(posts.map(post => post.id));
+      updateSearchTab(tab.id, { selected: new Set([...tab.selected].filter(id => !queued.has(id))) });
+    } finally {
+      setCheckingDestination(false);
+    }
   };
 
-  // Create new concept
+  // Create a plain dataset folder
   const handleCreateConcept = async () => {
-    if (!newConceptName.trim()) return;
+    if (!newConceptName.trim() || isCreatingConcept) return;
     setDatasetActionError('');
     setIsCreatingConcept(true);
-    const folder = await createConcept(newConceptName.trim(), newConceptRepeats, newConceptIsReg);
+    const folder = await createDataset(newConceptName.trim());
     setIsCreatingConcept(false);
     if (!folder) {
-      setDatasetActionError('Could not create concept');
+      setDatasetActionError('Could not create dataset folder');
       return;
     }
-    // Auto-enable the new concept
-    setSelectedDataset(folder);
-    setEnabledConcepts(new Set([folder]));
+    // Select the new folder
+    if (activeTab) updateSearchTab(activeTab.id, { downloadDestination: { dataset: folder, concepts: [folder] } });
     setShowNewConceptModal(false);
     setNewConceptName('');
-    setNewConceptRepeats(10);
-    setNewConceptIsReg(false);
   };
 
   // Rename dataset
@@ -260,19 +288,21 @@ export function SearchTab({ onDownload }: SearchTabProps) {
       setDatasetActionError('Could not rename dataset');
       return;
     }
-    setSelectedDataset(renamed);
+    for (const tab of useBoardStore.getState().searchTabs) {
+      if (tab.downloadDestination?.dataset !== selectedDataset) continue;
+      updateSearchTab(tab.id, { downloadDestination: {
+        dataset: renamed,
+        concepts: tab.downloadDestination.concepts.map(folder => folder === selectedDataset ? renamed : folder),
+      } });
+    }
     setShowRenameDatasetModal(false);
     setNewDatasetName('');
   };
 
-  // Get concepts for selected dataset
-  const datasetObj = datasets.find(d => d.name === selectedDataset);
-  const concepts = datasetObj?.concepts || [];
-
   return (
     <div
       data-umbra-data-forge-search
-      className="h-full flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
+      className="h-full min-h-0 flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
       style={{ fontFamily: 'var(--font-family)' }}
     >
       {/* Tab bar */}
@@ -281,12 +311,11 @@ export function SearchTab({ onDownload }: SearchTabProps) {
         className="glass-panel custom-scrollbar flex-shrink-0 flex items-center gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-2 py-1"
       >
         <button
+          type="button"
           onClick={addSearchTab}
-          className="umbra-icon-button flex-shrink-0 rounded p-1.5 transition-colors"
-          style={{ color: 'rgba(255,255,255,0.5)' }}
-          onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-accent)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
-          title="New Tab"
+          className="forge-button forge-button-icon"
+          aria-label="New search tab"
+          title="New search tab"
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -294,19 +323,20 @@ export function SearchTab({ onDownload }: SearchTabProps) {
         {searchTabs.map(tab => (
           <div
             key={tab.id}
-            className={`flex cursor-pointer items-center gap-1 rounded-md border px-3 py-1 text-xs transition-colors ${
-              tab.id === activeSearchTabId ? 'border-cyan-400/35 bg-cyan-500/12 text-cyan-100' : 'umbra-chip-neutral text-zinc-400'
+            className={`flex shrink-0 items-center gap-1 rounded border pr-1 text-xs ${
+              tab.id === activeSearchTabId ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)]' : 'border-white/10 text-zinc-400'
             }`}
-            onClick={() => setActiveSearchTab(tab.id)}
           >
-            <span className="text-xs truncate max-w-24">{tab.name}</span>
+            <button type="button" aria-pressed={tab.id === activeSearchTabId} onClick={() => setActiveSearchTab(tab.id)} className="min-h-8 max-w-44 truncate rounded px-3 text-left focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)]">{tab.name}</button>
             {searchTabs.length > 1 && (
               <button
+                type="button"
+                aria-label={`Close search: ${tab.name}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   removeSearchTab(tab.id);
                 }}
-                className="p-0.5 rounded opacity-50 hover:opacity-100"
+                className="umbra-icon-button rounded p-1.5"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -316,7 +346,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
       </div>
 
       {/* Main content */}
-      <div data-umbra-data-forge-search-main className="flex-1 flex min-h-0">
+      <div data-umbra-data-forge-search-main className="relative flex-1 flex min-h-0">
         {mobileFiltersOpen && (
           <button
             type="button"
@@ -330,7 +360,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
         <div
           data-umbra-data-forge-sources
           data-open={mobileFiltersOpen ? 'true' : 'false'}
-          className="glass-panel custom-scrollbar w-44 flex-shrink-0 space-y-3 overflow-y-auto rounded-none border-y-0 border-l-0 p-2"
+          className="glass-panel custom-scrollbar w-52 flex-shrink-0 space-y-4 overflow-y-auto rounded-none border-y-0 border-l-0 p-3"
         >
           <div data-umbra-data-forge-filter-header>
             <span>Search sources</span>
@@ -346,7 +376,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             onOpenApiKeys={() => setShowApiKeysModal(true)}
           />
 
-          <div className="pt-2" style={{ borderTop: '1px solid var(--umbra-border)' }}>
+          <div className="border-t border-white/10 pt-3">
             <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.5)' }}>
               Recent searches
             </div>
@@ -373,7 +403,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             </div>
           </div>
 
-          <div className="pt-2" style={{ borderTop: '1px solid var(--umbra-border)' }}>
+          <div className="border-t border-white/10 pt-3">
             <div className="text-[10px] font-medium uppercase tracking-wide mb-1.5" style={{ color: 'rgba(255,255,255,0.5)' }}>
               Favorites
             </div>
@@ -415,8 +445,9 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           {/* Search bar - compact */}
           <div
             data-umbra-data-forge-search-bar
-            className="glass-panel relative z-20 flex-shrink-0 rounded-none border-x-0 border-t-0 px-2 py-1.5"
+            className="glass-panel relative z-20 flex-shrink-0 rounded-none border-x-0 border-t-0 px-3 py-3"
           >
+            <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-xs font-semibold">Find media</h2><span className="text-[11px] text-zinc-500">{activeTab?.sources.length || 0} {activeTab?.sources.length === 1 ? 'source' : 'sources'} selected</span></div>
             <div className="flex gap-1.5 items-center">
               <button
                 type="button"
@@ -427,21 +458,25 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               >
                 <SlidersHorizontal className="h-5 w-5" />
               </button>
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <SearchInput
                   value={activeTab?.tags || ''}
                   onChange={(tags) => updateSearchTab(activeTab.id, { tags })}
                   onSearch={() => doSearch(false)}
                   source={activeTab?.sources[0] || 'danbooru'}
+                  placeholder="Enter tags, e.g. scenery sunset -watermark"
                 />
               </div>
+              <button type="button" onClick={() => void doSearch(false)} disabled={activeTab?.isLoading} className="forge-button forge-button-primary">
+                {activeTab?.isLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                {activeTab?.isLoading ? 'Searching…' : 'Search'}
+              </button>
               <button
+                type="button"
+                aria-label="Save search to favorites"
                 onClick={() => addFavorite(activeTab?.tags || '')}
                 disabled={!activeTab?.tags}
-                className="p-1.5 transition-colors disabled:opacity-30"
-                style={{ color: 'rgba(255,255,255,0.5)' }}
-                onMouseEnter={e => !e.currentTarget.disabled && (e.currentTarget.style.color = '#eab308')}
-                onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
+                className="forge-button forge-button-icon"
                 title="Add to favorites"
               >
                 <Star className="w-4 h-4" />
@@ -449,15 +484,15 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             </div>
 
             {searchError && (
-              <div className="mt-1 rounded border border-amber-400/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+              <div role="alert" className="mt-2 rounded border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 {searchError}
               </div>
             )}
 
             {/* Results info - inline */}
-            <div className="flex items-center justify-between mt-1">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                {filteredResults.length} results
+                {filteredResults.length} matches{activeTab?.results.length !== filteredResults.length && ` / ${activeTab?.results.length || 0} loaded`}
                 {(activeTab?.selected.size || 0) > 0 && (
                   <span style={{ color: 'var(--umbra-accent)' }} className="ml-1.5">
                     ({activeTab?.selected.size} selected)
@@ -466,27 +501,26 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               </span>
               <div className="flex gap-1">
                 <button
+                  type="button"
                   onClick={selectAll}
-                  className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] transition-colors"
-                  style={{ color: 'rgba(255,255,255,0.5)' }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-text)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
+                  disabled={filteredResults.length === 0}
+                  className="forge-button"
                 >
                   <CheckSquare className="w-3 h-3" />
-                  All
+                  Select all
                 </button>
                 <button
+                  type="button"
                   onClick={selectNone}
-                  className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] transition-colors"
-                  style={{ color: 'rgba(255,255,255,0.5)' }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-text)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
+                  disabled={!activeTab?.selected.size}
+                  className="forge-button"
                 >
                   <Square className="w-3 h-3" />
-                  None
+                  Clear selection
                 </button>
               </div>
             </div>
+            <CollectionSettings value={collection} onChange={updateCollection} />
           </div>
 
           {/* Image grid with infinite scroll */}
@@ -502,10 +536,11 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               onSelect={toggleSelect}
               onImageDoubleClick={openLightbox}
               isLoading={activeTab?.isLoading}
+              hasSearched={!!activeTab?.resultQuery}
             />
 
             {/* Load more button */}
-            {filteredResults.length > 0 && (
+            {!!activeTab?.resultQuery && (
               <div className="p-4 flex justify-center">
                 {activeTab?.isLoading ? (
                   <div className="flex items-center gap-2 text-[11px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
@@ -515,14 +550,8 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                 ) : activeTab?.hasMore ? (
                   <button
                     onClick={() => doSearch(true)}
-                    className="px-4 py-1.5 rounded text-xs font-medium transition-all"
-                    style={{
-                      background: 'rgba(255,255,255,0.1)',
-                      color: 'var(--umbra-text)',
-                      border: '1px solid var(--umbra-border)'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    type="button"
+                    className="forge-button"
                   >
                     Load More
                   </button>
@@ -535,143 +564,63 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             )}
           </div>
         </div>
+        {destinationOpen && <>
+          <button type="button" aria-label="Dismiss download folders" className="absolute inset-0 z-30 bg-black/60 xl:hidden" onClick={() => setDestinationOpen(false)} />
+          <DownloadDestinationPanel datasets={datasets} selected={selectedDataset} folders={enabledConcepts}
+            loading={foldersLoading} error={datasetError} onSelect={setSelectedDataset} onToggle={toggleConcept}
+            onCreate={() => { setDatasetActionError(''); setShowNewConceptModal(true); }}
+            onRename={() => { setNewDatasetName(selectedDataset); setDatasetActionError(''); setShowRenameDatasetModal(true); }}
+            onRefresh={() => { setDatasetActionError(''); void fetchDatasets(); }} onClose={() => setDestinationOpen(false)} />
+        </>}
       </div>
 
-      {/* Download bar with concept toggles */}
+      {/* Download action bar */}
       <div
         data-umbra-data-forge-download-bar
-        className="glass-panel flex-shrink-0 rounded-none border-x-0 border-b-0 px-2 py-1.5"
+        className="glass-panel flex-shrink-0 rounded-none border-x-0 border-b-0 px-3 py-3"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] flex-shrink-0" style={{ color: 'rgba(255,255,255,0.5)' }}>Download to:</span>
-
-          <div data-umbra-data-forge-dataset-picker className="flex items-center gap-0.5 flex-shrink-0">
-            <UmbraSelectControl
-              value={selectedDataset}
-              onChange={(e) => setSelectedDataset(e.target.value)}
-              className="settings-input !py-1 !text-xs !w-auto min-w-[100px]"
-            >
-              <option value="">Folder...</option>
-              {datasets.map(d => (
-                <option key={d.name} value={d.name}>{d.name}</option>
-              ))}
-            </UmbraSelectControl>
-
-            <button
-              data-umbra-data-forge-add-concept
-              onClick={() => { setDatasetActionError(''); setShowNewConceptModal(true); }}
-              className="p-1 rounded transition-colors"
-              style={{ color: 'rgba(255,255,255,0.5)' }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-accent)'}
-              onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
-              title="Create concept folder"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-
-            {selectedDataset && datasetObj?.layout !== 'flat' && (
-              <button
-                onClick={() => {
-                  setNewDatasetName(selectedDataset);
-                  setDatasetActionError('');
-                  setShowRenameDatasetModal(true);
-                }}
-                className="p-1 rounded transition-colors"
-                style={{ color: 'rgba(255,255,255,0.5)' }}
-                onMouseEnter={e => e.currentTarget.style.color = 'var(--umbra-accent)'}
-                onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.5)'}
-                title="Rename dataset"
-              >
-                <Pencil className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          {/* Concept toggles */}
-          {selectedDataset && datasetObj?.layout !== 'flat' && concepts.length > 0 && (
-            <div data-umbra-data-forge-concepts className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
-              {concepts.slice(0, 20).map(c => {
-                const folder = c.folder;
-                const isEnabled = enabledConcepts.has(folder);
-                return (
-                  <button
-                    key={folder}
-                    onClick={() => toggleConcept(folder)}
-                    className="px-2 py-0.5 rounded text-[10px] font-medium transition-all"
-                    style={{
-                      background: isEnabled ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                      color: isEnabled ? '#22c55e' : '#ef4444',
-                      border: `1px solid ${isEnabled ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
-                    }}
-                    title={isEnabled ? 'Click to ignore' : 'Click to enable'}
-                  >
-                    {folder}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="forge-button min-w-0 max-w-full" aria-expanded={destinationOpen} aria-controls="booru-download-folders" onClick={() => setDestinationOpen(open => !open)} title={selectedDataset || 'Choose download folder'}>
+            <FolderOpen size={14} className="shrink-0" /><span className="truncate">{selectedDataset || 'Download folder'}</span>
+          </button>
 
           <button
+            type="button"
             data-umbra-data-forge-download-button
             onClick={handleDownload}
-            disabled={!selectedDataset || enabledConcepts.size === 0 || (activeTab?.selected.size || 0) === 0}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-all disabled:opacity-40 flex-shrink-0"
-            style={{
-              background: 'var(--umbra-accent)',
-              color: 'white',
-            }}
+            disabled={checkingDestination || foldersLoading || !!datasetError || !selectedDataset || enabledConcepts.size === 0 || downloadBatch.length === 0 || !!collectionError}
+            className="forge-button forge-button-primary ml-auto"
           >
             <Download className="w-3.5 h-3.5" />
-            Download {activeTab?.selected.size || 0}
+            {checkingDestination ? 'Checking folder…' : 'Download selected'}{downloadBatch.length ? ` (${downloadBatch.length}${downloadBatch.length < (activeTab?.selected.size || 0) ? ` of ${activeTab?.selected.size}` : ''})` : ''}
             {enabledConcepts.size > 1 && ` x ${enabledConcepts.size}`}
           </button>
         </div>
+        <p role="status" className="mt-2 text-[11px] text-zinc-500">{!selectedDataset ? 'Choose a destination folder, then select media to download.' : enabledConcepts.size === 0 ? 'Choose at least one subfolder in the download folder panel.' : !downloadBatch.length ? 'Select media in the grid. Use the preview button for a closer look.' : `${downloadBatch.length} selected files → ${enabledConcepts.size} destination${enabledConcepts.size === 1 ? '' : 's'} (${downloadBatch.length * enabledConcepts.size} downloads). Highest scores first; remaining selections are kept.`}</p>
+        {datasetActionError && !showNewConceptModal && !showRenameDatasetModal && <p role="alert" className="mt-2 text-xs text-red-300">{datasetActionError}</p>}
       </div>
 
-      {/* New Concept Modal */}
+      {/* New dataset folder */}
       {showNewConceptModal && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.6)' }}>
           <div className="glass-panel p-4 w-72" style={{ background: 'var(--umbra-panel)' }}>
-            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--umbra-text)' }}>New Concept</h3>
+            <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--umbra-text)' }}>New dataset folder</h3>
 
             <div className="space-y-2">
               <input
                 type="text"
                 value={newConceptName}
                 onChange={(e) => setNewConceptName(e.target.value)}
-                placeholder="Concept name..."
+                aria-label="Dataset folder name" placeholder="Folder name…"
                 autoFocus
                 className="settings-input !text-xs"
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateConcept()}
               />
 
-              <div className="flex items-center gap-2">
-                <label className="text-[11px]" style={{ color: 'rgba(255,255,255,0.6)' }}>Repeats:</label>
-                <input
-                  type="number"
-                  value={newConceptRepeats}
-                  onChange={(e) => setNewConceptRepeats(parseInt(e.target.value) || 1)}
-                  min={1}
-                  max={100}
-                  className="settings-input !py-1 !text-xs !w-16"
-                />
-              </div>
-
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newConceptIsReg}
-                  onChange={(e) => setNewConceptIsReg(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded"
-                  style={{ accentColor: 'var(--umbra-accent)' }}
-                />
-                <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.7)' }}>Regularization images</span>
-              </label>
             </div>
 
             <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              Folder: {newConceptRepeats}_{newConceptIsReg ? 'reg_' : ''}{newConceptName || 'name'}
+              Folder: {newConceptName.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || 'name'}
             </p>
             {datasetActionError && <p role="alert" className="mt-2 text-xs text-red-300">{datasetActionError}</p>}
 
@@ -681,8 +630,6 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                 onClick={() => {
                   setShowNewConceptModal(false);
                   setNewConceptName('');
-                  setNewConceptRepeats(10);
-                  setNewConceptIsReg(false);
                 }}
                 className="px-3 py-1 text-xs transition-colors"
                 style={{ color: 'rgba(255,255,255,0.6)' }}

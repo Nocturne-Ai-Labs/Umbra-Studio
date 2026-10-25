@@ -1,99 +1,36 @@
-import { Pause, Play, Trash2, CheckCircle } from 'lucide-react';
+import { Pause, Play, Trash2, CheckCircle, Download } from 'lucide-react';
 import { DownloadQueue } from './components/DownloadQueue';
 import { useBoardStore } from './hooks/useBoardStore';
 
 export function DownloadsTab() {
-  const {
-    downloadQueue,
-    downloadPaused: isPaused,
-    setDownloadPaused: setIsPaused,
-    removeFromDownloadQueue,
-    clearDownloadQueue,
-  } = useBoardStore();
-
-  // Stats
-  const completed = downloadQueue.filter(i => i.status === 'done').length;
-  const failed = downloadQueue.filter(i => i.status === 'error').length;
-  const queued = downloadQueue.filter(i => i.status === 'queued').length;
-  const downloading = downloadQueue.filter(i => i.status === 'downloading').length;
-
-  const clearCompleted = () => {
-    downloadQueue
-      .filter(i => i.status === 'done')
-      .forEach(i => removeFromDownloadQueue(i.id));
-  };
+  const { downloadQueue, downloadPaused: isPaused, setDownloadPaused: setIsPaused, removeFromDownloadQueue, clearDownloadQueue } = useBoardStore();
+  const completed = downloadQueue.filter(item => item.status === 'done').length;
+  const failed = downloadQueue.filter(item => item.status === 'error').length;
+  const queued = downloadQueue.filter(item => item.status === 'queued').length;
+  const downloading = downloadQueue.filter(item => item.status === 'downloading').length;
+  const clearCompleted = () => downloadQueue.filter(item => item.status === 'done').forEach(item => removeFromDownloadQueue(item.id));
 
   return (
-    <div className="h-full flex flex-col" style={{ fontFamily: 'var(--font-family)' }}>
-      {/* Header */}
-      <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--umbra-border)', background: 'var(--umbra-panel)' }}>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="glass-panel flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-none border-x-0 border-t-0 px-4 py-3">
         <div>
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--umbra-text)' }}>Download Queue</h2>
-          <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.5)' }}>
-            {completed} done
-            {downloading > 0 && <span style={{ color: '#22c55e' }}>, {downloading} downloading</span>}
-            {queued > 0 && `, ${queued} queued`}
-            {failed > 0 && <span style={{ color: '#ef4444' }}>, {failed} failed</span>}
-            <span style={{ color: 'rgba(255,255,255,0.3)' }}> (5 parallel)</span>
+          <h2 className="flex items-center gap-2 text-sm font-semibold"><Download size={16} className="text-[var(--umbra-accent)]" /> Downloads</h2>
+          <p role="status" className="mt-1 text-xs text-zinc-400">
+            {isPaused ? 'Queue paused' : downloading ? `${downloading} downloading` : queued ? 'Waiting to download' : 'Queue idle'}
+            <span className="text-zinc-500"> · {queued} waiting · {completed} saved</span>
+            {failed > 0 && <span className="text-red-300"> · {failed} failed</span>}
           </p>
         </div>
-
-        <div className="flex items-center gap-1.5">
-          {completed > 0 && (
-            <button
-              onClick={clearCompleted}
-              className="flex items-center gap-1.5 px-2 py-1 text-[11px] rounded transition-colors"
-              style={{ color: 'rgba(255,255,255,0.6)' }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--umbra-text)'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.6)'; e.currentTarget.style.background = 'transparent'; }}
-            >
-              <CheckCircle className="w-3.5 h-3.5" />
-              Clear Done
-            </button>
-          )}
-
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            className="flex items-center gap-1.5 px-2 py-1 text-[11px] rounded transition-colors"
-            style={{
-              background: isPaused ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)',
-              color: isPaused ? '#22c55e' : '#eab308',
-            }}
-          >
-            {isPaused ? (
-              <>
-                <Play className="w-3.5 h-3.5" />
-                Resume
-              </>
-            ) : (
-              <>
-                <Pause className="w-3.5 h-3.5" />
-                Pause
-              </>
-            )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setIsPaused(!isPaused)} disabled={!isPaused && queued + downloading === 0} className="forge-button forge-button-primary" title="Pausing holds waiting items; active downloads finish.">
+            {isPaused ? <Play size={14} /> : <Pause size={14} />}{isPaused ? 'Resume queue' : 'Pause queue'}
           </button>
-
-          <button
-            onClick={clearDownloadQueue}
-            title="Clear queued and finished items. Active downloads will finish."
-            className="flex items-center gap-1.5 px-2 py-1 text-[11px] rounded transition-colors"
-            style={{ color: '#ef4444' }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear Inactive
-          </button>
+          <button type="button" onClick={clearCompleted} disabled={completed === 0} className="forge-button" title="Remove completed entries from the list; saved files are kept."><CheckCircle size={14} />Clear completed</button>
+          <button type="button" onClick={clearDownloadQueue} disabled={completed + failed + queued === 0} title="Remove waiting and finished entries from the list. Active downloads and saved files are kept." className="forge-button forge-button-danger"><Trash2 size={14} />Clear inactive</button>
         </div>
-      </div>
-
-      {/* Queue */}
-      <div className="flex-1 min-h-0">
-        <DownloadQueue
-          items={downloadQueue}
-          onRemove={removeFromDownloadQueue}
-        />
-      </div>
+      </header>
+      {isPaused && <p role="status" className="border-b border-white/10 px-4 py-2 text-xs text-amber-200">Waiting downloads are paused. Any active transfers will finish.</p>}
+      <div className="min-h-0 flex-1"><DownloadQueue items={downloadQueue} onRemove={removeFromDownloadQueue} /></div>
     </div>
   );
 }

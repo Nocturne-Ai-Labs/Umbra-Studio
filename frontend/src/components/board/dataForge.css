@@ -1,0 +1,88 @@
+[data-umbra-data-forge-root] .forge-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2rem;
+  flex-shrink: 0;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid color-mix(in srgb, var(--umbra-text) 14%, transparent);
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--umbra-panel) 65%, transparent);
+  color: var(--umbra-text);
+  font-size: 0.75rem;
+  line-height: 1rem;
+  transition: background 120ms, border-color 120ms;
+}
+
+[data-umbra-data-forge-root] .forge-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--umbra-text) 9%, var(--umbra-panel));
+  border-color: color-mix(in srgb, var(--umbra-text) 28%, transparent);
+}
+
+[data-umbra-data-forge-root] .forge-button:focus-visible {
+  outline: 2px solid var(--umbra-accent);
+  outline-offset: 2px;
+}
+
+[data-umbra-data-forge-root] .forge-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+[data-umbra-data-forge-root] .forge-button-primary,
+[data-umbra-data-forge-root] .forge-button[aria-pressed="true"],
+[data-umbra-data-forge-root] .forge-button[aria-expanded="true"] {
+  border-color: var(--umbra-accent);
+  background: var(--umbra-accent-glow);
+}
+
+[data-umbra-data-forge-root] .forge-button-danger {
+  color: #fca5a5;
+  border-color: rgb(239 68 68 / 25%);
+}
+
+[data-umbra-data-forge-root] .forge-button-icon {
+  width: 2rem;
+  padding: 0.375rem;
+}
+
+[data-umbra-data-forge-root] .forge-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.625rem;
+  cursor: pointer;
+  list-style: none;
+  border: 1px solid color-mix(in srgb, var(--umbra-text) 14%, transparent);
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--umbra-panel) 65%, transparent);
+}
+
+[data-umbra-data-forge-root] .forge-disclosure > summary::-webkit-details-marker { display: none; }
+[data-umbra-data-forge-root] .forge-disclosure > summary::before { content: '›'; font-size: 1rem; color: var(--umbra-accent); transition: transform 120ms; }
+[data-umbra-data-forge-root] .forge-disclosure[open] > summary::before { transform: rotate(90deg); }
+[data-umbra-data-forge-root] .forge-disclosure > summary:hover { border-color: var(--umbra-accent); }
+[data-umbra-data-forge-root] .forge-disclosure > summary:focus-visible { outline: 2px solid var(--umbra-accent); outline-offset: 2px; }
+
+[data-umbra-data-forge-root] .forge-collection-fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+/* Surface tokens use a full border shorthand in OLED themes, not a color. */
+[data-umbra-data-forge-root] :is(.umbra-surface-soft, .umbra-surface-deep, .umbra-input) {
+  border-color: color-mix(in srgb, var(--umbra-text) 14%, transparent);
+}
+[data-umbra-data-forge-root] .umbra-input:focus {
+  border-color: var(--umbra-accent);
+}
+[data-umbra-data-forge-root] :is(.umbra-surface-soft, .umbra-surface-deep)[data-selected="true"] {
+  border-color: var(--umbra-accent);
+}
+
+
+[data-umbra-data-forge-root] .forge-destination-panel {
+  background: var(--umbra-bg);
+  border-color: color-mix(in srgb, var(--umbra-text) 14%, transparent);
+}

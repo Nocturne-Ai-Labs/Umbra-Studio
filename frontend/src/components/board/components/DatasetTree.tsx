@@ -87,8 +87,8 @@ export function DatasetTree({
     if (contextMenu.type === 'dataset') {
       return [
         {
-          label: contextMenu.dataset.layout === 'flat' ? 'Open Concept' : 'Open Dataset',
-          icon: <MousePointer2 className="h-3.5 w-3.5 text-cyan-300" />,
+          label: 'Open folder',
+          icon: <MousePointer2 className="h-3.5 w-3.5 text-[var(--umbra-accent)]" />,
           action: () => runMenuAction(() => {
             if (contextMenu.dataset.layout === 'flat') onSelectConcept(contextMenu.dataset.name, contextMenu.dataset.name);
             else {
@@ -98,7 +98,7 @@ export function DatasetTree({
           }),
         },
         {
-          label: 'New Concept',
+          label: 'New dataset folder',
           icon: <FolderPlus className="h-3.5 w-3.5 text-emerald-300" />,
           action: () => runMenuAction(() => {
             setExpanded(prev => new Set(prev).add(contextMenu.dataset.name));
@@ -108,8 +108,8 @@ export function DatasetTree({
         {
           label: contextMenu.dataset.archive ? 'Rebuild ZIP' : 'Create ZIP',
           icon: archivingDataset === contextMenu.dataset.name
-            ? <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-300" />
-            : <Archive className="h-3.5 w-3.5 text-cyan-300" />,
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--umbra-accent)]" />
+            : <Archive className="h-3.5 w-3.5 text-[var(--umbra-accent)]" />,
           disabled: Boolean(archivingDataset),
           action: () => runMenuAction(() => onArchiveDataset(contextMenu.dataset.name)),
         },
@@ -119,13 +119,13 @@ export function DatasetTree({
           action: () => runMenuAction(() => onOpenDatasetArchive(contextMenu.dataset.archive!.path)),
         }] : []),
         {
-          label: contextMenu.dataset.layout === 'flat' ? 'Rename Concept Folder' : 'Rename Dataset',
+          label: 'Rename folder',
           icon: <Pencil className="h-3.5 w-3.5 text-amber-300" />,
           action: () => runMenuAction(() => onRenameDataset(contextMenu.dataset.name)),
         },
         { separator: true },
         {
-          label: contextMenu.dataset.layout === 'flat' ? 'Delete Concept Folder' : 'Delete Dataset',
+          label: 'Delete folder',
           icon: <Trash2 className="h-3.5 w-3.5" />,
           danger: true,
           action: () => runMenuAction(() => onDeleteDataset(contextMenu.dataset.name)),
@@ -136,12 +136,12 @@ export function DatasetTree({
     if (contextMenu.type === 'concept') {
       return [
         {
-          label: 'Open Concept',
-          icon: <Image className="h-3.5 w-3.5 text-cyan-300" />,
+          label: 'Open folder',
+          icon: <Image className="h-3.5 w-3.5 text-[var(--umbra-accent)]" />,
           action: () => runMenuAction(() => onSelectConcept(contextMenu.dataset.name, contextMenu.conceptKey)),
         },
         {
-          label: 'New Concept',
+          label: 'New dataset folder',
           icon: <FolderPlus className="h-3.5 w-3.5 text-emerald-300" />,
           action: () => runMenuAction(onCreateRootConcept),
         },
@@ -157,7 +157,7 @@ export function DatasetTree({
 
     return [
       {
-        label: 'New Concept',
+        label: 'New dataset folder',
         icon: <Plus className="h-3.5 w-3.5 text-emerald-300" />,
         action: () => runMenuAction(onCreateRootConcept),
       },
@@ -172,18 +172,16 @@ export function DatasetTree({
         setContextMenu({ type: 'empty', x: event.clientX, y: event.clientY });
       }}
     >
-      <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-        <span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">
-          Concepts
-        </span>
+      <div className="border-b border-white/10 p-3">
         <button
           type="button"
-          aria-label="New dataset concept"
+          aria-label="New dataset folder"
           onClick={onCreateRootConcept}
-          className="umbra-icon-button rounded p-1 transition-colors hover:text-cyan-300"
-          title="New Concept"
+          className="forge-button w-full"
+          title="New dataset folder"
         >
           <Plus className="w-4 h-4" />
+          New dataset folder
         </button>
       </div>
 
@@ -221,7 +219,7 @@ export function DatasetTree({
 
                 <button
                   type="button"
-                  aria-label={`Open ${isFlat ? 'concept' : 'dataset'}: ${dataset.name}`}
+                  aria-label={`Open folder: ${dataset.name}`}
                   aria-current={isSelected ? 'true' : undefined}
                   onClick={() => {
                     if (isFlat) onSelectConcept(dataset.name, dataset.name);
@@ -250,15 +248,6 @@ export function DatasetTree({
                   >
                     <MoreHorizontal size={14} />
                   </button>
-                  <button
-                    type="button"
-                    aria-label={`Add concept to: ${dataset.name}`}
-                    onClick={onCreateRootConcept}
-                    className="umbra-icon-button rounded p-1 transition-colors hover:text-cyan-300"
-                    title="Add Concept"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
 
@@ -276,24 +265,16 @@ export function DatasetTree({
                                    ${isConceptSelected ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]' : 'border-transparent text-zinc-300 hover:border-white/10 hover:bg-white/5'}`}
                         onContextMenu={(event) => openConceptMenu(event, dataset, conceptKey, concept.name)}
                       >
-                        <button type="button" aria-label={`Open concept: ${concept.name}`} aria-current={isConceptSelected ? 'true' : undefined} onClick={() => onSelectConcept(dataset.name, conceptKey)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                        <button type="button" aria-label={`Open folder: ${concept.name}`} aria-current={isConceptSelected ? 'true' : undefined} onClick={() => onSelectConcept(dataset.name, conceptKey)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                         <Image className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
-                        <span className={`rounded border px-1.5 py-0.5 text-[10px] ${
-                          concept.isReg ? 'border-cyan-400/30 bg-cyan-500/12 text-cyan-200' : 'border-emerald-400/30 bg-emerald-500/12 text-emerald-300'
-                        }`}>
-                          {concept.repeats}
-                        </span>
-                        <span className="text-sm flex-1 truncate">
-                          {concept.isReg && <span className="text-cyan-300">reg_</span>}
-                          {concept.name}
-                        </span>
+                        <span className="text-sm flex-1 truncate" title={concept.folder}>{concept.folder}</span>
                         <span className="text-xs text-zinc-500">
                           {concept.imageCount}
                         </span>
                         </button>
                         <button
                           type="button"
-                          aria-label={`Concept actions: ${concept.name}`}
+                          aria-label={`Folder actions: ${concept.name}`}
                           onClick={event => openConceptMenu(event, dataset, conceptKey, concept.name)}
                           className="umbra-icon-button shrink-0 rounded p-1 transition-colors"
                         >
@@ -310,15 +291,15 @@ export function DatasetTree({
                         ...previous,
                         [dataset.name]: shownConceptCount + TREE_PAGE_SIZE,
                       }))}
-                      className="w-full rounded px-2 py-1 text-left text-xs text-cyan-300 hover:bg-white/5"
+                      className="w-full rounded px-2 py-1 text-left text-xs text-[var(--umbra-accent)] hover:bg-white/5"
                     >
-                      Show more concepts ({shownConceptCount} of {dataset.concepts.length})
+                      Show more folders ({shownConceptCount} of {dataset.concepts.length})
                     </button>
                   )}
 
                   {dataset.concepts.length === 0 && (
                     <p className="px-2 py-1 text-xs italic text-zinc-500">
-                      No concepts yet
+                      No subfolders
                     </p>
                   )}
                 </div>
@@ -331,7 +312,7 @@ export function DatasetTree({
           <button
             type="button"
             onClick={() => setVisibleDatasetCount(shownDatasetCount + TREE_PAGE_SIZE)}
-            className="w-full rounded px-2 py-1 text-left text-xs text-cyan-300 hover:bg-white/5"
+            className="w-full rounded px-2 py-1 text-left text-xs text-[var(--umbra-accent)] hover:bg-white/5"
           >
             Show more folders ({shownDatasetCount} of {datasets.length})
           </button>
@@ -340,12 +321,12 @@ export function DatasetTree({
         {datasets.length === 0 && (
           <div className="py-8 text-center text-zinc-500">
             <Folder className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No concepts</p>
+            <p className="text-sm">No dataset folders</p>
             <button
               onClick={onCreateRootConcept}
-              className="mt-2 text-xs text-cyan-300 hover:text-cyan-200"
+              className="mt-2 text-xs text-[var(--umbra-accent)] hover:text-[var(--umbra-text)]"
             >
-              Create your first concept
+              Create your first folder
             </button>
           </div>
         )}

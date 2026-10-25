@@ -1,6 +1,7 @@
 @import "tailwindcss" source("../");
 @import "../features/manga/manga.css";
 @import "../components/layout/galleryRemoteBrowser.css";
+@import "../components/board/dataForge.css";
 
 @container umbra-model-merge-editor (max-width: 700px) {
   [data-model-merge-sources],

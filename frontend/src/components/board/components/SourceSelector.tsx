@@ -28,21 +28,13 @@ export function SourceSelector({ selected, onChange, apiConfig, onOpenApiKeys }:
         </div>
         {onOpenApiKeys && (
           <button
+            type="button"
             onClick={onOpenApiKeys}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] transition-colors"
-            style={{ color: 'rgba(255,255,255,0.65)', background: 'rgba(255,255,255,0.05)' }}
-            onMouseEnter={e => {
-              e.currentTarget.style.color = 'var(--umbra-text)';
-              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = 'rgba(255,255,255,0.65)';
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-            }}
+            className="forge-button"
             title="Manage site credentials"
           >
             <KeyRound className="h-3 w-3" />
-            Auth
+            API keys
           </button>
         )}
       </div>
@@ -57,11 +49,12 @@ export function SourceSelector({ selected, onChange, apiConfig, onOpenApiKeys }:
             <button
               key={source.id}
               type="button"
+              aria-pressed={isSelected}
               onClick={() => toggle(source.id)}
-              className="w-full rounded-md border px-2 py-1.5 text-left transition-all"
+              className="w-full rounded border px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)]"
               style={{
-                background: isSelected ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.03)',
-                borderColor: isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.09)',
+                background: isSelected ? 'var(--umbra-accent-glow)' : 'rgba(255,255,255,0.03)',
+                borderColor: isSelected ? 'var(--umbra-accent)' : 'rgba(255,255,255,0.09)',
               }}
               onMouseEnter={e => {
                 if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
@@ -86,7 +79,7 @@ export function SourceSelector({ selected, onChange, apiConfig, onOpenApiKeys }:
                 )}
               </div>
 
-              <div className="mt-1 text-[9px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              <div className="mt-1 text-[10px] text-zinc-400">
                 {requiresAuth
                   ? configured
                     ? 'Authenticated'

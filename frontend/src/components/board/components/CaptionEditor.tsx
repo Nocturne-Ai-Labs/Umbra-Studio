@@ -1,4 +1,4 @@
-import { Save, Copy, Loader2 } from 'lucide-react';
+import { Save, Copy, Loader2, TextCursorInput } from 'lucide-react';
 import type { DatasetImage } from '../types';
 import { DatasetThumbnail } from './DatasetThumbnail';
 import { DatasetRedownloadButton } from './DatasetRedownloadButton';
@@ -34,17 +34,19 @@ export function CaptionEditor({
 
   if (!image) {
     return (
-      <div className="h-full flex items-center justify-center text-zinc-500">
-        <p className="text-xs uppercase tracking-[0.16em]">Select an image to edit caption</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-zinc-500">
+        <TextCursorInput size={24} />
+        <p className="text-sm text-zinc-300">Image captions</p>
+        <p className="text-xs leading-relaxed">Select an image to review its sources and edit its training caption.</p>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="custom-scrollbar flex h-full flex-col overflow-y-auto">
       {/* Preview */}
       <div className="flex-shrink-0 border-b border-white/10 p-3">
-        <div className="umbra-surface-deep relative mx-auto aspect-square max-h-48 overflow-hidden rounded-lg border border-white/10">
+        <div className="umbra-surface-deep relative mx-auto h-36 overflow-hidden rounded border border-white/10">
           <DatasetThumbnail image={image} datasetName={datasetName} conceptFolder={conceptFolder} contain />
         </div>
       </div>
@@ -62,17 +64,17 @@ export function CaptionEditor({
         <DatasetRedownloadButton image={image} busy={isRedownloading} onRedownload={onRedownload} />
       </div>
 
-      <div className="custom-scrollbar max-h-60 shrink-0 space-y-2 overflow-y-auto border-b border-white/10 p-3 text-xs">
+      <div className="shrink-0 space-y-2 border-b border-white/10 p-3 text-xs">
         <p className="font-bold uppercase tracking-widest text-zinc-400">Paired sources</p>
         {image.captionSourceError && <p role="alert" className="text-red-300">{image.captionSourceError}</p>}
         {(['natural', 'tags'] as const).map(kind => {
           const source = image.captionSources?.[kind];
-          return <details key={kind}><summary className="cursor-pointer rounded border border-white/10 p-2">{kind === 'natural' ? 'Description' : 'Generated tags'} · {source?.error ? 'Failed' : source?.text ? 'Saved' : 'Missing'}</summary><p className="mt-1 whitespace-pre-wrap break-words text-zinc-400" data-i18n-skip="">{source?.error || source?.text || 'Run this caption mode to save its source separately.'}</p></details>;
+          return <details key={kind} className="forge-disclosure"><summary><span>{kind === 'natural' ? 'Description' : 'Generated tags'}</span><span className={`ml-auto text-[10px] ${source?.error ? 'text-red-300' : source?.text ? 'text-emerald-300' : 'text-zinc-500'}`}>{source?.error ? 'Failed' : source?.text ? 'Saved' : 'Missing'}</span></summary><p className="custom-scrollbar mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-2 text-zinc-400" data-i18n-skip="">{source?.error || source?.text || 'Run this caption mode to save its source separately.'}</p></details>;
         })}
-        <p className="text-zinc-500">Use Training export to combine sources. Source history is preserved; image identity is checked during export.</p>
+        <p className="text-[11px] leading-relaxed text-zinc-500">Training export combines descriptions and tags into matching .txt files.</p>
       </div>
       {/* Caption editor */}
-      <div className="flex-1 flex flex-col p-3 space-y-2 min-h-0">
+      <div className="flex min-h-64 flex-1 flex-col space-y-2 p-3">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">
             Training caption (.txt)
@@ -83,42 +85,46 @@ export function CaptionEditor({
         </div>
 
         <textarea
+          aria-label="Training caption"
           value={caption}
           onChange={(e) => {
             setCaption(e.target.value);
           }}
-          placeholder="Enter caption tags..."
-          className="umbra-input custom-scrollbar w-full flex-1 resize-none rounded-lg p-2 text-sm placeholder:text-zinc-500 focus:border-cyan-400/60 focus:outline-none"
+          placeholder="Write a description, tags, or both…"
+          className="umbra-input custom-scrollbar min-h-32 w-full flex-1 resize-y rounded p-2 text-xs leading-relaxed placeholder:text-zinc-500 focus:border-[var(--umbra-accent)] focus:outline-none"
         />
 
         {/* Actions */}
         {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={handleSave}
             disabled={!isDirty || isSaving}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-cyan-400/35 bg-cyan-500/15 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-cyan-100 transition-colors hover:bg-cyan-500/22 disabled:border-white/10 disabled:bg-white/5 disabled:text-zinc-500 disabled:cursor-not-allowed"
+            className="forge-button forge-button-primary flex-1"
           >
             {isSaving ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Save className="w-4 h-4" />
             )}
-            Save
+            {isSaving ? 'Saving…' : 'Save caption'}
           </button>
         </div>
       </div>
 
       {/* Source tags (if available) */}
       {image.tags && image.tags.length > 0 && (
-        <div className="flex-shrink-0 border-t border-white/10 p-3">
-          <div className="flex items-center justify-between mb-2">
+        <details className="forge-disclosure shrink-0 border-t border-white/10 p-3 text-xs">
+          <summary>Original source tags<span className="ml-auto text-zinc-500">{image.tags.length}</span></summary>
+          <div className="my-2 flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">
               Source Tags
             </span>
             <button
+              type="button"
               onClick={handleCopyTags}
-              className="flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200"
+              className="forge-button"
             >
               <Copy className="w-3 h-3" />
               Copy to Caption
@@ -139,7 +145,7 @@ export function CaptionEditor({
               </span>
             )}
           </div>
-        </div>
+        </details>
       )}
     </div>
   );

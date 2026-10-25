@@ -36,7 +36,6 @@ export const useBoardStore = create<BoardState>()(
       isDownloading: false,
       downloadPaused: false,
       enabledSources: ['danbooru'],
-      defaultRepeats: 10,
 
       // Search tab actions
       addSearchTab: () => {
@@ -151,16 +150,13 @@ export const useBoardStore = create<BoardState>()(
         }));
       },
 
-      setDefaultRepeats: (value) => {
-        boardPreferences.update(state => ({ ...state, defaultRepeats: value }));
-      },
     })
 );
 
-type BoardPreferences = Pick<BoardState, 'favorites' | 'searchHistory' | 'enabledSources' | 'defaultRepeats'>;
+type BoardPreferences = Pick<BoardState, 'favorites' | 'searchHistory' | 'enabledSources'>;
 const boardPreferences = createUserPreferenceSession<BoardPreferences>({
   key: 'board-preferences',
-  initial: { favorites: [], searchHistory: [], enabledSources: ['danbooru'], defaultRepeats: 10 },
+  initial: { favorites: [], searchHistory: [], enabledSources: ['danbooru'] },
   normalize: (raw) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid board preferences');
     const preferences = raw as Partial<BoardPreferences>;
@@ -168,7 +164,6 @@ const boardPreferences = createUserPreferenceSession<BoardPreferences>({
       favorites: Array.isArray(preferences.favorites) ? preferences.favorites.filter(item => typeof item === 'string') : [],
       searchHistory: Array.isArray(preferences.searchHistory) ? preferences.searchHistory.filter(item => typeof item === 'string').slice(0, 5) : [],
       enabledSources: normalizeSources(preferences.enabledSources),
-      defaultRepeats: Number.isFinite(Number(preferences.defaultRepeats)) ? Number(preferences.defaultRepeats) : 10,
     };
   },
   apply: preferences => useBoardStore.setState(preferences),

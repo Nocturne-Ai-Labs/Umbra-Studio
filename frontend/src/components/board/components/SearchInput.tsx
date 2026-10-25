@@ -92,13 +92,14 @@ export function SearchInput({
         <input
           ref={inputRef}
           type="text"
+          aria-label="Booru search tags"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setShowSuggestions(true)}
           onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="umbra-input w-full rounded-md px-7 py-1.5 text-xs outline-none transition-colors placeholder:text-zinc-500 focus:border-cyan-400/60"
+          className="umbra-input h-9 w-full rounded px-8 text-xs outline-none transition-colors placeholder:text-zinc-500 focus:border-[var(--umbra-accent)]"
         />
         {value && (
           <button
@@ -119,7 +120,7 @@ export function SearchInput({
               key={tag}
               onClick={() => insertSuggestion(tag)}
               className={`w-full rounded px-2.5 py-1.5 text-left text-xs transition-colors ${
-                index === selectedIndex ? 'bg-cyan-500/15 text-cyan-100' : 'text-zinc-300 hover:bg-white/10 hover:text-white'
+                index === selectedIndex ? 'bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]' : 'text-zinc-300 hover:bg-white/10 hover:text-white'
               }`}
             >
               {tag}

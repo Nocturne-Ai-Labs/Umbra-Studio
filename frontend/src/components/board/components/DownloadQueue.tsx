@@ -1,4 +1,4 @@
-import { Check, AlertCircle, Loader2, Clock } from 'lucide-react';
+import { Check, AlertCircle, Loader2, Clock, Download, X } from 'lucide-react';
 import { BOORU_SOURCES } from '../sources';
 import type { DownloadItem } from '../types';
 import { NsfwPrivacyShield, useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
@@ -9,7 +9,7 @@ interface DownloadQueueProps {
   onRemove: (id: string) => void;
 }
 
-export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps) {
+export function DownloadQueue({ items, onRemove }: DownloadQueueProps) {
   const { locked } = useNsfwPrivacy();
   const getStatusIcon = (item: DownloadItem) => {
     switch (item.status) {
@@ -18,7 +18,7 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
       case 'error':
         return <AlertCircle className="w-4 h-4 text-red-400" />;
       case 'downloading':
-        return <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />;
+        return <Loader2 className="w-4 h-4 text-[var(--umbra-accent)] animate-spin" />;
       default:
         return <Clock className="w-4 h-4 text-zinc-500" />;
     }
@@ -31,7 +31,7 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
       case 'error':
         return item.error || 'Error';
       case 'downloading':
-        return `${Math.round(item.progress)}%`;
+        return 'Downloading…';
       default:
         return 'Queued';
     }
@@ -39,34 +39,35 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
 
   if (items.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-zinc-500">
-        <p className="text-xs uppercase tracking-[0.16em]">Download queue is empty</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-zinc-500">
+        <Download size={26} className="text-[var(--umbra-accent)]" />
+        <p className="text-sm font-medium text-zinc-300">No downloads queued</p>
+        <p className="text-xs">Select media and a destination in Booru downloader to start collecting.</p>
       </div>
     );
   }
 
   // Calculate overall progress
   const completed = items.filter(i => i.status === 'done').length;
+  const failed = items.filter(i => i.status === 'error').length;
   const total = items.length;
-  const overallProgress = total > 0 ? (completed / total) * 100 : 0;
+  const overallProgress = ((completed + failed) / total) * 100;
 
   return (
     <div className="h-full flex flex-col bg-[var(--umbra-bg)]">
       {/* Overall progress */}
-      <div className="glass-panel m-2 mb-0 flex-shrink-0 rounded-lg border-white/10 p-3">
+      <div className="umbra-surface-soft flex-shrink-0 border-b border-white/10 px-4 py-3">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-400">
-            {completed} / {total} images
+            {completed} saved{failed > 0 ? ` · ${failed} failed` : ''} · {total} total
           </span>
-          <span className="text-xs text-cyan-200">
-            {Math.round(overallProgress)}%
+          <span className="text-xs text-zinc-400">
+            {Math.round(overallProgress)}% processed
           </span>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-black/45 ring-1 ring-white/10">
-          <div
-            className="h-full bg-cyan-400 transition-all duration-300 shadow-[0_0_14px_rgba(34,211,238,0.45)]"
-            style={{ width: `${overallProgress}%` }}
-          />
+        <div role="progressbar" aria-label="Download queue processed" aria-valuemin={0} aria-valuemax={total} aria-valuenow={completed + failed} aria-valuetext={`${completed} saved, ${failed} failed, ${total - completed - failed} remaining`} className="flex h-1.5 overflow-hidden rounded bg-black/45 ring-1 ring-white/10">
+          <div className="h-full bg-[var(--umbra-accent)] transition-all duration-300" style={{ width: `${completed / total * 100}%` }} />
+          <div className="h-full bg-red-400 transition-all duration-300" style={{ width: `${failed / total * 100}%` }} />
         </div>
       </div>
 
@@ -75,12 +76,13 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
         <table className="w-full min-w-[640px]">
           <thead className="sticky top-0 z-10 border-b border-white/10 bg-[var(--umbra-bg)]/95 backdrop-blur">
             <tr className="text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-              <th className="w-16 p-2 text-left">Img</th>
+              <th className="w-16 p-2 text-left">Preview</th>
               <th className="p-2 text-left">Filename</th>
               <th className="min-w-32 p-2 text-left">Folder</th>
               <th className="w-24 p-2 text-left">Source</th>
               <th className="w-20 p-2 text-left">Size</th>
               <th className="w-24 p-2 text-left">Status</th>
+              <th className="w-10 p-2"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -144,6 +146,7 @@ export function DownloadQueue({ items, onRemove: _onRemove }: DownloadQueueProps
                       </span>
                     </div>
                   </td>
+                  <td className="p-2"><button type="button" className="forge-button forge-button-icon" disabled={item.status === 'downloading'} onClick={() => onRemove(item.id)} aria-label={`Remove ${item.post.md5} from queue`} title={item.status === 'downloading' ? 'Active download is still running' : 'Remove from list; saved file is kept'}><X size={14} /></button></td>
                 </tr>
               );
             })}
