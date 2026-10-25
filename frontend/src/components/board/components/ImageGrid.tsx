@@ -38,7 +38,7 @@ export function ImageGrid({
       <div className="flex min-h-56 flex-col items-center justify-center gap-3 px-6 text-center text-zinc-500">
         <Search size={26} className="text-[var(--umbra-accent)]" />
         <p className="text-sm font-medium text-zinc-300">{hasSearched ? 'No matching media in the loaded results' : 'Start with a tag search'}</p>
-        <p className="max-w-sm text-xs leading-relaxed">{hasSearched ? 'Adjust the score or media filters, load more results, or try another search.' : 'Choose your sources, search for media, then select what to add to your dataset.'}</p>
+        <p className="max-w-sm text-xs leading-relaxed">{hasSearched ? 'Adjust the score or media filters, load more results, or try another search.' : 'Choose a source, search for media, then select what to add to your dataset.'}</p>
       </div>
     );
   }

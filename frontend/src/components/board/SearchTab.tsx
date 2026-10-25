@@ -9,6 +9,7 @@ import { DownloadDestinationPanel } from './components/DownloadDestinationPanel'
 import { CollectionSettings } from './components/CollectionSettings';
 import { SourceSearchTools } from './components/SourceSearchTools';
 import { sourceSearchQueryKey } from './sourceSearchTools';
+import { BOORU_SOURCES } from './sources';
 import { useBoardStore } from './hooks/useBoardStore';
 import { useBooru } from './hooks/useBooru';
 import { useDatasets } from './hooks/useDatasets';
@@ -380,15 +381,20 @@ export function SearchTab({ onDownload }: SearchTabProps) {
           className="glass-panel custom-scrollbar w-52 flex-shrink-0 space-y-4 overflow-y-auto rounded-none border-y-0 border-l-0 p-3"
         >
           <div data-umbra-data-forge-filter-header>
-            <span>Search sources</span>
+            <span>Search source</span>
             <button type="button" onClick={() => setMobileFiltersOpen(false)} aria-label="Close source filters">
               <X className="h-5 w-5" />
             </button>
           </div>
 
           <SourceSelector
-            selected={activeTab?.sources || []}
-            onChange={(sources) => updateSearchTab(activeTab.id, { sources })}
+            selected={activeTab?.sources[0] || 'danbooru'}
+            onChange={(source) => {
+              if (!activeTab || activeTab.sources[0] === source) return;
+              if (loadingTabIdRef.current === activeTab.id) searchControllerRef.current?.abort();
+              setLightboxOpen(false);
+              updateSearchTab(activeTab.id, { sources: [source] });
+            }}
             apiConfig={apiKeyConfig}
             onOpenApiKeys={() => setShowApiKeysModal(true)}
           />
@@ -420,7 +426,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             </div>
           </div>
 
-          <SourceSearchTools sources={activeTab?.sources || []} value={activeTab?.sourceSearch || {}}
+          <SourceSearchTools source={activeTab?.sources[0] || 'danbooru'} value={activeTab?.sourceSearch || {}}
             onChange={sourceSearch => updateSearchTab(activeTab.id, { sourceSearch })} />
 
           <div className="border-t border-white/10 pt-3">
@@ -467,13 +473,13 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             data-umbra-data-forge-search-bar
             className="glass-panel relative z-20 flex-shrink-0 rounded-none border-x-0 border-t-0 px-3 py-3"
           >
-            <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-xs font-semibold">Find media</h2><span className="text-[11px] text-zinc-500">{activeTab?.sources.length || 0} {activeTab?.sources.length === 1 ? 'source' : 'sources'} selected</span></div>
+            <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-xs font-semibold">Find media</h2><span className="text-[11px] text-zinc-500">{BOORU_SOURCES[activeTab?.sources[0] || 'danbooru']?.name}</span></div>
             <div className="flex gap-1.5 items-start">
               <button
                 type="button"
                 data-umbra-data-forge-filter-button
-                aria-label="Choose sources and recent searches"
-                title="Sources and search history"
+                aria-label="Choose source and recent searches"
+                title="Source and search history"
                 onClick={() => setMobileFiltersOpen(true)}
               >
                 <SlidersHorizontal className="h-5 w-5" />
@@ -510,7 +516,6 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             )}
 
             {pendingSearch && <p role="status" className="mt-2 text-xs text-amber-200">Search changed. Press Search to update these results.</p>}
-            {(activeTab?.sources.length || 0) > 1 && <p className="mt-2 text-[10px] text-zinc-500">Each page keeps the selected order within each source.</p>}
 
             {/* Results info - inline */}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">

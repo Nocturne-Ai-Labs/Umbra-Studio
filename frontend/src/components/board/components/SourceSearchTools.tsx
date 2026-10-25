@@ -1,13 +1,10 @@
-import { useState } from 'react';
 import { SlidersHorizontal, RotateCcw } from 'lucide-react';
 import { BOORU_SOURCES } from '../sources';
 import { SOURCE_SEARCH_TOOLS, sourceSearchModifiers, type SourceSearchSettings } from '../sourceSearchTools';
 
-export function SourceSearchTools({ sources, value, onChange }: {
-  sources: string[]; value: SourceSearchSettings; onChange: (next: SourceSearchSettings) => void;
+export function SourceSearchTools({ source, value, onChange }: {
+  source: string; value: SourceSearchSettings; onChange: (next: SourceSearchSettings) => void;
 }) {
-  const [chosenSource, setChosenSource] = useState('');
-  const source = sources.includes(chosenSource) ? chosenSource : sources[0];
   const tools = SOURCE_SEARCH_TOOLS[source];
   if (!tools) return null;
   const options = value[source] || {};
@@ -17,12 +14,6 @@ export function SourceSearchTools({ sources, value, onChange }: {
       <SlidersHorizontal size={12} /> Search tools
       <button type="button" className="umbra-icon-button ml-auto p-1" aria-label={`Reset ${BOORU_SOURCES[source]?.name} search tools`}
         title="Reset this site's search tools" disabled={!modifiers.length} onClick={() => onChange({ ...value, [source]: {} })}><RotateCcw size={12} /></button>
-    </div>
-    <div className="flex flex-wrap gap-1" aria-label="Customize search tools for source">
-      {sources.map(id => <button key={id} type="button" aria-pressed={source === id} onClick={() => setChosenSource(id)}
-        className={`forge-button !min-h-7 !px-1.5 !text-[10px] ${source === id ? 'border-[var(--umbra-accent)] text-[var(--umbra-accent)]' : ''}`}>
-        {BOORU_SOURCES[id]?.name}{sourceSearchModifiers(id, value[id]).length ? ' •' : ''}
-      </button>)}
     </div>
     <p className="text-[10px] leading-relaxed text-zinc-500">Applies to {BOORU_SOURCES[source]?.name} when you search.</p>
     {(['sort', 'rating'] as const).map(field => <div key={field}>

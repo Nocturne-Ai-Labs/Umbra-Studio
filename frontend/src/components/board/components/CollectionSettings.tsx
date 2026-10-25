@@ -31,7 +31,7 @@ export function CollectionSettings({ value, onChange }: { value: CollectionOptio
         <p className="text-[11px] leading-relaxed text-zinc-500">Original files are preserved. Videos are saved to the folder; dataset caption tools process images.</p>
       </fieldset>
     </div>
-    <p className="pb-2 text-[11px] text-zinc-500">Filters apply to loaded results from every source. Load more to find additional matches.</p>
+    <p className="pb-2 text-[11px] text-zinc-500">Filters apply to loaded results. Load more to find additional matches.</p>
     {error && <p role="alert" className="pb-2 text-xs text-amber-300">{error}</p>}
     </div>
   </details>;
