@@ -86,3 +86,20 @@
   background: var(--umbra-bg);
   border-color: color-mix(in srgb, var(--umbra-text) 14%, transparent);
 }
+
+[data-umbra-data-forge-root] .forge-tag-suggestions {
+  background: var(--umbra-bg);
+  border-color: color-mix(in srgb, var(--umbra-text) 20%, transparent);
+}
+[data-umbra-data-forge-root] .forge-search-tag {
+  border-color: color-mix(in srgb, var(--umbra-text) 14%, transparent);
+  background: color-mix(in srgb, var(--umbra-panel) 65%, transparent);
+}
+[data-umbra-data-forge-root] .forge-search-tag[data-excluded="true"] {
+  border-color: rgb(251 191 36 / 25%);
+  color: #fcd34d;
+}
+[data-umbra-data-forge-root] .forge-search-tag button:focus-visible {
+  outline: 2px solid var(--umbra-accent);
+  outline-offset: -2px;
+}

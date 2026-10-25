@@ -448,7 +448,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             className="glass-panel relative z-20 flex-shrink-0 rounded-none border-x-0 border-t-0 px-3 py-3"
           >
             <div className="mb-2 flex items-center justify-between gap-2"><h2 className="text-xs font-semibold">Find media</h2><span className="text-[11px] text-zinc-500">{activeTab?.sources.length || 0} {activeTab?.sources.length === 1 ? 'source' : 'sources'} selected</span></div>
-            <div className="flex gap-1.5 items-center">
+            <div className="flex gap-1.5 items-start">
               <button
                 type="button"
                 data-umbra-data-forge-filter-button
@@ -464,10 +464,10 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                   onChange={(tags) => updateSearchTab(activeTab.id, { tags })}
                   onSearch={() => doSearch(false)}
                   source={activeTab?.sources[0] || 'danbooru'}
-                  placeholder="Enter tags, e.g. scenery sunset -watermark"
+                  placeholder="Type tags… try blue hair or -watermark"
                 />
               </div>
-              <button type="button" onClick={() => void doSearch(false)} disabled={activeTab?.isLoading} className="forge-button forge-button-primary">
+              <button type="button" onClick={() => void doSearch(false)} disabled={activeTab?.isLoading} className="forge-button forge-button-primary h-10">
                 {activeTab?.isLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
                 {activeTab?.isLoading ? 'Searching…' : 'Search'}
               </button>
@@ -476,7 +476,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                 aria-label="Save search to favorites"
                 onClick={() => addFavorite(activeTab?.tags || '')}
                 disabled={!activeTab?.tags}
-                className="forge-button forge-button-icon"
+                className="forge-button forge-button-icon h-10"
                 title="Add to favorites"
               >
                 <Star className="w-4 h-4" />

@@ -115,7 +115,8 @@ export function useBooru() {
   // Autocomplete tags
   const autocomplete = useCallback(async (
     sourceId: string,
-    query: string
+    query: string,
+    signal?: AbortSignal
   ): Promise<string[]> => {
     if (!query.trim() || query.length < 2) {
       return [];
@@ -124,8 +125,8 @@ export function useBooru() {
     try {
       const response = await fetch(`/api/booru/autocomplete?${new URLSearchParams({
         source: sourceId,
-        query,
-      })}`);
+        query: query.trim().replace(/\s+/g, '_'),
+      })}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000) });
 
       if (!response.ok) {
         return [];
