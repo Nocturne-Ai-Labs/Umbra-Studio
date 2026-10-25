@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.90.35-beta - Responsive Setup and Visible Studio Launch
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Close and reopen Setup after the update so the new interface loads, then launch Studio.
+- No new models, custom nodes or ComfyUI update are required. Existing settings, models and datasets are preserved.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Setup Responsiveness
+
+- Setup immediately shows a localized checking indicator while it reads the installation, with an inline Retry button if a check fails.
+- Guided Setup, Tools and Models load when selected. Opening Updates no longer starts unrelated installation and model scans.
+- Heavy installation checks run in an owned background process. Setup's status requests and navigation remain responsive while the checks continue.
+- Concurrent requests share an in-progress check, and heavy checks run one at a time. Refresh and completed installations request fresh information; closing Setup stops its inspection process.
+- Launching Studio immediately displays its pending status instead of leaving the button apparently idle.
+
+### Windows Studio Terminal
+
+- Launching Studio from Setup now opens an explicit visible console window, including when Setup itself was started in the background.
+- The post-update relaunch uses the same console launch path and preserves the selected installation and listener port.
+
+### Validation Scope
+
+- Focused startup, loading, retry, inspection-process and Windows launch regressions passed using synthetic data. Isolated Windows and Linux checks verified that Setup stays responsive during inspection. Windows launch checks verified Studio readiness and a visible console.
+- Generation pipelines, model requirements and dependency installation recipes are unchanged; this maintenance release does not requalify GPU generation.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Studio could launch from Setup without a visible terminal window.
+- Fixed: Post-update relaunch explicitly requested a hidden Windows console.
+- Improved: Setup displays immediate checking and launch feedback.
+- Improved: Hidden tabs no longer trigger unnecessary startup scans, and installation checks no longer stall Setup's listener.
+- Improved: Failed checks offer Retry, while refreshes continue to inspect current installation state.
+
 ## v0.90.34-beta - Data Forge Collection and Dataset Polish
 
 ### TL;DR - Setup After Updating
