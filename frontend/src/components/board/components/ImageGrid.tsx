@@ -6,7 +6,7 @@ interface ImageGridProps {
   posts: BooruPost[];
   selected: Set<string>;
   onSelect: (id: string, selected: boolean) => void;
-  onImageDoubleClick?: (post: BooruPost, index: number) => void;
+  onImagePreview?: (post: BooruPost, index: number) => void;
   isLoading?: boolean;
   hasSearched?: boolean;
 }
@@ -15,7 +15,7 @@ export function ImageGrid({
   posts,
   selected,
   onSelect,
-  onImageDoubleClick,
+  onImagePreview,
   isLoading,
   hasSearched = true,
 }: ImageGridProps) {
@@ -52,7 +52,7 @@ export function ImageGrid({
           post={post}
           isSelected={selected.has(post.id)}
           onSelect={(sel) => onSelect(post.id, sel)}
-          onDoubleClick={() => onImageDoubleClick?.(post, index)}
+          onPreview={onImagePreview ? () => onImagePreview(post, index) : undefined}
         />
       ))}
     </div>

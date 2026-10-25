@@ -221,7 +221,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
     updateSearchTab(activeTab.id, { selected: new Set() });
   };
 
-  // Open lightbox on double-click
+  // Open lightbox with the thumbnail's preview button.
   const openLightbox = (_post: BooruPost, index: number) => {
     setLightboxIndex(index);
     setLightboxOpen(true);
@@ -557,7 +557,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               posts={filteredResults}
               selected={activeTab?.selected || new Set()}
               onSelect={toggleSelect}
-              onImageDoubleClick={openLightbox}
+              onImagePreview={openLightbox}
               isLoading={activeTab?.isLoading}
               hasSearched={!!activeTab?.resultQuery}
             />
