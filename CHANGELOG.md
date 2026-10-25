@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.90.34-beta - Data Forge Collection and Dataset Polish
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then reopen Studio. This update requires no new models, custom nodes or ComfyUI changes.
+- In **Data Forge > Booru downloader**, choose one source, search, select thumbnails, and choose a **Download folder**. Use the magnifier to preview an image; repeated thumbnail clicks only change its selection.
+- In **Data Forge > Datasets**, select a folder and drag image files into the workspace, or use **Import images**. Supported formats are PNG, JPEG, WebP, GIF, BMP and AVIF. Images are copied, and existing filenames are protected. Other files and empty files are reported as skipped; importing a directory itself is not supported.
+- Existing datasets and captions remain in place. New dataset folders use plain names; legacy nested folders remain usable. Configure training repeats and regularization in your trainer rather than in Data Forge.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Booru Search and Collection
+
+- Reorganized search controls, tag editing, favorites and destination selection into a compact workspace with a download-folder side panel.
+- Added source-specific sorting, rating and minimum-score search tools. Only one source is searched at a time; switching sources clears the previous results and selection while retaining the search text and each site's settings.
+- Improved multiword tag suggestions with underscore-aware completion while preserving exclusions, quoted search values and existing filters.
+- Added collection score filters, download limits and still-image/GIF/video toggles. Collection filters apply to loaded results; site search tools apply to the upstream query. A batch limit keeps additional selections available for the next batch.
+- Pagination can continue when a source page contains unavailable media, including a page with no usable images. Results preserve the source's order, later pages are deduplicated, and stale responses cannot replace a changed search.
+- Single clicks select or deselect thumbnails. Preview has a separate magnifier, preventing rapid selection clicks from unexpectedly opening it.
+
+### Dataset Organization and Import
+
+- Polished folder navigation, image browsing, caption tools and training-export controls. Legacy trainer-only repeats and regularization editing have been removed from this interface.
+- External image drops work across the dataset workspace with a visible destination hint. The Import images button provides a file-picker alternative.
+- Imports show progress, skipped files and partial failures. Uploads run in sequence, preserve original image bytes, avoid filename collisions, and retain their original destination if another folder is selected during the batch.
+- Folder counts refresh after imports. Missing or renamed download destinations are checked before queueing and require a valid selection rather than silently choosing another folder.
+
+### Validation Scope
+
+- Focused Data Forge regressions and independent review cover search paging, source switching, filters, selection, dataset destinations and imports. Live provider availability, account restrictions and physical Windows Explorer drag gestures were not requalified; test media and requests were synthetic. This update does not change generation pipelines or model requirements.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Unavailable upstream media no longer prematurely ends result pagination.
+- Fixed: Switching sources or editing a search cannot mix stale results into the new query.
+- Fixed: Rapid thumbnail selection changes no longer trigger an accidental preview.
+- Improved: Source-specific search tools, score limits, media toggles and a folder side panel make collection controls easier to reach.
+- Improved: Dataset image imports expose their destination, progress and failures while protecting existing filenames and folder selection.
+- Improved: Dataset browsing and caption controls use a cleaner layout without legacy trainer settings.
+
 ## v0.90.33-beta - MOSS Reference2IMG and Faster Gallery Loading
 
 ### TL;DR - Setup After Updating
