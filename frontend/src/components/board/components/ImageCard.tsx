@@ -10,11 +10,10 @@ interface ImageCardProps {
   post: BooruPost;
   isSelected: boolean;
   onSelect: (selected: boolean) => void;
-  onClick?: () => void;
   onDoubleClick?: () => void;
 }
 
-export function ImageCard({ post, isSelected, onSelect, onClick, onDoubleClick }: ImageCardProps) {
+export function ImageCard({ post, isSelected, onSelect, onDoubleClick }: ImageCardProps) {
   const { locked } = useNsfwPrivacy();
   const protectedMedia = isProtectedBooruPost(post);
   const blocked = locked && protectedMedia;
@@ -77,8 +76,6 @@ export function ImageCard({ post, isSelected, onSelect, onClick, onDoubleClick }
             }
             setHasError(true);
           }}
-          onClick={onClick}
-          onDoubleClick={onDoubleClick}
           className={`w-full h-full object-cover cursor-pointer transition-opacity
                      ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
         />
@@ -93,6 +90,9 @@ export function ImageCard({ post, isSelected, onSelect, onClick, onDoubleClick }
         <div className="absolute inset-0 animate-pulse bg-white/10" />
       )}
 
+      <button type="button" aria-label={`${isSelected ? 'Deselect' : 'Select'} thumbnail ${post.id}`} aria-pressed={isSelected}
+        onClick={event => { if (event.detail < 2) onSelect(!isSelected); }} onDoubleClick={onDoubleClick}
+        className="absolute inset-0 z-10 cursor-pointer rounded-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--umbra-accent)]" />
       <NsfwPrivacyShield protectedMedia={protectedMedia} compact />
       {mediaType !== 'image' && <span className="pointer-events-none absolute left-2 top-10 rounded bg-black/80 px-1.5 py-0.5 text-[10px] uppercase text-white">{mediaType === 'video' ? 'Video' : post.fileExt}</span>}
       {onDoubleClick && <button type="button" aria-label={previewLabel} title={previewLabel} onClick={onDoubleClick} className="absolute bottom-2 right-2 z-20 flex h-7 w-7 items-center justify-center rounded border border-white/25 bg-black/80 text-white transition-colors hover:border-[var(--umbra-accent)] focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)]"><ZoomIn size={14} /></button>}

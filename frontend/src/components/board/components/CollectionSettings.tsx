@@ -18,7 +18,7 @@ export function CollectionSettings({ value, onChange }: { value: CollectionOptio
       <label className="min-w-0 space-y-1.5">
         <span className="block text-zinc-300">Minimum score</span>
         <input aria-label="Minimum score" type="number" step="1" value={value.minimumScore} onChange={event => onChange({ minimumScore: event.target.value })} placeholder="Any score" className="umbra-input h-9 w-full rounded px-2" />
-        <span className="block text-[11px] leading-relaxed text-zinc-500">Leave blank for any score. Highest scores appear first.</span>
+        <span className="block text-[11px] leading-relaxed text-zinc-500">Leave blank for any score. Filters the loaded results.</span>
       </label>
       <label className="min-w-0 space-y-1.5">
         <span className="block text-zinc-300">Download limit per batch</span>

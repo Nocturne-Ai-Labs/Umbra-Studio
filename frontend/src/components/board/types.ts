@@ -22,6 +22,8 @@ export interface SearchTab {
   sources: string[];
   results: BooruPost[];
   resultQuery?: string;
+  sourceSearch?: import('./sourceSearchTools').SourceSearchSettings;
+  searchError?: string | null;
   collection?: import('./collectionOptions').CollectionOptions;
   downloadDestination?: { dataset: string; concepts: string[] };
   exhaustedSources?: string[];

@@ -7,6 +7,8 @@ import { ApiKeysModal } from './components/ApiKeysModal';
 import { BoardLightbox } from './components/BoardLightbox';
 import { DownloadDestinationPanel } from './components/DownloadDestinationPanel';
 import { CollectionSettings } from './components/CollectionSettings';
+import { SourceSearchTools } from './components/SourceSearchTools';
+import { sourceSearchQueryKey } from './sourceSearchTools';
 import { useBoardStore } from './hooks/useBoardStore';
 import { useBooru } from './hooks/useBooru';
 import { useDatasets } from './hooks/useDatasets';
@@ -34,7 +36,9 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   } = useBoardStore();
   const activeTab = searchTabs.find(t => t.id === activeSearchTabId) || searchTabs[0];
 
-  const { search, error: searchError } = useBooru();
+  const { search } = useBooru();
+  const searchError = activeTab?.searchError;
+  const pendingSearch = !!activeTab?.resultQuery && activeTab.resultQuery !== sourceSearchQueryKey(activeTab.tags, activeTab.sources, activeTab.sourceSearch);
   const { config: apiKeyConfig } = useApiKeys();
   const { datasets, renameDataset, createDataset, fetchDatasets, hasLoaded, isLoading: foldersLoading, error: datasetError } = useDatasets();
   const [datasetActionError, setDatasetActionError] = useState('');
@@ -112,13 +116,21 @@ export function SearchTab({ onDownload }: SearchTabProps) {
     }
     const searchTags = String(tagsOverride ?? tab.tags).trim();
     const sources = [...tab.sources];
-    const queryKey = JSON.stringify([searchTags, [...sources].sort()]);
+    const queryKey = sourceSearchQueryKey(searchTags, sources, tab.sourceSearch);
+    if (append && tab.resultQuery !== queryKey) return;
+    if (sources.some(source => {
+      const score = tab.sourceSearch?.[source]?.score;
+      return score?.trim() && !Number.isSafeInteger(Number(score));
+    })) {
+      updateSearchTab(tab.id, { isLoading: false, searchError: 'Site minimum score must be a whole number, or leave it blank.' });
+      return;
+    }
     const appendPage = append && tab.resultQuery === queryKey;
     const controller = new AbortController();
     searchControllerRef.current = controller;
     isLoadingRef.current = true;
     loadingTabIdRef.current = tab.id;
-    updateSearchTab(tab.id, { isLoading: true, tags: searchTags });
+    updateSearchTab(tab.id, { isLoading: true, tags: searchTags, searchError: null });
     if (!appendPage) addSearchHistory(searchTags);
 
     const page = appendPage ? tab.page + 1 : 1;
@@ -128,14 +140,19 @@ export function SearchTab({ onDownload }: SearchTabProps) {
       const results = await search({
         sources: sources.filter(source => !exhaustedSources.has(source)),
         tags: searchTags,
+        sourceSearch: tab.sourceSearch,
         page,
         limit: 40,
         signal: controller.signal,
         onPageInfo: (info) => { pageInfo = info; },
+        onError: (error) => {
+          const current = useBoardStore.getState().searchTabs.find(item => item.id === tab.id);
+          if (!controller.signal.aborted && current && sourceSearchQueryKey(current.tags, current.sources, current.sourceSearch) === queryKey) updateSearchTab(tab.id, { searchError: error });
+        },
       });
       if (results === null || controller.signal.aborted) return;
       const currentTab = useBoardStore.getState().searchTabs.find(item => item.id === tab.id);
-      if (!currentTab || JSON.stringify([currentTab.tags.trim(), [...currentTab.sources].sort()]) !== queryKey) return;
+      if (!currentTab || sourceSearchQueryKey(currentTab.tags, currentTab.sources, currentTab.sourceSearch) !== queryKey) return;
       if (pageInfo) for (const [source, hasMore] of Object.entries(pageInfo)) {
         if (!hasMore) exhaustedSources.add(source);
       }
@@ -170,14 +187,14 @@ export function SearchTab({ onDownload }: SearchTabProps) {
   // Auto-load more when scrolled to bottom
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
-    if (!container || !activeTab?.hasMore || (isLoadingRef.current && loadingTabIdRef.current === activeTab.id) || searchError) return;
+    if (!container || !activeTab?.hasMore || pendingSearch || (isLoadingRef.current && loadingTabIdRef.current === activeTab.id) || searchError) return;
 
     const { scrollTop, scrollHeight, clientHeight } = container;
     // Trigger when within 100px of bottom
     if (scrollHeight - scrollTop - clientHeight < 100) {
       doSearch(true);
     }
-  }, [activeTab?.hasMore, doSearch, searchError]);
+  }, [activeTab?.hasMore, doSearch, searchError, pendingSearch]);
 
   // Toggle selection
   const toggleSelect = (postId: string, selected: boolean) => {
@@ -403,6 +420,9 @@ export function SearchTab({ onDownload }: SearchTabProps) {
             </div>
           </div>
 
+          <SourceSearchTools sources={activeTab?.sources || []} value={activeTab?.sourceSearch || {}}
+            onChange={sourceSearch => updateSearchTab(activeTab.id, { sourceSearch })} />
+
           <div className="border-t border-white/10 pt-3">
             <div className="text-[10px] font-medium uppercase tracking-wide mb-1.5" style={{ color: 'rgba(255,255,255,0.5)' }}>
               Favorites
@@ -489,10 +509,13 @@ export function SearchTab({ onDownload }: SearchTabProps) {
               </div>
             )}
 
+            {pendingSearch && <p role="status" className="mt-2 text-xs text-amber-200">Search changed. Press Search to update these results.</p>}
+            {(activeTab?.sources.length || 0) > 1 && <p className="mt-2 text-[10px] text-zinc-500">Each page keeps the selected order within each source.</p>}
+
             {/* Results info - inline */}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                {filteredResults.length} matches{activeTab?.results.length !== filteredResults.length && ` / ${activeTab?.results.length || 0} loaded`}
+                {filteredResults.length} loaded matches{activeTab?.results.length !== filteredResults.length && ` / ${activeTab?.results.length || 0} loaded`}
                 {(activeTab?.selected.size || 0) > 0 && (
                   <span style={{ color: 'var(--umbra-accent)' }} className="ml-1.5">
                     ({activeTab?.selected.size} selected)
@@ -507,7 +530,7 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                   className="forge-button"
                 >
                   <CheckSquare className="w-3 h-3" />
-                  Select all
+                  Select loaded
                 </button>
                 <button
                   type="button"
@@ -547,6 +570,8 @@ export function SearchTab({ onDownload }: SearchTabProps) {
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     Loading...
                   </div>
+                ) : pendingSearch ? (
+                  <span className="text-xs text-zinc-500">Press Search to load the updated query.</span>
                 ) : activeTab?.hasMore ? (
                   <button
                     onClick={() => doSearch(true)}

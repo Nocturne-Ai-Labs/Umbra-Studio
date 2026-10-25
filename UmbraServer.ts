@@ -36060,21 +36060,25 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/booru/search' && method === 'GET') {
         const startedAt = Date.now();
         const source = String(url.searchParams.get('source') || 'danbooru').toLowerCase();
-        // Normalize tags: trim, collapse multiple spaces, convert commas to spaces
+        // Preserve quoted values and comma-separated metatags (for example id:1,2).
         const rawTags = url.searchParams.get('tags') || '';
-        const tags = rawTags.trim().replace(/,/g, ' ').replace(/\s+/g, ' ');
-        const page = parseInt(url.searchParams.get('page') || '1');
-        const limit = Math.min(parseInt(url.searchParams.get('limit') || '40'), 100);
+        const tags = rawTags.trim();
+        const page = Number(url.searchParams.get('page') || '1');
+        const requestedLimit = Number(url.searchParams.get('limit') || '40');
+        if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(requestedLimit) || requestedLimit < 1) return json({ error: 'Invalid search page or limit' }, 400);
+        const limit = Math.min(requestedLimit, 100);
+        let hasMore = false;
+        const onPageInfo = (info: { hasMore: boolean }) => { hasMore = info.hasMore; };
 
         console.log(`[Booru] Search started source=${source} tags="${tags}" page=${page} limit=${limit}`);
 
         try {
           const apiKeys = await loadStoredApiKeys();
           const sourceFetchers: Record<string, () => Promise<unknown[]>> = {
-            danbooru: () => fetchDanbooruPosts(tags, limit, page, apiKeys.danbooru),
-            gelbooru: () => fetchGelbooruPosts(tags, limit, page, apiKeys.gelbooru),
-            rule34: () => fetchRule34Posts(tags, limit, page, apiKeys.rule34),
-            e621: () => fetchE621Posts(tags, limit, page, apiKeys.e621),
+            danbooru: () => fetchDanbooruPosts(tags, limit, page, apiKeys.danbooru, req.signal, onPageInfo),
+            gelbooru: () => fetchGelbooruPosts(tags, limit, page, apiKeys.gelbooru, req.signal, onPageInfo),
+            rule34: () => fetchRule34Posts(tags, limit, page, apiKeys.rule34, req.signal, onPageInfo),
+            e621: () => fetchE621Posts(tags, limit, page, apiKeys.e621, req.signal, onPageInfo),
           };
           const fetchSource = sourceFetchers[source];
           if (!fetchSource) {
@@ -36083,7 +36087,9 @@ const server = Bun.serve<UmbraSocketData>({
           const data = await fetchSource();
 
           console.log(`[Booru] Search completed source=${source} results=${Array.isArray(data) ? data.length : 0} ms=${Date.now() - startedAt}`);
-          return json(data);
+          const response = json(data);
+          response.headers.set('X-Umbra-Booru-Has-More', String(hasMore));
+          return response;
         } catch (error: any) {
           console.error(`[Booru] Search error for ${source}:`, error.message);
           const status = /requires a valid .*api key/i.test(String(error?.message || '')) ? 401 : 502;

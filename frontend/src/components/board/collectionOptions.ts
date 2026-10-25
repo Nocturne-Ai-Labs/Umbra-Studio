@@ -34,12 +34,12 @@ export function filterCollectionPosts(posts: BooruPost[], options: CollectionOpt
   return posts.filter(post => {
     const type = booruMediaType(post);
     return type !== null && options.mediaTypes.includes(type) && Number.isFinite(post.score) && post.score >= minimum;
-  }).sort((a, b) => b.score - a.score);
+  });
 }
 
 export function collectionDownloadBatch(posts: BooruPost[], selected: Set<string>, options: CollectionOptions): BooruPost[] {
   if (collectionOptionsError(options)) return [];
-  const eligible = filterCollectionPosts(posts, options).filter(post => selected.has(post.id));
+  const eligible = filterCollectionPosts(posts, options).filter(post => selected.has(post.id)).sort((a, b) => b.score - a.score);
   const limit = Number(options.downloadLimit);
   return limit > 0 ? eligible.slice(0, limit) : eligible;
 }

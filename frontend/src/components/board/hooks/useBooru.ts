@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { BOORU_SOURCES } from '../sources';
 import type { BooruPost } from '../types';
+import { buildSourceSearchQuery, type SourceSearchSettings } from '../sourceSearchTools';
 
 interface SearchOptions {
   sources: string[];
@@ -9,6 +10,8 @@ interface SearchOptions {
   limit?: number;
   signal?: AbortSignal;
   onPageInfo?: (hasMoreBySource: Record<string, boolean>) => void;
+  onError?: (error: string | null) => void;
+  sourceSearch?: SourceSearchSettings;
 }
 
 export function useBooru() {
@@ -16,7 +19,8 @@ export function useBooru() {
   const [error, setError] = useState<string | null>(null);
 
   // Helper to parse rating
-  const parseRating = (r: string): 'safe' | 'questionable' | 'explicit' => {
+  const parseRating = (r: string, source: string): 'safe' | 'questionable' | 'explicit' => {
+    if (source === 'danbooru' && r === 's') return 'questionable';
     if (r === 's' || r === 'g' || r === 'safe' || r === 'general') return 'safe';
     if (r === 'q' || r === 'questionable' || r === 'sensitive') return 'questionable';
     return 'explicit';
@@ -26,12 +30,13 @@ export function useBooru() {
   const search = useCallback(async (options: SearchOptions): Promise<BooruPost[] | null> => {
     const { sources, tags, page = 1, limit = 40 } = options;
 
-    if (!tags.trim()) {
+    if (!sources.some(source => buildSourceSearchQuery(tags, source, options.sourceSearch?.[source]).trim())) {
       return [];
     }
 
     setIsLoading(true);
     setError(null);
+    options.onError?.(null);
     const deadline = AbortSignal.timeout(30_000);
     const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
 
@@ -41,7 +46,7 @@ export function useBooru() {
         sources.map(async (sourceId) => {
           const response = await fetch(`/api/booru/search?${new URLSearchParams({
             source: sourceId,
-            tags,
+            tags: buildSourceSearchQuery(tags, sourceId, options.sourceSearch?.[sourceId]),
             page: String(page),
             limit: String(limit),
           })}`, { signal });
@@ -65,11 +70,12 @@ export function useBooru() {
             width: p.width || 0,
             height: p.height || 0,
             score: p.score || 0,
-            rating: parseRating(p.rating || 's'),
+            rating: parseRating(p.rating || (sourceId === 'danbooru' ? 'q' : 's'), sourceId),
             tags: p.tags || [],
             fileExt: p.fileExt || (p.fullUrl || p.url || '').split('.').pop() || 'jpg',
           }));
-          return { posts: mapped, sourceId, hasMore: posts.length >= limit };
+          const more = response.headers.get('X-Umbra-Booru-Has-More');
+          return { posts: mapped, sourceId, hasMore: more === 'true' || (more !== 'false' && posts.length >= limit) };
         })
       );
       if (options.signal?.aborted) return null;
@@ -87,6 +93,7 @@ export function useBooru() {
         }
       }
       setError(sourceErrors.length > 0 ? sourceErrors.join(' | ') : null);
+      options.onError?.(sourceErrors.length > 0 ? sourceErrors.join(' | ') : null);
       // A shared page cursor cannot advance until every selected source succeeds.
       if (sourceErrors.length > 0) return null;
       options.onPageInfo?.(hasMoreBySource);
@@ -100,12 +107,13 @@ export function useBooru() {
         return true;
       });
 
-      // Sort by score
-      allPosts.sort((a, b) => b.score - a.score);
+      // Preserve each site's requested order, including across later pages.
 
       return allPosts;
     } catch (err: any) {
+      if (options.signal?.aborted) return null;
       setError(err.message);
+      options.onError?.(err.message);
       return null;
     } finally {
       setIsLoading(false);
