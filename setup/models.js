@@ -232,7 +232,59 @@ const modelElement = id => document.getElementById(id);
 const modelBytes = value => value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(2)} GB` : `${(value / 1024 ** 2).toFixed(1)} MB`;
 function modelError(error) { status.textContent = error.message; status.classList.add('error'); status.dataset.actionError = 'true'; }
 
+const setupLoadingCopy = {
+  en: ['Checking installation…', 'Checking installed tools…', 'Loading model files…', 'Retry'],
+  ja: ['インストールを確認中…', 'インストール済みツールを確認中…', 'モデルファイルを読み込み中…', '再試行'],
+  'zh-CN': ['正在检查安装…', '正在检查已安装的工具…', '正在加载模型文件…', '重试'],
+  ko: ['설치 확인 중…', '설치된 도구 확인 중…', '모델 파일 불러오는 중…', '다시 시도'],
+  de: ['Installation wird geprüft…', 'Installierte Tools werden geprüft…', 'Modelldateien werden geladen…', 'Erneut versuchen'],
+};
+const setupTabLoads = new Map();
+let activeSetupTab = 'general';
+function renderSetupLoading() {
+  const entry = setupTabLoads.get(activeSetupTab);
+  const loading = activeSetupTab !== 'updates' && (!entry || entry.phase !== 'ready');
+  modelElement('setup-loading').hidden = !loading;
+  modelElement('setup-loading').dataset.error = String(entry?.phase === 'error');
+  const copy = setupLoadingCopy[currentLanguage] || setupLoadingCopy.en;
+  modelElement('setup-loading-message').textContent = entry?.phase === 'error' ? entry.error : copy[{general: 0, tools: 1, models: 2}[activeSetupTab] || 0];
+  modelElement('setup-loading-retry').hidden = entry?.phase !== 'error';
+  modelElement('setup-loading-retry').textContent = copy[3];
+  for (const tab of ['general', 'tools', 'models']) modelElement(tab + '-panel').setAttribute('aria-busy', String(setupTabLoads.get(tab)?.phase === 'loading'));
+}
+function ensureSetupTabLoaded(tab, refresh = false) {
+  const entry = setupTabLoads.get(tab);
+  if (!entry || entry.pending || (!refresh && entry.phase !== 'idle')) return entry?.pending;
+  entry.phase = 'loading'; entry.error = '';
+  renderSetupLoading();
+  // Let the loading indicator paint before asking for the installation checks.
+  entry.pending = new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
+    .then(entry.load)
+    .then(() => { entry.phase = 'ready'; })
+    .catch(error => { entry.phase = 'error'; entry.error = error.message; })
+    .finally(() => {
+      entry.pending = null;
+      if (entry.refreshRequested) { entry.refreshRequested = false; entry.phase = 'idle'; }
+      renderSetupLoading();
+      if (activeSetupTab === tab && entry.phase === 'idle') void ensureSetupTabLoaded(tab);
+    });
+  return entry.pending;
+}
+function registerSetupLoader(tab, load) {
+  setupTabLoads.set(tab, { load, phase: 'idle', pending: null, error: '' });
+  if (activeSetupTab === tab) void ensureSetupTabLoaded(tab);
+}
+function refreshSetupTab(tab) {
+  const entry = setupTabLoads.get(tab);
+  if (entry?.pending) entry.refreshRequested = true;
+  if (entry && !entry.pending) entry.phase = 'idle';
+  if (activeSetupTab === tab) void ensureSetupTabLoaded(tab);
+}
+modelElement('setup-loading-retry').addEventListener('click', () => { void ensureSetupTabLoaded(activeSetupTab, true); });
+document.addEventListener('umbra-setup-language', renderSetupLoading);
+
 function showSetupTab(tab) {
+  activeSetupTab = tab;
   if (tab === 'tools' || tab === 'models') modelElement('setup-advanced').open = true;
   modelElement('setup-steps').hidden = tab !== 'general';
   modelElement('setup-step-summary').hidden = tab !== 'general';
@@ -241,6 +293,8 @@ function showSetupTab(tab) {
     modelElement(`tab-${id}`).setAttribute('aria-selected', String(tab === id));
     modelElement(`tab-${id}`).tabIndex = 0;
   });
+  renderSetupLoading();
+  void ensureSetupTabLoaded(tab);
 }
 const setupTabs = ['general', 'tools', 'models', 'updates'];
 setupTabs.forEach(tab => {
@@ -381,7 +435,7 @@ function renderModelProgress(job) {
   cancel.hidden = job.phase !== 'running' || !job.cancellable;
   cancel.disabled = !!job.cancelRequested; cancel.textContent = tr(job.cancelRequested ? 'cancelling' : 'cancelDownload');
   if (job.phase !== 'running' && completedModelJob !== job.id) {
-    completedModelJob = job.id; void loadModelCatalog().catch(modelError);
+    completedModelJob = job.id; refreshSetupTab('models');
   }
 }
 for (const pack of ['requirements', 'support']) {
@@ -413,7 +467,6 @@ language.addEventListener('change', renderModelFamilies);
 showSetupTab(setupTabs.includes(new URLSearchParams(location.search).get('tab')) ? new URLSearchParams(location.search).get('tab') : 'general');
 modelElement(`pack-${modelPack}`).click();
 if (new URLSearchParams(location.search).get('pack') === 'data-forge') modelElement('data-forge-pack').scrollIntoView();
-void loadModelCatalog().catch(modelError);
 
 Object.assign(SETUP_TRANSLATIONS.en, {
   toolsTab: 'Tools', managedTools: 'Managed tools', refreshTools: 'Refresh', repairTool: 'Install / repair',
@@ -478,6 +531,11 @@ document.querySelectorAll('[data-setup-tab]').forEach(button => button.addEventL
 
 async function loadManagedTools() {
   const dependencies = await api('/api/dependencies');
+  renderManagedTools(dependencies);
+}
+let managedToolsData = null;
+function renderManagedTools(dependencies) {
+  managedToolsData = dependencies;
   modelElement('shared-support-size').textContent = setupFormat('sharedSize', { size: (dependencies.sharedSupport.bytes / 1024 ** 3).toFixed(2) });
   modelElement('tools-list').replaceChildren();
   modelElement('tools-summary').textContent = tr(dependencies.features.length ? 'toolsHint' : 'noManagedTools');
@@ -589,11 +647,12 @@ function renderToolsProgress(job) {
   modelElement('tools-message').textContent = job.error || (job.phase === 'complete' && job.kind === 'managed-tools' && !job.step.includes('maintenance complete')
     ? tr('afterRepair') : localizeJobStep(job.step));
   if (job.phase !== 'running' && completedToolsJob !== job.id) {
-    completedToolsJob = job.id; void loadManagedTools().catch(modelError);
+    completedToolsJob = job.id; refreshSetupTab('tools');
   }
 }
-modelElement('tools-refresh').addEventListener('click', () => { void loadManagedTools().catch(modelError); });
-void loadManagedTools().catch(modelError);
+modelElement('tools-refresh').addEventListener('click', () => { void ensureSetupTabLoaded('tools', true); });
+registerSetupLoader('models', loadModelCatalog);
+registerSetupLoader('tools', loadManagedTools);
 let renderedSetupLocale = '';
 document.addEventListener('umbra-setup-language', () => {
   if (renderedSetupLocale === currentLanguage) return;
@@ -601,5 +660,5 @@ document.addEventListener('umbra-setup-language', () => {
   modelElement('model-search').placeholder = tr('searchModels');
   modelElement('model-search').setAttribute('aria-label', tr('searchModels'));
   renderModelFamilies();
-  void loadManagedTools().catch(modelError);
+  if (managedToolsData) renderManagedTools(managedToolsData);
 });
