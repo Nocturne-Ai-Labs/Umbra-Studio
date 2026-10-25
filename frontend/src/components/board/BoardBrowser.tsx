@@ -67,20 +67,20 @@ export function BoardBrowser() {
   }, []);
 
   const tabs: { id: Tab; label: string; icon: typeof Search; badge?: number }[] = [
-    { id: 'search', label: 'Search', icon: Search },
+    { id: 'search', label: 'Booru downloader', icon: Search },
+    { id: 'downloads', label: 'Downloads', icon: Download, badge: pendingDownloads },
+    { id: 'datasets', label: 'Datasets', icon: FolderOpen },
+    { id: 'aitoolkit', label: 'AI-Toolkit', icon: GraduationCap },
     { id: 'corpus', label: 'Tag Corpus', icon: BarChart3 },
     { id: 'wildcards', label: 'Wildcard Generator', icon: WandSparkles },
     { id: 'merge', label: 'Model Merge', icon: Combine },
     { id: 'generator', label: 'Danbooru Dataset Generator', icon: Database },
-    { id: 'downloads', label: 'Downloads', icon: Download, badge: pendingDownloads },
-    { id: 'datasets', label: 'Datasets', icon: FolderOpen },
-    { id: 'aitoolkit', label: 'AI-Toolkit', icon: GraduationCap },
   ];
 
   return (
     <div
       data-umbra-data-forge-root
-      className="h-full flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
+      className="h-full min-h-0 min-w-0 flex flex-col bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
       style={{ fontFamily: 'var(--font-family)' }}
     >
       <div data-umbra-data-forge-mobile-tabs>
@@ -109,18 +109,16 @@ export function BoardBrowser() {
           return (
             <button
               key={tab.id}
+              type="button"
+              aria-pressed={isActive}
               onClick={() => setActiveTab(tab.id)}
-              className={`relative flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ${
-                isActive
-                  ? 'border-cyan-400/45 bg-cyan-500/15 text-cyan-100 shadow-[0_0_16px_rgba(34,211,238,0.14)]'
-                  : 'umbra-chip-neutral text-zinc-400 hover:border-white/18 hover:text-zinc-100'
-              }`}
+              className="forge-button whitespace-nowrap"
             >
               <Icon className="w-3.5 h-3.5" />
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
                 <span className={`ml-1 rounded border px-1.5 py-0.5 text-[10px] ${
-                  isActive ? 'border-cyan-300/40 bg-cyan-300/15 text-cyan-100' : 'border-emerald-400/35 bg-emerald-500/15 text-emerald-300'
+                  isActive ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)]' : 'border-white/15 bg-white/5 text-zinc-300'
                 }`}>
                   {tab.badge}
                 </span>

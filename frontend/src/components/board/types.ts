@@ -22,6 +22,10 @@ export interface SearchTab {
   sources: string[];
   results: BooruPost[];
   resultQuery?: string;
+  sourceSearch?: import('./sourceSearchTools').SourceSearchSettings;
+  searchError?: string | null;
+  collection?: import('./collectionOptions').CollectionOptions;
+  downloadDestination?: { dataset: string; concepts: string[] };
   exhaustedSources?: string[];
   selected: Set<string>;
   page: number;
@@ -106,7 +110,6 @@ export interface BoardState {
 
   // Settings
   enabledSources: string[];
-  defaultRepeats: number;
 
   // Actions
   addSearchTab: () => void;
@@ -126,5 +129,4 @@ export interface BoardState {
   setIsDownloading: (value: boolean) => void;
   setDownloadPaused: (value: boolean) => void;
   toggleSource: (sourceId: string) => void;
-  setDefaultRepeats: (value: number) => void;
 }

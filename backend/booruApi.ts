@@ -24,6 +24,24 @@ export interface BooruImageResult {
   fileExt?: string;
 }
 
+export interface BooruPageInfo { hasMore: boolean; rawCount: number; unavailableCount: number }
+
+export function parseBooruSearchPage(
+  data: unknown, parser: (data: unknown) => BooruImageResult[], limit: number,
+  onPageInfo?: (info: BooruPageInfo) => void,
+): BooruImageResult[] {
+  const raw = data as any;
+  const emptyGelbooru = raw?.['@attributes']?.count === 0 || raw?.['@attributes']?.count === '0';
+  if (!Array.isArray(raw) && !Array.isArray(raw?.post) && !Array.isArray(raw?.posts) && !emptyGelbooru) {
+    throw new Error('Invalid search response from source. Please retry.');
+  }
+  const rawCount = unwrapPosts(data).length;
+  const posts = parser(data);
+  // Unavailable media must not make a full upstream page look like the last page.
+  onPageInfo?.({ rawCount, hasMore: rawCount >= limit, unavailableCount: rawCount - posts.length });
+  return posts;
+}
+
 const BOORU_USER_AGENT = 'UmbraStudio (Data Forge; local application)';
 
 export function buildBooruMediaRequestHeaders(
@@ -198,7 +216,7 @@ export async function saveApiKeys(configPath: string, config: BooruApiConfig): P
   }
 }
 
-export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['danbooru'], signal?: AbortSignal): Promise<BooruImageResult[]> {
+export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['danbooru'], signal?: AbortSignal, onPageInfo?: (info: BooruPageInfo) => void): Promise<BooruImageResult[]> {
   const baseUrl = 'https://danbooru.donmai.us/posts.json';
   const params = new URLSearchParams({ tags, limit: limit.toString(), page: page.toString() });
   const fullUrl = `${baseUrl}?${params}`;
@@ -222,10 +240,10 @@ export async function fetchDanbooruPosts(tags: string, limit: number, page = 1, 
     throw new Error(`Danbooru API error: ${res.status}`);
   }
 
-  return parseDanbooruPosts(await res.json());
+  return parseBooruSearchPage(await res.json(), parseDanbooruPosts, limit, onPageInfo);
 }
 
-export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['gelbooru'], signal?: AbortSignal): Promise<BooruImageResult[]> {
+export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['gelbooru'], signal?: AbortSignal, onPageInfo?: (info: BooruPageInfo) => void): Promise<BooruImageResult[]> {
   const pid = page - 1;
   let url = `https://gelbooru.com/index.php?page=dapi&s=post&q=index&json=1&tags=${encodeURIComponent(tags)}&pid=${pid}&limit=${limit}`;
 
@@ -251,10 +269,10 @@ export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, 
 
   const data = await res.json() as any;
   if (data?.success === false) throw new Error(`Gelbooru search failed: ${String(data?.message || 'unknown error')}`);
-  return parseGelbooruPosts(data);
+  return parseBooruSearchPage(data, parseGelbooruPosts, limit, onPageInfo);
 }
 
-export async function fetchE621Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['e621'], signal?: AbortSignal): Promise<BooruImageResult[]> {
+export async function fetchE621Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['e621'], signal?: AbortSignal, onPageInfo?: (info: BooruPageInfo) => void): Promise<BooruImageResult[]> {
   const url = `https://e621.net/posts.json?tags=${encodeURIComponent(tags)}&page=${page}&limit=${limit}`;
 
   const identity = String(apiConfig?.username || 'local-user').replace(/[^a-zA-Z0-9_.-]/g, '') || 'local-user';
@@ -271,10 +289,10 @@ export async function fetchE621Posts(tags: string, limit: number, page = 1, apiC
   const res = await fetch(url, { headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`e621 API error: ${res.status}`);
 
-  return parseE621Posts(await res.json());
+  return parseBooruSearchPage(await res.json(), parseE621Posts, limit, onPageInfo);
 }
 
-export async function fetchRule34Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['rule34'], signal?: AbortSignal): Promise<BooruImageResult[]> {
+export async function fetchRule34Posts(tags: string, limit: number, page = 1, apiConfig?: BooruApiConfig['rule34'], signal?: AbortSignal, onPageInfo?: (info: BooruPageInfo) => void): Promise<BooruImageResult[]> {
   let url = `https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&json=1&tags=${encodeURIComponent(tags)}&pid=${page - 1}&limit=${limit}`;
   if (apiConfig?.userId && apiConfig?.apiKey) {
     url += `&user_id=${encodeURIComponent(apiConfig.userId)}&api_key=${encodeURIComponent(apiConfig.apiKey)}`;
@@ -294,5 +312,5 @@ export async function fetchRule34Posts(tags: string, limit: number, page = 1, ap
       : `Rule34 search failed: ${data}`;
     throw new Error(message);
   }
-  return parseRule34Posts(data);
+  return parseBooruSearchPage(data, parseRule34Posts, limit, onPageInfo);
 }

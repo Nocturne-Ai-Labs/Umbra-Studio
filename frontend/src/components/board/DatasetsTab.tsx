@@ -1,7 +1,7 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useI18n } from '@/i18n';
 import { useState, useEffect, useMemo, useRef, type DragEvent, type MouseEvent, type KeyboardEvent } from 'react';
-import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen, Search, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, ArrowUpAZ, ArrowDownAZ, PanelRight, FolderTree, ZoomIn, MoreHorizontal } from 'lucide-react';
+import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen, Search, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, ArrowUpAZ, ArrowDownAZ, PanelRight, FolderTree, ZoomIn, MoreHorizontal, FileOutput } from 'lucide-react';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
 import { useStore } from '@/store/useStore';
@@ -22,8 +22,8 @@ import { DatasetRedownloadButton } from './components/DatasetRedownloadButton';
 import { DatasetThumbnail } from './components/DatasetThumbnail';
 import { createConceptSettingsSession, type ConceptSaveStatus } from './conceptSettingsSession';
 import { browseDatasetImages, selectDatasetImageRange, type DatasetCaptionFilter, type DatasetImageSort } from './datasetBrowse';
+import { DATASET_IMAGE_ACCEPT, isDatasetImageFile, isExternalDatasetFileDrag, prepareDatasetFileImport, uploadDatasetImage } from './datasetFileImport';
 
-const IMAGE_FILE_PATTERN = /\.(avif|bmp|gif|jpe?g|png|webp)$/i;
 const DATASET_IMAGE_PAGE_SIZE = 120;
 const WAIFU_MODEL_OPTIONS = [
   { id: 'SmilingWolf/wd-vit-tagger-v3', label: 'wd-vit' },
@@ -64,10 +64,6 @@ const DEFAULT_CONCEPT_SETTINGS: DatasetConceptSettings = {
   replaceUnderscoresWithSpaces: false,
 };
 
-function isNativeImageFile(file: File): boolean {
-  return file.type.startsWith('image/') || IMAGE_FILE_PATTERN.test(file.name);
-}
-
 function formatArchiveBytes(value: number): string {
   const bytes = Math.max(0, Number(value) || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -97,13 +93,13 @@ function getDroppedImageUrl(dataTransfer: DataTransfer): string {
 function hasNativeImageDrop(dataTransfer: DataTransfer): boolean {
   const types = Array.from(dataTransfer.types || []);
   if (types.includes('application/json')) return false;
-  if (Array.from(dataTransfer.files || []).some(isNativeImageFile)) return true;
+  if (Array.from(dataTransfer.files || []).some(isDatasetImageFile)) return true;
   return types.some((type) => ['Files', 'text/uri-list', 'text/plain', 'text/html', 'text/x-moz-url'].includes(type));
 }
 
 function extractNativeDroppedImages(dataTransfer: DataTransfer): DroppedImage[] {
   const images: DroppedImage[] = Array.from(dataTransfer.files || [])
-    .filter(isNativeImageFile)
+    .filter(isDatasetImageFile)
     .map((file): DroppedImage => ({ kind: 'file', file, name: file.name, type: file.type }));
 
   const url = getDroppedImageUrl(dataTransfer);
@@ -125,7 +121,7 @@ export function DatasetsTab() {
     deleteDataset,
     renameDataset,
     archiveDataset,
-    createConcept,
+    createDataset,
     deleteConcept,
     getConceptImages,
     getConceptSettings,
@@ -149,6 +145,7 @@ export function DatasetsTab() {
   const [tagSettingsOpen, setTagSettingsOpen] = useState(false);
   const [folderRailOpen, setFolderRailOpen] = useState(() => window.innerWidth >= 1024);
   const [captionPaneOpen, setCaptionPaneOpen] = useState(() => window.innerWidth >= 1280);
+  const [folderMenu, setFolderMenu] = useState<{ x: number; y: number } | null>(null);
   const [imageContextMenu, setImageContextMenu] = useState<{ x: number; y: number; filename: string } | null>(null);
   const selectionAnchor = useRef<string | null>(null);
   const browsedImages = useMemo(() => browseDatasetImages(images, imageQuery, captionFilter, imageSort, sortDescending), [images, imageQuery, captionFilter, imageSort, sortDescending]);
@@ -189,11 +186,13 @@ export function DatasetsTab() {
   const [renameDatasetTarget, setRenameDatasetTarget] = useState<string | null>(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newRepeats, setNewRepeats] = useState(10);
-  const [isReg, setIsReg] = useState(false);
   const [moveToConcept, setMoveToConcept] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const importInProgress = useRef(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const externalDragDepth = useRef(0);
+  const [externalDropActive, setExternalDropActive] = useState(false);
+  const [importFeedback, setImportFeedback] = useState<{ text: string; error: boolean } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [nativeDropActive, setNativeDropActive] = useState(false);
@@ -235,19 +234,7 @@ export function DatasetsTab() {
 
   const importDroppedImage = async (img: any, dataset: string, concept: string) => {
     if (img?.kind === 'file' && img.file instanceof File) {
-      const formData = new FormData();
-      formData.append('dataset', dataset);
-      formData.append('concept', concept);
-      formData.append('image', img.file, img.name || img.file.name || 'image.png');
-
-      const response = await fetch('/api/datasets/import-uploaded-image', {
-        method: 'POST',
-        body: formData,
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error || 'Failed to import dropped image');
-      }
+      await uploadDatasetImage(img.file, dataset, concept);
       return;
     }
 
@@ -286,15 +273,18 @@ export function DatasetsTab() {
     }
   };
 
-  const importDroppedImages = async (droppedImages: any[]) => {
+  const importDroppedImages = async (droppedImages: any[], skipped = 0) => {
     if (!selectedDataset || !selectedConcept || droppedImages.length === 0 || importInProgress.current) return;
 
     const dataset = selectedDataset;
     const concept = selectedConcept;
+    const destination = dataset === concept ? dataset : `${dataset} / ${concept}`;
     importInProgress.current = true;
     setIsImporting(true);
+    setImportFeedback({ text: `Importing 0 of ${droppedImages.length} images to ${destination}…`, error: false });
     try {
       let imported = 0;
+      let completed = 0;
       const failures: string[] = [];
       for (const img of droppedImages) {
         try {
@@ -303,25 +293,59 @@ export function DatasetsTab() {
         } catch (error) {
           failures.push(error instanceof Error ? error.message : 'Image import failed');
         }
+        completed++;
+        setImportFeedback({ text: `Importing ${completed} of ${droppedImages.length} images to ${destination}…`, error: false });
       }
       const refreshed = await loadImages();
+      await fetchDatasets();
+      const summary = `Imported ${imported} of ${droppedImages.length} images to ${destination}.${skipped ? ` Skipped ${skipped} unsupported or empty file${skipped === 1 ? '' : 's'}.` : ''}`;
       if (refreshed === null && activeConcept.current === conceptKey) {
-        showToast(`Imported ${imported} of ${droppedImages.length} images, but could not refresh the concept.`, 'error');
+        setImportFeedback({ text: `${summary} Refresh the folder to see your images.${failures.length ? ` ${failures[0]}` : ''}`, error: true });
         return;
       }
-      if (failures.length > 0) {
-        showToast(`Imported ${imported} of ${droppedImages.length} images. ${failures[0]}`, 'error');
-      } else {
-        showToast(`Imported ${imported} image${imported === 1 ? '' : 's'} to ${concept}`, 'success');
-      }
+      setImportFeedback({ text: `${summary}${failures.length ? ` ${failures.length} failed. ${failures[0]}` : ''}`, error: failures.length > 0 });
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Could not refresh imported images', 'error');
+      setImportFeedback({ text: error instanceof Error ? error.message : 'Could not refresh imported images', error: true });
     } finally {
       importInProgress.current = false;
       setIsImporting(false);
       setNativeDropActive(false);
     }
   };
+
+  const importExternalFiles = async (files: Iterable<File>) => {
+    if (importInProgress.current) {
+      showToast('An import is already running. Wait for it to finish before adding more images.', 'info');
+      return;
+    }
+    if (!selectedDataset || !selectedConcept) {
+      setImportFeedback({ text: 'Choose a dataset folder first, then drop your images again.', error: true });
+      setFolderRailOpen(true);
+      return;
+    }
+    const { images: droppedImages, skipped } = prepareDatasetFileImport(files);
+    if (!droppedImages.length) {
+      setImportFeedback({ text: 'No supported images found. Drop PNG, JPEG, WebP, GIF, BMP or AVIF files. Open folders on your computer and select their images first.', error: true });
+      return;
+    }
+    await importDroppedImages(droppedImages, skipped);
+  };
+
+  const handleExternalDrag = (event: DragEvent<HTMLDivElement>) => {
+    if (!isExternalDatasetFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = selectedDataset && selectedConcept && !isImporting ? 'copy' : 'none';
+    if (event.type === 'dragenter') externalDragDepth.current++;
+    setExternalDropActive(true);
+  };
+
+  useEffect(() => {
+    const resetDrag = () => { externalDragDepth.current = 0; setExternalDropActive(false); setNativeDropActive(false); };
+    window.addEventListener('dragend', resetDrag);
+    window.addEventListener('blur', resetDrag);
+    return () => { window.removeEventListener('dragend', resetDrag); window.removeEventListener('blur', resetDrag); };
+  }, []);
 
   const handleNativeDragOver = (e: DragEvent<HTMLDivElement>) => {
     if (!selectedDataset || !selectedConcept || !hasNativeImageDrop(e.dataTransfer)) return false;
@@ -337,6 +361,7 @@ export function DatasetsTab() {
     e.preventDefault();
     e.stopPropagation();
 
+    setNativeDropActive(false);
     const droppedImages = extractNativeDroppedImages(e.dataTransfer);
     await importDroppedImages(droppedImages);
     return true;
@@ -558,18 +583,16 @@ export function DatasetsTab() {
 
   // Handlers
   const handleCreateConcept = async () => {
-    if (!showNewConcept || !newName.trim()) return;
+    if (!showNewConcept || !newName.trim() || isCreating) return;
     setCreateError(null);
     setIsCreating(true);
-    const created = await createConcept(newName.trim(), newRepeats, isReg);
+    const created = await createDataset(newName.trim());
     setIsCreating(false);
     if (!created) {
-      setCreateError(datasetError || 'Failed to create concept');
+      setCreateError(datasetError || 'Failed to create dataset folder');
       return;
     }
     setNewName('');
-    setNewRepeats(10);
-    setIsReg(false);
     setShowNewConcept(false);
     setSelectedDataset(created);
     setSelectedConcept(created);
@@ -921,9 +944,44 @@ export function DatasetsTab() {
   };
 
   return (
-    <div data-umbra-datasets-workspace className="relative flex h-full min-h-0 overflow-hidden bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
+    <div
+      data-umbra-datasets-workspace
+      className="relative flex h-full min-h-0 overflow-hidden bg-[var(--umbra-bg)] text-[var(--umbra-text)]"
+      style={{ fontFamily: 'var(--font-family)' }}
+      onDragEnterCapture={handleExternalDrag}
+      onDragOverCapture={handleExternalDrag}
+      onDragLeaveCapture={event => {
+        if (!externalDragDepth.current) return;
+        event.stopPropagation();
+        externalDragDepth.current = Math.max(0, externalDragDepth.current - 1);
+        if (!externalDragDepth.current) setExternalDropActive(false);
+      }}
+      onDropCapture={event => {
+        if (!isExternalDatasetFileDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        externalDragDepth.current = 0;
+        setExternalDropActive(false);
+        void importExternalFiles(Array.from(event.dataTransfer.files));
+      }}
+    >
+      <input ref={importInputRef} type="file" multiple accept={DATASET_IMAGE_ACCEPT} aria-label="Choose dataset images to import" className="hidden" onChange={event => {
+        const files = Array.from(event.currentTarget.files || []);
+        event.currentTarget.value = '';
+        if (files.length) void importExternalFiles(files);
+      }} />
+      {externalDropActive && <div className="pointer-events-none absolute inset-1 z-[60] flex items-center justify-center rounded border-2 border-dashed border-[var(--umbra-accent)] bg-[var(--umbra-bg)]/90 p-6 backdrop-blur-sm">
+        <div className="max-w-md text-center">
+          <Upload size={28} className="mx-auto mb-3 text-[var(--umbra-accent)]" />
+          <p className="text-sm font-semibold">{isImporting ? 'Import in progress' : selectedDataset && selectedConcept ? 'Drop images to import' : 'Choose a dataset folder first'}</p>
+          <p className="mt-2 break-words text-xs text-zinc-400">{isImporting ? 'Wait for the current import to finish.' : selectedConcept ? `${selectedDataset}${selectedConcept !== selectedDataset ? ` / ${selectedConcept}` : ''}` : 'Use the folder list, then drag your images here.'}</p>
+          {!isImporting && selectedConcept && <p className="mt-3 text-[11px] text-zinc-500">PNG · JPEG · WebP · GIF · BMP · AVIF</p>}
+        </div>
+      </div>}
+      {folderRailOpen && <button type="button" aria-label="Dismiss dataset folders" onClick={() => setFolderRailOpen(false)} className="absolute inset-0 z-20 bg-black/60 lg:hidden" />}
+      {captionPaneOpen && <button type="button" aria-label="Dismiss caption panel" onClick={() => setCaptionPaneOpen(false)} className="absolute inset-0 z-20 bg-black/60 xl:hidden" />}
       {/* Left sidebar - Dataset tree */}
-      <div id="dataset-folder-rail" className={`glass-panel absolute inset-y-0 left-0 z-30 w-52 shrink-0 rounded-none border-y-0 border-l-0 lg:relative lg:z-auto ${folderRailOpen ? 'flex flex-col' : 'hidden'}`}>
+      <div id="dataset-folder-rail" style={{ background: 'var(--umbra-bg)' }} className={`glass-panel absolute inset-y-0 left-0 z-30 w-60 shrink-0 rounded-none border-y-0 border-l-0 lg:relative lg:z-auto ${folderRailOpen ? 'flex flex-col' : 'hidden'}`}>
         <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
           <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400"><FolderTree size={14} /> Dataset Library</span>
           <button type="button" aria-label="Close dataset folders" onClick={() => setFolderRailOpen(false)} className="umbra-icon-button rounded p-1"><X size={14} /></button>
@@ -946,7 +1004,7 @@ export function DatasetsTab() {
           onOpenDatasetArchive={(archivePath) => { void openDatasetArchivePath(archivePath); }}
           onRenameDataset={openRenameDataset}
           onDeleteDataset={async (name) => {
-            const kind = datasets.find(dataset => dataset.name === name)?.layout === 'flat' ? 'concept folder' : 'dataset';
+            const kind = datasets.find(dataset => dataset.name === name)?.layout === 'flat' ? 'dataset folder' : 'dataset';
             if (confirm(`Delete ${kind} "${name}" and all its contents?`)) {
               const deleted = await deleteDataset(name);
               if (!deleted) showToast('Could not delete dataset.', 'error');
@@ -957,7 +1015,7 @@ export function DatasetsTab() {
             }
           }}
           onDeleteConcept={async (dataset, concept) => {
-            if (confirm(`Delete concept folder "${concept}"?`)) {
+            if (confirm(`Delete dataset folder "${concept}"?`)) {
               const deleted = await deleteConcept(dataset, concept);
               if (!deleted) showToast('Could not delete concept.', 'error');
               if (deleted && selectedDataset === dataset && selectedConcept === concept) {
@@ -980,14 +1038,26 @@ export function DatasetsTab() {
               <span className="truncate" title={selectedDataset || undefined}>{selectedDataset || 'Datasets'}</span>
               {selectedConcept && selectedConcept !== selectedDataset && <><ChevronRight size={12} className="shrink-0 text-zinc-600" /><span className="truncate" title={selectedConcept}>{selectedConcept}</span></>}
             </div>
-            <div className="mt-1 truncate text-[11px] text-zinc-500" title={selectedConceptPath || undefined}>{selectedConcept ? `${images.length} images loaded` : 'Select a concept folder'}</div>
+            <div className="mt-1 truncate text-[11px] text-zinc-500" title={selectedConceptPath || undefined}>{selectedConcept ? `${images.length} images loaded · Drop images to import` : 'Select a dataset folder'}</div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button type="button" aria-label="Toggle dataset folders" aria-expanded={folderRailOpen} aria-controls="dataset-folder-rail" onClick={() => setFolderRailOpen(value => !value)} className="umbra-icon-button flex h-8 w-8 items-center justify-center rounded"><FolderTree size={15} /></button>
-            <button type="button" aria-label="Toggle caption panel" aria-expanded={captionPaneOpen} aria-controls="dataset-caption-panel" onClick={() => setCaptionPaneOpen(value => !value)} className="umbra-icon-button flex h-8 w-8 items-center justify-center rounded"><PanelRight size={15} /></button>
-            <button type="button" aria-label="Refresh dataset view" disabled={isLoadingImages || isLoadingDatasets} onClick={() => { void fetchDatasets(); if (selectedConcept) void loadImages(); }} className="umbra-icon-button flex h-8 w-8 items-center justify-center rounded disabled:opacity-40"><RefreshCw size={15} className={isLoadingImages || isLoadingDatasets ? 'animate-spin' : ''} /></button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button type="button" disabled={!selectedConcept || isImporting} title={selectedConcept ? 'Import images from your device, or drag them into this workspace' : 'Choose a dataset folder first'} onClick={() => importInputRef.current?.click()} className="forge-button forge-button-primary">{isImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}Import images</button>
+            {selectedConcept && <>
+              <button type="button" aria-expanded={tagSettingsOpen} aria-controls="dataset-tag-settings" onClick={() => setTagSettingsOpen(value => !value)} className="forge-button"><Sparkles size={14} />Caption tools<ChevronDown size={12} className={tagSettingsOpen ? 'rotate-180' : ''} /></button>
+              <button type="button" disabled={autoTagging || !selectedDataset} onClick={() => setExportDataset(selectedDataset)} className="forge-button forge-button-primary"><FileOutput size={14} />Training export</button>
+              <button type="button" aria-label="Dataset folder actions" aria-haspopup="menu" aria-expanded={!!folderMenu} title="Folder and ZIP actions" onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); setFolderMenu({ x: bounds.right, y: bounds.bottom }); }} className="forge-button forge-button-icon"><MoreHorizontal size={15} /></button>
+              <span className="mx-1 h-5 w-px bg-white/10" aria-hidden="true" />
+            </>}
+            <button type="button" aria-label="Toggle dataset folders" aria-expanded={folderRailOpen} aria-controls="dataset-folder-rail" onClick={() => setFolderRailOpen(value => !value)} className="forge-button forge-button-icon"><FolderTree size={15} /></button>
+            <button type="button" aria-label="Toggle caption panel" aria-expanded={captionPaneOpen} aria-controls="dataset-caption-panel" onClick={() => setCaptionPaneOpen(value => !value)} className="forge-button forge-button-icon"><PanelRight size={15} /></button>
+            <button type="button" aria-label="Refresh dataset view" disabled={isLoadingImages || isLoadingDatasets} onClick={() => { void fetchDatasets(); if (selectedConcept) void loadImages(); }} className="forge-button forge-button-icon"><RefreshCw size={15} className={isLoadingImages || isLoadingDatasets ? 'animate-spin' : ''} /></button>
           </div>
         </header>
+        {importFeedback && <div role={importFeedback.error ? 'alert' : 'status'} className={`flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2 text-xs ${importFeedback.error ? 'bg-red-500/10 text-red-200' : 'umbra-surface-soft text-[var(--umbra-text)]'}`}>
+          {isImporting ? <Loader2 size={14} className="shrink-0 animate-spin text-[var(--umbra-accent)]" /> : <Upload size={14} className="shrink-0" />}
+          <span className="min-w-0 flex-1 break-words">{importFeedback.text}</span>
+          {!isImporting && <button type="button" aria-label="Dismiss import status" onClick={() => setImportFeedback(null)} className="umbra-icon-button shrink-0 rounded p-1"><X size={14} /></button>}
+        </div>}
         {datasetError && !selectedConcept && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200"><span>{datasetError}</span><button type="button" onClick={() => void fetchDatasets()} className="umbra-icon-button shrink-0 rounded px-2 py-1">Retry folders</button></div>}
         {selectedConcept && <div className="umbra-surface-soft flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
           <div className="flex min-w-[160px] flex-1 items-center rounded border border-white/10 focus-within:border-[var(--umbra-accent)]">
@@ -999,133 +1069,23 @@ export function DatasetsTab() {
           <UmbraSelectControl value={imageSort} aria-label="Sort dataset images" onChange={event => setImageSort(event.target.value as DatasetImageSort)} className="umbra-input h-7 rounded px-2 text-xs"><option value="source">Folder order</option><option value="name">Name</option></UmbraSelectControl>
           <button type="button" aria-label={sortDescending ? 'Sort dataset ascending' : 'Sort dataset descending'} onClick={() => setSortDescending(value => !value)} className="umbra-icon-button flex h-7 w-7 items-center justify-center rounded">{sortDescending ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}</button>
         </div>}
-        {/* Toolbar */}
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
-          <div className="min-w-0 text-xs text-zinc-500" role="status">
-            <span>
-              {selectedConcept ? (
-                <>
-                  {browsedImages.length} visible
-                  {selectedImages.size > 0 && (
-                    <span className="ml-2 text-[var(--umbra-accent)]">
-                      {selectedImages.size} selected{selectedImages.size > filteredSelectionCount ? ` (${selectedImages.size - filteredSelectionCount} hidden)` : ''}
-                    </span>
-                  )}
-                </>
-              ) : (
-                'Select a concept folder'
-              )}
-            </span>
+        {selectedConcept && <div className="umbra-surface-soft flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2" aria-label="Image selection actions">
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={selectAll} disabled={browsedImages.length === 0} title="Select all images matching the current view, including those not yet displayed" className="forge-button"><CheckSquare size={14} />{imageQuery.trim() || captionFilter !== 'all' ? 'Select matches' : 'Select all'}</button>
+            {selectedImages.size > 0 && <button type="button" onClick={selectNone} className="forge-button"><Square size={14} />Clear</button>}
+            <span role="status" className="text-xs text-zinc-400">{selectedImages.size > 0 ? `${selectedImages.size} selected` : `${browsedImages.length} images`}{selectedImages.size > filteredSelectionCount ? ` · ${selectedImages.size - filteredSelectionCount} hidden by filters` : ''}</span>
           </div>
-
-          {selectedConcept && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button type="button" disabled={autoTagging || !selectedDataset} onClick={() => setExportDataset(selectedDataset)} className="umbra-icon-button rounded border border-white/10 px-2 py-1 text-xs">Training export</button>
-              <button
-                onClick={() => selectedDataset && void createDatasetZip(selectedDataset)}
-                disabled={!selectedDataset || Boolean(archivingDataset)}
-                className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                title={currentDataset?.archive ? 'Rebuild the complete dataset ZIP' : 'Create a compressed ZIP of the complete dataset'}
-              >
-                {archivingDataset === selectedDataset
-                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  : <Archive className="h-3.5 w-3.5" />}
-                {currentDataset?.archive ? 'Rebuild ZIP' : 'Create ZIP'}
-              </button>
-              {currentDataset?.archive?.path && !isUmbraRemoteClient() ? (
-                <button
-                  onClick={() => void openDatasetArchivePath(currentDataset.archive!.path)}
-                  className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-                  title={`${currentDataset.archive.path} (${formatArchiveBytes(currentDataset.archive.size)})`}
-                >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  Open ZIP
-                </button>
-              ) : null}
-
-              <div className="h-4 w-px bg-white/10" />
-
-              <button
-                onClick={selectAll}
-                disabled={browsedImages.length === 0}
-                title="Select all images matching the current view, including those not yet displayed"
-                className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-              >
-                <CheckSquare className="w-3.5 h-3.5" />
-                {imageQuery.trim() || captionFilter !== 'all' ? 'Select matches' : 'Select all'}
-              </button>
-              <button
-                onClick={selectNone}
-                className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-              >
-                <Square className="w-3.5 h-3.5" />
-                Clear
-              </button>
-
-              <button
-                onClick={() => void copySelectedConceptPath()}
-                className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-                title={selectedConceptPath || 'Copy dataset concept path'}
-              >
-                <Copy className="w-3.5 h-3.5" />
-                Copy Path
-              </button>
-              <button
-                onClick={() => void openSelectedConceptPath()}
-                className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-                title={selectedConceptPath || 'Open dataset concept path'}
-              >
-                <FolderOpen className="w-3.5 h-3.5" />
-                Open Path
-              </button>
-
-              <div className="h-4 w-px bg-white/10" />
-
-              <button
-                onClick={handleDeleteSelected}
-                disabled={selectedImages.size === 0}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300
-                           disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Delete
-              </button>
-
-              <button
-                onClick={() => setShowMoveModal(true)}
-                disabled={selectedImages.size === 0 || otherConcepts.length === 0}
-                className="umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors
-                           disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Move className="w-3.5 h-3.5" />
-                Move
-              </button>
-
-              <button type="button" aria-expanded={tagSettingsOpen} aria-controls="dataset-tag-settings" onClick={() => setTagSettingsOpen(value => !value)} className={`umbra-icon-button flex items-center gap-1 rounded px-2 py-1 text-xs ${tagSettingsOpen ? 'text-[var(--umbra-accent)]' : ''}`}><SlidersHorizontal size={13} /> Caption tools <ChevronDown size={12} className={tagSettingsOpen ? 'rotate-180' : ''} /></button>
-
-              {/* Delete Flagged button - only shows when images are flagged */}
-              {flaggedForDeletion.size > 0 && (
-                <>
-                  <div className="h-4 w-px bg-white/10" />
-                  <button
-                    onClick={() => setShowDeleteConfirm(true)}
-                    className="flex items-center gap-1 rounded border border-red-500/30 bg-red-500/12 px-2 py-1 text-xs text-red-300 hover:bg-red-500/20"
-                  >
-                    <Flag className="w-3.5 h-3.5" />
-                    Delete Flagged ({flaggedForDeletion.size})
-                  </button>
-                  <button
-                    onClick={clearFlags}
-                    className="umbra-icon-button rounded p-1 text-xs transition-colors"
-                    title="Clear all flags"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedImages.size > 0 && <>
+              <button type="button" onClick={() => setShowMoveModal(true)} disabled={otherConcepts.length === 0} className="forge-button"><Move size={14} />Move selected</button>
+              <button type="button" onClick={handleDeleteSelected} className="forge-button forge-button-danger"><Trash2 size={14} />Delete selected</button>
+            </>}
+            {flaggedForDeletion.size > 0 && <>
+              <button type="button" onClick={() => setShowDeleteConfirm(true)} className="forge-button forge-button-danger"><Flag size={14} />Review flagged ({flaggedForDeletion.size})</button>
+              <button type="button" onClick={clearFlags} className="forge-button forge-button-icon" aria-label="Clear all deletion flags" title="Clear all flags"><X size={14} /></button>
+            </>}
+          </div>
+        </div>}
 
         {selectedConcept && (
           <div id="dataset-tag-settings" hidden={!tagSettingsOpen} className="glass-panel custom-scrollbar max-h-[45%] shrink-0 overflow-y-auto rounded-none border-x-0 border-t-0 px-3 py-2">
@@ -1134,7 +1094,8 @@ export function DatasetsTab() {
               {conceptSettingsFailed && <button type="button" className="umbra-icon-button rounded px-2 py-1" onClick={() => setConceptSettingsRetry(value => value + 1)}>Retry</button>}
             </div>}
             <fieldset disabled={conceptSettingsReadyKey !== selectedConceptSettingsKey} className="min-w-0 disabled:opacity-50">
-              <div role="status" className="mb-2 min-h-6 text-xs text-zinc-400">
+              <div role="status" className="mb-3 flex min-h-6 flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+                <span className="mr-auto font-medium text-zinc-300">Caption generation</span>
                 {conceptSettingsReadyKey !== selectedConceptSettingsKey ? null : conceptSaveStatus.state === 'error' ? <>
                   <span className="text-red-400">{conceptSaveStatus.error}</span>
                   <button type="button" className="ml-2 rounded px-2 py-1" onClick={() => void conceptSessions.current.get(selectedConceptSettingsKey)?.retry()}>Retry save</button>
@@ -1186,7 +1147,7 @@ export function DatasetsTab() {
                     aria-pressed={captionMode === 'natural'}
                     className={`h-7 rounded border text-[10px] font-bold uppercase tracking-[0.12em] ${captionMode === 'natural' ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]' : 'border-white/10 text-zinc-500'}`}
                   >
-                    Natural
+                    Description
                   </button>
                 </div>
                 <UmbraSelectControl
@@ -1203,6 +1164,7 @@ export function DatasetsTab() {
                   }}
                   className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-[var(--umbra-accent)] focus:outline-none"
                   title="Caption model"
+                  aria-label="Caption model"
                 >
                   {(captionMode === 'natural' ? NATURAL_MODEL_OPTIONS : WAIFU_MODEL_OPTIONS).map(option => (
                     <option key={option.id} value={option.id}>{option.label}</option>
@@ -1210,6 +1172,7 @@ export function DatasetsTab() {
                 </UmbraSelectControl>
               </div>
               <div className="col-span-full flex flex-wrap items-center justify-end gap-2">
+                <span className="mr-auto text-xs text-zinc-400">{selectedImages.size ? `${selectedImages.size} selected images` : `All ${images.length} images in this folder`}</span>
                 <label className="flex h-8 items-center gap-1.5 rounded border border-white/10 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-400">
                   <input
                     type="checkbox"
@@ -1227,7 +1190,7 @@ export function DatasetsTab() {
                   className="umbra-icon-button h-8 rounded px-2 text-xs font-bold uppercase tracking-[0.12em] disabled:cursor-not-allowed disabled:opacity-50"
                   title="Apply trigger/prepend text without running the selected caption model"
                 >
-                  Apply
+                  Apply text
                 </button>
                 <button
                   onClick={() => void handleBatchCaption(true)}
@@ -1242,6 +1205,8 @@ export function DatasetsTab() {
                 </button>
               </div>
             </div>
+            <details className="forge-disclosure mt-3 text-xs" hidden={captionMode !== 'tags'}>
+              <summary className="font-medium">Tag filters &amp; thresholds<span className="ml-auto text-[11px] font-normal text-zinc-500">Categories, confidence, limits</span></summary>
             <div className={`${captionMode === 'tags' ? 'grid' : 'hidden'} mt-2 grid-cols-2 items-end gap-2 xl:grid-cols-3 2xl:grid-cols-[repeat(6,minmax(90px,1fr))_auto_auto]`}>
               <label className="min-w-0">
                 <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
@@ -1254,7 +1219,7 @@ export function DatasetsTab() {
                   step={0.01}
                   value={generalThreshold}
                   onChange={(e) => setGeneralThreshold(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
-                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-cyan-400/60 focus:outline-none"
+                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-[var(--umbra-accent)] focus:outline-none"
                 />
               </label>
               <label className="min-w-0">
@@ -1268,7 +1233,7 @@ export function DatasetsTab() {
                   step={0.01}
                   value={characterThreshold}
                   onChange={(e) => setCharacterThreshold(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
-                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-cyan-400/60 focus:outline-none"
+                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-[var(--umbra-accent)] focus:outline-none"
                 />
               </label>
               <label className="min-w-0">
@@ -1282,7 +1247,7 @@ export function DatasetsTab() {
                   step={0.01}
                   value={ratingThreshold}
                   onChange={(e) => setRatingThreshold(Math.max(0, Math.min(1, Number(e.target.value) || 0)))}
-                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-cyan-400/60 focus:outline-none"
+                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-[var(--umbra-accent)] focus:outline-none"
                 />
               </label>
               <label className="min-w-0">
@@ -1296,7 +1261,7 @@ export function DatasetsTab() {
                   step={1}
                   value={maxTags}
                   onChange={(e) => setMaxTags(Math.max(1, Math.min(500, Math.floor(Number(e.target.value) || 1))))}
-                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-cyan-400/60 focus:outline-none"
+                  className="umbra-input h-8 w-full rounded px-2 text-xs focus:border-[var(--umbra-accent)] focus:outline-none"
                 />
               </label>
               <label className="flex h-8 items-center gap-1.5 rounded border border-white/10 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-400">
@@ -1347,7 +1312,7 @@ export function DatasetsTab() {
                   key={String(label)}
                   className={`flex h-8 items-center gap-1.5 rounded border px-2 text-[10px] font-bold uppercase tracking-[0.12em] transition-colors ${
                     checked
-                      ? 'border-cyan-400/35 bg-cyan-500/10 text-cyan-100'
+                      ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] text-[var(--umbra-text)]'
                       : 'border-white/10 text-zinc-500'
                   }`}
                 >
@@ -1362,8 +1327,9 @@ export function DatasetsTab() {
                 </label>
               ))}
             </div>
+            </details>
             {captionMode === 'natural' && (
-              <div className="mt-2 flex flex-wrap items-end gap-2 rounded border border-cyan-400/15 bg-cyan-500/5 p-2">
+              <div className="mt-2 flex flex-wrap items-end gap-2 rounded border border-white/10 bg-[var(--umbra-accent-glow)] p-2">
                 <label className="w-32">
                   <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Device</span>
                   <UmbraSelectControl
@@ -1416,6 +1382,7 @@ export function DatasetsTab() {
             }
           }}
           onDragLeave={(e) => {
+            if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
             setNativeDropActive(false);
             dropHandlers.onDragLeave(e);
           }}
@@ -1435,21 +1402,11 @@ export function DatasetsTab() {
         >
           {/* Drop overlay */}
           {(isOver || nativeDropActive) && selectedConcept && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center border-2 border-dashed border-cyan-400/70 bg-cyan-500/15 backdrop-blur-sm pointer-events-none">
+            <div className="absolute inset-0 z-50 flex items-center justify-center border-2 border-dashed border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] backdrop-blur-sm pointer-events-none">
               <div className="text-center">
-                <Upload className="mx-auto mb-2 h-12 w-12 animate-bounce text-cyan-300" />
-                <p className="font-bold text-cyan-100">Drop images here</p>
-                <p className="text-sm text-cyan-300">to add to {selectedConcept}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Importing overlay */}
-          {isImporting && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="text-center">
-                <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-cyan-300" />
-                <p className="text-white font-medium">Importing images...</p>
+                <Upload className="mx-auto mb-2 h-12 w-12 animate-bounce text-[var(--umbra-accent)]" />
+                <p className="font-bold text-[var(--umbra-text)]">Drop images here</p>
+                <p className="text-sm text-[var(--umbra-accent)]">to add to {selectedConcept}</p>
               </div>
             </div>
           )}
@@ -1461,17 +1418,19 @@ export function DatasetsTab() {
           ) : imageLoadError ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-400">
               <p>Could not load concept images.</p>
-              <button type="button" className="rounded border border-white/20 px-3 py-2 text-xs text-cyan-300 hover:bg-white/5" onClick={() => void loadImages()}>Retry</button>
+              <button type="button" className="rounded border border-white/20 px-3 py-2 text-xs text-[var(--umbra-accent)] hover:bg-white/5" onClick={() => void loadImages()}>Retry</button>
             </div>
           ) : !selectedConcept ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-zinc-500">
               <FolderOpen size={24} />
-              <p>Select a concept folder, then drag images from filmstrip</p>
+              <p>Choose a folder to organize and caption your images</p>
               {!folderRailOpen && <button type="button" onClick={() => setFolderRailOpen(true)} className="umbra-icon-button rounded px-3 py-2 text-xs">Browse folders</button>}
             </div>
           ) : images.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-center text-sm text-zinc-500">
-              <p>No images - drag from filmstrip or download from Search</p>
+            <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-zinc-500">
+              <Upload size={24} />
+              <p>Drop images from your computer here</p>
+              <button type="button" disabled={isImporting} onClick={() => importInputRef.current?.click()} className="forge-button">Browse images</button>
             </div>
           ) : browsedImages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-zinc-500"><p>No matching images</p><button type="button" className="umbra-icon-button rounded px-3 py-2 text-xs" onClick={() => { setImageQuery(''); setCaptionFilter('all'); }}>Clear filters</button></div>
@@ -1486,6 +1445,7 @@ export function DatasetsTab() {
                   <div
                     key={img.filename}
                     data-umbra-dataset-image
+                    data-selected={isFocused || isSelected}
                     className={`umbra-surface-soft group relative overflow-hidden rounded border cursor-pointer transition-colors
                                ${isFlagged ? 'ring-2 ring-red-500' : ''}
                                ${isFocused || isSelected ? 'border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)]' : 'border-white/10 hover:border-white/25'}`}
@@ -1548,7 +1508,7 @@ export function DatasetsTab() {
       </div>
 
       {/* Right sidebar - Caption editor */}
-      <div id="dataset-caption-panel" className={`glass-panel absolute inset-y-0 right-0 z-30 w-72 shrink-0 flex-col rounded-none border-y-0 border-r-0 xl:relative xl:z-auto ${captionPaneOpen ? 'flex' : 'hidden'}`}>
+      <div id="dataset-caption-panel" style={{ background: 'var(--umbra-bg)' }} className={`glass-panel absolute inset-y-0 right-0 z-30 w-80 max-w-[90vw] shrink-0 flex-col rounded-none border-y-0 border-r-0 xl:relative xl:z-auto ${captionPaneOpen ? 'flex' : 'hidden'}`}>
         <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2"><span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">Image Details</span><button type="button" aria-label="Close caption panel" onClick={() => setCaptionPaneOpen(false)} className="umbra-icon-button rounded p-1"><X size={14} /></button></div>
         <div className="min-h-0 flex-1">
         <CaptionEditor
@@ -1561,6 +1521,14 @@ export function DatasetsTab() {
         />
         </div>
       </div>
+
+      <ContextMenu isOpen={!!folderMenu} position={folderMenu || { x: 0, y: 0 }} onClose={() => setFolderMenu(null)} items={[
+        { label: 'Copy folder path', icon: <Copy size={14} />, action: () => { setFolderMenu(null); void copySelectedConceptPath(); } },
+        ...(!isUmbraRemoteClient() ? [{ label: 'Open folder', icon: <FolderOpen size={14} />, action: () => { setFolderMenu(null); void openSelectedConceptPath(); } }] : []),
+        { separator: true },
+        { label: currentDataset?.archive ? 'Rebuild dataset ZIP' : 'Create dataset ZIP', icon: <Archive size={14} />, disabled: !selectedDataset || !!archivingDataset, action: () => { setFolderMenu(null); if (selectedDataset) void createDatasetZip(selectedDataset); } },
+        ...(currentDataset?.archive?.path && !isUmbraRemoteClient() ? [{ label: 'Open ZIP folder', icon: <FolderOpen size={14} />, action: () => { setFolderMenu(null); void openDatasetArchivePath(currentDataset.archive!.path); } }] : []),
+      ]} />
 
       <ContextMenu isOpen={Boolean(imageContextMenu)} position={{ x: imageContextMenu?.x || 0, y: imageContextMenu?.y || 0 }} items={imageContextItems} onClose={() => setImageContextMenu(null)} />
 
@@ -1577,7 +1545,7 @@ export function DatasetsTab() {
               onChange={(e) => setRenameValue(e.target.value)}
               placeholder="Dataset name..."
               autoFocus
-              className="umbra-input w-full rounded px-3 py-2 text-sm placeholder:text-zinc-500 focus:border-cyan-400/60 focus:outline-none"
+              className="umbra-input w-full rounded px-3 py-2 text-sm placeholder:text-zinc-500 focus:border-[var(--umbra-accent)] focus:outline-none"
               onKeyDown={(e) => e.key === 'Enter' && handleRenameDataset()}
             />
             {createError && (
@@ -1596,7 +1564,7 @@ export function DatasetsTab() {
               <button
                 onClick={handleRenameDataset}
                 disabled={!renameValue.trim() || isCreating}
-                className="rounded border border-cyan-400/35 bg-cyan-500/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-cyan-100 hover:bg-cyan-500/22
+                className="forge-button forge-button-primary
                            disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isCreating ? 'Renaming...' : 'Rename'}
@@ -1606,44 +1574,24 @@ export function DatasetsTab() {
         </div>
       )}
 
-      {/* New Concept Modal */}
+      {/* New dataset folder */}
       {showNewConcept && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="glass-panel w-80 border-white/10 p-4">
-            <h3 className="mb-4 text-sm font-bold uppercase tracking-[0.16em] text-zinc-200">Create Concept</h3>
+            <h3 className="mb-4 text-sm font-bold uppercase tracking-[0.16em] text-zinc-200">New dataset folder</h3>
             <div className="space-y-3">
               <input
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="Concept name..."
+                aria-label="Dataset folder name" placeholder="Folder name…"
                 autoFocus
-                className="umbra-input w-full rounded px-3 py-2 text-sm placeholder:text-zinc-500 focus:border-cyan-400/60 focus:outline-none"
+                className="umbra-input w-full rounded px-3 py-2 text-sm placeholder:text-zinc-500 focus:border-[var(--umbra-accent)] focus:outline-none"
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateConcept()}
               />
-              <div className="flex items-center gap-3">
-                <label className="text-sm text-zinc-400">Repeats:</label>
-                <input
-                  type="number"
-                  value={newRepeats}
-                  onChange={(e) => setNewRepeats(parseInt(e.target.value) || 1)}
-                  min={1}
-                  className="umbra-input w-20 rounded px-2 py-1 text-white"
-                />
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isReg}
-                  onChange={(e) => setIsReg(e.target.checked)}
-                  className="h-4 w-4 rounded border-zinc-600 bg-zinc-800"
-                  style={{ accentColor: 'var(--umbra-accent)' }}
-                />
-                <span className="text-sm text-zinc-300">Regularization images</span>
-              </label>
             </div>
             <p className="text-xs text-zinc-500 mt-3">
-              Folder: {newRepeats}_{isReg ? 'reg_' : ''}{newName || 'name'}
+              Folder: {newName.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || 'name'}
             </p>
             {createError && (
               <p className="mt-3 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -1652,7 +1600,7 @@ export function DatasetsTab() {
             )}
             <div className="flex justify-end gap-2 mt-4">
               <button
-                onClick={() => { setShowNewConcept(false); setNewName(''); setNewRepeats(10); setIsReg(false); setCreateError(null); }}
+                onClick={() => { setShowNewConcept(false); setNewName(''); setCreateError(null); }}
                 disabled={isCreating}
                 className="umbra-icon-button rounded px-4 py-2 text-xs"
               >
@@ -1661,7 +1609,7 @@ export function DatasetsTab() {
               <button
                 onClick={handleCreateConcept}
                 disabled={!newName.trim() || isCreating}
-                className="rounded border border-cyan-400/35 bg-cyan-500/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-cyan-100 hover:bg-cyan-500/22
+                className="forge-button forge-button-primary
                            disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isCreating ? 'Creating...' : 'Create'}
@@ -1679,7 +1627,7 @@ export function DatasetsTab() {
             <UmbraSelectControl
               value={moveToConcept}
               onChange={(e) => setMoveToConcept(e.target.value)}
-              className="umbra-input w-full rounded px-3 py-2 text-white focus:border-cyan-400/60 focus:outline-none"
+              className="umbra-input w-full rounded px-3 py-2 text-white focus:border-[var(--umbra-accent)] focus:outline-none"
             >
               <option value="">Select concept...</option>
               {otherConcepts.map(c => {
@@ -1699,7 +1647,7 @@ export function DatasetsTab() {
               <button
                 onClick={handleMoveSelected}
                 disabled={!moveToConcept}
-                className="rounded border border-cyan-400/35 bg-cyan-500/15 px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-cyan-100 hover:bg-cyan-500/22
+                className="forge-button forge-button-primary
                            disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Move

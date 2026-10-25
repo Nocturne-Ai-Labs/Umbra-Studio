@@ -42,6 +42,7 @@ type DatasetActionResult = { success: true } | { success: false; error: string }
 export function useDatasets() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const listRequestSequence = useRef(0);
 
@@ -55,7 +56,7 @@ export function useDatasets() {
   };
 
   // Fetch all datasets
-  const fetchDatasets = useCallback(async () => {
+  const fetchDatasets = useCallback(async (): Promise<Dataset[] | null> => {
     const requestSequence = ++listRequestSequence.current;
     setIsLoading(true);
     setError(null);
@@ -66,16 +67,21 @@ export function useDatasets() {
 
       const data = await response.json();
       if (!Array.isArray(data?.datasets)) throw new Error('Invalid dataset list response');
-      if (requestSequence === listRequestSequence.current) setDatasets(data.datasets);
+      if (requestSequence === listRequestSequence.current) {
+        setDatasets(data.datasets);
+        setHasLoaded(true);
+      }
+      return data.datasets;
     } catch (err: any) {
       if (requestSequence === listRequestSequence.current) setError(err.message);
+      return null;
     } finally {
       if (requestSequence === listRequestSequence.current) setIsLoading(false);
     }
   }, []);
 
   // Create new dataset
-  const createDataset = useCallback(async (name: string): Promise<boolean> => {
+  const createDataset = useCallback(async (name: string): Promise<string | null> => {
     try {
       const response = await fetch('/api/datasets', {
         method: 'POST',
@@ -84,12 +90,13 @@ export function useDatasets() {
       });
 
       if (!response.ok) throw new Error(await getResponseError(response, 'Failed to create dataset'));
-
+      const data = await response.json();
+      if (!data?.success || typeof data.name !== 'string' || !data.name) throw new Error('Invalid dataset create response');
       await fetchDatasets();
-      return true;
+      return data.name;
     } catch (err: any) {
       setError(err.message);
-      return false;
+      return null;
     }
   }, [fetchDatasets]);
 
@@ -144,31 +151,6 @@ export function useDatasets() {
     } catch (err: any) {
       setError(err.message);
       throw err;
-    }
-  }, [fetchDatasets]);
-
-  // Create concept folder
-  const createConcept = useCallback(async (
-    conceptName: string,
-    repeats: number = 10,
-    isReg: boolean = false
-  ): Promise<string | null> => {
-    try {
-      const response = await fetch('/api/datasets/concept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: conceptName, repeats, isReg }),
-      });
-
-      if (!response.ok) throw new Error(await getResponseError(response, 'Failed to create concept'));
-
-      const data = await response.json();
-      if (typeof data?.folder !== 'string' || !data.folder) throw new Error('Invalid concept create response');
-      await fetchDatasets();
-      return data.folder;
-    } catch (err: any) {
-      setError(err.message);
-      return null;
     }
   }, [fetchDatasets]);
 
@@ -348,13 +330,13 @@ export function useDatasets() {
   return {
     datasets,
     isLoading,
+    hasLoaded,
     error,
     fetchDatasets,
     createDataset,
     deleteDataset,
     renameDataset,
     archiveDataset,
-    createConcept,
     deleteConcept,
     getConceptImages,
     getConceptSettings,

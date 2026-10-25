@@ -1,30 +1,31 @@
 import { ImageCard } from './ImageCard';
+import { Search } from 'lucide-react';
 import type { BooruPost } from '../types';
 
 interface ImageGridProps {
   posts: BooruPost[];
   selected: Set<string>;
   onSelect: (id: string, selected: boolean) => void;
-  onImageClick?: (post: BooruPost) => void;
-  onImageDoubleClick?: (post: BooruPost, index: number) => void;
+  onImagePreview?: (post: BooruPost, index: number) => void;
   isLoading?: boolean;
+  hasSearched?: boolean;
 }
 
 export function ImageGrid({
   posts,
   selected,
   onSelect,
-  onImageClick,
-  onImageDoubleClick,
+  onImagePreview,
   isLoading,
+  hasSearched = true,
 }: ImageGridProps) {
   if (isLoading && posts.length === 0) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 p-4">
+      <div role="status" aria-label="Loading search results" className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-3">
         {Array.from({ length: 24 }).map((_, i) => (
           <div
             key={i}
-            className="bg-zinc-800 rounded-lg animate-pulse"
+            className="umbra-surface-soft rounded border border-white/10 animate-pulse"
             style={{ aspectRatio: '1' }}
           />
         ))}
@@ -34,23 +35,24 @@ export function ImageGrid({
 
   if (posts.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-zinc-500">
-        <p>No results. Try a different search.</p>
+      <div className="flex min-h-56 flex-col items-center justify-center gap-3 px-6 text-center text-zinc-500">
+        <Search size={26} className="text-[var(--umbra-accent)]" />
+        <p className="text-sm font-medium text-zinc-300">{hasSearched ? 'No matching media in the loaded results' : 'Start with a tag search'}</p>
+        <p className="max-w-sm text-xs leading-relaxed">{hasSearched ? 'Adjust the score or media filters, load more results, or try another search.' : 'Choose a source, search for media, then select what to add to your dataset.'}</p>
       </div>
     );
   }
 
   // Simple grid with smaller thumbnails
   return (
-    <div className="p-3 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-2">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 p-3">
       {posts.map((post, index) => (
         <ImageCard
           key={post.id}
           post={post}
           isSelected={selected.has(post.id)}
           onSelect={(sel) => onSelect(post.id, sel)}
-          onClick={() => onImageClick?.(post)}
-          onDoubleClick={() => onImageDoubleClick?.(post, index)}
+          onPreview={onImagePreview ? () => onImagePreview(post, index) : undefined}
         />
       ))}
     </div>

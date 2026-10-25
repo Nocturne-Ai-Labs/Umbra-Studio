@@ -10,7 +10,7 @@ const createBoardId = (prefix: string) => `${prefix}_${Date.now()}_${++nextBoard
 function normalizeSources(value: unknown): string[] {
   const sources = Array.isArray(value) ? value.map(source => String(source || '').trim()) : [];
   const filtered = sources.filter(source => SUPPORTED_SOURCES.has(source));
-  return filtered.length > 0 ? filtered : ['danbooru'];
+  return [filtered[0] || 'danbooru'];
 }
 
 const createSearchTab = (): SearchTab => ({
@@ -26,7 +26,7 @@ const createSearchTab = (): SearchTab => ({
 });
 
 export const useBoardStore = create<BoardState>()(
-    (set, get) => ({
+    (set) => ({
       // Initial state
       searchTabs: [createSearchTab()],
       activeSearchTabId: null,
@@ -36,7 +36,6 @@ export const useBoardStore = create<BoardState>()(
       isDownloading: false,
       downloadPaused: false,
       enabledSources: ['danbooru'],
-      defaultRepeats: 10,
 
       // Search tab actions
       addSearchTab: () => {
@@ -72,9 +71,18 @@ export const useBoardStore = create<BoardState>()(
 
       updateSearchTab: (id, updates) => {
         set(state => ({
-          searchTabs: state.searchTabs.map(tab =>
-            tab.id === id ? { ...tab, ...updates } : tab
-          ),
+          searchTabs: state.searchTabs.map(tab => {
+            if (tab.id !== id) return tab;
+            const sources = normalizeSources(updates.sources ?? tab.sources);
+            const sourceChanged = tab.sources.length !== 1 || tab.sources[0] !== sources[0];
+            return {
+              ...tab, ...updates, sources,
+              ...(sourceChanged ? {
+                results: [], selected: new Set<string>(), resultQuery: undefined,
+                page: 1, hasMore: true, exhaustedSources: [], searchError: null, isLoading: false,
+              } : {}),
+            };
+          }),
         }));
       },
 
@@ -142,25 +150,19 @@ export const useBoardStore = create<BoardState>()(
       setDownloadPaused: (value) => set({ downloadPaused: value }),
 
       toggleSource: (sourceId) => {
-        const remove = get().enabledSources.includes(sourceId);
         boardPreferences.update(state => ({
           ...state,
-          enabledSources: remove
-            ? state.enabledSources.filter(s => s !== sourceId)
-            : [...new Set([...state.enabledSources, sourceId])],
+          enabledSources: normalizeSources([sourceId]),
         }));
       },
 
-      setDefaultRepeats: (value) => {
-        boardPreferences.update(state => ({ ...state, defaultRepeats: value }));
-      },
     })
 );
 
-type BoardPreferences = Pick<BoardState, 'favorites' | 'searchHistory' | 'enabledSources' | 'defaultRepeats'>;
+type BoardPreferences = Pick<BoardState, 'favorites' | 'searchHistory' | 'enabledSources'>;
 const boardPreferences = createUserPreferenceSession<BoardPreferences>({
   key: 'board-preferences',
-  initial: { favorites: [], searchHistory: [], enabledSources: ['danbooru'], defaultRepeats: 10 },
+  initial: { favorites: [], searchHistory: [], enabledSources: ['danbooru'] },
   normalize: (raw) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid board preferences');
     const preferences = raw as Partial<BoardPreferences>;
@@ -168,7 +170,6 @@ const boardPreferences = createUserPreferenceSession<BoardPreferences>({
       favorites: Array.isArray(preferences.favorites) ? preferences.favorites.filter(item => typeof item === 'string') : [],
       searchHistory: Array.isArray(preferences.searchHistory) ? preferences.searchHistory.filter(item => typeof item === 'string').slice(0, 5) : [],
       enabledSources: normalizeSources(preferences.enabledSources),
-      defaultRepeats: Number.isFinite(Number(preferences.defaultRepeats)) ? Number(preferences.defaultRepeats) : 10,
     };
   },
   apply: preferences => useBoardStore.setState(preferences),
