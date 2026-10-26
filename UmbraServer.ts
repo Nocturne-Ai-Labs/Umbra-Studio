@@ -5,6 +5,7 @@ import { applyMossSamplingSettings, assertMossSamplingAvailable } from './shared
 import { applyMossPromptEnhancer, assertMossPromptEnhancerAvailable } from './shared/umbra-ui/mossPromptEnhancer';
 import { assertDetailerRuntimeAvailable } from './shared/umbra-ui/detailerReadiness';
 import { syncUmbraMossCustomNode } from './backend/MossCustomNodeSync';
+import { syncUmbraWindowsAcceptNode } from './backend/ComfyWindowsAcceptSync';
 import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from './shared/umbra-ui/mossLayout';
 import { aiToolkitRequirementsVerified } from './setup/AIToolkitPython';
@@ -18080,9 +18081,10 @@ async function startComfyUIProcess() {
     }
 
     try {
+      syncUmbraWindowsAcceptNode(ROOT_DIR, join(config.cwd, 'custom_nodes'));
       syncUmbraMossCustomNode(ROOT_DIR, join(config.cwd, 'custom_nodes'));
     } catch (error) {
-      return { success: false, error: `Could not install the MOSS prompt enhancer: ${error instanceof Error ? error.message : String(error)}` };
+      return { success: false, error: `Could not install bundled ComfyUI compatibility: ${error instanceof Error ? error.message : String(error)}` };
     }
     applyComfyFrontendCompatibilityPatches(config.cwd || '');
 
