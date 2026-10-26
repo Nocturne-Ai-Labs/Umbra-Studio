@@ -16,6 +16,8 @@
 
 ### Fixes And Quality-of-Life Recap
 
+- Keep the hidden Gallery browser idle while preserving its filmstrip data and viewer; contain browser-render errors within Gallery with manual recovery. The reported intermittent Firefox recursion remains under investigation.
+
 - Fixed: Setup registers the advertised MOSS vision encoder and prepares missing PixAI dependencies.
 - Fixed: Guided MOSS setup no longer requires the optional Reference2IMG extension to finish ordinary image generation setup.
 - Improved: Setup groups core tools, optional workflows and node diagnostics, links completed setup to optional features, and supports rechecking an installation. Checkpoint verification reports byte progress and can be cancelled without changing model files. Completed checks no longer retain misleading zero-file progress.

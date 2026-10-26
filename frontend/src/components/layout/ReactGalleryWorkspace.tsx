@@ -6,6 +6,7 @@ import { stageMangaImages } from '@/features/manga/mangaMediaHandoff';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { buildGalleryBreadcrumbs } from '@/lib/galleryBreadcrumbs';
+import { FrozenGalleryBrowser, GalleryBrowserBoundary } from './GalleryBrowserSurface';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -10574,6 +10575,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
       data-umbra-gallery-controls-open={galleryControlsOpen ? '1' : '0'}
       data-umbra-gallery-has-metadata-filter={metadataQuery ? '1' : undefined}
     >
+      <GalleryBrowserBoundary><FrozenGalleryBrowser active={active} render={() => <>
       {!isTouchRemote && <LibraryNavigator
         multiFolderView={multiFolderView}
         onToggleMultiFolderView={isPhoneRemote ? undefined : () => {
@@ -11789,6 +11791,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
         </div>
       </main>
 
+      </>} /></GalleryBrowserBoundary>
       {viewerFile && !galleryModalOpen ? (
         <GalleryMediaViewer
           file={viewerFile}
