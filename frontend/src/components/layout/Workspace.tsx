@@ -983,7 +983,6 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
   const workflowLoadGenerationRef = useRef(0);
   const comfyConnection = useStore((state) => state.connections.comfyui);
   const isConnected = comfyConnection === 'connected';
-  const comfyUrl = useStore((state) => state.urls.comfyui);
   const isBooting = useStore((state) => state.booting.comfyui);
   const isHealthy = useStore((state) => state.backendHealth.comfyui === true);
   const { addToast } = useToastStore();
@@ -1000,18 +999,21 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
     if (isRemoteClient || officialProxyRequested) {
       return '/comfy/';
     }
-    return comfyUrl;
-  }, [comfyUrl, isRemoteClient, officialProxyRequested]);
+    // Queue control accepts the Studio origin. Loading local ComfyUI through
+    // its owned proxy also lets the node bridge use that origin without
+    // trusting another localhost application or the historical default port.
+    return new URL('/comfy/', window.location.origin).href;
+  }, [isRemoteClient, officialProxyRequested]);
   const comfyOrigin = useMemo(() => {
     if (isRemoteClient || officialProxyRequested) {
       return window.location.origin;
     }
     try {
-      return new URL(comfyUrl).origin;
+      return new URL(comfyFrameUrl, window.location.origin).origin;
     } catch {
       return null;
     }
-  }, [comfyUrl, isRemoteClient, officialProxyRequested]);
+  }, [comfyFrameUrl, isRemoteClient, officialProxyRequested]);
   const [nodePickerOpen, setNodePickerOpen] = useState(false);
   const [nodePickerLoading, setNodePickerLoading] = useState(false);
   const [nodePickerAssigning, setNodePickerAssigning] = useState(false);
