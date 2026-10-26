@@ -1865,6 +1865,7 @@ const COMFY_NODES = [
     { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', required: true },
     { name: 'ComfyUI-Iris', repo: 'https://github.com/envy-ai/ComfyUI-Iris.git', defaultEnabled: false },
     { name: 'ComfyUI-Spectrum-MOSS', repo: 'https://github.com/Rkkss/ComfyUI-Spectrum-MOSS.git', defaultEnabled: false },
+    { name: 'ComfyUI-MOSSImageTextEncoder', repo: 'https://github.com/ThetaCursed/ComfyUI-MOSSImageTextEncoder.git', defaultEnabled: false },
     { name: 'Longshot_Studio', repo: 'https://github.com/r34vtraining/Longshot_Studio.git', defaultEnabled: false },
     { name: 'ComfyUI-H3-Motion-Context', repo: 'https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context.git', defaultEnabled: false },
     { name: 'ComfyUI_HYWorld2', repo: 'https://github.com/AHEKOT/ComfyUI_HYWorld2.git', defaultEnabled: false },
