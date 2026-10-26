@@ -794,8 +794,8 @@ export const UmbraAppBar = () => {
     const rawUrl = String(aiToolkitStatus.url || EMPTY_AI_TOOLKIT_STATUS.url).trim();
     try {
       const targetUrl = new URL(/^https?:\/\//i.test(rawUrl) ? rawUrl : `http://${rawUrl}`).toString();
-      const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
-      if (!opened) useStore.getState().showToast('Unable to open AI-Toolkit in the browser.', 'error');
+      // With noopener, browsers may return null even when the new tab opened.
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
     } catch {
       useStore.getState().showToast('AI-Toolkit URL is invalid.', 'error');
     }
