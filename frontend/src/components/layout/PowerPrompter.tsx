@@ -7549,6 +7549,12 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
             String(item.requestId || '').trim() === requestId
           );
           if (!queueRequestMetaRef.current.has(requestId) && trackedVisualRequestId !== requestId && !hasTrackedStackItem) {
+            // The terminal controller snapshot can clear tracking before its
+            // runtime result arrives. Keep genuine failures visible in Issues.
+            if (payload.backendOwned === true && payload.runtime === true
+              && !queueResultEvent.success && !isBackendOwnedCancellationPayload(payload)) {
+              showToast(String(queueResultEvent.errorMessage || payload.error || 'Queue failed.'), 'error');
+            }
             logQueueDebug('ws:queue_result:ignored_untracked', { requestId, success: payload.success });
             return;
           }
