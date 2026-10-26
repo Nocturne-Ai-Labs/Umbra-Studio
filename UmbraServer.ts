@@ -3,6 +3,7 @@ import { stampGeneratedImageMetadata } from './backend/GeneratedImageMetadata';
 import { applyImagePipelineSettings, normalizeImagePipelineSettings, type ImagePipelineSettings } from './shared/umbra-ui/imagePipelineSettings';
 import { applyMossSamplingSettings, assertMossSamplingAvailable } from './shared/umbra-ui/mossSampling';
 import { applyMossPromptEnhancer, assertMossPromptEnhancerAvailable } from './shared/umbra-ui/mossPromptEnhancer';
+import { assertDetailerRuntimeAvailable } from './shared/umbra-ui/detailerReadiness';
 import { syncUmbraMossCustomNode } from './backend/MossCustomNodeSync';
 import { bindFlux3LayoutPrompt, parseFlux3LayoutRegions } from './shared/umbra-ui/flux3Edit';
 import { compileMossLayoutPrompt } from './shared/umbra-ui/mossLayout';
@@ -12005,6 +12006,7 @@ async function runBackendPowerPrompterPipelineQueue(
         assertAnima38TextEncoderRetentionAvailable(queuedWorkflow.promptGraph, objectInfo);
         assertMossPromptEnhancerAvailable(queuedWorkflow.promptGraph, objectInfo);
         assertMossSamplingAvailable(queuedWorkflow.promptGraph, objectInfo);
+        assertDetailerRuntimeAvailable(queuedWorkflow.promptGraph, objectInfo);
       }
       const continuationPreviewNodeId = extendedSession && index < prompts.length - 1
         ? injectUmbraExtendedContinuationPreview(
@@ -21606,6 +21608,7 @@ async function buildUmbraUiInpaintBaseWorkflow(settings: UmbraUiInpaintSettings,
   assertAnima38TextEncoderRetentionAvailable(compiled.promptGraph, objectInfo);
   assertMossPromptEnhancerAvailable(compiled.promptGraph, objectInfo);
   assertMossSamplingAvailable(compiled.promptGraph, objectInfo);
+  assertDetailerRuntimeAvailable(compiled.promptGraph, objectInfo);
   return compiled;
 }
 
