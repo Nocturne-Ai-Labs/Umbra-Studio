@@ -11,6 +11,21 @@ const input = 'min-h-9 min-w-0 rounded border border-white/15 bg-black/25 px-2 t
 const MEDIA = 'application/x-umbra-video-project-media';
 const SHOT = 'application/x-umbra-video-project-shot';
 
+function ShotDurationInput({ shot, disabled, onChange }: {
+  shot: VideoStudioShot; disabled: boolean; onChange: (seconds: number) => void;
+}) {
+  const [draft, setDraft] = React.useState<string | null>(null);
+  const commit = (value: string) => {
+    const seconds = Number(value);
+    if (value.trim() && Number.isFinite(seconds) && seconds > 0) onChange(seconds);
+  };
+  return <input aria-label="Selected shot duration" className={input + ' w-24'}
+    inputMode="decimal" value={draft ?? String(Number(shot.draft.durationSeconds.toFixed(6)))} disabled={disabled}
+    onChange={event => { setDraft(event.target.value); commit(event.target.value); }}
+    onBlur={() => { if (draft !== null) commit(draft); setDraft(null); }}
+    onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} />;
+}
+
 export function VideoStudioTimeline({ project, onChange, disabled, comfyConnected, onBusy }: {
   project: VideoStudioProject; onChange: (project: VideoStudioProject) => void;
   disabled: boolean; comfyConnected: boolean; onBusy: (busy: boolean) => void;
@@ -223,8 +238,8 @@ export function VideoStudioTimeline({ project, onChange, disabled, comfyConnecte
       </div>
       <div className="flex flex-wrap items-center gap-2 py-2">
         <span className="text-xs text-[var(--umbra-accent)]">Editing shot {project.shots.indexOf(active) + 1} of {project.shots.length}</span><input aria-label="Shot name" className={input + ' w-40'} value={active.name} disabled={disabled} onChange={event => mutateShot(active.id, s => ({ ...s, name: event.target.value }))} maxLength={200} />
-        <label className="flex items-center gap-2 text-xs text-zinc-400">Duration<input aria-label="Selected shot duration" className={input + ' w-24'} type="number" min={1 / active.draft.frameRate} step={1 / active.draft.frameRate} value={Number(active.draft.durationSeconds.toFixed(6))} disabled={disabled}
-          onChange={event => mutateShot(active.id, s => ({ ...s, draft: resizeVideoShot(s.draft, Number(event.target.value)) }))} />s</label>
+        <label className="flex items-center gap-2 text-xs text-zinc-400">Duration<ShotDurationInput key={active.id} shot={active} disabled={disabled}
+          onChange={seconds => mutateShot(active.id, s => ({ ...s, draft: resizeVideoShot(s.draft, seconds) }))} />s</label>
         <button className={button} title="Move shot earlier" aria-label="Move shot earlier" disabled={disabled || active.id === project.shots[0].id} onClick={() => move(active.id, project.shots.indexOf(active) - 1)}><ArrowLeft size={14} /></button>
         <button className={button} title="Move shot later" aria-label="Move shot later" disabled={disabled || active.id === project.shots.at(-1)?.id} onClick={() => move(active.id, project.shots.indexOf(active) + 1)}><ArrowRight size={14} /></button>
         <button className={button} title="Remove selected shot" aria-label="Remove selected shot" disabled={disabled || project.shots.length === 1} onClick={() => onChange({ ...project, activeShotId: project.shots.find(s => s.id !== active.id)!.id, shots: project.shots.filter(s => s.id !== active.id) })}><Trash2 size={14} /></button>
