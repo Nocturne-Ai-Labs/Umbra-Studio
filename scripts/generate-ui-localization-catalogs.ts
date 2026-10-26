@@ -705,7 +705,7 @@ function splitIntoBatches(values: string[]): string[][] {
 
 function normalizeBrandNames(value: string): string {
   return value
-    .replace(/\b(?:comfy\s*ui|comfui|comfortui)\b/gi, 'ComfyUI')
+    .replace(/\b(?:comfy\s*ui|comfui|comfortui|bequemui)\b/gi, 'ComfyUI')
     .replace(/\b(?:ai[-\s]?toolkit|ki[-\s]?toolkit)\b/gi, 'AI-Toolkit')
     .replace(/\b(?:civit\s*ai)\b/gi, 'CivitAI')
     .replace(/\bpower[-\s]?prompter\b/gi, 'Power Prompter')
@@ -770,7 +770,7 @@ function renderCatalog(entriesByLanguage: Record<RecentUiLanguage, Map<string, s
       const { arrayName } = LANGUAGE_CONFIG[language];
       const entries = [...entriesByLanguage[language].entries()]
         .sort(([left], [right]) => left.localeCompare(right, 'en', { sensitivity: 'base' }))
-        .map(([english, localized]) => `  [${JSON.stringify(english)}, ${JSON.stringify(localized)}],`)
+        .map(([english, localized]) => `  [${JSON.stringify(english)}, ${JSON.stringify(normalizeBrandNames(localized))}],`)
         .join('\n');
       return `const ${arrayName}: Array<readonly [string, string]> = [\n${entries}\n];`;
     })

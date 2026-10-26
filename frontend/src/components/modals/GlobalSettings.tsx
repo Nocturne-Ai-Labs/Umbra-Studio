@@ -549,9 +549,10 @@ const SettingHint = ({ children }: { children: React.ReactNode }) => (
   <p className="text-xs text-zinc-500 mt-1">{children}</p>
 );
 
-const SettingInput = ({ value, onChange, placeholder, type = 'text', disabled = false }: any) => (
+const SettingInput = ({ value, onChange, placeholder, label, type = 'text', disabled = false }: any) => (
   <input
     type={type}
+    aria-label={label}
     value={value ?? ''}
     disabled={disabled}
     onChange={(e) => {
@@ -567,8 +568,9 @@ const SettingInput = ({ value, onChange, placeholder, type = 'text', disabled = 
   />
 );
 
-const SettingSelect = ({ value, onChange, options, disabled = false }: any) => (
+const SettingSelect = ({ value, onChange, options, label, disabled = false }: any) => (
   <UmbraSelectControl
+    aria-label={label}
     value={value}
     disabled={disabled}
     onChange={(e) => onChange(e.target.value)}
@@ -620,6 +622,7 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
       <SettingGroup label={t('language.current')}>
         <div className="glass-panel p-4 bg-black/20 space-y-2">
           <SettingSelect
+            label={t('language.current')}
             value={settings['ui.language']}
             onChange={(value: string) => updateSetting('ui.language', value)}
             options={APP_LANGUAGES.map((value) => ({
@@ -658,6 +661,7 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
               <div>
                 <label className="text-xs text-zinc-400 mb-1 block">Idle timeout (seconds)</label>
                 <SettingInput
+                  label="OLED idle timeout (seconds)"
                   type="number"
                   value={settings['oledMode.idleTime']}
                   onChange={(val: number) => updateSetting('oledMode.idleTime', val)}
@@ -686,6 +690,7 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
               <div>
                 <label className="text-xs text-zinc-400 mb-1 block">Idle timeout (seconds)</label>
                 <SettingInput
+                  label="Idle timeout (seconds)"
                   type="number"
                   value={settings['ui.idleFrameCapIdleTime']}
                   onChange={(val: number) => updateSetting('ui.idleFrameCapIdleTime', val)}
@@ -695,6 +700,7 @@ const GeneralSettings = ({ settings, updateSetting }: any) => {
               <div>
                 <label className="text-xs text-zinc-400 mb-1 block">Idle FPS cap</label>
                 <SettingInput
+                  label="Idle FPS cap"
                   type="number"
                   value={settings['ui.idleFrameCapFps']}
                   onChange={(val: number) => updateSetting('ui.idleFrameCapFps', val)}
@@ -803,6 +809,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="ComfyUI Root Directory">
           <SettingInput
+            label="ComfyUI Root Directory"
             value={settings['comfyui.path']}
             onChange={(val: string) => updateSetting('comfyui.path', val)}
             placeholder="D:/Tools/ComfyUI"
@@ -812,6 +819,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="AI-Toolkit Root Directory">
           <SettingInput
+            label="AI-Toolkit Root Directory"
             value={settings['aitoolkit.path']}
             onChange={(val: string) => updateSetting('aitoolkit.path', val)}
             placeholder="D:/Tools/AI-Toolkit"
@@ -821,6 +829,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="AI-Toolkit URL">
           <SettingInput
+            label="AI-Toolkit URL"
             value={settings['aitoolkit.url']}
             onChange={(val: string) => updateSetting('aitoolkit.url', val)}
             placeholder="http://127.0.0.1:8675"
@@ -835,6 +844,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="External Comfy Output Path (Optional)">
           <SettingInput
+            label="External Comfy Output Path (Optional)"
             value={settings['comfyui.externalOutputPath']}
             onChange={(val: string) => updateSetting('comfyui.externalOutputPath', val)}
             placeholder="D:/AI/Outputs"
@@ -863,6 +873,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
             {externalRootsDraft.map((root, index) => (
               <div key={`external-root-${index}`} className="flex items-center gap-2">
                 <SettingInput
+                  label={`External library root ${index + 1}`}
                   value={root}
                   onChange={(val: string) => updateExternalRootDraft(index, val)}
                   placeholder={index === 0 ? 'D:/Archive/Images' : 'E:/Projects/Outputs'}
@@ -910,6 +921,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="Trash Storage Path (Optional)">
           <SettingInput
+            label="Trash Storage Path (Optional)"
             value={settings['library.trashStoragePath']}
             onChange={(val: string) => updateSetting('library.trashStoragePath', val)}
             placeholder="D:/UmbraTrash"
@@ -933,6 +945,7 @@ const StorageSettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="Auto Delete Days">
           <SettingInput
+            label="Auto Delete Days"
             type="number"
             value={settings['library.trashAutoDeleteDays']}
             onChange={(val: number) => updateSetting('library.trashAutoDeleteDays', val)}
@@ -1181,6 +1194,7 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="Server URL">
           <SettingInput
+            label="Server URL"
             value={settings['comfyui.url']}
             onChange={(val: string) => updateSetting('comfyui.url', val)}
             placeholder="http://127.0.0.1:8188"
@@ -1293,6 +1307,7 @@ const ComfyUISettings = ({ settings, updateSetting }: any) => {
 
         <SettingGroup label="External Output Path (Optional)">
           <SettingInput
+            label="External Output Path (Optional)"
             value={settings['comfyui.externalOutputPath']}
             onChange={(val: string) => updateSetting('comfyui.externalOutputPath', val)}
             placeholder="/mnt/external/ComfyOutput"

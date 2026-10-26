@@ -9230,7 +9230,7 @@ const GERMAN_RECENT_UI_TEXT: Array<readonly [string, string]> = [
   ["comfyui is not connected.", "ComfyUI ist nicht verbunden."],
   ["comfyui is not connected. open its workspace to use the managed controls.", "ComfyUI ist nicht verbunden. Öffnen Sie den zugehörigen Arbeitsbereich, um die verwalteten Steuerelemente zu verwenden."],
   ["comfyui json", "ComfyUI JSON"],
-  ["comfyui offline", "bequemui offline"],
+  ["comfyui offline", "ComfyUI offline"],
   ["comfyui ready", "ComfyUI bereit"],
   ["comfyui server ready", "ComfyUI-Server bereit"],
   ["comfyui vram mode", "ComfyUI-VRAM-Modus"],
