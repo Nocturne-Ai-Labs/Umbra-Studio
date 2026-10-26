@@ -1147,6 +1147,46 @@ export function PowerPrompterCommandBar(props: PowerPrompterCommandBarProps) {
                     </div>
                   </div>
 
+                  {(prompterPanelMode === 'editor' || prompterPanelMode === 'preset-editor') && (
+                    <div className="mb-3 grid grid-cols-2 gap-2 2xl:hidden">
+                      <button
+                        type="button"
+                        disabled={!currentFile || !!queueingMode}
+                        onClick={() => {
+                          setQueueSettingsMenuOpen(false);
+                          void handleQueuePrompts('selected', {
+                            setId: queueSetTarget,
+                            traversalMode: queueTraversalMode,
+                            diversity: queueDiversity,
+                            shuffleEnabled: queueShuffleEnabled,
+                          });
+                        }}
+                        aria-label={`Queue Set ${queueSetTarget}: ${queueEstimate.setImageCount} images`}
+                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-amber-400/35 bg-amber-500/10 px-3 text-[10px] font-black uppercase tracking-wide text-amber-100 disabled:opacity-40"
+                      >
+                        <ListChecks size={14} /> Queue Set · {queueEstimate.setImageCount}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!currentFile || !!queueingMode}
+                        onClick={() => {
+                          setQueueSettingsMenuOpen(false);
+                          void handleQueuePrompts('variants', {
+                            includeAllSets: true,
+                            setId: queueSetTarget,
+                            traversalMode: queueTraversalMode,
+                            diversity: queueDiversity,
+                            shuffleEnabled: queueShuffleEnabled,
+                          });
+                        }}
+                        aria-label={`Queue All Sets: ${queueEstimate.allImageCount} images`}
+                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-400/35 bg-cyan-500/10 px-3 text-[10px] font-black uppercase tracking-wide text-cyan-100 disabled:opacity-40"
+                      >
+                        <ListOrdered size={14} /> Queue All · {queueEstimate.allImageCount}
+                      </button>
+                    </div>
+                  )}
+
                   <UmbraAlertSettingsButton />
 
                   <div className="mb-3 grid gap-2 sm:grid-cols-2">
