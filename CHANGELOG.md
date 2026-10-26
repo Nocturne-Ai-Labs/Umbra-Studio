@@ -17,6 +17,7 @@
 ### Fixes And Quality-of-Life Recap
 
 - Keep the hidden Gallery browser idle while preserving its filmstrip data and viewer; contain browser-render errors within Gallery with manual recovery. The reported intermittent Firefox recursion remains under investigation.
+- Avoid publishing a stale workflow mode back to other tabs when receiving shared navigation; let Extras and video navigation work independently of image-control loading.
 
 - Fixed: Setup registers the advertised MOSS vision encoder and prepares missing PixAI dependencies.
 - Fixed: Guided MOSS setup no longer requires the optional Reference2IMG extension to finish ordinary image generation setup.
