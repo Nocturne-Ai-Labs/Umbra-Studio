@@ -48,6 +48,7 @@ export type SetupJobState = {
   cancellable?: boolean;
   maintenanceTool?: 'comfyui' | 'aitoolkit';
   cancelRequested?: boolean;
+  cancelInProcess?: boolean;
   progress?: { stage?: string; file?: string; bytes?: number; totalBytes?: number; completedFiles?: number; totalFiles?: number };
 };
 const jobChildren = new Map<string, ReturnType<typeof spawn>>();
@@ -466,14 +467,20 @@ async function main() {
           await runModelInstall(runtimeRoot, sourceRoot, 'requirements', job, modelSetupSelection(sourceRoot, 'requirements', state.profiles), true);
           const checkpoint = await inspectOnboarding(sourceRoot, runtimeRoot);
           job.step = 'Verifying generation checkpoint';
-          job.progress = { stage: 'checking', file: checkpoint.selectedCheckpoint };
-          writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), checkpointVerification: await verifyOnboardingCheckpoint(runtimeRoot, checkpoint.selectedCheckpoint) });
+          job.cancelInProcess = true;
+          const checkpointVerification = await verifyOnboardingCheckpoint(runtimeRoot, checkpoint.selectedCheckpoint, {
+            isCancelled: () => job.cancelRequested === true,
+            onProgress: (bytes, totalBytes) => { job.progress = { stage: 'checking', file: checkpoint.selectedCheckpoint, bytes, totalBytes, completedFiles: 0, totalFiles: 1 }; },
+          });
+          job.cancelInProcess = false; job.cancellable = false;
+          writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), checkpointVerification });
+          job.progress = { stage: 'verified', file: checkpoint.selectedCheckpoint, bytes: checkpointVerification.identity.size, totalBytes: checkpointVerification.identity.size, completedFiles: 1, totalFiles: 1 };
           const result = await inspectOnboarding(sourceRoot, runtimeRoot);
           if (result.issues.length) throw new Error(result.issues.join(' '));
           writeOnboarding(runtimeRoot, { ...readOnboarding(runtimeRoot), verificationFingerprint: result.fingerprint, verifiedAt: new Date().toISOString() });
           appendOutput(job, result.qualification);
           job.phase = 'complete'; job.step = 'Installation verified'; job.completedAt = new Date().toISOString();
-        })().catch(error => { job.phase = job.cancelRequested ? 'cancelled' : 'failed'; job.step = 'Verification held'; job.error = (error as Error).message; job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(() => finishSetupJobLog(job));
+        })().catch(error => { job.phase = job.cancelRequested ? 'cancelled' : 'failed'; job.step = job.cancelRequested ? 'Verification cancelled' : 'Verification held'; job.error = (error as Error).message; job.completedAt = new Date().toISOString(); appendOutput(job, job.error); }).finally(() => { job.cancelInProcess = false; finishSetupJobLog(job); });
         return json({ success: true, accepted: true, job }, 202);
       }
       if (url.pathname === '/api/dependencies' && request.method === 'GET') {
@@ -661,6 +668,7 @@ async function main() {
       if (url.pathname === '/api/cancel' && request.method === 'POST') {
         if (!activeJob || activeJob.phase !== 'running' || !activeJob.cancellable) return json({ success: false, error: 'No cancellable download is running.' }, 409);
         const job = activeJob;
+        if (job.cancelInProcess) { job.cancelRequested = true; return json({ success: true }); }
         const child = jobChildren.get(job.id);
         if (!child?.stdin?.writable) return json({ success: false, error: 'Installer is finishing. Try again shortly.' }, 409);
         try {

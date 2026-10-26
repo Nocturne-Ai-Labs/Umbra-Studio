@@ -137,13 +137,26 @@ export function validCheckpoint(root: string, path: string) {
     return offsets[0][0] === 0 && offsets.every(([start], index) => index === 0 || start === offsets[index - 1][1]) && offsets.at(-1)![1] === size - length - 8;
   } catch { return false; } finally { if (fd !== undefined) closeSync(fd); }
 }
-export async function verifyOnboardingCheckpoint(root: string, path: string) {
+export async function verifyOnboardingCheckpoint(root: string, path: string, options: {
+  onProgress?: (bytes: number, totalBytes: number) => void;
+  isCancelled?: () => boolean;
+} = {}) {
   if (!validCheckpoint(root, path)) throw new Error('Choose a valid generation checkpoint in this Umbra installation.');
   const target = join(root, 'Tools', 'ComfyUI', 'models', path), before = identity(target);
+  if (!before) throw new Error('The generation checkpoint is unavailable. Select it again and retry verification.');
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(target)) hash.update(chunk);
+  let bytes = 0, lastProgress = 0;
+  options.onProgress?.(0, before.size);
+  for await (const chunk of createReadStream(target, { highWaterMark: 1024 * 1024 })) {
+    if (options.isCancelled?.()) throw new Error('Checkpoint verification cancelled.');
+    hash.update(chunk); bytes += chunk.length;
+    if (Date.now() - lastProgress >= 500 || bytes === before.size) {
+      options.onProgress?.(bytes, before.size); lastProgress = Date.now();
+    }
+  }
+  if (options.isCancelled?.()) throw new Error('Checkpoint verification cancelled.');
   const after = identity(target);
-  if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('The generation checkpoint changed while it was being verified. Retry verification.');
+  if (!after || JSON.stringify(before) !== JSON.stringify(after)) throw new Error('The generation checkpoint changed while it was being verified. Retry verification.');
   return { path, sha256: hash.digest('hex'), identity: after };
 }
 function modelEvidence(source: string, root: string, pack: ModelSetupPack, selection: string[]) {

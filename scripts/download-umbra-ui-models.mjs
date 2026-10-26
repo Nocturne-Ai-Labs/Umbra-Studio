@@ -81,14 +81,14 @@ let cancelInputWasRaw = false;
 
 class DownloadCancelledError extends Error {
   constructor() {
-    super('Download cancelled. The incomplete file was removed.');
+    super(checkOnly ? 'Verification cancelled. Installed files were preserved.' : 'Download cancelled. The incomplete file was removed.');
     this.name = 'DownloadCancelledError';
   }
 }
 
 function requestCancellation() {
   cancellationRequested = true;
-  process.stderr.write('\n[umbra-ui-models] Cancelling and removing the incomplete download...\n');
+  process.stderr.write(checkOnly ? '\n[umbra-ui-models] Cancelling verification; installed files are preserved...\n' : '\n[umbra-ui-models] Cancelling and removing the incomplete download...\n');
   activeDownloadController?.abort();
 }
 
@@ -186,19 +186,25 @@ function formatBytes(value) {
   return `${(bytes / 1024 ** 3).toFixed(2)}GB`;
 }
 
-function sha256File(filePath) {
+function sha256File(filePath, onProgress) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
-    const stream = fs.createReadStream(filePath);
+    const stream = fs.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
+    const totalBytes = fs.statSync(filePath).size;
+    let bytes = 0, lastProgress = 0;
     stream.on('error', reject);
-    stream.on('data', chunk => hash.update(chunk));
+    stream.on('data', chunk => {
+      if (cancellationRequested) { stream.destroy(new DownloadCancelledError()); return; }
+      hash.update(chunk); bytes += chunk.length;
+      if (Date.now() - lastProgress >= 500 || bytes === totalBytes) { onProgress?.(bytes); lastProgress = Date.now(); }
+    });
     stream.on('end', () => resolve(hash.digest('hex')));
   });
 }
 
-async function verifyFile(filePath, expected) {
+async function verifyFile(filePath, expected, onProgress) {
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size !== expected.bytes) return false;
-  return (await sha256File(filePath)).toLowerCase() === expected.sha256.toLowerCase();
+  return (await sha256File(filePath, onProgress)).toLowerCase() === expected.sha256.toLowerCase();
 }
 
 function downloadUrl(model, file) {
@@ -423,7 +429,7 @@ async function main() {
       const destination = normalizedRelative(expected.destination, `${model.id} destination`);
       const outputPath = path.join(modelsRoot, ...destination.split('/'));
       reportProgress({ stage: 'checking', file: destination, completedFiles: installed.length, totalFiles, bytes: 0, totalBytes: expected.bytes });
-      const existingIsValid = await verifyFile(outputPath, expected);
+      const existingIsValid = await verifyFile(outputPath, expected, bytes => reportProgress({ stage: 'checking', file: destination, completedFiles: installed.length, totalFiles, bytes, totalBytes: expected.bytes }));
       if (cancellationRequested) throw new DownloadCancelledError();
       if (existingIsValid) {
         console.log(`  verified ${destination} (${formatBytes(expected.bytes)})`);

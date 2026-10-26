@@ -149,7 +149,7 @@ async function runDetector(rootDir: string, sourceDir: string, modelPath: string
   const python = resolvePython(rootDir, specialist);
   const specialistPath = join(rootDir, 'User', 'Models', 'Detectors', 'anatomy-v2', 'cockAndBallDetection2D_v20.pt');
   if (specialist && !existsSync(specialistPath)) {
-    throw new Error('Paired censoring requires the separately licensed anatomy v2 model. See CENSORING.md for the official download and setup. Place cockAndBallDetection2D_v20.pt in User/Models/Detectors/anatomy-v2. No fallback output was generated.');
+    throw new Error('Paired censoring requires the separately licensed anatomy v2 model. Open Umbra Setup > Models > Automatic censoring for the official download and placement instructions. Place cockAndBallDetection2D_v20.pt in User/Models/Detectors/anatomy-v2. No fallback output was generated.');
   }
   const script = join(sourceDir, 'backend', 'python', 'anime_censor_detector.py');
   if (!existsSync(script)) throw new Error('Umbra\'s body-part detector script is missing.');

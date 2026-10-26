@@ -264,8 +264,17 @@ function renderOnboarding() {
     const media = onboardingData.media; const mediaCopy = onboardingMediaCopy[currentLanguage] || onboardingMediaCopy.en;
     const item = onboardingElement('li', `${media?.ready ? '✓' : '○'} ${mediaCopy[0]}`); item.append(onboardingElement('small', mediaCopy[media?.ready ? 1 : 2])); checks.append(item); content.append(checks);
     if (!media?.ready && media?.supported) primary(mediaCopy[3], () => runOnboardingJob('/api/dependencies/action', { kind: 'media', target: 'FFmpeg' }));
-    else if (onboardingData.ready) { content.append(onboardingElement('p', onboardingText(35))); primary(onboardingText(25), () => document.getElementById('launch').click()); }
+    else if (onboardingData.ready) {
+      content.append(onboardingElement('p', onboardingText(35)));
+      secondary.append(onboardingButton(onboardingText(24), () => runOnboardingJob('/api/onboarding/verify', {})));
+      primary(onboardingText(25), () => document.getElementById('launch').click());
+    }
     else { content.append(onboardingElement('p', onboardingUx(19))); primary(onboardingText(24), () => runOnboardingJob('/api/onboarding/verify', {})); }
+    const extras = onboardingElement('div', undefined, 'wizard-card');
+    extras.append(onboardingElement('h3', tr('extraSetupTitle')), onboardingElement('p', tr('extraSetupHint')));
+    const extraActions = onboardingElement('div', undefined, 'secondary-actions');
+    extraActions.append(onboardingButton(tr('extraTools'), () => showSetupTab('tools')), onboardingButton(tr('extraModels'), () => showSetupTab('models')));
+    extras.append(extraActions); content.append(extras);
     const diagnostics = onboardingElement('details'); diagnostics.append(onboardingElement('summary', onboardingUx(10)));
     diagnostics.dataset.onboardingKey = 'diagnostics';
     const issues = onboardingElement('ul'); for (const code of onboardingData.issueCodes || []) issues.append(onboardingElement('li', tr(`onboardingIssue_${code}`))); diagnostics.append(issues); content.append(diagnostics);

@@ -80,6 +80,7 @@
     .pack { border: 1px solid var(--line); background: #080c0f; padding: 16px; }
     .pack h3 { margin: 0 0 8px; font-size: 14px; }
     .pack p { min-height: 0; }
+    .pack code { display: block; overflow-wrap: anywhere; font-size: 11px; color: var(--muted); }
     .pack .button { width: 100%; margin-top: 14px; }
     .progress { display: none; border: 1px solid var(--line); background: var(--panel-2); padding: 14px; }
     .progress.visible { display: block; }
@@ -131,6 +132,10 @@
     .model-file { border-bottom: 1px solid var(--line); padding: 9px 0; overflow-wrap: anywhere; font-size: 12px; }
     .model-file small { display: block; color: var(--muted); margin-top: 5px; }
     .model-file a { color: #9ee8d0; }
+
+    .setup-tool-group { padding: 16px; margin: 14px 0; border: 1px solid var(--line); background: var(--panel); }
+    .setup-tool-group h3 { margin: 0 0 10px; }
+    .setup-tool-group > summary { cursor: pointer; min-height: 36px; font-weight: 700; }
     .tool-maintenance-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
     .tool-maintenance-actions .button { min-height: 36px; }
     #tools-list { max-height: none; overflow: visible; }
@@ -340,12 +345,18 @@
             <p data-i18n="pixaiTaggerDescription">Optional PixAI Tagger v1.0 for anime metadata and dataset tags. About 1.95 GB of model files plus Python dependencies. Run main tool setup first.</p>
             <button class="button" data-install="data-forge-pixai" type="button" data-i18n="installPixaiTagger">Install PixAI Tagger</button>
           </article>
+          <article class="pack">
+            <h3 data-i18n="censorSetupTitle">Automatic censoring (optional)</h3>
+            <p data-i18n="censorSetupHint">Manual censoring needs no detector. Automatic paired detection additionally needs the separately licensed anatomy-v2 model (about 125 MB). Download it yourself and place the original file here:</p>
+            <code>User/Models/Detectors/anatomy-v2/cockAndBallDetection2D_v20.pt</code>
+            <p><a href="https://civitai.com/models/310687?modelVersionId=1793796" target="_blank" rel="noopener noreferrer" data-i18n="manualDownload">Manual download</a></p>
+          </article>
         </div>
         </div>
       </section>
       <section id="tools-panel" class="panel" role="tabpanel" aria-labelledby="tab-tools" hidden>
         <details><summary data-i18n="advancedBundles">Advanced feature bundles</summary>
-          <button id="install-all-dependencies" class="button" type="button" data-i18n="installAllDependencies">Install All Dependencies &amp; Support Models</button>
+          <button id="install-all-dependencies" class="button" type="button" data-i18n="installAllDependencies">Install Shared Tools &amp; Support Models</button>
           <p id="shared-support-size" aria-live="polite"></p>
         </details>
         <div class="panel-head">
@@ -392,8 +403,8 @@
       en: {
         standaloneService: 'Standalone service',
         setupGuide: "Set up Umbra Studio",
-        installAllDependencies: "Install All Dependencies & Support Models",
-        allDependenciesHint: "One click installs shared Python packages (including pandas), WD and PixAI taggers, natural-language tagging/captioning (Qwen2-VL), detailers, SAM, upscaling/interpolation, CLIP/SigLIP vision support, and managed workflow tools. Generation checkpoints and model-family downloads stay separate in Step 3. Stop managed ComfyUI before installing.",
+        installAllDependencies: "Install Shared Tools & Support Models",
+        allDependenciesHint: "One click installs shared Python packages (including pandas), WD and PixAI taggers, natural-language tagging/captioning (Qwen2-VL), detailers, SAM, upscaling/interpolation, CLIP/SigLIP vision support, and managed workflow tools. Generation checkpoints and model-family downloads stay separate in Models. Optional apps and model-specific extensions have their own setup controls.",
         setupStep1: "Step 1 — Choose and save your language below.",
         setupStep2: "Step 2 — Install shared dependencies and support models above, or use Tools and Models to repair individual features.",
         setupStep3: "Step 3 — Separately choose the generation model family you want in Models, then add its compatible checkpoint in Model Manager where required.",
@@ -560,6 +571,7 @@
     function localizeJobStep(step) {
       const jobSteps = {
         'Preparing installer': 'preparingInstaller',
+        'Verification cancelled': 'cancelled',
         'Installing Python Helpers': 'installingPythonHelpers',
         'Installing WD tagger models': 'installingWdTaggers',
         'Installing PixAI Python dependencies': 'installingPixaiDependencies',
@@ -614,7 +626,8 @@
       progress.classList.add('visible');
       progress.classList.toggle('done', job.phase === 'complete');
       progress.classList.toggle('failed', job.phase === 'failed');
-      jobStep.textContent = localizeJobStep(job.step);
+      const displayedStep = job.phase === 'cancelled' ? tr('cancelled') : localizeJobStep(job.step);
+      jobStep.textContent = displayedStep;
       jobPhase.textContent = tr(job.phase);
       const jobError = document.getElementById('job-error');
       jobError.hidden = job.phase !== 'failed';
@@ -632,7 +645,7 @@
       renderOnboardingProgress(job);
       // Polling an older job must not erase a newer request's admission error.
       if (!status.dataset.actionError) {
-        status.textContent = job.phase === 'running' ? job.kind === 'managed-tools' || job.kind === 'python-helpers' ? localizeJobStep(job.step) : tr('installingModels') : localizeJobStep(job.step);
+        status.textContent = job.phase === 'running' && ['requirements', 'support'].includes(job.kind) ? tr('installingModels') : displayedStep;
         status.classList.toggle('error', job.phase === 'failed');
       }
     }

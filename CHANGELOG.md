@@ -18,6 +18,7 @@
 
 - Fixed: Setup registers the advertised MOSS vision encoder and prepares missing PixAI dependencies.
 - Fixed: Guided MOSS setup no longer requires the optional Reference2IMG extension to finish ordinary image generation setup.
+- Improved: Setup groups core tools, optional workflows and node diagnostics, links completed setup to optional features, and supports rechecking an installation. Checkpoint verification reports byte progress and can be cancelled without changing model files. Completed checks no longer retain misleading zero-file progress.
 - Fixed: Malformed AI Toolkit addresses cannot replace a working endpoint.
 - Fixed: Fractional img2img denoise and Manga numeric controls retain normal typed values.
 - Fixed: Windows ComfyUI keeps its listener available when an incoming client disconnects during acceptance.

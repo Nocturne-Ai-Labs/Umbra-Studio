@@ -46,7 +46,7 @@ onboardingIssue_generation¦Select a model family and a compatible generation ch
 onboardingIssue_checkpoint¦Add a compatible generation checkpoint in Model Manager. Prerequisites alone do not include one.¦Model Manager で互換性のある生成チェックポイントを追加してください。前提ファイルだけでは含まれません。¦在 Model Manager 中添加兼容的生成检查点。仅安装前置文件不包含检查点。¦Model Manager에서 호환 생성 체크포인트를 추가하세요. 필수 파일만으로는 체크포인트가 포함되지 않습니다.¦Kompatiblen Generierungs-Checkpoint im Model Manager hinzufügen. Voraussetzungspakete enthalten allein keinen Checkpoint.
 onboardingIssue_media¦Install or repair FFmpeg and ffprobe.¦FFmpeg と ffprobe をインストールまたは修復してください。¦安装或修复 FFmpeg 和 ffprobe。¦FFmpeg와 ffprobe를 설치하거나 복구하세요.¦FFmpeg und ffprobe installieren oder reparieren.
 setupGuide¦Set up Umbra Studio¦Umbra Studio を設定¦设置 Umbra Studio¦Umbra Studio 설정¦Umbra Studio einrichten
-installAllDependencies¦Install all dependencies and support models¦すべての依存関係と補助モデルをインストール¦安装全部依赖和辅助模型¦모든 의존성과 보조 모델 설치¦Alle Abhängigkeiten und Hilfsmodelle installieren
+installAllDependencies¦Install shared tools and support models¦共通ツールと補助モデルをインストール¦安装共享工具和辅助模型¦공유 도구 및 보조 모델 설치¦Gemeinsame Tools und Hilfsmodelle installieren
 openTools¦Open Tools¦ツールを開く¦打开工具¦도구 열기¦Tools öffnen
 openModels¦Open Models¦モデルを開く¦打开模型¦모델 열기¦Modelle öffnen
 pythonHelpers¦Python Helpers¦Python 補助ツール¦Python 辅助工具¦Python 보조 도구¦Python-Hilfsprogramme
@@ -427,13 +427,17 @@ function renderModelProgress(job) {
   const meter = modelElement('model-meter'); meter.hidden = !event;
   document.querySelector('#progress .track').hidden = !!event;
   if (event) {
-    if (event.stage === 'checking') meter.removeAttribute('value');
+    if (job.phase === 'complete') meter.value = 100;
+    else if (event.stage === 'checking' && !event.totalBytes) meter.removeAttribute('value');
     else meter.value = Math.max(0, Math.min(100, (event.bytes || 0) / Math.max(1, event.totalBytes || 1) * 100));
-    modelElement('model-transfer').textContent = `${tr(event.stage || '')}: ${event.file || ''} | ${modelBytes(event.bytes || 0)} / ${modelBytes(event.totalBytes || 0)} | ${event.completedFiles || 0}/${event.totalFiles || 0} ${tr('filesLabel')}`;
+    const state = job.phase === 'cancelled' ? 'cancelled' : job.phase === 'complete' && event.stage === 'checking' ? 'verified' : event.stage;
+    const bytes = event.totalBytes > 0 ? ` | ${modelBytes(event.bytes || 0)} / ${modelBytes(event.totalBytes)}` : '';
+    const files = event.totalFiles > 0 ? ` | ${event.completedFiles || 0}/${event.totalFiles} ${tr('filesLabel')}` : '';
+    modelElement('model-transfer').textContent = `${tr(state || '')}: ${event.file || ''}${bytes}${files}`;
   } else modelElement('model-transfer').textContent = '';
   const cancel = modelElement('model-cancel');
   cancel.hidden = job.phase !== 'running' || !job.cancellable;
-  cancel.disabled = !!job.cancelRequested; cancel.textContent = tr(job.cancelRequested ? 'cancelling' : 'cancelDownload');
+  cancel.disabled = !!job.cancelRequested; cancel.textContent = tr(job.cancelRequested ? 'cancelling' : job.kind === 'readiness' ? 'cancelVerification' : 'cancelDownload');
   if (job.phase !== 'running' && completedModelJob !== job.id) {
     completedModelJob = job.id; refreshSetupTab('models');
   }
@@ -480,7 +484,24 @@ function setToolsBusy(busy) {
   modelElement('tools-list').querySelectorAll('button').forEach(button => { button.disabled = busy || button.dataset.requiresInstall === 'true'; });
   modelElement('tools-refresh').disabled = busy;
 }
-function toolsRow(label, detail, kind = '', target = '', action = null, actionLabel = '') {
+const setupPolishKeys = ['coreTools', 'workflowTools', 'technicalNodes', 'extraSetupTitle', 'extraSetupHint', 'extraTools', 'extraModels', 'cancelVerification'];
+for (const [locale, copy] of Object.entries({
+  en: ['Core tools', 'Workflow setup & optional tools', 'Installed nodes & technical details', 'Set up more of Umbra', 'Readiness covers your selected configuration. Add training, tagging, reference-image or video tools here when needed. Their models and prerequisites are checked separately.', 'Tools & workflow support', 'Models & tagging', 'Cancel verification'],
+  ja: ['基本ツール', 'ワークフローと任意ツール', 'インストール済みノードと技術情報', 'Umbra の追加設定', '準備確認は選択した構成が対象です。学習、タグ付け、参照画像、動画ツールは必要に応じて追加できます。各モデルと前提条件は別途確認します。', 'ツールとワークフロー', 'モデルとタグ付け', '検証を中止'],
+  'zh-CN': ['核心工具', '工作流设置与可选工具', '已安装节点与技术详情', '设置更多 Umbra 功能', '就绪检查仅涵盖所选配置。可按需添加训练、标签、参考图像或视频工具，其模型和前置条件将单独检查。', '工具与工作流支持', '模型与标签', '取消验证'],
+  ko: ['기본 도구', '워크플로 설정 및 선택 도구', '설치된 노드 및 기술 정보', 'Umbra 추가 설정', '준비 확인은 선택한 구성에만 적용됩니다. 필요할 때 학습, 태그, 참조 이미지 또는 비디오 도구를 추가하세요. 해당 모델과 필수 조건은 별도로 확인합니다.', '도구 및 워크플로 지원', '모델 및 태그', '검증 취소'],
+  de: ['Kerntools', 'Workflow-Einrichtung und optionale Tools', 'Installierte Nodes und technische Details', 'Weitere Umbra-Funktionen einrichten', 'Die Bereitschaft gilt für die gewählte Konfiguration. Training, Tagging, Referenzbilder und Videotools bei Bedarf hinzufügen. Modelle und Voraussetzungen werden separat geprüft.', 'Tools und Workflow-Unterstützung', 'Modelle und Tagging', 'Prüfung abbrechen'],
+})) Object.assign(SETUP_TRANSLATIONS[locale], Object.fromEntries(setupPolishKeys.map((key, index) => [key, copy[index]])));
+
+for (const [locale, [title, hint]] of Object.entries({
+  en: ['Automatic censoring (optional)', 'Manual censoring needs no detector. Automatic paired detection additionally needs the separately licensed anatomy-v2 model (about 125 MB). Download it yourself and place the original file here:'],
+  ja: ['自動検閲（任意）', '手動の検閲には検出器は不要です。自動の複合検出には、別ライセンスの anatomy-v2 モデル（約125 MB）が追加で必要です。手動でダウンロードし、元のファイルを次の場所に配置してください：'],
+  'zh-CN': ['自动审查（可选）', '手动审查无需检测器。自动联合检测还需要单独许可的 anatomy-v2 模型（约125 MB）。请自行下载并将原始文件放在此处：'],
+  ko: ['자동 검열 (선택 사항)', '수동 검열에는 감지기가 필요하지 않습니다. 자동 결합 감지에는 별도 라이선스의 anatomy-v2 모델(약125 MB)이 추가로 필요합니다. 직접 다운로드한 원본 파일을 여기에 배치하세요:'],
+  de: ['Automatische Zensierung (optional)', 'Manuelle Zensierung benötigt keinen Detektor. Die automatische kombinierte Erkennung benötigt zusätzlich das separat lizenzierte anatomy-v2-Modell (etwa125 MB). Selbst herunterladen und die Originaldatei hier ablegen:'],
+})) Object.assign(SETUP_TRANSLATIONS[locale], { censorSetupTitle: title, censorSetupHint: hint });
+
+function toolsRow(label, detail, kind = '', target = '', action = null, actionLabel = '', host = modelElement('tools-list').querySelector('[data-setup-core-tools]') || modelElement('tools-list')) {
   const row = document.createElement('div'); row.className = 'model-file';
   const name = document.createElement('strong'); name.textContent = label; row.append(name);
   const text = document.createElement('small'); text.textContent = detail; row.append(text);
@@ -497,7 +518,7 @@ function toolsRow(label, detail, kind = '', target = '', action = null, actionLa
     });
     row.append(button);
   }
-  modelElement('tools-list').append(row);
+  host.append(row);
   return row;
 }
 function toolDiagnostic(row, message) {
@@ -537,7 +558,15 @@ let managedToolsData = null;
 function renderManagedTools(dependencies) {
   managedToolsData = dependencies;
   modelElement('shared-support-size').textContent = setupFormat('sharedSize', { size: (dependencies.sharedSupport.bytes / 1024 ** 3).toFixed(2) });
+  const technicalOpen = modelElement('tools-list').querySelector('details.setup-tool-group')?.open === true;
   modelElement('tools-list').replaceChildren();
+  const group = (label) => { const section = document.createElement('section'); section.className = 'setup-tool-group'; const heading = document.createElement('h3'); heading.textContent = tr(label); section.append(heading); return section; };
+  const coreTools = group('coreTools'); coreTools.dataset.setupCoreTools = '';
+  const workflowTools = group('workflowTools');
+  const technical = document.createElement('details'); technical.className = 'setup-tool-group';
+  technical.open = technicalOpen;
+  const technicalSummary = document.createElement('summary'); technicalSummary.textContent = tr('technicalNodes'); technical.append(technicalSummary);
+  modelElement('tools-list').append(coreTools, workflowTools, technical);
   modelElement('tools-summary').textContent = tr(dependencies.features.length ? 'toolsHint' : 'noManagedTools');
   toolsRow('Frame Forge — spacesimeco-hue and contributors', `${tr(dependencies.frameforge?.installed ? 'installed' : 'missing')}. Separate Python environment; projects stay in User/FrameForge. Install the Frame Forge video nodes below for generation.`,
     '', '', async () => {
@@ -546,7 +575,7 @@ function renderManagedTools(dependencies) {
         const result = await api('/api/frameforge/install', { method: 'POST' });
         renderJob(result.job); void poll();
       } catch (error) { modelError(error); setBusy(false); }
-    }, dependencies.frameforge?.installed ? 'Update / Repair' : 'Install');
+    }, dependencies.frameforge?.installed ? 'Update / Repair' : 'Install', workflowTools);
   for (const tool of dependencies.maintenanceTools || []) {
     const row = document.createElement('div'); row.className = 'model-file';
     const title = document.createElement('strong'); title.textContent = tool.name;
@@ -583,7 +612,7 @@ function renderManagedTools(dependencies) {
         void runAction('set_comfyui_version', ref);
       }); row.append(switchButton);
     }
-    modelElement('tools-list').append(row);
+    coreTools.append(row);
   }
   const media = dependencies.mediaTools;
   const helpers = dependencies.pythonHelpers;
@@ -612,23 +641,23 @@ function renderManagedTools(dependencies) {
     if (plan.featureId === 'all-managed-dependencies') plan.sharedSupport = dependencies.sharedSupport;
     const saved = dependencies.repairState?.featureId === plan.featureId ? dependencies.repairState : null;
     toolsRow(setupFeatureLabel(plan), saved ? `${tr(saved.phase)} | ${setupFormat('stepsComplete', { count: saved.completedTargets.length })} | ${saved.error || ''}` : setupFormat('reviewSteps', { count: plan.steps.length }), '', '',
-      () => reviewAndInstallManagedPlan(plan), tr(saved && ['held', 'failed'].includes(saved.phase) ? 'resumeRepair' : 'reviewRepair'));
+      () => reviewAndInstallManagedPlan(plan), tr(saved && ['held', 'failed'].includes(saved.phase) ? 'resumeRepair' : 'reviewRepair'), workflowTools);
     if (saved && ['restart-required', 'preflight-held', 'preflight-passed'].includes(saved.phase)) {
       toolsRow(tr('runtimeReadiness'), tr('runtimeHint'), '', '', async () => {
         try {
           const result = await api('/api/dependencies/preflight', { method: 'POST', body: JSON.stringify({ featureId: plan.featureId }) });
           await loadManagedTools(); modelElement('tools-message').textContent = result.ready ? result.qualification : result.issues.join(' ');
         } catch (error) { modelError(error); }
-      }, tr('recheck'));
+      }, tr('recheck'), workflowTools);
     }
   }
   for (const feature of dependencies.features) {
     const requiredClasses = feature.requiredBuiltinClasses || [];
     const workflows = feature.workflowIds || [];
-    toolsRow(setupFeatureLabel(feature), `${workflows.length ? `${setupFormat('declaredWorkflows', { count: workflows.length })} | ` : ''}ComfyUI ${feature.minimumComfyVersion}+${requiredClasses.length ? ` | ${tr('runtimeClasses')}: ${requiredClasses.join(', ')}` : ''}`);
+    toolsRow(setupFeatureLabel(feature), `${workflows.length ? `${setupFormat('declaredWorkflows', { count: workflows.length })} | ` : ''}ComfyUI ${feature.minimumComfyVersion}+${requiredClasses.length ? ` | ${tr('runtimeClasses')}: ${requiredClasses.join(', ')}` : ''}`, '', '', null, '', technical);
     for (const dependency of feature.runtimePackages || []) {
       toolsRow(`${dependency.distribution} | ${tr(dependency.status === 'missing' ? 'workflowHeld' : 'runtimeUnchecked')}`,
-        `${dependency.detail} ${dependency.reason}`);
+        `${dependency.detail} ${dependency.reason}`, '', '', null, '', technical);
     }
     for (const node of feature.customNodes) {
       const existing = suites.get(node.name);
@@ -638,7 +667,7 @@ function renderManagedTools(dependencies) {
   for (const node of suites.values()) {
     const assets = node.frontendAssets || [];
     toolsRow(node.name, `${tr(node.status === 'ready' ? 'filesVerified' : node.status)} | ${tr('reviewed')} ${node.minimumCommit.slice(0, 12)}${node.reason ? ` | ${node.reason}` : ''}${assets.length ? ` | ${tr('frontend')}: ${assets.join(', ')}` : ''}`,
-      node.status === 'ready' ? '' : 'node', node.name);
+      node.status === 'ready' ? '' : 'node', node.name, null, '', technical);
   }
   setToolsBusy(toolsBusy);
 }
