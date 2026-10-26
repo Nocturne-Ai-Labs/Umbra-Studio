@@ -2,6 +2,7 @@
 
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraAlertSettingsButton } from '@/components/ui/UmbraAlertSettings';
+import { validateAIToolkitUrl } from '../../../../shared/aiToolkitUrl';
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -140,6 +141,8 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
     setSaveError('');
     try {
       const normalized = normalizeAppSettings(settings);
+      const toolkitUrlError = validateAIToolkitUrl(normalized['aitoolkit.url']);
+      if (toolkitUrlError) throw new Error(toolkitUrlError);
       await pushAppSettingsToBackend(normalized);
       const bundleResponse = await fetch('/api/settings/bundle', {
         method: 'POST',

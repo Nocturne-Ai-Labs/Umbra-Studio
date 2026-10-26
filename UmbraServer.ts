@@ -239,6 +239,7 @@ import { getTrackedComfyProcessPids } from './backend/comfyProcessOwnership';
 import { officialComfySessionFromEnvironment, officialComfySessionMutationIssue } from './backend/OfficialComfySession';
 import { inspectActiveManagedWorkflowRuntimePackages } from './updater/ManagedDependencyStatus';
 import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges, preserveRemoteComfyUrl } from './backend/hostOnlySettings';
+import { validateAIToolkitUrl } from './shared/aiToolkitUrl';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 import {
   generateDataForgeWildcard,
@@ -4487,6 +4488,10 @@ function validateHostOnlyServiceSettings(
 ): string | null {
   const hostOnlyError = validateHostOnlySettingChanges(patch, current, hostRequest);
   if (hostOnlyError) return hostOnlyError;
+  if (Object.prototype.hasOwnProperty.call(patch, 'aitoolkit.url') && patch['aitoolkit.url'] !== current['aitoolkit.url']) {
+    const toolkitUrlError = validateAIToolkitUrl(patch['aitoolkit.url']);
+    if (toolkitUrlError) return toolkitUrlError;
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'comfyui.url')
     && patch['comfyui.url'] !== (current['comfyui.url'] ?? HOST_ONLY_SERVICE_SETTING_DEFAULTS['comfyui.url'])) {
     const target = resolveComfyEndpoint(String(patch['comfyui.url'] || ''), '127.0.0.1', 8188);
