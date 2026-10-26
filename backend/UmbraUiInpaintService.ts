@@ -1059,6 +1059,12 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
   item: Pick<UmbraUiInpaintJobItem, 'id' | 'ppuid' | 'seed'>,
   promptCount: number,
 ): Record<string, unknown> {
+  const executedPrompt = settings.mossLayout
+    ? compileMossLayoutPrompt(settings.prompt, settings.layoutRegions || [], {
+      x: settings.generationRegionX, y: settings.generationRegionY,
+      width: settings.generationRegionWidth, height: settings.generationRegionHeight,
+    }, settings)
+    : settings.prompt;
   const enabledLoras = (Array.isArray(settings.loras) ? settings.loras : [])
     .filter((lora) => lora?.enabled !== false && String(lora?.name || '').trim())
     .map((lora) => ({
@@ -1092,7 +1098,7 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
     clipSkip: settings.clipSkip,
     samplerName: settings.samplerName,
     scheduler: settings.scheduler,
-    denoise: settings.denoise,
+    denoise: settings.mossLayout ? 1 : settings.denoise,
     aspectRatio: 'custom',
     swapDimensions: false,
     width: settings.width,
@@ -1126,7 +1132,7 @@ export function buildUmbraUiInpaintPowerPrompterMetadata(
     promptCount: Math.max(1, promptCount),
     promptSetId: 1,
     setId: 1,
-    prompt: settings.prompt,
+    prompt: executedPrompt,
     negativePrompt: settings.negativePrompt,
     generation,
     detailerPipeline: (settings.detailerPipeline || []).map((stage) => ({ ...stage })),
@@ -2175,7 +2181,7 @@ export class UmbraUiInpaintService {
                     clipSkip: settings.clipSkip,
                     samplerName: settings.samplerName,
                     scheduler: settings.scheduler,
-                    denoise: settings.denoise,
+                    denoise: settings.mossLayout ? 1 : settings.denoise,
                     samples: settings.samples,
                     maskGrow: settings.maskGrow,
                     maskFeather: settings.maskFeather,
