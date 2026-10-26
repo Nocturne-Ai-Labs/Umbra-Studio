@@ -67,12 +67,25 @@ def enhance_prompt(prompt, generate):
                    'Return every input id exactly once, unchanged; enhance each caption independently '
                    'using its context. No other keys. Do not combine subjects or add scenery to items.')
         try:
-            enhanced = json.loads(generate(json.dumps({"captions": captions}, ensure_ascii=False), context))
+            response = generate(json.dumps({"captions": captions}, ensure_ascii=False), context)
+            if not isinstance(response, str):
+                raise ValueError("Caption batch must be text")
+            response = response.strip()
+            # Qwen can wrap otherwise valid JSON in a single Markdown code block.
+            # Unwrap only a complete response, never extract JSON from commentary.
+            fenced = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", response, re.DOTALL | re.IGNORECASE)
+            if fenced:
+                response = fenced.group(1)
+            enhanced = json.loads(response)
+            if not isinstance(enhanced, dict) or set(enhanced) != {"captions"}:
+                raise ValueError("Unexpected caption batch fields")
             entries = enhanced["captions"]
             if not isinstance(entries, list) or len(entries) != len(captions):
                 raise ValueError("Caption count changed")
             seen = set()
             for entry in entries:
+                if not isinstance(entry, dict) or set(entry) != {"id", "caption"}:
+                    raise ValueError("Unexpected caption fields")
                 key = entry["id"]
                 if not isinstance(key, str) or key not in targets or key in seen:
                     raise ValueError("Caption identity changed")
