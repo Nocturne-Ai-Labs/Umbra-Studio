@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.90.37-beta - Qualification Candidate
+## v0.91.0 - 2026-10-26
 
 ### TL;DR - Setup After Updating
 
@@ -10,28 +10,41 @@
 
 **Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
 
-- Local qualification candidate only; no public release has been published.
-- Optional PixAI installation now prepares its separate Python environment automatically. Existing model files are preserved.
-- Install the optional MOSS vision encoder through Setup for Reference2IMG.
+- Open `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Use Guided Setup for the essentials, then Tools and Models for the workflows you want. Readiness applies to your selected configuration; it does not promise every optional tool or model is installed.
+- Existing installations keep their models, projects, presets and managed tools. Relaunch managed ComfyUI after updating Studio so Umbra can load its updated compatibility and MOSS helper nodes.
+- Transparency and Canvas background removal need the CPU cutout model in Setup's core support pack. Setup now installs it automatically; use Models to install or verify missing support files.
+- Data Forge's WD taggers and natural-language caption model install through Models. Optional PixAI Tagger 1.0 additionally prepares its own Python dependencies; allow approximately 1.95 GB for its model files.
+- For MOSS Reference2IMG, install the MOSS vision encoder node through Setup. Iris and optional MOSS Spectrum have their own reviewed node requirements; use Tools to repair missing dependencies for the workflow you select.
+- Male anatomy and paired automatic censor detection require the separately licensed anatomy-v2 model (about 125 MB). Setup > Models links the signed-in Civitai download and shows the exact placement path. Public female anatomy detection downloads its detector automatically; manual masks require no detector.
+- Optional AI Toolkit requires host Git and Node.js 20 or newer. On Linux, also install `python3-dev`, `build-essential`, `libgl1`, and `libglib2.0-0`, or their distribution equivalents, for managed Python extensions and OpenCV-backed tools.
+
+### Maintenance Milestone
+
+This release focuses on getting from Setup to usable tools, clearer progress and failure feedback, reliable model discovery, and preserving image workflow settings and metadata. No model weights or personal runtime data are bundled in the portable packages.
+
+### Validation And Known Limits
+
+- Windows qualification exercised managed Setup and tool startup, MOSS structured enhancement, Anima 2.9B TXT2IMG and IMG2IMG, Gallery viewing and handoffs, CPU cutout, tagging/captioning, combined training-caption export, watermark presets and export, and image upscaling.
+- A longer MOSS structured prompt exposed an enhancer response-shape failure. The corrected node passed the exact same prompt and seed with enhancement enabled, alongside layout and literal-text regression checks.
+- The Gallery browser now stays idle while hidden and has local error containment. The reported intermittent Firefox idle recursion is not confirmed resolved.
+- Phone-mode selector and cancellation checks passed in a desktop browser; physical-device testing remains separate. The native Windows file picker remains unverified in automation; image watermarking now offers a browser-upload alternative.
+- Video tools and the separately licensed censor detector were not requalified in this maintenance pass. Node registration checks for Iris and Spectrum are separate from generation qualification.
 
 ### Fixes And Quality-of-Life Recap
 
-- Preserve transparency and pixels outside the selected mask when applying mosaic censorship.
-- Add browser image uploads to watermarking so the host file picker is not the only import path.
-- Accept echoed caption context from the MOSS prompt enhancer while preserving the user's structured layout and literal text.
-- Keep the hidden Gallery browser idle while preserving its filmstrip data and viewer; contain browser-render errors within Gallery with manual recovery. The reported intermittent Firefox recursion remains under investigation.
-- Avoid publishing a stale workflow mode back to other tabs when receiving shared navigation; let Extras and video navigation work independently of image-control loading.
-
-- Fixed: Setup registers the advertised MOSS vision encoder and prepares missing PixAI dependencies.
-- Fixed: Guided MOSS setup no longer requires the optional Reference2IMG extension to finish ordinary image generation setup.
-- Improved: Setup groups core tools, optional workflows and node diagnostics, links completed setup to optional features, and supports rechecking an installation. Checkpoint verification reports byte progress and can be cancelled without changing model files. Completed checks no longer retain misleading zero-file progress.
-- Fixed: Malformed AI Toolkit addresses cannot replace a working endpoint.
-- Fixed: Fractional img2img denoise and Manga numeric controls retain normal typed values.
-- Fixed: Windows ComfyUI keeps its listener available when an incoming client disconnects during acceptance.
-- Fixed: Model and LoRA catalogs refresh automatically when ComfyUI becomes ready after Studio opens.
-- Fixed: MOSS structured prompt enhancement accepts complete JSON code fences while retaining layout and text validation.
-- Fixed: Setup's core support pack installs the CPU cutout model needed by Transparency and Canvas. Missing prerequisites are shown directly in Transparency.
-- Improved: Video dependency labels and Booru credential guidance use readable, current wording.
+- Fixed: PixAI setup prepares its separate Python environment, and core support installs the CPU cutout model needed by Transparency and Canvas.
+- Fixed: Setup registers the advertised MOSS vision encoder and no longer requires that optional extension to finish ordinary MOSS generation setup.
+- Improved: Setup groups core tools, optional workflows and node diagnostics, links readiness to further setup, reports checkpoint verification progress, and supports cancellation and rechecking.
+- Fixed: Windows managed ComfyUI tolerates interrupted client connections without silently losing its listener; model catalogs refresh when ComfyUI becomes ready.
+- Fixed: MOSS enhancement accepts complete JSON fences and harmless echoed caption context while protecting IDs, layout and literal text.
+- Fixed: Decimal denoise, Manga numeric inputs and fractional video-shot durations retain typed values. Inpaint saving and Canvas naming give more reliable feedback.
+- Fixed: Mosaic censorship preserves transparency and leaves pixels outside the selected mask untouched.
+- Improved: Image watermarking offers browser uploads and preserves selected watermark assets in reusable presets.
+- Improved: Gallery rendering is contained locally; shared navigation avoids echoing a stale workflow when receiving shell changes. The broader intermittent Firefox report remains under investigation.
+- Fixed: Native video metadata reaches Gallery and Metadata Scanner; inpaint output metadata retains layout coordinates and effective denoise.
+- Fixed: Power Prompter exposes queue staging on compact desktops and settles previews and terminal-job feedback more reliably. Optional detailer dependencies are checked before execution.
+- Fixed: Malformed AI Toolkit addresses cannot replace a working endpoint, and tool launch popups avoid false failure reports.
+- Improved: Setup model inspection, dependency repair guidance, Booru credential errors and localized labels use clearer wording.
 
 ## v0.90.36-beta - Reliable UI Crash Details
 
