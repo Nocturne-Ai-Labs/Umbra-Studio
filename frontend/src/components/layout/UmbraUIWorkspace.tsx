@@ -638,7 +638,9 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
     if (currentWorkspace !== 'umbraui' && currentWorkspace !== 'powerprompter' && currentWorkspace !== 'comfyui') return;
     if (currentWorkspace === targetWorkspace) return;
     setActiveWorkspace(targetWorkspace);
-  }, [activeMode, activeWorkspace, setActiveWorkspace]);
+    // A shell update received from another tab must not publish this tab's
+    // stale inner mode back to the shared session. Only a mode change owns it.
+  }, [activeMode, setActiveWorkspace]);
 
   React.useEffect(() => {
     const root = document.documentElement;
@@ -1355,7 +1357,13 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   // to use setActiveMode and apply the settings the user chose to transfer.
   const navigateWorkspace = React.useCallback((mode: UmbraGenerationMode, variant = img2imgVariant) => {
     const destinationKey = resolveImageWorkspaceDraftKey(mode, variant);
-    if (destinationKey === activeImageDraftKey || !imageControlsHydrated) return;
+    if (destinationKey === activeImageDraftKey) return;
+    // Extras, video and the native editor do not depend on image draft loading.
+    // Keep them usable even while that separate configuration request is pending.
+    if (!imageControlsHydrated) {
+      if (!isImageWorkspace(destinationKey)) setActiveMode(mode);
+      return;
+    }
     const destinationDraft = stageImageWorkspaceNavigation(
       workspaceDraftsRef.current,
       activeImageDraftKey,
