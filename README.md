@@ -17,6 +17,56 @@ will continue through Beta before 1.0. **Umbra Remote mobile is a supported Beta
 interface.** See the current release notes for feature-specific limitations,
 including Canvas and video generation qualification, and setup requirements.
 
+[Download Windows / Linux](https://github.com/Nocturne-Ai-Labs/Umbra-Studio/releases/latest) · [Supported models](MODELS.md) · [Setup requirements](REQUIREMENTS.md) · [Release notes](CHANGELOG.md) · [Interface tour](#interface-tour)
+
+## Feature Highlights
+
+| Workspace | What you can do |
+| --- | --- |
+| **Image generation** | TXT2IMG, IMG2IMG, inpainting and model-aware pipelines with LoRA stacks, trigger information, detailers, hires fix and upscaling where supported. |
+| **Edit and Canvas** | Use supported instruction-edit models, or work with layers, masks, saved projects and restore points in experimental Canvas. MOSS adds its own structured composition controls. |
+| **Power Prompter** | Build reusable prompt cards and variants, expand wildcards, stage grouped queues and retain generation metadata. |
+| **Manga Studio** | Arrange panels, layered artwork, lettering and GIFs; generate with compatible image pipelines; export still pages, books and animated HTML readers. |
+| **Gallery and metadata** | Browse and organize outputs, inspect full-resolution media and structured JSON prompts, and send images between compatible tools. |
+| **Data Forge** | Search supported Booru sources, curate datasets, import media, tag/caption images and export paired training captions. WD taggers, optional PixAI and natural-language captioning are available through Setup. |
+| **Media tools** | Background removal, manual or model-assisted censoring, watermarking, upscaling, visual analysis and GIF/media conversion, with their required prerequisites. |
+| **Video** | DaSiWa MiniMax H3 and LTX workflows, plus optional upstream Longshot Studio and Frame Forge interfaces. Video remains Beta/experimental; see the workflow notes below. |
+| **Umbra Remote** | Supported Beta phone/tablet layouts for compatible image workflows, mobile Gallery and Extras, plus simplified DaSiWa text/image-to-video. |
+| **Setup and managed tools** | Install and maintain ComfyUI, AI Toolkit, custom nodes and optional models; check readiness and update portable Windows/Linux installations. |
+
+Controls depend on the selected pipeline and installed resources; not every model
+supports every stage. See [Supported Models](MODELS.md) for the shipped workflow
+matrix and [Requirements](REQUIREMENTS.md) for installation details.
+
+### Manga Studio
+
+Manga Studio is an experimental desktop/tablet editor under **Umbra UI > Extras**.
+Build pages from templates, import artwork or GIFs, and arrange panel-clipped
+backgrounds, character layers and editable dialogue. Gallery image menus offer
+**Add to Manga Studio**. Generation uses your managed ComfyUI and the existing
+image queue; no models are required for importing and editing artwork.
+
+Save editable books in `User/MangaStudio/Projects`; put your own font files in
+`User/Fonts` and refresh the font list. Comic Neue and Bangers ship with their
+OFL licenses. Page PNG and book PDF/PNG ZIP exports provide still editions;
+Manga HTML creates a self-contained scrollable reader with original GIFs,
+independent playback, optional lettering and zoom controls. Open the HTML in a
+browser; file/email previews may disable scripts. Physical mobile reader devices,
+complete localization and all-model generation remain unqualified.
+
+## Supported Models At A Glance
+
+- **Anime and illustration:** Anima, Anima 2.9B, Anima 3.8B, Illustrious XL and NoobAI XL V-Pred.
+- **Image generation:** MOSS Image Base/SFT, Wulver Turbo/Non-Turbo, Iris 3B/official Turbo, FLUX.1/2/3, Krea 2, Qwen Image/2.1, Chroma 1, Z-Image Base/Turbo, HiDream O1, ERNIE Image, Ovis Image, OmniGen2, Ideogram 4 and Stable Diffusion/3.5 pipelines.
+- **Instruction editing:** FLUX.2 Edit, FLUX.3, Qwen Image Edit, Qwen Image 2.1 and HiDream O1 through their supported edit pipelines.
+- **MOSS-specific workflows:** structured JSON prompting, optional local prompt enhancement, Edit composition boxes and vision-conditioned Reference2IMG.
+- **Video workflows:** MiniMax H3, LTX-2.3/2.5 and WAN 2.2, subject to the active route and installed dependencies. DaSiWa H3/LTX are the default official workflow path.
+
+The [full model matrix](MODELS.md) lists the actual bundled pipeline coverage.
+Model weights are downloaded separately and keep their upstream licenses.
+Pipeline availability does not imply that every checkpoint, optional stage or
+hardware configuration has been generation-tested.
+
 ## Built With
 
 - [Bun](https://bun.sh/) powers Umbra's TypeScript backend, local HTTP and
@@ -87,33 +137,6 @@ The phone video layout provides DaSiWa text-to-video and image-to-video.
 Canvas and Manga Studio remain desktop/tablet tools; FrameForge, Longshot Studio,
 and H3 Director are not offered in the phone layout. Generation uses the host's
 managed ComfyUI, installed nodes, and models.
-
-## Feature Highlights
-
-Manga Studio is an experimental desktop/tablet editor under **Umbra UI > Extras**.
-Build pages from templates, import artwork or GIFs, and arrange panel-clipped
-backgrounds, character layers and editable dialogue. Gallery image menus offer
-**Add to Manga Studio**. Generation uses your managed ComfyUI and the existing
-image queue; no models are required for importing and editing artwork.
-
-Save editable books in `User/MangaStudio/Projects`; put your own font files in
-`User/Fonts` and refresh the font list. Comic Neue and Bangers ship with their
-OFL licenses. Page PNG and book PDF/PNG ZIP exports provide still editions;
-Manga HTML creates a self-contained scrollable reader with original GIFs,
-independent playback, optional lettering and zoom controls. Open the HTML in a
-browser; file/email previews may disable scripts. Physical mobile reader devices,
-complete localization and all-model generation remain unqualified.
-
-- Gallery and Filmstrip for output browsing, viewing, and organization
-- Power Prompter for prompt construction, grouped queues, and tracked batch workflows
-- Metadata Scanner for prompt recovery, metadata parsing, and tag workflows
-- Model Manager for local model organization and snapshot-based CivitAI import
-- Data Forge for dataset collection and curation workflows
-- Umbra UI for model-aware image, video, img2img, inpaint, and upscale pipelines
-- Experimental Canvas for desktop/tablet layer editing, masks, saved projects, restore points, and portable project export
-- Optional LTX 2.3 Storyboard mode for timed per-shot prompts, multiple guide images, and selective agent prompt enhancement
-- Managed tool runtime support for ComfyUI and AI Toolkit
-- Local Servers for opening localhost/LAN tools inside Umbra
 
 ## Interface Tour
 

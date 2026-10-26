@@ -6,6 +6,7 @@ const PUBLIC_MARKDOWN = new Set([
   'CHANGELOG.md',
   'Credits.md',
   'README.md',
+  'MODELS.md',
   'REQUIREMENTS.md',
   'UMBRA_UI_TOUR.md',
   'User/README.md',
