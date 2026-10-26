@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.90.36-beta - Reliable UI Crash Details
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through **Umbra Setup > Updates**, using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. Reopen Studio and reload its browser tabs after updating. No new models, custom nodes or ComfyUI changes are required.
+- If the interface crashes, use **Copy error details** before restarting, or expand **Error details** and copy the text manually. This works with optional diagnostic recording turned off.
+- This patch improves diagnosis. The reported random idle **too much recursion** crash has not yet been reproduced or fixed.
+- Linux requires glibc 2.35+ and `python3-dev`, `build-essential`, `libgl1` and `libglib2.0-0` or distribution equivalents. Optional AI Toolkit requires host Git and Node.js 20 or newer.
+
+### Critical Error Capture
+
+- Critical render failures now retain a bounded error message, JavaScript stack, component stack, timestamp and app version, independently of optional diagnostic recording.
+- One report is kept in the current browser tab's session storage. Reports do not export the app session or upload to a server; URL query/fragment values are removed.
+- The crash screen exposes expandable details and a copy button with success or manual-copy feedback.
+- Unavailable browser storage, an unreadable error stack or a failed optional diagnostics subscriber cannot interrupt report capture.
+- Removed the unsupported claim that every crash had already been logged to telemetry.
+
+### Validation Scope
+
+- Synthetic timed render failures verified capture with diagnostics disabled, bounded fields, query-value removal, storage failure, clipboard success and clipboard rejection.
+- A bounded isolated Chromium idle check did not reproduce the reported Firefox recursion. This is not a claim that the idle crash is resolved. Generation pipelines and model requirements are unchanged.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Critical render errors could leave no useful console record when optional diagnostics were disabled.
+- Improved: The crash screen exposes copyable stack traces and retains one local report for diagnosis.
+- Improved: Failure handling tolerates unavailable storage, clipboard access and optional diagnostic logging.
+
 ## v0.90.35-beta - Responsive Setup and Visible Studio Launch
 
 ### TL;DR - Setup After Updating
