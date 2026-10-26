@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.90.37-beta - Qualification Candidate
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Local qualification candidate only; no public release has been published.
+- Optional PixAI installation now prepares its separate Python environment automatically. Existing model files are preserved.
+- Install the optional MOSS vision encoder through Setup for Reference2IMG.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Setup registers the advertised MOSS vision encoder and prepares missing PixAI dependencies.
+- Fixed: Malformed AI Toolkit addresses cannot replace a working endpoint.
+- Fixed: Fractional img2img denoise and Manga numeric controls retain normal typed values.
+- Improved: Video dependency labels and Booru credential guidance use readable, current wording.
+
 ## v0.90.36-beta - Reliable UI Crash Details
 
 ### TL;DR - Setup After Updating
