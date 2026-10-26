@@ -447,6 +447,13 @@ export class MetadataParser {
         if (typeof inputs.scheduler === 'string') meta.scheduler = inputs.scheduler;
       }
       if (node.class_type === 'CheckpointLoaderSimple' && node.inputs.ckpt_name) meta.model = node.inputs.ckpt_name;
+      if (node.class_type === 'UNETLoader' && !meta.model && typeof node.inputs?.unet_name === 'string') {
+        meta.model = node.inputs.unet_name;
+      }
+      if ((node.class_type === 'MiniMaxH3ImageToVideo' || node.class_type === 'MiniMaxH3ReferenceToVideo')
+        && !meta.positive_prompt && typeof node.inputs?.prompt === 'string') {
+        meta.positive_prompt = node.inputs.prompt;
+      }
       if (node.class_type === 'EmptyLatentImage') {
         if (node.inputs?.width) meta.width = Number(node.inputs.width);
         if (node.inputs?.height) meta.height = Number(node.inputs.height);

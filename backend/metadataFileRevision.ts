@@ -21,6 +21,6 @@ export async function metadataFileRevision(filePath: string, sourceRevision: str
     sidecarRevision = null;
   }
   // Re-index videos previously scanned without their native container tags.
-  const parserRevision = VIDEO_METADATA_EXTENSIONS.has(extname(filePath).toLowerCase()) ? 'metadata-video-v2' : 'metadata-v1';
+  const parserRevision = VIDEO_METADATA_EXTENSIONS.has(extname(filePath).toLowerCase()) ? 'metadata-video-v3' : 'metadata-v1';
   return JSON.stringify([parserRevision, sourceRevision, sidecarRevision]);
 }
