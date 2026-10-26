@@ -262,7 +262,7 @@ export async function fetchGelbooruPosts(tags: string, limit: number, page = 1, 
 
   if (!res.ok) {
     if (res.status === 401) {
-      throw new Error('Gelbooru requires a valid user ID and API key. Add them from Data Forge > Search > Auth.');
+      throw new Error('Gelbooru requires a valid user ID and API key. Add them using the API keys button in Data Forge > Booru downloader.');
     }
     throw new Error(`Gelbooru API error: ${res.status}`);
   }
@@ -308,7 +308,7 @@ export async function fetchRule34Posts(tags: string, limit: number, page = 1, ap
   const data = await res.json();
   if (typeof data === 'string') {
     const message = data.toLowerCase().includes('authentication')
-      ? 'Rule34 requires a valid user ID and API key. Add them from Data Forge > Search > Auth.'
+      ? 'Rule34 requires a valid user ID and API key. Add them using the API keys button in Data Forge > Booru downloader.'
       : `Rule34 search failed: ${data}`;
     throw new Error(message);
   }
