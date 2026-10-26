@@ -330,6 +330,11 @@ export async function applyUmbraUiImageCensor(options: {
     return false;
   }
   const compositeLayers: OverlayOptions[] = [];
+  // Mosaic changes colour, not coverage. Compositing an RGBA copy over its
+  // source doubles partial alpha and rounds pixels even outside the mask.
+  const mosaicPixels = options.mode === 'mosaic'
+    ? await sharp(prepared).ensureAlpha().raw().toBuffer()
+    : undefined;
   for (const region of regions) {
     const left = Math.max(0, Math.min(outputWidth - 1, Math.round(outputWidth * region.x)));
     const top = Math.max(0, Math.min(outputHeight - 1, Math.round(outputHeight * region.y)));
@@ -354,9 +359,21 @@ export async function applyUmbraUiImageCensor(options: {
         .extract({ left, top, width, height })
         .ensureAlpha().raw().toBuffer();
       const averaged = averageMosaicBlocks(pixels, width, height, blockSize, mask);
-      censorLayer = await sharp(averaged, { raw: { width, height, channels: 4 } })
-        .png()
-        .toBuffer();
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const pixel = y * width + x;
+          const coverage = mask ? mask[pixel] / 255 : 1;
+          if (coverage === 0) continue;
+          const destination = ((top + y) * outputWidth + left + x) * 4;
+          for (let channel = 0; channel < 3; channel++) {
+            mosaicPixels![destination + channel] = Math.round(
+              mosaicPixels![destination + channel] * (1 - coverage)
+              + averaged[pixel * 4 + channel] * coverage,
+            );
+          }
+        }
+      }
+      continue;
     }
     if (mask) {
       const layer = await sharp(censorLayer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -368,7 +385,9 @@ export async function applyUmbraUiImageCensor(options: {
     compositeLayers.push({ input: censorLayer, left, top, blend: 'over' });
   }
 
-  const output = sharp(prepared).composite(compositeLayers);
+  const output = mosaicPixels
+    ? sharp(mosaicPixels, { raw: { width: outputWidth, height: outputHeight, channels: 4 } })
+    : sharp(prepared).composite(compositeLayers);
   await writeOutput(output);
   return true;
 }
