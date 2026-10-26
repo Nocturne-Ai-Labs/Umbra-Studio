@@ -77,6 +77,9 @@ export function UmbraImg2ImgSourceControls({
 }: UmbraImg2ImgSourceControlsProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = React.useState(false);
+  // Keep incomplete decimals intact while typing instead of rewriting each
+  // keystroke with toFixed(), which can silently change the submitted value.
+  const [denoiseDraft, setDenoiseDraft] = React.useState<string | null>(null);
   const uploadGenerationRef = React.useRef(0);
   const sourceIdentity = JSON.stringify([referenceOnly, source.path, source.originalPath, source.name, source.imageUrl]);
   const sourceRevisionRef = React.useRef({ identity: sourceIdentity, revision: 0 });
@@ -270,8 +273,20 @@ export function UmbraImg2ImgSourceControls({
           />
           <input
             aria-label="Denoise strength"
-            value={denoise.toFixed(2)}
-            onChange={(event) => onDenoiseChange(clampDenoise(event.target.value))}
+            value={denoiseDraft ?? String(denoise)}
+            onChange={(event) => {
+              const draft = event.target.value;
+              setDenoiseDraft(draft);
+              const numeric = Number(draft);
+              if (draft.trim() && Number.isFinite(numeric) && numeric >= 0.01 && numeric <= 1) onDenoiseChange(numeric);
+            }}
+            onBlur={() => {
+              if (denoiseDraft?.trim() && Number.isFinite(Number(denoiseDraft))) onDenoiseChange(clampDenoise(denoiseDraft));
+              setDenoiseDraft(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur();
+            }}
             inputMode="decimal"
             className={`${inputClass} text-center font-mono`}
           />
