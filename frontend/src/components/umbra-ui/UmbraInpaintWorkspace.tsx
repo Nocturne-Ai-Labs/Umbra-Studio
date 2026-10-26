@@ -2552,6 +2552,7 @@ export function UmbraInpaintWorkspace({
   const deletingProjectIdRef = React.useRef('');
   const projectAutoSaveTimerRef = React.useRef<number | null>(null);
   const projectAutoSaveSnapshotRef = React.useRef<UmbraCanvasDocument | null>(null);
+  const savedProjectSnapshotRef = React.useRef<UmbraCanvasDocument | null>(null);
   const pendingOriginalSourceReplacementRef = React.useRef<{
     documentId: string;
     sourceId: string;
@@ -3989,10 +3990,12 @@ export function UmbraInpaintWorkspace({
       const saved = await saveRequest;
       if (requestId !== projectSaveRequestRef.current) return;
       const pendingSnapshot = projectAutoSaveSnapshotRef.current;
-      if (pendingSnapshot?.id === documentSnapshot.id && pendingSnapshot.revision <= documentSnapshot.revision) {
+      if (pendingSnapshot === documentSnapshot) {
         projectAutoSaveSnapshotRef.current = null;
       }
-      if (latestDocumentRef.current?.id === saved.id && latestDocumentRef.current.revision === documentSnapshot.revision) {
+      savedProjectSnapshotRef.current = saved;
+      const savedCurrentSnapshot = latestDocumentRef.current === documentSnapshot;
+      if (savedCurrentSnapshot) {
         dispatchCanvasHistory({ type: 'history_hydrate', document: saved });
       }
       setProjects((current) => {
@@ -4009,7 +4012,7 @@ export function UmbraInpaintWorkspace({
         return [summary, ...current.filter((entry) => entry.id !== saved.id)]
           .sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name));
       });
-      setProjectSaveState('saved');
+      setProjectSaveState(savedCurrentSnapshot ? 'saved' : 'idle');
       if (notify) showToast('Inpaint project saved.', 'success');
       return saved;
     } catch (error) {
@@ -4034,7 +4037,12 @@ export function UmbraInpaintWorkspace({
     if (deletingProjectIdRef.current === canvasDocument.id
       || inpaintProjectsDeleting.has(canvasDocument.id)
       || inpaintProjectsDeleted.has(canvasDocument.id)) return;
+    if (canvasDocument === savedProjectSnapshotRef.current) {
+      setProjectSaveState('saved');
+      return;
+    }
     projectAutoSaveSnapshotRef.current = canvasDocument;
+    setProjectSaveState((current) => current === 'saving' ? current : 'idle');
     if (projectAutoSaveTimerRef.current !== null) return;
     projectAutoSaveTimerRef.current = window.setTimeout(() => {
       projectAutoSaveTimerRef.current = null;
@@ -10301,7 +10309,7 @@ export function UmbraInpaintWorkspace({
                 </>
               ) : null}
               <div className={cn('text-right font-mono text-[7px] uppercase', projectSaveState === 'error' ? 'text-red-300' : projectSaveState === 'saved' ? 'text-emerald-300/70' : 'text-zinc-700')}>
-                {projectSaveState === 'saving' ? 'autosaving' : projectSaveState === 'error' ? 'autosave failed' : projectSaveState === 'saved' ? 'saved' : 'autosave ready'}
+                {projectSaveState === 'saving' ? 'autosaving' : projectSaveState === 'error' ? 'autosave failed' : projectSaveState === 'saved' ? 'saved' : canvasDocument ? 'autosave pending' : 'autosave ready'}
               </div>
             </div>
           </details>
