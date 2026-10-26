@@ -190,7 +190,7 @@ restartPending¦Restart required; runtime checks pending¦再起動が必要。�
 preparingTool¦Preparing {tool}¦{tool} を準備中¦正在准备 {tool}¦{tool} 준비 중¦{tool} wird vorbereitet
 installingTool¦Installing {tool}¦{tool} をインストール中¦正在安装 {tool}¦{tool} 설치 중¦{tool} wird installiert
 coreSupport¦Core pipeline support¦基本パイプライン補助¦核心流程辅助¦기본 파이프라인 지원¦Grundlegende Pipeline-Unterstützung
-coreSupportDescription¦Person, face and hand detailers, SAM masks, upscaling and frame interpolation.¦人物、顔、手のディテーラー、SAM マスク、アップスケール、フレーム補間です。¦人物、脸部及手部细化、SAM 遮罩、放大和插帧。¦사람, 얼굴, 손 디테일러, SAM 마스크, 업스케일 및 프레임 보간입니다.¦Detailer für Personen, Gesichter und Hände, SAM-Masken, Upscaling und Frame-Interpolation.
+coreSupportDescription¦Detailer detectors, SAM masks, CPU background removal, upscaling and frame interpolation.¦ディテーラー検出、SAM マスク、CPU 背景除去、アップスケール、フレーム補間です。¦细化检测器、SAM 遮罩、CPU 背景移除、放大和插帧。¦디테일러 감지기, SAM 마스크, CPU 배경 제거, 업스케일 및 프레임 보간입니다.¦Detailer-Detektoren, SAM-Masken, CPU-Hintergrundentfernung, Upscaling und Frame-Interpolation.
 anima-38-lora¦Anima 3.8B LoRA support¦Anima 3.8B LoRA 対応¦Anima 3.8B LoRA 支持¦Anima 3.8B LoRA 지원¦Anima 3.8B LoRA-Unterstützung
 minimax-h3¦MiniMax H3 video¦MiniMax H3 動画¦MiniMax H3 视频¦MiniMax H3 비디오¦MiniMax H3 Video
 ltx23-omniforge¦LTX-2.3 OmniForge video tools¦LTX-2.3 OmniForge 動画ツール¦LTX-2.3 OmniForge 视频工具¦LTX-2.3 OmniForge 비디오 도구¦LTX-2.3 OmniForge Videotools

@@ -19,6 +19,10 @@
 - Fixed: Setup registers the advertised MOSS vision encoder and prepares missing PixAI dependencies.
 - Fixed: Malformed AI Toolkit addresses cannot replace a working endpoint.
 - Fixed: Fractional img2img denoise and Manga numeric controls retain normal typed values.
+- Fixed: Windows ComfyUI keeps its listener available when an incoming client disconnects during acceptance.
+- Fixed: Model and LoRA catalogs refresh automatically when ComfyUI becomes ready after Studio opens.
+- Fixed: MOSS structured prompt enhancement accepts complete JSON code fences while retaining layout and text validation.
+- Fixed: Setup's core support pack installs the CPU cutout model needed by Transparency and Canvas. Missing prerequisites are shown directly in Transparency.
 - Improved: Video dependency labels and Booru credential guidance use readable, current wording.
 
 ## v0.90.36-beta - Reliable UI Crash Details

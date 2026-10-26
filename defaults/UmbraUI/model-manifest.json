@@ -4,10 +4,29 @@
   "profiles": {
     "core": {
       "label": "Core pipeline support",
-      "description": "Default person, face, and hand detailer detectors, SAM refinement, general upscaling, and frame interpolation. Installed with managed ComfyUI setup."
+      "description": "Default detailer detectors, SAM refinement, CPU background removal, general upscaling, and frame interpolation. Installed with managed ComfyUI setup."
     }
   },
   "models": [
+    {
+      "id": "isnet-anime-cutout",
+      "family": "Background removal",
+      "creator": "SkyTNT and rembg contributors",
+      "project": "https://github.com/SkyTNT/anime-segmentation",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/SkyTNT/anime-segmentation/blob/main/LICENSE",
+      "installPolicy": "automatic",
+      "profiles": ["core"],
+      "purpose": "CPU auto cutout in Transparency and Canvas",
+      "files": [
+        {
+          "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-anime.onnx",
+          "destination": "rembg/isnet-anime.onnx",
+          "bytes": 176069933,
+          "sha256": "f15622d853e8260172812b657053460e20806f04b9e05147d49af7bed31a6e99"
+        }
+      ]
+    },
     {
       "id": "detailer-detectors-bingsu",
       "family": "Detailer",

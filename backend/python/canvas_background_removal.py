@@ -33,7 +33,7 @@ def main():
     threading.Thread(target=watch_cancel, daemon=True).start()
     model = Path(args.model)
     if not model.is_file():
-        raise ValueError("The local isnet-anime model is missing. Place its official weights in Tools/ComfyUI/models/rembg; no download was attempted.")
+        raise ValueError("The local isnet-anime model is missing. Install Core pipeline support in Umbra Setup > Models > Pipeline support, then reopen Transparency. No download was attempted.")
     with model.open("rb") as stream:
         if hashlib.file_digest(stream, "md5").hexdigest() != MODEL_MD5:
             raise ValueError("The local isnet-anime model failed its integrity check; no replacement was downloaded.")

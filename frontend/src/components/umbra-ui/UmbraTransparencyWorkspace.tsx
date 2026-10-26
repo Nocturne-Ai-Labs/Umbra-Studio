@@ -143,6 +143,7 @@ export function UmbraTransparencyWorkspace({ active = true }: { active?: boolean
       <span>{importing ? 'Importing images' : working ? stopping ? 'Stopping cutout · CPU' : 'Creating cutout · CPU' : exporting ? 'Exporting PNG' : image ? `${image.name} · ${image.width} × ${image.height}` : 'Add images to edit transparency'}</span>
       {!working && <span className="ml-auto" title={status?.reason}>{status?.available ? 'CPU cutout ready' : !status ? 'Checking CPU cutout' : 'CPU cutout unavailable'}</span>}
     </div>
+    {!status?.available && status?.reason && <p role="status" className="shrink-0 break-words border-b border-white/10 px-3 py-2 text-xs text-zinc-400">{status.reason}</p>}
     {error && <p role="alert" className="shrink-0 break-words border-b border-red-300/20 px-3 py-2 text-xs text-red-300">{error}</p>}
     {image ? <UmbraTransparencyViewer source={image} mask={image.history.present} disabled={disabled} onCommit={commitStroke} onDrawing={setDrawing} /> : <div className="flex min-h-40 flex-1 items-center justify-center"><button type="button" className={censorButton} disabled={importing} onClick={() => input.current?.click()}><ImagePlus size={16} />Add images</button></div>}
     <footer className="shrink-0 border-t border-white/10">
