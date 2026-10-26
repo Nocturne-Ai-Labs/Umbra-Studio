@@ -27,7 +27,20 @@ type Gesture = { id: string; mode: 'move' | 'resize' | 'tail' | 'bubble' | 'pane
 const message = (error: unknown) => error instanceof Error ? error.message : 'The action could not be completed.';
 
 function NumberField({ label, value, min = 0, max = 4096, step = 1, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; onChange: (value: number) => void }) {
-  return <label className="manga-field"><span>{label}</span><input type="number" aria-label={label} value={Math.round(value * 100) / 100} min={min} max={max} step={step} onChange={event => { if (event.target.value === '') return; const number = Number(event.target.value); if (Number.isFinite(number)) onChange(Math.min(max, Math.max(min, number))); }} /></label>;
+  const [draft, setDraft] = useState<string | null>(null);
+  return <label className="manga-field"><span>{label}</span><input type="number" aria-label={label} value={draft ?? Math.round(value * 100) / 100} min={min} max={max} step={step}
+    onChange={event => {
+      const text = event.target.value;
+      setDraft(text);
+      const number = Number(text);
+      if (text.trim() && Number.isFinite(number) && number >= min && number <= max) onChange(number);
+    }}
+    onBlur={() => {
+      if (draft?.trim() && Number.isFinite(Number(draft))) onChange(Math.min(max, Math.max(min, Number(draft))));
+      setDraft(null);
+    }}
+    onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+  /></label>;
 }
 
 export function MangaStudio({ embedded = false, active = true }: { embedded?: boolean; active?: boolean }) {
