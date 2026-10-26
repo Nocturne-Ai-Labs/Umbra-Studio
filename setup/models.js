@@ -493,13 +493,13 @@ for (const [locale, copy] of Object.entries({
   de: ['Kerntools', 'Workflow-Einrichtung und optionale Tools', 'Installierte Nodes und technische Details', 'Weitere Umbra-Funktionen einrichten', 'Die Bereitschaft gilt für die gewählte Konfiguration. Training, Tagging, Referenzbilder und Videotools bei Bedarf hinzufügen. Modelle und Voraussetzungen werden separat geprüft.', 'Tools und Workflow-Unterstützung', 'Modelle und Tagging', 'Prüfung abbrechen'],
 })) Object.assign(SETUP_TRANSLATIONS[locale], Object.fromEntries(setupPolishKeys.map((key, index) => [key, copy[index]])));
 
-for (const [locale, [title, hint]] of Object.entries({
-  en: ['Automatic censoring (optional)', 'Manual censoring needs no detector. Automatic paired detection additionally needs the separately licensed anatomy-v2 model (about 125 MB). Download it yourself and place the original file here:'],
-  ja: ['自動検閲（任意）', '手動の検閲には検出器は不要です。自動の複合検出には、別ライセンスの anatomy-v2 モデル（約125 MB）が追加で必要です。手動でダウンロードし、元のファイルを次の場所に配置してください：'],
-  'zh-CN': ['自动审查（可选）', '手动审查无需检测器。自动联合检测还需要单独许可的 anatomy-v2 模型（约125 MB）。请自行下载并将原始文件放在此处：'],
-  ko: ['자동 검열 (선택 사항)', '수동 검열에는 감지기가 필요하지 않습니다. 자동 결합 감지에는 별도 라이선스의 anatomy-v2 모델(약125 MB)이 추가로 필요합니다. 직접 다운로드한 원본 파일을 여기에 배치하세요:'],
-  de: ['Automatische Zensierung (optional)', 'Manuelle Zensierung benötigt keinen Detektor. Die automatische kombinierte Erkennung benötigt zusätzlich das separat lizenzierte anatomy-v2-Modell (etwa125 MB). Selbst herunterladen und die Originaldatei hier ablegen:'],
-})) Object.assign(SETUP_TRANSLATIONS[locale], { censorSetupTitle: title, censorSetupHint: hint });
+for (const [locale, [title, hint, download]] of Object.entries({
+  en: ['Automatic censoring models', 'The anatomy-v2 model (about 125 MB) is required for male anatomy detection and paired automatic detection. Download the original file from Civitai while signed in, then place it at the path below inside your Umbra Studio folder. The public female anatomy detector downloads automatically; manual censoring needs no detector.', 'Download required anatomy model (Civitai)'],
+  ja: ['自動検閲モデル', '男性器の検出と複合自動検出には anatomy-v2 モデル（約125 MB）が必須です。Civitai にログインして元のファイルをダウンロードし、Umbra Studio フォルダー内の次の場所に配置してください。公開の女性器検出モデルは自動でダウンロードされます。手動の検閲には検出器は不要です。', '必須の検出モデルをダウンロード（Civitai）'],
+  'zh-CN': ['自动审查模型', '男性生殖器检测和联合自动检测必须安装 anatomy-v2 模型（约125 MB）。请登录 Civitai 下载原始文件，然后放到 Umbra Studio 文件夹内的以下路径。公开的女性生殖器检测模型会自动下载；手动审查无需检测器。', '下载必需的检测模型（Civitai）'],
+  ko: ['자동 검열 모델', '남성 신체 감지와 결합 자동 감지에는 anatomy-v2 모델(약125 MB)이 필수입니다. Civitai에 로그인하여 원본 파일을 다운로드한 뒤 Umbra Studio 폴더 안의 아래 경로에 넣으세요. 공개 여성 신체 감지 모델은 자동으로 다운로드되며 수동 검열에는 감지기가 필요하지 않습니다.', '필수 감지 모델 다운로드 (Civitai)'],
+  de: ['Modelle für automatische Zensierung', 'Das anatomy-v2-Modell (etwa 125 MB) ist für die Erkennung männlicher Genitalien und die kombinierte automatische Erkennung erforderlich. Bei Civitai anmelden, die Originaldatei herunterladen und im folgenden Pfad innerhalb des Umbra-Studio-Ordners ablegen. Der öffentliche Detektor für weibliche Genitalien wird automatisch heruntergeladen; manuelle Zensierung benötigt keinen Detektor.', 'Erforderliches Anatomiemodell herunterladen (Civitai)'],
+})) Object.assign(SETUP_TRANSLATIONS[locale], { censorSetupTitle: title, censorSetupHint: hint, censorModelDownload: download });
 
 function toolsRow(label, detail, kind = '', target = '', action = null, actionLabel = '', host = modelElement('tools-list').querySelector('[data-setup-core-tools]') || modelElement('tools-list')) {
   const row = document.createElement('div'); row.className = 'model-file';
