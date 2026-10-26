@@ -34,6 +34,13 @@ export function repairManagedComfyCheckout(
   checked(['fetch', '--no-tags', repository, `v${minimumVersion}`]);
   const stable = checked(['rev-parse', 'FETCH_HEAD']);
   for (const commit of commits) checked(['fetch', '--no-tags', repository, commit]);
+  // Fresh Setup clones only the release tip. Missing ancestry in that truncated
+  // history is not evidence that the release lacks reviewed native-node changes.
+  if (commits.length && !containsCommits(stable)
+    && checked(['rev-parse', '--is-shallow-repository']) === 'true') {
+    hooks.log?.('Fetching complete ComfyUI history to verify reviewed native support.');
+    checked(['fetch', '--unshallow', '--no-tags', repository]);
+  }
   if (compareUmbraVersions(installedVersion || '0.0.0', minimumVersion) >= 0 && containsCommits(previous)) return { previous, current: previous };
   // Prefer the stable release when it already contains the required native support.
   const target = [stable, ...commits].find((candidate) => containsCommits(candidate));
