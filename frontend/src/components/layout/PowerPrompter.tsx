@@ -7417,6 +7417,20 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
           const requestId = String(payload.requestId || '');
           if (!requestId) return;
           logQueueDebug('ws:job_idle:received', { requestId, payload });
+          // Successful backend runs end with job_idle, not a runtime queue_result.
+          // The final progress snapshot may already have removed their rows.
+          if (payload.source === 'backend_pipeline'
+            && generationPreviewRef.current?.requestId === requestId
+            && (payload.success === false || (Number(payload.total) > 0
+              && Number(payload.settled ?? payload.completed) >= Number(payload.total)))) {
+            setGenerationPreview((prev) => {
+              if (!prev || prev.requestId !== requestId) return prev;
+              return payload.success === false
+                ? null
+                : { ...prev, status: 'idle', updatedAt: Date.now() };
+            });
+            scheduleGenerationPreviewHide();
+          }
           queueBridgeDispatchedRequestIdsRef.current.delete(requestId);
           pruneBridgeQueueStateRequestIds([requestId]);
           const requestMeta = queueRequestMetaRef.current.get(requestId);
@@ -7538,6 +7552,18 @@ export const PowerPrompter = ({ overlayMode = false, isActive = true, queueManag
         if (!queueResultEvent) return;
         const { requestId } = queueResultEvent;
         logQueueDebug('ws:queue_result:received', { requestId, payload });
+        // Runtime completion can arrive after the terminal snapshot has removed
+        // queue tracking. Settle its preview independently of admission state.
+        if (payload.backendOwned === true && payload.runtime === true
+          && generationPreviewRef.current?.requestId === requestId) {
+          setGenerationPreview((prev) => {
+            if (!prev || prev.requestId !== requestId) return prev;
+            return queueResultEvent.success
+              ? { ...prev, status: 'idle', updatedAt: Date.now() }
+              : null;
+          });
+          scheduleGenerationPreviewHide();
+        }
         const pending = pendingQueueRequestsRef.current.get(requestId);
         if (!pending) {
           if (payload.success === false && intentionallyCanceledQueueRequestIdsRef.current.has(requestId)) {
