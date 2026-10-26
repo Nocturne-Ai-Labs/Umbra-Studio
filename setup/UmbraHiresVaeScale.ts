@@ -12,6 +12,8 @@ function apply(nodePath: string, ...args: string[]): boolean {
 }
 export function removeUmbraHiresVaeScalePatchForUpdate(nodePath: string): void {
   assertCheckout(nodePath);
+  // An upstream/staged fix belongs to the index; only remove our working-tree patch.
+  if (apply(nodePath, '--cached', '--reverse', '--check')) return;
   if (apply(nodePath, '--reverse', '--check') && !apply(nodePath, '--reverse')) {
     throw new Error('Could not temporarily remove the Umbra VAE-scale compatibility patch. Node files were preserved.');
   }

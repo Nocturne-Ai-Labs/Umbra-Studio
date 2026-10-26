@@ -147,6 +147,14 @@
           "requiredClasses": []
         }
       ],
+      "runtimePackages": [
+        {
+          "module": "sageattention",
+          "distribution": "sageattention",
+          "optional": true,
+          "reason": "When KJNodes is installed, Longshot's default Auto attention uses its SageAttention patch. Use Install / repair SageAttention in Setup > Tools before selecting Auto or a Sage mode, or choose Advanced > Sage attention > disabled for standard PyTorch attention. This package is optional when Sage attention is disabled."
+        }
+      ],
       "notes": "Optional upstream application by r34vtraining. Setup downloads the original repositories on request; no upstream code is bundled or patched. Restart ComfyUI after installation. H3 model files and FFmpeg are also required; Turbo, RTX VSR and RefMods are upstream optional extensions."
     },
     {
@@ -693,7 +701,8 @@
             "UmbraOmniGen2DetailerSamplingProvider",
             "UmbraPowerPrompter",
             "UmbraPowerPrompterReader"
-          ]
+          ],
+          "requiredPatch": "UmbraNodesCompatibility.patch"
         }
       ],
       "notes": "Requirements for the shipped locked API workflow declarations, including installed model resources handled separately by Setup. Source and dependency checks do not qualify GPU execution."
@@ -1031,7 +1040,8 @@
             "UmbraA1111LoraSyntax",
             "UmbraImageUpscale",
             "UmbraLabSaveImage"
-          ]
+          ],
+          "requiredPatch": "UmbraNodesCompatibility.patch"
         },
         {
           "name": "comfyui-inpaint-nodes",
@@ -1081,7 +1091,8 @@
             "UmbraA1111LoraSyntax",
             "UmbraLabSaveImage",
             "UmbraKSamplerHiResFix"
-          ]
+          ],
+          "requiredPatch": "UmbraNodesCompatibility.patch"
         },
         {
           "name": "comfyui-inpaint-nodes",
@@ -1130,7 +1141,8 @@
             "UmbraPowerPrompterReader",
             "UmbraA1111LoraSyntax",
             "UmbraLabSaveImage"
-          ]
+          ],
+          "requiredPatch": "UmbraNodesCompatibility.patch"
         },
         {
           "name": "comfyui-inpaint-nodes",
@@ -1184,7 +1196,7 @@
             "UmbraImageUpscale",
             "UmbraLabSaveImage"
           ],
-          "requiredPatch": "UmbraHiresVaeScale.patch"
+          "requiredPatch": "UmbraNodesCompatibility.patch"
         },
         {
           "name": "ComfyUI-MOSSImageTextEncoder",
@@ -1246,7 +1258,7 @@
             "UmbraImageUpscale",
             "UmbraLabSaveImage"
           ],
-          "requiredPatch": "UmbraHiresVaeScale.patch"
+          "requiredPatch": "UmbraNodesCompatibility.patch"
         },
         {
           "name": "comfyui-inpaint-nodes",

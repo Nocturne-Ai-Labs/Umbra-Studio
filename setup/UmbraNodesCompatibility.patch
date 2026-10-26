@@ -1,0 +1,119 @@
+diff --git a/nodes.py b/nodes.py
+index eda5753..f1484d6 100644
+--- a/nodes.py
++++ b/nodes.py
+@@ -11,6 +11,7 @@ import os
+ import sys
+ import re
+ import json
++import math
+ import time
+ import random
+ import shutil
+@@ -2161,17 +2162,26 @@ class UmbraKSamplerHiResFix:
+     DESCRIPTION = "A Forge-style Hires Fix pass with latent, pixel, or installed model upscalers and exact output sizing."
+ 
+     @classmethod
+-    def _round_dimension(cls, value):
+-        return min(16384, max(8, int(round(float(value) / 8.0) * 8)))
++    def _round_dimension(cls, value, scale=8):
++        return min(16384, max(scale, int(round(float(value) / scale) * scale)))
+ 
+     @classmethod
+-    def _target_pixel_size(cls, latent, resize_mode, scale_by, resize_width, resize_height):
++    def _vae_spatial_scale(cls, vae, encode=False):
++        scale = vae.spacial_compression_encode() if encode else vae.spacial_compression_decode()
++        if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale < 1 or int(scale) != scale:
++            raise RuntimeError("Umbra Hires Fix requires a VAE with a positive integer spatial scale.")
++        return int(scale)
++
++    @classmethod
++    def _target_pixel_size(cls, latent, resize_mode, scale_by, resize_width, resize_height, vae):
+         latent_samples = latent.get("samples") if isinstance(latent, dict) else None
+         if not isinstance(latent_samples, torch.Tensor):
+             raise RuntimeError("Umbra Hires Fix received an invalid latent image.")
+ 
+-        base_width = max(8, int(latent_samples.shape[-1]) * 8)
+-        base_height = max(8, int(latent_samples.shape[-2]) * 8)
++        decode_scale = cls._vae_spatial_scale(vae)
++        encode_scale = cls._vae_spatial_scale(vae, encode=True)
++        base_width = max(decode_scale, int(latent_samples.shape[-1]) * decode_scale)
++        base_height = max(decode_scale, int(latent_samples.shape[-2]) * decode_scale)
+         safe_scale = _to_float(scale_by, default=2.0, minimum=1.0, maximum=8.0)
+         requested_width = _to_int(resize_width, default=0, minimum=0)
+         requested_height = _to_int(resize_height, default=0, minimum=0)
+@@ -2181,11 +2191,11 @@ class UmbraKSamplerHiResFix:
+                 requested_width = round(requested_height * base_width / float(base_height))
+             if requested_height <= 0:
+                 requested_height = round(requested_width * base_height / float(base_width))
+-            return cls._round_dimension(requested_width), cls._round_dimension(requested_height)
++            return cls._round_dimension(requested_width, encode_scale), cls._round_dimension(requested_height, encode_scale)
+ 
+         return (
+-            cls._round_dimension(base_width * safe_scale),
+-            cls._round_dimension(base_height * safe_scale),
++            cls._round_dimension(base_width * safe_scale, encode_scale),
++            cls._round_dimension(base_height * safe_scale, encode_scale),
+         )
+ 
+     @classmethod
+@@ -2219,10 +2229,11 @@ class UmbraKSamplerHiResFix:
+         latent_method = cls._latent_method(upscaler)
+         if latent_method:
+             out = dict(latent)
++            encode_scale = cls._vae_spatial_scale(vae, encode=True)
+             out["samples"] = comfy_utils.common_upscale(
+                 latent_samples,
+-                max(1, target_width // 8),
+-                max(1, target_height // 8),
++                max(1, target_width // encode_scale),
++                max(1, target_height // encode_scale),
+                 latent_method,
+                 "disabled",
+             )
+@@ -2333,6 +2344,7 @@ class UmbraKSamplerHiResFix:
+             scale_by,
+             resize_width,
+             resize_height,
++            vae,
+         )
+ 
+         hires_input_latent = self._upscale_latent_for_hires(
+diff --git a/web/js/Umbra.powerprompter.reader.js b/web/js/Umbra.powerprompter.reader.js
+index cee9d62..a337f53 100644
+--- a/web/js/Umbra.powerprompter.reader.js
++++ b/web/js/Umbra.powerprompter.reader.js
+@@ -819,6 +819,22 @@ function ensureExecutionListeners() {
+ }
+ 
+ function createPrompterWsUrl() {
++  // An embedded ComfyUI belongs to its containing Studio, including private
++  // development ports and Remote proxies. Never connect an unidentified frame
++  // to a different Studio just because it listens on the historical default.
++  if (window.parent !== window) {
++    try {
++      const owner = new URL(document.referrer);
++      if (!["http:", "https:"].includes(owner.protocol) || owner.username || owner.password) return null;
++      owner.protocol = owner.protocol === "https:" ? "wss:" : "ws:";
++      owner.pathname = "/ws/prompter";
++      owner.search = "";
++      owner.hash = "";
++      return owner.href;
++    } catch {
++      return null;
++    }
++  }
+   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+   const host = window.location.hostname || "127.0.0.1";
+   return `${protocol}://${host}:8212/ws/prompter`;
+@@ -2854,6 +2870,10 @@ function connectPrompterWs() {
+   }
+ 
+   const wsUrl = createPrompterWsUrl();
++  if (!wsUrl) {
++    prompterWsStatus = "disconnected";
++    return;
++  }
+   const ws = new WebSocket(wsUrl);
+   prompterWs = ws;
+   prompterWsStatus = "connecting";

@@ -1,0 +1,38 @@
+diff --git a/web/js/Umbra.powerprompter.reader.js b/web/js/Umbra.powerprompter.reader.js
+index cee9d62..a337f53 100644
+--- a/web/js/Umbra.powerprompter.reader.js
++++ b/web/js/Umbra.powerprompter.reader.js
+@@ -819,6 +819,22 @@ function ensureExecutionListeners() {
+ }
+ 
+ function createPrompterWsUrl() {
++  // An embedded ComfyUI belongs to its containing Studio, including private
++  // development ports and Remote proxies. Never connect an unidentified frame
++  // to a different Studio just because it listens on the historical default.
++  if (window.parent !== window) {
++    try {
++      const owner = new URL(document.referrer);
++      if (!["http:", "https:"].includes(owner.protocol) || owner.username || owner.password) return null;
++      owner.protocol = owner.protocol === "https:" ? "wss:" : "ws:";
++      owner.pathname = "/ws/prompter";
++      owner.search = "";
++      owner.hash = "";
++      return owner.href;
++    } catch {
++      return null;
++    }
++  }
+   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+   const host = window.location.hostname || "127.0.0.1";
+   return `${protocol}://${host}:8212/ws/prompter`;
+@@ -2854,6 +2870,10 @@ function connectPrompterWs() {
+   }
+ 
+   const wsUrl = createPrompterWsUrl();
++  if (!wsUrl) {
++    prompterWsStatus = "disconnected";
++    return;
++  }
+   const ws = new WebSocket(wsUrl);
+   prompterWs = ws;
+   prompterWsStatus = "connecting";
