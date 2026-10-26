@@ -451,6 +451,10 @@ export function UmbraCanvasWorkspace({
   const setGenerationBbox = useUmbraCanvasStore((state) => state.setGenerationBbox);
   const setViewport = useUmbraCanvasStore((state) => state.setViewport);
   const renameProject = useUmbraCanvasStore((state) => state.renameProject);
+  const [projectNameDraft, setProjectNameDraft] = React.useState(project.name);
+  React.useEffect(() => {
+    setProjectNameDraft(project.name);
+  }, [project.id, project.name]);
   const newProject = useUmbraCanvasStore((state) => state.newProject);
   const toggleEntityVisibility = useUmbraCanvasStore((state) => state.toggleEntityVisibility);
   const toggleEntityGeneration = useUmbraCanvasStore((state) => state.toggleEntityGeneration);
@@ -2691,7 +2695,16 @@ export function UmbraCanvasWorkspace({
           ))}
           <button type="button" title={compactPanel ? 'Hide Canvas controls' : 'Restore Canvas controls'} aria-label={compactPanel ? 'Hide Canvas controls' : 'Restore Canvas controls'} aria-pressed={!compactPanel} onClick={() => setCompactPanel((current) => current ? '' : lastPanelRef.current)} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-zinc-100">{compactPanel ? <Maximize2 size={14} /> : <Minimize2 size={14} />}</button>
         </div>
-        <input value={project.name} onChange={(event) => renameProject(event.target.value)} aria-label="Canvas project name" className="h-8 min-w-32 max-w-72 flex-1 rounded-md border border-transparent bg-transparent px-2 font-mono text-[11px] font-bold text-zinc-300 outline-none focus:border-cyan-300/25 focus:bg-black/35" />
+        <input value={projectNameDraft} maxLength={160} onChange={(event) => setProjectNameDraft(event.target.value)} onBlur={() => {
+          const name = projectNameDraft.trim() || 'Untitled Canvas';
+          setProjectNameDraft(name);
+          if (name !== project.name) renameProject(name);
+        }} onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }} aria-label="Canvas project name" className="h-8 min-w-32 max-w-72 flex-1 rounded-md border border-transparent bg-transparent px-2 font-mono text-[11px] font-bold text-zinc-300 outline-none focus:border-cyan-300/25 focus:bg-black/35" />
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <button type="button" title="New Canvas project" aria-label="New Canvas project" onClick={startBlankProject} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100"><Layers3 size={14} /></button>
           <button type="button" title="Canvas projects" aria-label="Canvas projects" onClick={openProjectBrowser} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:text-cyan-100"><FolderOpen size={14} /></button>
