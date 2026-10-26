@@ -808,6 +808,10 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
 
   React.useEffect(() => {
     let canceled = false;
+    if (!comfyUiConnected) {
+      setModelCatalog((current) => ({ ...current, loading: false, error: '' }));
+      return;
+    }
     setModelCatalog((current) => ({ ...current, loading: true, error: '' }));
     void Promise.all([
       fetchNodeRequiredInputs('UmbraPowerPrompter'),
@@ -901,10 +905,14 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     return () => {
       canceled = true;
     };
-  }, [modelCatalogRevision]);
+  }, [comfyUiConnected, modelCatalogRevision]);
 
   React.useEffect(() => {
     let canceled = false;
+    if (!comfyUiConnected) {
+      setVideoModelCatalog((current) => ({ ...current, loading: false, error: '' }));
+      return;
+    }
     setVideoModelCatalog((current) => ({ ...current, loading: true, error: '' }));
     void Promise.all([
       fetchNodeRequiredInputs('UNETLoader'),
@@ -985,7 +993,7 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     return () => {
       canceled = true;
     };
-  }, [modelCatalogRevision]);
+  }, [comfyUiConnected, modelCatalogRevision]);
 
   React.useEffect(() => {
     let disposed = false;
