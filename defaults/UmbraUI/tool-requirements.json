@@ -22,7 +22,7 @@
     },
     {
       "id": "frameforge-video",
-      "label": "Frame Forge â€” H3 video nodes",
+      "label": "Frame Forge — H3 video nodes",
       "optional": true,
       "optIn": true,
       "workflowIds": [
@@ -57,7 +57,7 @@
     },
     {
       "id": "frameforge-extras",
-      "label": "Frame Forge â€” Speech and Qwen prerequisites",
+      "label": "Frame Forge — Speech and Qwen prerequisites",
       "optional": true,
       "optIn": true,
       "workflowIds": [
@@ -83,7 +83,7 @@
     },
     {
       "id": "frameforge-world",
-      "label": "Frame Forge â€” optional WorldMirror 3D nodes",
+      "label": "Frame Forge — optional WorldMirror 3D nodes",
       "optional": true,
       "optIn": true,
       "workflowIds": [
@@ -108,7 +108,7 @@
     },
     {
       "id": "longshot-studio",
-      "label": "Longshot Studio (optional) â€” r34vtraining",
+      "label": "Longshot Studio (optional) — r34vtraining",
       "optional": true,
       "optIn": true,
       "workflowIds": [
