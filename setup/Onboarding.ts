@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { modelSetupCatalog, modelSetupSelection, readModelSetupManifest, type ModelSetupPack } from './ModelSetupCatalog';
 import { inspectManagedDependencies } from '../updater/ManagedDependencyStatus';
 import { compareUmbraVersions } from '../shared/appUpdate';
-import { readManagedToolRequirements } from './ManagedToolRequirements';
+import { readManagedToolRequirements, requiredForModelSetup } from './ManagedToolRequirements';
 import { ordinaryNodeRequirementsRecorded } from './OrdinaryNodeRequirements';
 import { aiToolkitRequirementsVerified, aiToolkitRequirementsFingerprint } from './AIToolkitPython';
 import { inspectComfyPython, inspectAIToolkitPython } from './ComfyPythonRuntime';
@@ -182,7 +182,7 @@ export async function inspectOnboarding(source: string, root: string) {
     && dependencies.features.every(feature => !feature.minimumComfyCommit || feature.comfyCommitVerified)
     && compareUmbraVersions(core.version, core.minimumRequired || '0.0.0') >= 0
     && compareUmbraVersions(core.frontendVersion || '0.0.0', core.minimumFrontendRequired || '0.0.0') >= 0;
-  const relevant = dependencies.features.filter(feature => !feature.optional || feature.modelProfiles.some(profile => state.profiles.includes(profile)));
+  const relevant = dependencies.features.filter(feature => requiredForModelSetup(feature, state.profiles));
   const nodeStates = relevant.flatMap(feature => feature.customNodes);
   const baseNodes = ['Umbra-Nodes', 'ComfyUI-Impact-Pack', 'ComfyUI-Impact-Subpack'].map(name => {
     const folder = join(root, 'Tools', 'ComfyUI', 'custom_nodes', name);

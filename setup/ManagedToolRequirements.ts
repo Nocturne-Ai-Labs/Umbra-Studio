@@ -20,6 +20,8 @@ export type ManagedFeatureRequirement = {
   label: string;
   optional?: boolean;
   optIn?: boolean;
+  // Extensions may share a family without being needed for its basic model setup.
+  modelSetupRequired?: boolean;
   activationFile?: string;
   minimumComfyVersion: string;
   minimumComfyCommit?: string;
@@ -30,6 +32,10 @@ export type ManagedFeatureRequirement = {
   runtimePackages?: ManagedRuntimePackage[];
   customNodes: ManagedNodeRequirement[];
 };
+
+export function requiredForModelSetup(feature: Pick<ManagedFeatureRequirement, 'optional' | 'modelSetupRequired' | 'modelProfiles'>, profiles: string[]): boolean {
+  return !feature.optional || feature.modelSetupRequired !== false && feature.modelProfiles.some(profile => profiles.includes(profile));
+}
 
 export function managedChildPath(root: string, child: string): string {
   const target = resolve(root, child);
@@ -73,6 +79,7 @@ export function readManagedToolRequirements(sourceRoot: string): ManagedFeatureR
       || (feature.activationFile !== undefined && !relativePath(feature.activationFile))
       || (!feature.activationFile && !feature.workflowIds?.length)
       || (feature.optIn !== undefined && typeof feature.optIn !== 'boolean')
+      || (feature.modelSetupRequired !== undefined && (typeof feature.modelSetupRequired !== 'boolean' || !feature.optional))
       || !stringList(feature.modelProfiles, 64) || !Array.isArray(feature.customNodes) || feature.customNodes.length > 64
       || (feature.workflowIds !== undefined && !stringList(feature.workflowIds, 128))
       || (feature.requiredBuiltinClasses !== undefined && !stringList(feature.requiredBuiltinClasses))) {

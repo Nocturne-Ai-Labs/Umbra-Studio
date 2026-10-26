@@ -17,6 +17,7 @@
 ### Fixes And Quality-of-Life Recap
 
 - Fixed: Setup registers the advertised MOSS vision encoder and prepares missing PixAI dependencies.
+- Fixed: Guided MOSS setup no longer requires the optional Reference2IMG extension to finish ordinary image generation setup.
 - Fixed: Malformed AI Toolkit addresses cannot replace a working endpoint.
 - Fixed: Fractional img2img denoise and Manga numeric controls retain normal typed values.
 - Fixed: Windows ComfyUI keeps its listener available when an incoming client disconnects during acceptance.

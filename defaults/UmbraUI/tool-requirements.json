@@ -1161,6 +1161,7 @@
       "label": "MOSS Image — Reference2IMG (vision reference)",
       "optional": true,
       "optIn": true,
+      "modelSetupRequired": false,
       "minimumComfyVersion": "0.41.0",
       "minimumComfyCommit": "e087d8f6cb7c6cdb11b59dc7c9bf17c79f8d877d",
       "modelProfiles": [

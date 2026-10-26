@@ -38,6 +38,7 @@ export type ManagedFeatureStatus = {
   label: string;
   optional: boolean;
   optIn?: boolean;
+  modelSetupRequired?: boolean;
   active: boolean;
   minimumComfyVersion: string;
   minimumComfyCommit?: string;
@@ -293,6 +294,7 @@ export function inspectManagedDependencies(sourceRoot: string, runtimeRoot: stri
       label: feature.label,
       optional: feature.optional === true,
       optIn: feature.optIn === true,
+      modelSetupRequired: feature.modelSetupRequired,
       active: feature.workflowIds?.length ? true : Boolean(feature.activationFile && existsSync(safeChild(modelsRoot, feature.activationFile))),
       minimumComfyVersion: feature.minimumComfyVersion,
       minimumComfyCommit: feature.minimumComfyCommit,
