@@ -814,6 +814,16 @@ by **NikoDemon80 and contributors** provides the optional GPL-3.0 video continua
 by **AHEKOT and contributors** provide optional 3D reconstruction; their dependencies
 and models retain their upstream terms.
 
+## CPU background removal
+
+Transparency and Canvas use the ISNet-anime model from
+[SkyTNT/anime-segmentation](https://github.com/SkyTNT/anime-segmentation) (Apache-2.0).
+Setup downloads checksum-pinned weights from the official rembg release; weights
+are not bundled. Image normalization and soft-mask processing follow
+[rembg](https://github.com/danielgatis/rembg) by Daniel Gatis and contributors (MIT).
+The corresponding MIT notice is included in
+`defaults/ThirdPartyLicenses/rembg-LICENSE.txt`. Inference uses ONNX Runtime on CPU.
+
 ### MOSS visual-reference encoder (optional)
 
 Reference2IMG uses [ComfyUI-MOSSImageTextEncoder](https://github.com/ThetaCursed/ComfyUI-MOSSImageTextEncoder) by ThetaCursed and contributors (MIT), reviewed at `289170a5a057a4484d755e7473c7148aab294884`. Umbra Setup installs the extension unmodified from its upstream repository on request; its code and model weights are not bundled. The upstream license remains with that installation.

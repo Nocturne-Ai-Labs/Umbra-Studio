@@ -12,6 +12,26 @@ MODEL_MD5 = "6f184e756bb3bd901c8849220a83e38e"
 MAX_PIXELS = 64 * 1024 * 1024
 
 
+def cutout(source, session):
+    """ISNet-anime normalization/mask contract from rembg (MIT); see Credits.md."""
+    import numpy as np
+    from PIL import Image
+
+    pixels = np.asarray(source.resize((1024, 1024), Image.Resampling.LANCZOS))
+    normalized = pixels / max(float(pixels.max()), 1e-6)
+    normalized -= np.array((0.485, 0.456, 0.406))
+    tensor = normalized.transpose(2, 0, 1)[None].astype(np.float32)
+    prediction = np.asarray(session.run(None, {session.get_inputs()[0].name: tensor})[0])[0, 0]
+    if prediction.shape != (1024, 1024) or not np.isfinite(prediction).all():
+        raise ValueError('The background-removal model returned an invalid mask; the original image was kept.')
+    low, high = float(prediction.min()), float(prediction.max())
+    mask = (prediction - low) / (high - low) if high > low else np.zeros_like(prediction)
+    alpha = Image.fromarray((mask * 255).astype(np.uint8)).resize(source.size, Image.Resampling.LANCZOS)
+    result = source.convert('RGBA')
+    result.putalpha(alpha)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -41,10 +61,8 @@ def main():
         import numpy  # noqa: F401
         import onnxruntime as ort
         from PIL import Image, ImageOps
-        from rembg import remove
-        from rembg.sessions.dis_anime import DisSession
     except ImportError as error:
-        raise ValueError("Canvas CPU background removal needs rembg, ONNX Runtime, NumPy and Pillow in Umbra's managed ComfyUI Python environment.") from error
+        raise ValueError("Canvas CPU background removal needs ONNX Runtime, NumPy and Pillow. Repair ComfyUI custom-node dependencies in Umbra Setup, then reopen Transparency.") from error
 
     if args.probe:
         print(json.dumps({"available": True, "provider": "CPUExecutionProvider", "model": "isnet-anime"}))
@@ -52,18 +70,11 @@ def main():
     if not args.input or not args.output:
         raise ValueError("An input image and output PNG are required.")
 
-    # Preserve rembg's existing model normalization while bypassing its model
-    # downloader. Supplying providers explicitly avoids auto-device/GPU probing.
-    class LocalAnimeSession(DisSession):
-        @classmethod
-        def download_models(cls, *unused, **unused_kwargs):
-            return str(model)
-
     options = ort.SessionOptions()
     options.intra_op_num_threads = min(4, os.cpu_count() or 1)
     options.inter_op_num_threads = 1
-    session = LocalAnimeSession("isnet-anime", options, providers=["CPUExecutionProvider"])
-    providers = session.inner_session.get_providers()
+    session = ort.InferenceSession(str(model), sess_options=options, providers=["CPUExecutionProvider"])
+    providers = session.get_providers()
     if providers != ["CPUExecutionProvider"]:
         raise RuntimeError("Canvas background removal did not start with the required CPU-only provider.")
     try:
@@ -73,7 +84,7 @@ def main():
             source = ImageOps.exif_transpose(source).convert("RGB")
             # Canvas reapplies the baked source alpha once when composing the
             # cutout. Keep the model's soft mask here, without threshold/morphology.
-            result = remove(source, session=session, post_process_mask=False, alpha_matting=False).convert("RGBA")
+            result = cutout(source, session)
             result.save(args.output, format="PNG")
             print(json.dumps({"provider": providers[0], "model": "isnet-anime", "mask": "soft", "width": result.width, "height": result.height}))
     except (OSError, Image.DecompressionBombError) as error:
