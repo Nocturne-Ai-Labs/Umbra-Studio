@@ -2,6 +2,8 @@ import { stat } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import { mediaFileRevision } from './mediaFileRevision';
 
+const VIDEO_METADATA_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv', '.wmv', '.gif']);
+
 export function metadataSidecarPath(filePath: string): string | null {
   const extension = extname(filePath);
   return extension.toLowerCase() === '.png' ? null : join(dirname(filePath), `${basename(filePath, extension)}.png`);
@@ -18,5 +20,7 @@ export async function metadataFileRevision(filePath: string, sourceRevision: str
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     sidecarRevision = null;
   }
-  return JSON.stringify(['metadata-v1', sourceRevision, sidecarRevision]);
+  // Re-index videos previously scanned without their native container tags.
+  const parserRevision = VIDEO_METADATA_EXTENSIONS.has(extname(filePath).toLowerCase()) ? 'metadata-video-v2' : 'metadata-v1';
+  return JSON.stringify([parserRevision, sourceRevision, sidecarRevision]);
 }

@@ -193,8 +193,8 @@ function buildFileSignature(file: GalleryFileInput): string {
 }
 
 function isMetadataSupportedType(filePath: string, type: GalleryMediaType): boolean {
-  if (type === 'video') return false;
   const ext = extname(filePath).toLowerCase();
+  if (type === 'video') return ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.flv', '.wmv'].includes(ext);
   return ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.webp' || ext === '.gif';
 }
 
@@ -219,6 +219,10 @@ function sanitizeMetadata(meta: ImageMetadata): Record<string, unknown> | null {
     const value = meta[key];
     if (value === undefined || value === null || value === '') continue;
     output[key] = value;
+  }
+
+  if (!output.positive_prompt && typeof meta.umbra_power_prompter?.prompt === 'string') {
+    output.positive_prompt = meta.umbra_power_prompter.prompt;
   }
 
   return Object.keys(output).length > 0 ? output : null;
@@ -1470,7 +1474,10 @@ export class GalleryDb {
       if (before.size !== row.size || normalizeTimestamp(before.mtimeMs) !== normalizeTimestamp(row.modifiedMs)) return;
       sourceRevision = await metadataFileRevision(filePath, mediaFileRevision(before));
       const parsed = (await MetadataParser.parse(filePath, { throwOnReadError: true })) || {};
-      const dimensions = await readImageDimensions(filePath);
+      // The video parser already probes encoded dimensions; image decoders cannot read containers.
+      const dimensions = row.type === 'video'
+        ? { width: Math.max(0, Math.trunc(Number(parsed.width || 0))), height: Math.max(0, Math.trunc(Number(parsed.height || 0))) }
+        : await readImageDimensions(filePath);
       if (dimensions.width <= 0 || dimensions.height <= 0) return;
       const merged = {
         ...parsed,
