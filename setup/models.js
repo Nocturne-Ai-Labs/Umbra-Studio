@@ -6,7 +6,7 @@ Object.assign(SETUP_TRANSLATIONS.en, {
   modelHint: 'Most families need a separate checkpoint from Model Manager. Some packs include generation weights; review the file list and licenses.',
   cancelDownload: 'Cancel download', cancelling: 'Cancelling...', cancelled: 'Cancelled',
   chooseFamily: 'Select a family', noFiles: 'No separate files required for this selection.',
-  presentFile: 'Present, not yet checksum-verified', missingFile: 'Missing or size mismatch',
+  presentFile: 'Present; file size matches', missingFile: 'Missing or size mismatch',
   fullSize: 'full size', missingSize: 'missing / size mismatch', filesLabel: 'files',
   installerLog: 'Installer log',
   recommendedModels: 'Recommended',
@@ -23,7 +23,7 @@ Object.assign(SETUP_TRANSLATIONS.de, {
   modelHint: 'Die meisten Familien benötigen einen separaten Checkpoint aus dem Model Manager. Einige Pakete enthalten Modellgewichte; Dateiliste und Lizenzen prüfen.',
   cancelDownload: 'Download abbrechen', cancelling: 'Wird abgebrochen...', cancelled: 'Abgebrochen',
   chooseFamily: 'Familie auswählen', noFiles: 'Für diese Auswahl sind keine separaten Dateien erforderlich.',
-  presentFile: 'Vorhanden, Prüfsumme noch nicht geprüft', missingFile: 'Fehlend oder abweichende Größe',
+  presentFile: 'Vorhanden; Dateigröße stimmt überein', missingFile: 'Fehlend oder abweichende Größe',
   fullSize: 'Gesamtgröße', missingSize: 'fehlend / abweichende Größe', filesLabel: 'Dateien',
   installerLog: 'Installationsprotokoll',
   recommendedModels: 'Empfohlen',
@@ -96,7 +96,7 @@ cancelling¦Cancelling…¦中止しています…¦正在取消…¦취소 중
 cancelled¦Cancelled¦中止済み¦已取消¦취소됨¦Abgebrochen
 chooseFamily¦Select a family¦系列を選択¦选择系列¦계열 선택¦Familie auswählen
 noFiles¦No separate files required for this selection.¦この選択には別途ファイルは不要です。¦此选择不需要额外文件。¦이 선택에는 별도 파일이 필요하지 않습니다.¦Für diese Auswahl sind keine zusätzlichen Dateien nötig.
-presentFile¦Present; checksum not verified yet¦存在します。チェックサムは未検証です¦已存在，校验和尚未验证¦파일 있음; 체크섬 미검증¦Vorhanden; Prüfsumme noch nicht geprüft
+presentFile¦Present; file size matches¦存在します。ファイルサイズは一致しています¦已存在，文件大小匹配¦파일 있음; 파일 크기 일치¦Vorhanden; Dateigröße stimmt überein
 missingFile¦Missing or size mismatch¦不足またはサイズ不一致¦缺失或大小不符¦누락 또는 크기 불일치¦Fehlend oder abweichende Größe
 fullSize¦total size¦合計サイズ¦总大小¦전체 크기¦Gesamtgröße
 missingSize¦missing / size mismatch¦不足／サイズ不一致¦缺失／大小不符¦누락 / 크기 불일치¦fehlend / abweichende Größe
