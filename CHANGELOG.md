@@ -18,6 +18,7 @@
 
 - Preserve transparency and pixels outside the selected mask when applying mosaic censorship.
 - Add browser image uploads to watermarking so the host file picker is not the only import path.
+- Accept echoed caption context from the MOSS prompt enhancer while preserving the user's structured layout and literal text.
 - Keep the hidden Gallery browser idle while preserving its filmstrip data and viewer; contain browser-render errors within Gallery with manual recovery. The reported intermittent Firefox recursion remains under investigation.
 - Avoid publishing a stale workflow mode back to other tabs when receiving shared navigation; let Extras and video navigation work independently of image-control loading.
 

@@ -84,8 +84,14 @@ def enhance_prompt(prompt, generate):
                 raise ValueError("Caption count changed")
             seen = set()
             for entry in entries:
-                if not isinstance(entry, dict) or set(entry) != {"id", "caption"}:
-                    raise ValueError("Unexpected caption fields")
+                # Qwen sometimes echoes the advisory input context alongside a
+                # valid caption. It is never applied to the user's layout.
+                if (not isinstance(entry, dict) or not {"id", "caption"}.issubset(entry)
+                        or set(entry) - {"id", "caption", "context"}
+                        or ("context" in entry and not isinstance(entry["context"], str))):
+                    fields = set(entry) if isinstance(entry, dict) else set()
+                    raise ValueError("Unexpected caption fields (count=%s, id=%s, caption=%s, context=%s)" %
+                                     (len(fields), "id" in fields, "caption" in fields, "context" in fields))
                 key = entry["id"]
                 if not isinstance(key, str) or key not in targets or key in seen:
                     raise ValueError("Caption identity changed")
