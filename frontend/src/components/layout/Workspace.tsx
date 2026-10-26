@@ -1113,7 +1113,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
       isOfficial ? 19000 : 12000
     );
     if (!result?.ok) {
-      throw Object.assign(new Error(String(result?.error || 'ComfyUI could not open the workflow.')), { officialWorkflowTerminal: isOfficial });
+      throw Object.assign(new Error(String(result?.error || 'ComfyUI could not open the workflow.')), { officialWorkflowTerminal: isOfficial && result?.retryable !== true });
     }
     if (!isOfficial) loadedOfficialWorkflowRef.current = null;
     if (!options?.silent) {
@@ -1146,7 +1146,8 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
   }, []);
 
   // An explicit official load stays alive when the user returns to Video.
-  // Readiness and serializer failures are terminal; they never select a fallback.
+  // Cold-start readiness may retry within the existing deadline. Native load,
+  // dependency, provenance and serializer failures remain terminal, without fallback.
   useEffect(() => {
     if (!officialLoadRequest || !officialProxyRequested) return;
     let canceled = false;

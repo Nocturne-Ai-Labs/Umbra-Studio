@@ -179,9 +179,14 @@
     const [{ app }, { api }] = modules;
     let problem;
     while ((problem = runtimeProblem(app, api, nodeTypes))) {
-      operation.waitReason = `${problem} Update the managed ComfyUI/DaSiWa nodes and reload this iframe; no fallback serializer is used.`;
+      operation.retryableReadiness = problem === 'ComfyUI native graph loading and serialization are not ready.'
+        || problem === 'ComfyUI is still initializing or restoring its workspace.';
+      operation.waitReason = operation.retryableReadiness
+        ? 'ComfyUI is still initializing or restoring its workspace. Wait for startup to finish and retry.'
+        : `${problem} Update the managed ComfyUI/DaSiWa nodes and reload this iframe; no fallback serializer is used.`;
       await pause(operation);
     }
+    operation.retryableReadiness = false;
     operation.waitReason = '';
     return { app, api };
   }
@@ -319,14 +324,17 @@
     if (active) { reply(message, { ok: false, error: 'Another official workflow operation is still in progress. Wait for its result before retrying.' }); return; }
     if (runtimeFaulted) { reply(message, { ok: false, error: 'A native ComfyUI operation timed out. Reload the iframe before loading or capturing another workflow.' }); return; }
     if (!WORKFLOWS.has(message.workflowId)) { reply(message, { ok: false, error: 'Unknown official workflow. Choose a pinned Umbra workflow.' }); return; }
-    const operation = { controller: new AbortController(), nativePending: false, waitReason: '' };
+    const operation = { controller: new AbortController(), nativePending: false, retryableReadiness: false, waitReason: '' };
     active = operation;
     const timer = setTimeout(() => operation.controller.abort(new Error(operation.waitReason || 'The official workflow operation exceeded 15 seconds. Reload the iframe and try again.')), TIMEOUT_MS);
     try {
       reply(message, await (message.type === 'UMBRA_OFFICIAL_WORKFLOW_LOAD' ? load(message, operation) : serialize(message, operation)));
     } catch (error) {
       if (operation.controller.signal.aborted && operation.nativePending) { runtimeFaulted = true; loaded = null; }
-      reply(message, { ok: false, error: error?.message || 'Official workflow operation failed. Reload the original and try again.' });
+      const retryable = message.type === 'UMBRA_OFFICIAL_WORKFLOW_LOAD'
+        && operation.controller.signal.aborted && operation.retryableReadiness
+        && !operation.nativePending && !runtimeFaulted;
+      reply(message, { ok: false, retryable, error: error?.message || 'Official workflow operation failed. Reload the original and try again.' });
     } finally {
       clearTimeout(timer);
       operation.controller.abort(new Error('Operation completed.'));
