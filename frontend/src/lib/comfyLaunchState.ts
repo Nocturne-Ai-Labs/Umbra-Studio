@@ -54,8 +54,10 @@ export function reconcileComfyLaunchRuntimeState(
   return {
     connection: explicitLaunchPending
       ? 'connecting'
-      : sample.running
+      : healthy
         ? 'connected'
+        : sample.running && !sample.failed
+          ? 'connecting'
         : 'disconnected',
     healthy,
     booting: explicitLaunchPending || (

@@ -171,6 +171,9 @@ export const UmbraAppBar = () => {
   const gpuUsage = useStore((state) => state.systemStats.gpuUsage);
   const systemStatsStale = useStore((state) => state.systemStats.stale);
   const comfyConnection = useStore((state) => state.connections.comfyui);
+  const comfyProcessRunning = useStore((state) => state.comfyProcessRunning);
+  const comfyStartupError = useStore((state) => state.comfyStartupError);
+  const comfyRunning = comfyProcessRunning || comfyConnection === 'connected';
   const comfyActionBusy = useStore((state) => state.comfyToolAction.busy);
   const launchReady = useStore((state) => state.comfyToolAction.launchReady);
   const comfyAction = useStore((state) => state.comfyToolAction.action);
@@ -651,7 +654,7 @@ export const UmbraAppBar = () => {
   };
 
   const handleBackendToggle = async (backend: 'comfyui') => {
-    const isRunning = useStore.getState().connections[backend] === 'connected';
+    const isRunning = useStore.getState().comfyProcessRunning || useStore.getState().connections[backend] === 'connected';
     if (!isRunning && !comfyToolActions.getState().launchReady) return;
     if (useStore.getState().booting.comfyui || backendLoading.comfyui || restartingAll || stoppingAll) return;
     const release = comfyToolActions.acquireLifecycle();
@@ -814,7 +817,10 @@ export const UmbraAppBar = () => {
       if (currentStatus === 'connected') {
         useStore.getState().showToast(`${backendName} is connected`, 'success');
       } else {
-        useStore.getState().showToast(`${backendName} is not running`, 'error');
+        const current = useStore.getState();
+        current.showToast(current.comfyStartupError || (current.comfyProcessRunning
+          ? `${backendName} is running but is not ready. Check its startup log.`
+          : `${backendName} is not running`), 'error');
       }
     } catch (err) {
       useStore.getState().showToast(`Failed to check ${backendName} connection`, 'error');
@@ -825,7 +831,7 @@ export const UmbraAppBar = () => {
 
   const handleStopAll = async () => {
     const managedBackends: NeuralHubTool[] = [];
-    if (connections.comfyui === 'connected') managedBackends.push('comfyui');
+    if (comfyRunning) managedBackends.push('comfyui');
     if (
       (aiToolkitStatus.running || aiToolkitStatus.healthy)
       && aiToolkitStatus.ownership !== 'external-compatible'
@@ -936,7 +942,7 @@ export const UmbraAppBar = () => {
   const handleRestartAll = async () => {
     if (comfyToolActions.getState().busy || useStore.getState().booting.comfyui || restartingAll || stoppingAll) return;
     const connectedBackends: NeuralHubTool[] = [];
-    if (connections.comfyui === 'connected') connectedBackends.push('comfyui');
+    if (comfyRunning) connectedBackends.push('comfyui');
     if (
       (aiToolkitStatus.running || aiToolkitStatus.healthy)
       && aiToolkitStatus.ownership !== 'external-compatible'
@@ -1037,7 +1043,7 @@ export const UmbraAppBar = () => {
   const isSidebarExpanded = !isAppBarCollapsed || isHoverExpanded;
   const comfyStarting = comfyBooting || comfyConnection === 'connecting' || backendLoading.comfyui === 'starting';
   const comfyLifecycleLabel = restartingAll ? 'ComfyUI restarting' : backendLoading.comfyui === 'stopping' ? 'ComfyUI stopping' : comfyStarting ? 'ComfyUI starting' : '';
-  const hasManagedBackendRunning = connections.comfyui === 'connected'
+  const hasManagedBackendRunning = comfyRunning
     || (
       (aiToolkitStatus.running || aiToolkitStatus.healthy)
       && aiToolkitStatus.ownership !== 'external-compatible'
@@ -1384,28 +1390,30 @@ export const UmbraAppBar = () => {
                       <div className={cn(
                         "w-1.5 h-1.5 rounded-full transition-all",
                         backendLoading.comfyui ? "bg-amber-500 animate-pulse shadow-[0_0_5px_#f59e0b]" :
+                        comfyStartupError && connections.comfyui !== 'connected' ? "bg-red-500" :
                         connections.comfyui === 'connected' ? "bg-emerald-500 shadow-[0_0_5px_#10b981]" : "bg-zinc-700"
                       )} />
                       <span className="tool-name text-xs font-bold text-white flex-1">ComfyUI</span>
                       {(toolUpdates.comfyui.tool || toolUpdates.comfyui.pytorch) && <AlertCircle size={10} className="text-amber-400" />}
                       <span className={cn("tool-status text-[8px] uppercase font-bold",
                         backendLoading.comfyui ? "text-amber-500" :
+                        comfyStartupError && connections.comfyui !== 'connected' ? "text-red-300" :
                         connections.comfyui === 'connected' ? "text-emerald-500" : "text-zinc-600"
                       )}>
-                        {backendLoading.comfyui || connections.comfyui}
+                        {backendLoading.comfyui || (comfyStartupError && connections.comfyui !== 'connected' ? 'failed' : connections.comfyui)}
                       </span>
                     </div>
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => handleBackendToggle('comfyui')}
-                        disabled={comfyActionBusy || !!backendLoading.comfyui || restartingAll || stoppingAll || (connections.comfyui !== 'connected' && !launchReady)}
+                        disabled={comfyActionBusy || !!backendLoading.comfyui || restartingAll || stoppingAll || (!comfyRunning && !launchReady)}
                         className={cn(
                           "flex-1 text-[9px] uppercase tracking-wider font-bold py-1.5 px-2 rounded transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed",
-                          connections.comfyui === 'connected' ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+                          comfyRunning ? "bg-red-500/10 text-red-400 hover:bg-red-500/20" : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
                         )}
                       >
                         {backendLoading.comfyui ? <Loader2 size={10} className="animate-spin" /> : <Power size={10} />}
-                        {backendLoading.comfyui === 'starting' ? 'Starting...' : backendLoading.comfyui === 'stopping' ? 'Stopping...' : connections.comfyui === 'connected' ? 'Stop' : 'Launch'}
+                        {backendLoading.comfyui === 'starting' ? 'Starting...' : backendLoading.comfyui === 'stopping' ? 'Stopping...' : comfyRunning ? 'Stop' : 'Launch'}
                       </button>
                       <button
                         onClick={() => handleCheckConnection('comfyui')}
@@ -1426,6 +1434,9 @@ export const UmbraAppBar = () => {
                         UI
                       </button>
                     </div>
+                    {comfyStartupError && connections.comfyui !== 'connected' ? (
+                      <p role="alert" className="break-words text-[10px] leading-relaxed text-red-300">{comfyStartupError}</p>
+                    ) : null}
                     <button type="button" onClick={() => void handleOpenSetup()} disabled={isRemoteClient}
                       className="w-full rounded bg-white/5 px-2 py-1.5 text-[9px] font-bold uppercase tracking-wider hover:bg-white/10 disabled:opacity-50">
                       Open Umbra Setup

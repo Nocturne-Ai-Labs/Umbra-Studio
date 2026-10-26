@@ -85,6 +85,7 @@ interface AppState {
   setConnectionStatus: (backend: 'comfyui', status: 'connected' | 'disconnected' | 'connecting') => void;
   setComfyLaunchPhase: (phase: ComfyLaunchPhase) => void;
   comfyStartupError: string | null;
+  comfyProcessRunning: boolean;
   comfyToolAction: ToolActionState;
 
   // Backend readiness/health (port/service responding)
@@ -316,6 +317,7 @@ export const useStore = create<AppState>()(
         },
 
         comfyStartupError: null,
+        comfyProcessRunning: false,
         comfyToolAction: comfyToolActions.getState(),
         connections: {
           comfyui: 'disconnected',
@@ -541,6 +543,8 @@ export const useStore = create<AppState>()(
               void comfyToolActions.refresh();
               const comfyStartupError = typeof data.backends?.comfyui?.startup?.error === 'string' ? data.backends.comfyui.startup.error : null;
               if (comfyStartupError !== current.comfyStartupError) set({ comfyStartupError });
+              const comfyProcessRunning = data.backends?.comfyui?.running === true;
+              if (comfyProcessRunning !== current.comfyProcessRunning) set({ comfyProcessRunning });
               const comfyRuntime = reconcileComfyLaunchRuntimeState({
                 connection: current.connections.comfyui,
                 healthy: current.backendHealth.comfyui,
