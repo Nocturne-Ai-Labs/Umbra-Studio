@@ -153,7 +153,7 @@ export function ScannerWorkspace({
   const loadFile = useCallback(async (blob: Blob, filename: string, path?: string) => {
     const epoch = importEpoch.current, controller = new AbortController();
     imports.current.add(controller); setImporting(true); setError(''); setFeedback('');
-    const isVideo = filename.match(/\.(mp4|webm|mov)$/i);
+    const isVideo = filename.match(/\.(mp4|webm|mov|avi|mkv|m4v|flv|wmv)$/i);
     const blobUrl = URL.createObjectURL(blob);
     const nextPath = path || filename;
     const nextPathNormalized = normalizePersistPath(nextPath);
@@ -165,7 +165,7 @@ export function ScannerWorkspace({
     };
 
     try {
-      if (!isVideo) metadata = await extractMetadataFromFile(new File([blob], filename, { type: blob.type || 'image/png' }), controller.signal);
+      metadata = await extractMetadataFromFile(new File([blob], filename, { type: blob.type || (isVideo ? 'video/mp4' : 'image/png') }), controller.signal);
       if (!mounted.current || epoch !== importEpoch.current || !activeRef.current) { URL.revokeObjectURL(blobUrl); return; }
 
       if (!isVideo && scannerPrefs.autoCopyWorkflow && (metadata.workflow || metadata.prompt)) {

@@ -712,10 +712,10 @@ export async function extractMetadataFromFile(file: File, signal?: AbortSignal):
     size: file.size
   };
 
-  // Only process image files
+  // Video container tags are read by the backend too; only the local PNG
+  // fallback is image-specific.
   if (!file.type.startsWith('image/')) {
     metadata.type = 'video';
-    return metadata;
   }
 
   // Prefer backend parser for consistency with saved-output metadata parsing.
@@ -750,6 +750,8 @@ export async function extractMetadataFromFile(file: File, signal?: AbortSignal):
     signal?.throwIfAborted();
     // Fall back to local PNG parser.
   }
+
+  if (metadata.type === 'video') return metadata;
 
   try {
     const buffer = await file.arrayBuffer();

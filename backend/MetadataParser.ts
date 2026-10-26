@@ -108,7 +108,18 @@ export class MetadataParser {
       const height = Number(stream?.height);
       const tags = payload.format?.tags || {};
       const comment = String(tags.comment ?? tags.COMMENT ?? '').trim();
-      const metadata = comment ? { ...result, ...this.parseVideoComment(comment) } : result;
+      // Native ComfyUI video savers write individual container tags rather than
+      // a JSON comment. Use the same supported payloads as image metadata.
+      const supported = new Set(['prompt', 'workflow', 'umbra_api_workflow', 'umbra_power_prompter',
+        'umbra_inpaint', 'umbra_metadata', 'parameters', 'cozyui', 'source_file']);
+      const chunks: Record<string, string> = {};
+      for (const [key, value] of Object.entries(tags)) {
+        const normalized = key.toLowerCase();
+        if (supported.has(normalized) && typeof value === 'string') chunks[normalized] = value;
+      }
+      const taggedMetadata = this.processChunks(chunks);
+      if (taggedMetadata.format === 'unknown') delete taggedMetadata.format;
+      const metadata = { ...result, ...(comment ? this.parseVideoComment(comment) : {}), ...taggedMetadata };
       // Comments and sidecars can describe an earlier render; the encoded stream owns physical dimensions.
       if (Number.isFinite(width) && width > 0) metadata.width = Math.round(width);
       if (Number.isFinite(height) && height > 0) metadata.height = Math.round(height);
