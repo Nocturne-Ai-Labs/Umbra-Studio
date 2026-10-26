@@ -2166,7 +2166,7 @@ export class UmbraUiInpaintService {
                       height: job.height,
                     },
                     sourceName: source.name,
-                    prompt,
+                    prompt: powerPrompterMetadata.prompt,
                     promptSegments: settings.promptSegments,
                     negativePrompt: settings.negativePrompt,
                     loras: settings.loras,
