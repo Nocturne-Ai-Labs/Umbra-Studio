@@ -250,6 +250,14 @@ async function runModelInstall(
     return;
   }
   if (kind === 'data-forge-pixai') {
+    // The packaged CPU bundle deliberately excludes PyTorch. PixAI needs the
+    // separate writable helper venv, including on an otherwise complete install.
+    const helperPython = join(runtimeRoot, 'Runtime', 'PythonHelpers', 'venv',
+      process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python');
+    if (!existsSync(helperPython)) {
+      job.step = 'Preparing PixAI Python environment';
+      await runModelInstall(runtimeRoot, sourceRoot, 'python-helpers', job);
+    }
     job.step = 'Installing PixAI Python dependencies';
     await runScript(runtimeRoot, join(sourceRoot, 'scripts', 'install-pixai-tagger-deps.mjs'), [], job);
     job.step = 'Installing optional PixAI tagger';
