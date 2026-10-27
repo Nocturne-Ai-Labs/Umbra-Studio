@@ -62,6 +62,10 @@ function onboardingButton(text, callback, disabled = false) {
   node.addEventListener('click', () => Promise.resolve().then(callback).catch(modelError)); return node;
 }
 async function saveOnboarding(patch) {
+  // The first language button is usable while the initial inspection is still
+  // running. Do not advance the revision until there is state to update: an
+  // exception here would leave every subsequent load waiting for an unsaved revision.
+  if (!onboardingData) await loadOnboarding();
   const revision = ++onboardingRevision;
   const previousState = { ...onboardingData.state };
   Object.assign(onboardingData.state, patch);
