@@ -1,5 +1,6 @@
 import { readUmbraProcessIdentity, processIdentityMatches, processIdentityBelongsToRoot, type UmbraProcessIdentity } from './umbraProcessIdentity';
 import { createConnection } from 'node:net';
+import { inspectLoopbackListeners, listenerHoldMessage } from './loopbackListener';
 import { inspectUmbraRuntimeHealth } from './umbraRuntimeHealth';
 import { readUmbraShutdownMarker, isUmbraShutdownMarkerForProcess } from './umbraShutdownMarker';
 
@@ -29,7 +30,8 @@ export async function shutdownUmbraForInstallation(options: {
   const health = await inspectUmbraRuntimeHealth(options.runtimeRoot, port, host);
   if (health === 'foreign') throw new Error('The Umbra listener belongs to another installation or cannot be verified. No installation started.');
   if (health === 'absent') {
-    if (!await isUmbraInstallationListenerClosed(host, port)) throw new Error('The Umbra listener is still in use. No installation started.');
+    const probes = await inspectLoopbackListeners(port);
+    if (probes.some(probe => probe.state !== 'closed')) throw new Error(listenerHoldMessage(probes));
     const marker = readUmbraShutdownMarker(options.runtimeRoot);
     const pids = marker
       ? [marker.serverPid, ...marker.managedProcessPids, marker.launcherPid || 0]

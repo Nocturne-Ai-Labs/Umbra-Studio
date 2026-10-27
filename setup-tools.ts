@@ -42,6 +42,7 @@ import { installAIToolkitPythonDependencies, updateAIToolkitTorchStack, verifyAI
 import { restoreComfyAttention } from './setup/ComfyAttentionUpgrade';
 import { isComfyInstallScaffold } from './setup/ComfyInstallScaffold';
 import { resolveHostNodeRuntime } from './shared/hostNodeRuntime';
+import { verifyPythonHelperInstallPath } from './setup/PythonHelperPath';
 
 const ROOT_DIR = process.env.UMBRA_ROOT || import.meta.dir;
 const MANAGED_SOURCE_ROOT = process.env.UMBRA_SOURCE_ROOT || import.meta.dir;
@@ -907,6 +908,13 @@ function setupUmbraPythonHelpersVenv(): boolean {
         }
     }
 
+    const pathCheck = verifyPythonHelperInstallPath(py, PYTHON_HELPERS_DIR);
+    if (!pathCheck.ok) {
+        return failWithVerify('python-helper-install-path-failed',
+            'Python cannot create helper files in this folder.',
+            [`Helper path: ${PYTHON_HELPERS_DIR}`, pathCheck.detail],
+            ['Close Setup and extract Umbra into a short, writable folder such as C:\\Umbra. Open Setup from that folder and retry Python Helpers. Keep your existing installation until the new location works.']);
+    }
     log('->', 'Installing Umbra Python helper packages...');
     const packages = PYTHON_HELPER_PACKAGES.map((pkg) => `"${pkg}"`).join(' ');
     if (!runCmd(`"${py}" -m pip install --upgrade pip ${packages}`, PYTHON_HELPERS_DIR)) {

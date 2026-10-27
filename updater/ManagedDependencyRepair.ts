@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { createConnection } from 'node:net';
+import { inspectLoopbackListeners, listenerHoldMessage } from '../shared/loopbackListener';
 import { join } from 'node:path';
 import { resolveComfyEndpoint } from '../backend/comfyEndpoint';
 import { compareUmbraVersions } from '../shared/appUpdate';
@@ -137,15 +137,7 @@ export function readManagedRepairState(runtimeRoot: string): ManagedRepairState 
 }
 
 async function loopbackPortIsClosed(port: number): Promise<boolean> {
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return false;
-  const probes = await Promise.all(['127.0.0.1', '::1'].map((host) => new Promise<boolean>((resolveStopped) => {
-    const socket = createConnection({ host, port });
-    socket.setTimeout(1_500);
-    socket.once('connect', () => { socket.destroy(); resolveStopped(false); });
-    socket.once('timeout', () => { socket.destroy(); resolveStopped(false); });
-    socket.once('error', (error: NodeJS.ErrnoException) => { socket.destroy(); resolveStopped(error.code === 'ECONNREFUSED'); });
-  })));
-  return probes.every(Boolean);
+  return (await inspectLoopbackListeners(port)).every(probe => probe.state === 'closed');
 }
 
 export function managedComfyProcessBelongsToRoot(runtimeRoot: string, commandLine: string, executablePath = ''): boolean {
@@ -213,12 +205,15 @@ export async function assertManagedDependencyRepairIdle(options: {
     }
     return;
   }
-  const appStopped = await (options.umbraStoppedProof || (() => {
+  let listenerDetail = '';
+  const appStopped = await (options.umbraStoppedProof || (async () => {
     const origin = new URL(options.origin);
     if (origin.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(origin.hostname)) return Promise.resolve(false);
-    return loopbackPortIsClosed(Number(origin.port || 80));
+    const probes = await inspectLoopbackListeners(Number(origin.port || 80));
+    listenerDetail = listenerHoldMessage(probes);
+    return probes.every(probe => probe.state === 'closed');
   }))();
-  if (!appStopped) throw new Error('Dependency repair is held: the Umbra listener is still present or cannot be verified stopped. Refresh its status and queue before retrying.');
+  if (!appStopped) throw new Error(listenerDetail || 'Installation paused: Studio shutdown could not be verified. Close Studio and retry; no installation files were changed.');
   const stopped = await (options.stoppedProof || (() => proveManagedRuntimeStopped(options.runtimeRoot)))();
   if (!stopped) throw new Error('Dependency repair is held: a ComfyUI process/listener may still be using these files, or its absence could not be verified.');
   if (!options.serverPid) return;

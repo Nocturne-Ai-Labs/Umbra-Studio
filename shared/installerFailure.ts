@@ -15,7 +15,9 @@ export function parseInstallerFailure(line: string): InstallerFailure | null {
 export function installerFailureMessage(lines: string[], code: number): string {
   for (const line of [...lines].reverse()) {
     const failure = parseInstallerFailure(line);
-    if (failure) return [...(failure.details.length ? failure.details : [failure.title]), ...failure.nextSteps].join(' ');
+    // The compact Setup status may truncate this message. Lead with the reason
+    // and recovery action; paths and tracebacks remain in the saved installer log.
+    if (failure) return [failure.title, ...failure.nextSteps].join(' ');
   }
   return `Installer exited with code ${code}. Review the setup log and retry.`;
 }
