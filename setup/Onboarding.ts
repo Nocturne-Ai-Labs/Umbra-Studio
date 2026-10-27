@@ -1,3 +1,5 @@
+import { inspectFizgig } from './Fizgig';
+import { TRAINER_DESCRIPTIONS } from '../shared/fizgig';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync, readdirSync, realpathSync, openSync, readSync, closeSync, createReadStream } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -11,7 +13,7 @@ import { inspectComfyPython, inspectAIToolkitPython } from './ComfyPythonRuntime
 import { comfyPythonUpgradePending, toolPythonUpgradePending } from '../shared/toolMaintenanceLock';
 
 export type OnboardingState = {
-  schemaVersion: 1; languageSaved: boolean; training: 'undecided' | 'skip' | 'install';
+  schemaVersion: 1; languageSaved: boolean; training: 'undecided' | 'skip' | 'install'; trainers?: ('aitoolkit' | 'fizgig')[];
   profiles: string[]; supportProfiles: string[]; checkpoint: string; stage: number;
   nodesFingerprint?: string; verificationFingerprint?: string; verifiedAt?: string;
   checkpointVerification?: { path: string; sha256: string; identity: ReturnType<typeof identity> };
@@ -29,7 +31,7 @@ function assertLocalPath(root: string, target: string) {
 }
 export function assertOnboardingPaths(root: string) {
   const canonicalRoot = realpathSync(root);
-  for (const path of ['User', 'User/Config', 'User/Config/settings.json', 'User/Config/onboarding.json', 'Tools', 'Tools/ComfyUI', 'Tools/ComfyUI/models', 'Tools/ComfyUI/custom_nodes', 'Tools/AI-Toolkit']) {
+  for (const path of ['User', 'User/Config', 'User/Config/settings.json', 'User/Config/onboarding.json', 'Tools', 'Tools/ComfyUI', 'Tools/ComfyUI/models', 'Tools/ComfyUI/custom_nodes', 'Tools/AI-Toolkit', 'Tools/Fizgig']) {
     const target = resolve(root, path);
     if (existsSync(target) && !contained(canonicalRoot, realpathSync(target))) throw new Error('Setup paths must remain inside this Umbra installation.');
   }
@@ -48,7 +50,7 @@ export function readOnboarding(root: string): OnboardingState {
       || !Array.isArray(saved.supportProfiles) || !saved.supportProfiles.every((p: unknown) => typeof p === 'string')
       || typeof saved.checkpoint !== 'string' || !Number.isInteger(saved.stage) || saved.stage < 0 || saved.stage > 6) return initial;
     const state: OnboardingState = { ...initial, languageSaved: saved.languageSaved, training: saved.training,
-      profiles: saved.profiles, supportProfiles: saved.supportProfiles, checkpoint: saved.checkpoint, stage: saved.stage };
+      trainers: Array.isArray(saved.trainers) ? saved.trainers.filter((id: string) => ['aitoolkit', 'fizgig'].includes(id)) : ['aitoolkit'], profiles: saved.profiles, supportProfiles: saved.supportProfiles, checkpoint: saved.checkpoint, stage: saved.stage };
     if (state.checkpoint && (!/^(checkpoints|diffusion_models)\//.test(state.checkpoint) || state.checkpoint.split(/[\\/]/).includes('..'))) state.checkpoint = '';
     for (const field of ['nodesFingerprint', 'verificationFingerprint', 'verifiedAt'] as const) if (typeof saved[field] === 'string') state[field] = saved[field];
     if (saved.checkpointVerification && typeof saved.checkpointVerification.path === 'string'
@@ -67,8 +69,12 @@ export function writeOnboarding(root: string, state: OnboardingState) {
 }
 export function updateOnboarding(source: string, root: string, body: Record<string, unknown>) {
   const state = readOnboarding(root);
+  if (body.trainers !== undefined) {
+    if (!Array.isArray(body.trainers) || body.trainers.some(id => !['aitoolkit', 'fizgig'].includes(id))) throw new Error('Choose AI Toolkit, Fizgig, or both.');
+    state.trainers = [...new Set(body.trainers)] as ('aitoolkit' | 'fizgig')[];
+  }
   if (body.training !== undefined) {
-    if (!['skip', 'install'].includes(String(body.training))) throw new Error('Choose whether to install AI Toolkit.');
+    if (!['skip', 'install'].includes(String(body.training))) throw new Error('Choose whether to install training tools.');
     state.training = body.training as OnboardingState['training'];
   }
   for (const [field, pack] of [['profiles', 'requirements'], ['supportProfiles', 'support']] as const) {
@@ -218,19 +224,22 @@ export async function inspectOnboarding(source: string, root: string) {
   const generationComplete = state.profiles.length === 1 && generationProfiles.has(state.profiles[0]) && generation.complete && !!checkpoint && validCheckpoint(root, checkpoint);
   const trainingPython = inspectAIToolkitPython(join(root, 'Tools', 'AI-Toolkit'));
   const trainingAssets = ['ui/.next/BUILD_ID', 'ui/dist/cron/worker.js', 'ui/.umbra_ui_built'].every(path => existsSync(join(root, 'Tools', 'AI-Toolkit', path)));
-  const trainingComplete = state.training === 'skip' || state.training === 'install' && existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py'))
+  const aiToolkitComplete = existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py'))
     && trainingAssets && trainingPython.healthy && !trainingPython.multipleEnvironments && aiToolkitRequirementsVerified(join(root, 'Tools', 'AI-Toolkit')) && !trainingPython.upgradeAvailable && !toolPythonUpgradePending(root, 'aitoolkit');
+  const fizgig = inspectFizgig(root);
+  const trainers = state.trainers ?? ['aitoolkit'];
+  const trainingComplete = state.training === 'skip' || state.training === 'install' && trainers.length > 0 && trainers.every(id => id === 'fizgig' ? fizgig.ready : aiToolkitComplete);
   const media = dependencies.mediaTools;
-  const fingerprint = createHash('sha256').update(JSON.stringify({ media: media.tools.map(tool => ({ tool: tool.tool, source: tool.source, ready: tool.ready, version: tool.version })), state: { languageSaved: state.languageSaved, training: state.training, profiles: state.profiles, supportProfiles: state.supportProfiles, checkpoint },
+  const fingerprint = createHash('sha256').update(JSON.stringify({ media: media.tools.map(tool => ({ tool: tool.tool, source: tool.source, ready: tool.ready, version: tool.version })), state: { languageSaved: state.languageSaved, training: state.training, trainers, fizgigReady: fizgig.ready, profiles: state.profiles, supportProfiles: state.supportProfiles, checkpoint },
     trainingPython: [trainingPython.version, trainingPython.healthy, trainingAssets, identity(join(root, 'Tools', 'AI-Toolkit', 'ui/.next/BUILD_ID')),  toolPythonUpgradePending(root, 'aitoolkit'), aiToolkitRequirementsFingerprint(join(root, 'Tools', 'AI-Toolkit')), identity(join(root, 'Tools', 'AI-Toolkit', trainingPython.environment, 'pyvenv.cfg'))], core: [core.installedCommit, core.version, core.frontendVersion, core.pythonDependencies.verified, python.version, identity(join(root, 'Tools', 'ComfyUI', python.environment, 'pyvenv.cfg'))], nodesFingerprint, support, generation, checkpointIdentity: checkpoint && identity(join(root, 'Tools', 'ComfyUI', 'models', checkpoint)), checkpointVerification: state.checkpointVerification })).digest('hex');
   const checks = [state.languageSaved, comfyComplete, trainingComplete, nodesComplete, support.complete, generationComplete];
   const ready = checks.every(Boolean) && media.ready && checkpointIntegrity && state.verificationFingerprint === fingerprint;
-  const details = ['Save your preferred language.', 'Install and verify managed ComfyUI and its Python environment.', 'Install AI Toolkit for training, or skip it.', 'Install and verify custom nodes.', 'Install or verify selected support models.', 'Select a model family and a compatible generation checkpoint.', 'Verify the selected installation.'];
+  const details = ['Save your preferred language.', 'Install and verify managed ComfyUI and its Python environment.', 'Install AI Toolkit, Fizgig, or both for training, or skip this step.', 'Install and verify custom nodes.', 'Install or verify selected support models.', 'Select a model family and a compatible generation checkpoint.', 'Verify the selected installation.'];
   const stages = ['language', 'comfyui', 'training', 'nodes', 'support', 'generation', 'ready'].map((id, index) => ({ id, complete: index === 6 ? ready : checks[index], detail: details[index] }));
   const issues = stages.slice(0, 6).filter(stage => !stage.complete).map(stage => stage.detail);
   const issueCodes = stages.slice(0, 6).filter(stage => !stage.complete).map(stage => stage.id);
   if (state.profiles.length && !checkpoint) { issueCodes.push('checkpoint'); issues.push('Add a compatible generation checkpoint in Umbra Model Manager; prerequisites alone do not include one.'); }
   if (!media.ready) { issueCodes.push('media'); issues.push('Install or repair FFmpeg and ffprobe.'); }
-  return { success: true, state, stages, issueCodes, media, trainingPython: { ...trainingPython, installed: existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py')), upgradeAvailable: trainingPython.upgradeAvailable || toolPythonUpgradePending(root, 'aitoolkit') }, python: { installed: core.installed, version: python.version, healthy: python.healthy, target: python.targetVersion, upgradeAvailable: python.upgradeAvailable || pythonPending }, selectedCheckpoint: checkpoint, checkpointIntegrity, catalog: { ...catalog, checkpoints, generationProfiles: [...generationProfiles] }, ready, issues, fingerprint, nodesFingerprint,
+  return { success: true, state, trainers: { aitoolkit: { ready: aiToolkitComplete, description: TRAINER_DESCRIPTIONS.aitoolkit }, fizgig: { ...fizgig, description: TRAINER_DESCRIPTIONS.fizgig } }, stages, issueCodes, media, trainingPython: { ...trainingPython, installed: existsSync(join(root, 'Tools', 'AI-Toolkit', 'run.py')), upgradeAvailable: trainingPython.upgradeAvailable || toolPythonUpgradePending(root, 'aitoolkit') }, python: { installed: core.installed, version: python.version, healthy: python.healthy, target: python.targetVersion, upgradeAvailable: python.upgradeAvailable || pythonPending }, selectedCheckpoint: checkpoint, checkpointIntegrity, catalog: { ...catalog, checkpoints, generationProfiles: [...generationProfiles] }, ready, issues, fingerprint, nodesFingerprint,
     qualification: 'Installation files and model integrity verified. Launch managed ComfyUI from Umbra; GPU execution and image quality have not been tested.' };
 }

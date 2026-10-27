@@ -290,3 +290,19 @@ source repositories.
 
 Models and upstream tools retain their own licenses and hardware requirements.
 Review those projects before redistribution or commercial deployment.
+
+
+### Optional Fizgig trainer
+
+Umbra Setup offers AI Toolkit, Fizgig, or both. Fizgig installs from the official
+[shootthesound/Fizgig repository](https://github.com/shootthesound/Fizgig),
+licensed Apache-2.0, into `Tools/Fizgig` with its own Python 3.12 environment.
+The reviewed dependency recipe uses NVIDIA CUDA PyTorch; other hardware is not
+qualified by this integration. Models and their licenses are selected separately.
+
+Data Forge > Training embeds the installed trainer's native local interface.
+Fizgig defaults to loopback port 8680 (`UMBRA_FIZGIG_PORT` can select a free port).
+The integration is host-only and does not expose Fizgig through Umbra Remote.
+Finish training and close Fizgig before updating or repairing it. Maintenance
+refuses active workers or an occupied/unverifiable port; existing environments
+and user data are retained. Closing Studio does not terminate Fizgig training.

@@ -32,7 +32,7 @@ including Canvas and video generation qualification, and setup requirements.
 | **Media tools** | Background removal, manual or model-assisted censoring, watermarking, upscaling, visual analysis and GIF/media conversion, with their required prerequisites. |
 | **Video** | DaSiWa MiniMax H3 and LTX workflows, plus optional upstream Longshot Studio and Frame Forge interfaces. Video remains Beta/experimental; see the workflow notes below. |
 | **Umbra Remote** | Supported Beta phone/tablet layouts for compatible image workflows, mobile Gallery and Extras, plus simplified DaSiWa text/image-to-video. |
-| **Setup and managed tools** | Install and maintain ComfyUI, AI Toolkit, custom nodes and optional models; check readiness and update portable Windows/Linux installations. |
+| **Setup and managed tools** | Install and maintain ComfyUI, AI Toolkit, Fizgig, custom nodes and optional models; check readiness and update portable Windows/Linux installations. |
 
 Controls depend on the selected pipeline and installed resources; not every model
 supports every stage. See [Supported Models](MODELS.md) for the shipped workflow
@@ -332,7 +332,7 @@ saves your progress and follows this order:
 1. Choose and save English, Japanese, Simplified Chinese, Korean, or German.
    The guided instructions change immediately to the selected language.
 2. Install managed ComfyUI, including its Python and CUDA/PyTorch environment.
-3. Install AI Toolkit if you want to train models, or skip it.
+3. Choose AI Toolkit, Fizgig, or both for training, or skip training.
 4. Install custom nodes separately from model downloads.
 5. Review and install support models. Optional manual models show their original
    download link and the exact destination folder.
@@ -348,7 +348,7 @@ saves your progress and follows this order:
 
 Existing valid model files are retained, supported partial downloads resume, and
 only one installation or application update runs at a time. **Advanced > Tools** retains
-ComfyUI and AI Toolkit repairs, CUDA/PyTorch updates, custom nodes, SageAttention,
+ComfyUI, AI Toolkit and Fizgig maintenance, CUDA/PyTorch updates, custom nodes, SageAttention,
 and ComfyUI version switching. **Advanced > Models** retains optional Data Forge packs and
 model-family downloads. **Updates** lists newer portable releases and shows a
 progress bar, transferred bytes, and installation stages. Reopening Setup after
@@ -862,3 +862,13 @@ Umbra Studio is owned and published by **Nocturne AI Labs** and developed by
 Use the **IMG2IMG** workspace selector to choose **Reference2IMG**, select MOSS Image, import a reference and describe the new image. This conditions MOSS through Qwen3.5 vision while starting from an empty latent; it does not edit or preserve source pixels. Ordinary IMG2IMG remains available in the same selector.
 
 Install **MOSS Image — Reference2IMG** in Umbra Setup and restart ComfyUI when ready. This optional extension reuses the MOSS Base/SFT diffusion model and FLUX2 VAE. Its Qwen3.5 encoder must contain working vision weights; some FP8 encoders need a compatible BF16, FP16 or INT8 alternative. Reference weight adjusts the input pixels before encoding; vision megapixels controls reference downsampling independently of output size. Both controls are saved in presets. Generation uses the shared queue, LoRA stack, sampling, detailer and output controls.
+
+### Optional Fizgig training workspace
+
+Install Fizgig through **Umbra Setup > Guided Setup > Training** or
+**Advanced > Tools > Fizgig**. Data Forge > Training shows the installed trainers
+and opens Fizgig's unchanged native interface. AI Toolkit remains available.
+Fizgig has its own Python environment and local port (8680 by default), preserves
+training when Studio closes, and requires training to finish before maintenance.
+See [requirements](REQUIREMENTS.md#optional-fizgig-trainer) for hardware and
+installation details. This integration is available on the host PC.

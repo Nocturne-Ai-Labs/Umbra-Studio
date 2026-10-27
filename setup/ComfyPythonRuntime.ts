@@ -102,6 +102,7 @@ function checkedCommand(command: string, args: string[], cwd?: string) {
 
 export function ensureComfyPython(root: string, log: (line: string) => void) { return ensureManagedPython(root, '3.13', 'ComfyUI', log); }
 export function ensureAIToolkitPython(root: string, log: (line: string) => void) { return ensureManagedPython(root, '3.12', 'AI Toolkit', log); }
+export function ensureFizgigPython(root: string, log: (line: string) => void) { return ensureManagedPython(root, '3.12', 'Fizgig', log); }
 export function ensureFrameForgePython(root: string, log: (line: string) => void) { return ensureManagedPython(root, '3.12', 'Frame Forge', log); }
 
 async function ensureManagedPython(root: string, version: '3.12' | '3.13', tool: string, log: (line: string) => void): Promise<string> {

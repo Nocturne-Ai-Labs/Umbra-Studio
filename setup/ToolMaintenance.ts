@@ -1,16 +1,19 @@
+import { inspectFizgig } from './Fizgig';
+import { TRAINER_DESCRIPTIONS } from '../shared/fizgig';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { inspectComfyPython, inspectAIToolkitPython } from './ComfyPythonRuntime';
 
-export type MaintenanceTool = 'comfyui' | 'aitoolkit';
-const folders = { comfyui: 'ComfyUI', aitoolkit: 'AI-Toolkit' };
+export type MaintenanceTool = 'comfyui' | 'aitoolkit' | 'fizgig';
+const folders = { comfyui: 'ComfyUI', aitoolkit: 'AI-Toolkit', fizgig: 'Fizgig' };
 
 export function toolMaintenanceArgs(tool: unknown, action: unknown, ref: unknown = ''): string[] {
-  if (tool !== 'comfyui' && tool !== 'aitoolkit') throw new Error('Choose ComfyUI or AI Toolkit.');
+  if (tool !== 'comfyui' && tool !== 'aitoolkit' && tool !== 'fizgig') throw new Error('Choose ComfyUI, AI Toolkit, or Fizgig.');
   if (action === 'install') return [tool];
   if (action === 'update') return [`update-${tool}`];
+  if (tool === 'fizgig') throw new Error('Use Install / Repair or Update for Fizgig.');
   if (action === 'update_python') return [`update-python-${tool}`];
   if (action === 'update_pytorch') return [`update-pytorch-${tool}`];
   if (tool === 'comfyui') {
@@ -26,11 +29,12 @@ export function toolMaintenanceArgs(tool: unknown, action: unknown, ref: unknown
 
 export function inspectToolMaintenance(root: string) {
   return (Object.keys(folders) as MaintenanceTool[]).map(id => {
+    if (id === 'fizgig') { const tool = inspectFizgig(root); return { id, name: 'Fizgig', ...tool, description: TRAINER_DESCRIPTIONS.fizgig, commit: '', python: null }; }
     const path = join(root, 'Tools', folders[id]);
     const installed = existsSync(join(path, id === 'comfyui' ? 'main.py' : 'run.py'));
     const managedGit = join(root, 'Runtime', 'Git', 'cmd', 'git.exe');
     const git = installed ? spawnSync(process.platform === 'win32' && existsSync(managedGit) ? managedGit : 'git', ['-C', path, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', windowsHide: true, timeout: 3000 }) : null;
-    return { id, name: id === 'comfyui' ? 'ComfyUI' : 'AI Toolkit', path, installed, commit: git?.status === 0 ? git.stdout.trim() : '',
+    return { id, description: id === 'aitoolkit' ? TRAINER_DESCRIPTIONS.aitoolkit : '', name: id === 'comfyui' ? 'ComfyUI' : 'AI Toolkit', path, installed, commit: git?.status === 0 ? git.stdout.trim() : '',
       python: installed ? (id === 'comfyui' ? inspectComfyPython(path) : inspectAIToolkitPython(path)) : null };
   });
 }

@@ -1,3 +1,5 @@
+import { inspectUmbraRuntimeHealth } from '../shared/umbraRuntimeHealth';
+import { assertFizgigStopped } from './Fizgig';
 import { SetupJobLogStore, redactSetupOutput, validSetupJobId, MAX_SETUP_LOG_LINES, type SetupLogStatus } from './SetupJobLogs';
 import { createSetupInspector } from './SetupInspection';
 import { launchVisibleWindowsUmbra } from '../shared/visibleUmbraLaunch';
@@ -46,7 +48,7 @@ export type SetupJobState = {
   error: string;
   log?: SetupLogStatus;
   cancellable?: boolean;
-  maintenanceTool?: 'comfyui' | 'aitoolkit';
+  maintenanceTool?: 'comfyui' | 'aitoolkit' | 'fizgig';
   cancelRequested?: boolean;
   cancelInProcess?: boolean;
   progress?: { stage?: string; file?: string; bytes?: number; totalBytes?: number; completedFiles?: number; totalFiles?: number };
@@ -207,6 +209,7 @@ export async function runScript(runtimeRoot: string, scriptPath: string, args: s
 }
 
 async function runManagedToolScript(runtimeRoot: string, sourceRoot: string, args: string[], job: SetupJobState) {
+  if (args[0] === 'fizgig' || args[0] === 'update-fizgig') { await runScript(runtimeRoot, join(sourceRoot, 'setup-tools.ts'), args, job, '', sourceRoot); return; }
   // Old interpreter constraints cannot be applied to a fresh Python ABI. The migration
   // snapshots optional attention packages and rolls back if they cannot be restored.
   const selection = managedMaintenanceAction(args[0] || '');
@@ -386,6 +389,7 @@ async function main() {
     if (installationPreparing) throw new Error('Another installation is preparing. Wait for it to finish.');
     installationPreparing = true;
     try {
+      await assertFizgigStopped(runtimeRoot);
       await shutdownUmbraForInstallation({ runtimeRoot, origin: umbraOrigin(), serverPid: session?.serverPid, launcherPid: session?.launcherPid,
         onProgress: message => { if (job) { job.step = message; appendOutput(job, message); } } });
       await assertDependencyIdle();
@@ -394,7 +398,7 @@ async function main() {
   };
   let updateController: Awaited<ReturnType<typeof createUmbraUpdateController>> | null = null;
   const inspector = createSetupInspector({ entrypoint: Bun.main, runtimeRoot, sourceRoot });
-  const setupBusy = () => installationPreparing || activeJob?.phase === 'running' || jobLogs.hasLiveJobs() || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit');
+  const setupBusy = () => installationPreparing || activeJob?.phase === 'running' || jobLogs.hasLiveJobs() || !!readToolMaintenance(runtimeRoot, 'comfyui') || !!readToolMaintenance(runtimeRoot, 'aitoolkit') || !!readToolMaintenance(runtimeRoot, 'fizgig');
   const hasRunningInstaller = () => installationPreparing || activeJob?.phase === 'running' || jobLogs.hasLiveJobs() || updateController?.isBusy() === true;
   const closeSetup = () => { inspector.close(); updateController?.close(); server.stop(true); process.exit(0); };
   process.once('exit', () => inspector.close());
@@ -518,15 +522,16 @@ async function main() {
           const release = claimToolMaintenance(runtimeRoot, String(body.tool));
           releaseMaintenance = release;
           try {
-            const health = await fetch(`${umbraOrigin()}/api/healthz`, { signal: AbortSignal.timeout(1500) }).then(response => response.json()).catch(() => null) as any;
-            if (health && health.runtimeRoot !== runtimeRoot) throw new Error('The Umbra endpoint belongs to another installation.');
-            if (health) {
+            const health = await inspectUmbraRuntimeHealth(runtimeRoot, Number(new URL(umbraOrigin()).port), session?.appHost);
+            if (health === 'foreign') throw new Error('The Umbra endpoint belongs to another installation or could not be verified.');
+            if (health === 'owned') {
               const detect = await fetch(`${umbraOrigin()}/api/tools/detect`, { signal: AbortSignal.timeout(1500) }).then(response => response.json()) as any;
               const action = detect[body.tool as string]?.activeAction;
               if (action && action.ownerPid !== process.pid) throw new Error('Finish the active Umbra tool operation before maintenance.');
             }
-            await prepareForInstallation();
+            if (body.tool !== 'fizgig') await prepareForInstallation();
             if (body.tool === 'comfyui') await assertDependencyIdle();
+            else if (body.tool === 'fizgig') await assertFizgigStopped(runtimeRoot);
             else await assertAIToolkitStopped(runtimeRoot);
           } catch (error) { release(); throw error; }
           if (hasRunningInstaller()) { release(); return json({ success: false, error: 'Finish the current installation first.' }, 409); }

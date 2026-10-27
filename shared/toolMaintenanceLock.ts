@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 function lockPath(root: string, tool: string) {
-  if (!['comfyui', 'aitoolkit', 'frameforge'].includes(tool)) throw new Error('Unsupported maintenance tool.');
+  if (!['comfyui', 'aitoolkit', 'frameforge', 'fizgig'].includes(tool)) throw new Error('Unsupported maintenance tool.');
   return join(root, 'User', 'Config', `setup-${tool}-maintenance.json`);
 }
 

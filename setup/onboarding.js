@@ -1,6 +1,6 @@
 // Guided Setup uses the same authenticated jobs as the maintenance tabs.
 const ONBOARDING_COPY = {
-  en: ['Guided setup', 'Set up Umbra Studio in order. Your progress is saved; completed steps can be checked again.', 'Language', 'ComfyUI', 'Training (optional)', 'Custom nodes', 'Support models', 'Generation models', 'Ready', 'Choose and save your language before continuing.', 'Install the generation engine and its managed Python environment.', 'AI Toolkit is needed only for training models. You can install it later.', 'Install the nodes used by Umbra workflows.', 'Choose support models for the workflows you want to use.', 'Choose a model family and review its files and licenses. Some families also need a separate checkpoint.', 'Check the installed files and nodes. This does not generate an image.', 'Back', 'Continue', 'Install ComfyUI', 'Install AI Toolkit', 'Skip training', 'Install custom nodes', 'Install selected files', 'Verify installed files', 'Check readiness', 'Open Umbra Studio', 'Complete', 'Pending', 'Working…', 'Selected download', 'Hugging Face token (optional, session only)', 'Accept gated model licenses on Hugging Face before downloading.', 'Manual download', 'Place {file} in {folder} inside your Umbra Studio folder. Setup does not download this model.', 'Review each model’s license before downloading; Umbra’s license does not grant model usage rights.', 'Umbra is ready for the selected configuration.', 'Resolve these items to finish setup:', 'Refresh status', 'Optional models can be added later in Models.', 'Check the current step before continuing.'],
+  en: ['Guided setup', 'Set up Umbra Studio in order. Your progress is saved; completed steps can be checked again.', 'Language', 'ComfyUI', 'Training (optional)', 'Custom nodes', 'Support models', 'Generation models', 'Ready', 'Choose and save your language before continuing.', 'Install the generation engine and its managed Python environment.', 'Training tools are optional. Choose AI Toolkit, Fizgig, or both; you can install them later.', 'Install the nodes used by Umbra workflows.', 'Choose support models for the workflows you want to use.', 'Choose a model family and review its files and licenses. Some families also need a separate checkpoint.', 'Check the installed files and nodes. This does not generate an image.', 'Back', 'Continue', 'Install ComfyUI', 'Install AI Toolkit', 'Skip training', 'Install custom nodes', 'Install selected files', 'Verify installed files', 'Check readiness', 'Open Umbra Studio', 'Complete', 'Pending', 'Working…', 'Selected download', 'Hugging Face token (optional, session only)', 'Accept gated model licenses on Hugging Face before downloading.', 'Manual download', 'Place {file} in {folder} inside your Umbra Studio folder. Setup does not download this model.', 'Review each model’s license before downloading; Umbra’s license does not grant model usage rights.', 'Umbra is ready for the selected configuration.', 'Resolve these items to finish setup:', 'Refresh status', 'Optional models can be added later in Models.', 'Check the current step before continuing.'],
   ja: ['セットアップガイド', '順番に Umbra Studio を設定します。進行状況は保存され、完了した手順も再確認できます。', '言語', 'ComfyUI', '学習（任意）', 'カスタムノード', '補助モデル', '生成モデル', '準備完了', '最初に言語を選択して保存してください。', '生成エンジンと専用 Python 環境をインストールします。', 'AI Toolkit はモデル学習にのみ必要です。後でインストールできます。', 'Umbra のワークフローで使用するノードをインストールします。', '使用するワークフローの補助モデルを選びます。', 'モデル系列を選び、ファイルとライセンスを確認してください。別途チェックポイントが必要な系列もあります。', 'ファイルとノードを確認します。画像は生成しません。', '戻る', '次へ', 'ComfyUI をインストール', 'AI Toolkit をインストール', '学習をスキップ', 'カスタムノードをインストール', '選択ファイルをインストール', 'ファイルを検証', '準備状況を確認', 'Umbra Studio を開く', '完了', '未完了', '処理中…', '選択したダウンロード', 'Hugging Face トークン（任意、このセッションのみ）', 'ダウンロード前に Hugging Face で制限付きモデルのライセンスに同意してください。', '手動ダウンロード', 'Umbra Studio フォルダー内の {folder} に {file} を配置してください。Setup はこのモデルをダウンロードしません。', 'ダウンロード前に各モデルのライセンスを確認してください。Umbra のライセンスはモデルの使用権を付与しません。', '選択した構成の準備が完了しました。', 'セットアップを完了するには以下を解決してください：', '状態を更新', '任意のモデルは後で Models から追加できます。', '次へ進む前に現在の手順を確認してください。'],
   'zh-CN': ['引导设置', '按顺序设置 Umbra Studio。进度会保存，已完成的步骤可以重新检查。', '语言', 'ComfyUI', '训练（可选）', '自定义节点', '辅助模型', '生成模型', '就绪', '请先选择并保存语言，然后继续。', '安装生成引擎及其专用 Python 环境。', 'AI Toolkit 仅在训练模型时需要，可稍后安装。', '安装 Umbra 工作流使用的节点。', '选择所需工作流的辅助模型。', '选择模型系列并查看文件和许可证。部分系列还需要单独的检查点。', '检查已安装的文件和节点，不会生成图像。', '返回', '继续', '安装 ComfyUI', '安装 AI Toolkit', '跳过训练', '安装自定义节点', '安装所选文件', '验证已安装文件', '检查就绪状态', '打开 Umbra Studio', '已完成', '待完成', '处理中…', '所选下载', 'Hugging Face 令牌（可选，仅本次会话）', '下载前请在 Hugging Face 接受受限模型的许可证。', '手动下载', '请将 {file} 放入 Umbra Studio 文件夹中的 {folder}。Setup 不会下载此模型。', '下载前请查看每个模型的许可证；Umbra 的许可证不授予模型使用权。', '所选配置已就绪。', '请解决以下事项以完成设置：', '刷新状态', '可选模型可稍后在 Models 中添加。', '继续前请检查当前步骤。'],
   ko: ['단계별 설정', 'Umbra Studio를 순서대로 설정합니다. 진행 상황은 저장되며 완료한 단계도 다시 확인할 수 있습니다.', '언어', 'ComfyUI', '학습 (선택 사항)', '사용자 노드', '보조 모델', '생성 모델', '준비 완료', '계속하기 전에 언어를 선택하고 저장하세요.', '생성 엔진과 전용 Python 환경을 설치합니다.', 'AI Toolkit은 모델 학습에만 필요합니다. 나중에 설치할 수 있습니다.', 'Umbra 워크플로에 필요한 노드를 설치합니다.', '사용할 워크플로의 보조 모델을 선택하세요.', '모델 계열을 선택하고 파일 및 라이선스를 확인하세요. 일부 계열은 별도 체크포인트가 필요합니다.', '설치한 파일과 노드를 확인합니다. 이미지를 생성하지 않습니다.', '뒤로', '계속', 'ComfyUI 설치', 'AI Toolkit 설치', '학습 건너뛰기', '사용자 노드 설치', '선택 파일 설치', '설치 파일 검증', '준비 상태 확인', 'Umbra Studio 열기', '완료', '대기', '작업 중…', '선택한 다운로드', 'Hugging Face 토큰 (선택 사항, 현재 세션만)', '다운로드 전에 Hugging Face에서 제한 모델의 라이선스에 동의하세요.', '수동 다운로드', 'Umbra Studio 폴더 안의 {folder}에 {file}을 넣으세요. Setup은 이 모델을 다운로드하지 않습니다.', '다운로드 전에 각 모델의 라이선스를 확인하세요. Umbra 라이선스는 모델 사용 권한을 부여하지 않습니다.', '선택한 구성의 준비가 완료되었습니다.', '설정을 완료하려면 다음 항목을 해결하세요:', '상태 새로고침', '선택 모델은 나중에 Models에서 추가할 수 있습니다.', '계속하기 전에 현재 단계를 확인하세요.'],
@@ -98,6 +98,7 @@ async function runOnboardingJob(path, body) {
     const result = await api(path, { method: 'POST', body: JSON.stringify(body) });
     if (body.hfToken) { onboardingToken = ''; const input = document.getElementById('onboarding-token'); if (input) input.value = ''; }
     renderJob(result.job); void poll();
+    return result.job;
   } catch (error) { setBusy(false); throw error; }
 }
 function onboardingPackSelection(packId, container, primary) {
@@ -250,14 +251,35 @@ function renderOnboarding() {
       await runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: repair ? 'update_python' : 'install_core' });
     });
   } else if (stage === 2) {
-    const card = onboardingElement('div', undefined, 'wizard-card'); card.append(onboardingElement('h3', onboardingUx(15)), onboardingElement('p', onboardingUx(16))); content.append(card);
-    const repair = onboardingData.trainingPython?.installed && onboardingData.trainingPython.upgradeAvailable;
+    const selected = new Set(onboardingData.state.trainers || ['aitoolkit']);
+    const card = onboardingElement('div', undefined, 'wizard-card');
+    card.append(onboardingElement('h3', 'Training tools'), onboardingElement('p', 'Choose AI Toolkit, Fizgig, or both. Each trainer has its own environment. Models are selected separately.'));
+    for (const id of ['aitoolkit', 'fizgig']) {
+      const info = onboardingData.trainers?.[id];
+      const label = onboardingElement('label', undefined, 'model-family');
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = selected.has(id); checkbox.disabled = onboardingBusy; checkbox.dataset.onboardingKey = `trainer:${id}`;
+      checkbox.addEventListener('change', () => { checkbox.checked ? selected.add(id) : selected.delete(id); void saveOnboarding({ trainers: [...selected], training: selected.size ? 'install' : 'undecided' }).catch(modelError); });
+      const text = onboardingElement('div'); text.append(onboardingElement('strong', id === 'aitoolkit' ? 'AI Toolkit' : 'Fizgig'), onboardingElement('p', info?.description || ''), onboardingElement('small', info?.ready ? 'Ready' : 'Not ready — install or repair'));
+      label.append(checkbox, text); card.append(label);
+    }
+    content.append(card);
     secondary.append(onboardingButton(onboardingText(20), async () => { await saveOnboarding({ training: 'skip', stage: 3 }); }));
-    primary(repair ? tr('updateTrainingPython') : onboardingText(19), async () => {
-      if (repair && !window.confirm(tr('trainingPythonWarning'))) return;
-      await saveOnboarding({ training: 'install' });
-      await runOnboardingJob('/api/tools/action', { tool: 'aitoolkit', action: repair ? 'update_python' : 'install' });
-    });
+    primary('Install / repair selected', async () => {
+      await saveOnboarding({ training: 'install', trainers: [...selected] });
+      for (const tool of selected) {
+        const repair = tool === 'aitoolkit' && onboardingData.trainingPython?.installed && onboardingData.trainingPython.upgradeAvailable;
+        if (repair && !window.confirm(tr('trainingPythonWarning'))) return;
+        const job = await runOnboardingJob('/api/tools/action', { tool, action: repair ? 'update_python' : 'install' });
+        for (;;) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          const status = await api('/api/status');
+          if (status.job?.id !== job.id) throw new Error('Installer status changed. Refresh before continuing.');
+          if (status.job.phase === 'failed') throw new Error(status.job.error || 'Trainer installation failed.');
+          if (status.job.phase === 'complete' && !status.busy) break;
+        }
+
+      }
+    }, selected.size === 0);
   } else if (stage === 3) {
     const card = onboardingElement('div', undefined, 'wizard-card'); card.append(onboardingElement('h3', onboardingText(5)), onboardingElement('p', onboardingText(12))); content.append(card);
     primary(onboardingText(21), () => runOnboardingJob('/api/tools/action', { tool: 'comfyui', action: 'nodes_only' }));

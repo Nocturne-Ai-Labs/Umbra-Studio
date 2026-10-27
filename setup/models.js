@@ -582,9 +582,11 @@ function renderManagedTools(dependencies) {
     const detail = document.createElement('small'); detail.textContent = `${tr(tool.installed ? 'installed' : 'missing')}${tool.commit ? ` | ${tool.commit}` : ''}. ${setupFormat('stopBeforeMaintenance', { tool: tool.name })}`;
     if (tool.python) detail.textContent += ` Python ${tool.python.version || tr('unavailable')} → ${tool.python.targetVersion || tool.python.target}.`;
     row.append(title, detail);
+    if (tool.description) { const description = document.createElement('p'); description.textContent = tool.description; row.append(description); }
     row.dataset.maintenanceTool = tool.id;
     const controls = document.createElement('div'); controls.className = 'tool-maintenance-actions'; row.append(controls);
-    const actions = [['install', tr(tool.installed ? 'reinstallTool' : 'installTool')], ['update', tr('updateTool')], ['update_pytorch', tr('updateCuda')]];
+    const actions = [['install', tr(tool.installed ? 'reinstallTool' : 'installTool')], ['update', tr('updateTool')]];
+    if (tool.id !== 'fizgig') actions.push(['update_pytorch', tr('updateCuda')]);
     if (tool.id === 'aitoolkit') actions.push(['update_python', tr('updateTrainingPython')]);
     if (tool.id === 'comfyui') actions.push(['update_python', tr('updatePython')], ['custom_nodes', tr('updateCustomNodes')], ['h3_nodes', tr('updateH3Nodes')], ['install_sageattention', tr('repairSage')]);
     const runAction = async (action, ref = '') => {

@@ -7,7 +7,7 @@ import { DatasetsTab } from './DatasetsTab';
 import { TagCorpusTab } from './TagCorpusTab';
 import { DanbooruDatasetGeneratorTab } from './DanbooruDatasetGeneratorTab';
 import { WildcardGeneratorTab } from './WildcardGeneratorTab';
-import { AIToolkitTab } from './AIToolkitTab';
+import { TrainingWorkspace } from './TrainingWorkspace';
 import { ModelMergeTab } from './ModelMergeTab';
 import { useBoardStore } from './hooks/useBoardStore';
 import type { BooruPost } from './types';
@@ -70,7 +70,7 @@ export function BoardBrowser() {
     { id: 'search', label: 'Booru downloader', icon: Search },
     { id: 'downloads', label: 'Downloads', icon: Download, badge: pendingDownloads },
     { id: 'datasets', label: 'Datasets', icon: FolderOpen },
-    { id: 'aitoolkit', label: 'AI-Toolkit', icon: GraduationCap },
+    { id: 'aitoolkit', label: 'Training', icon: GraduationCap },
     { id: 'corpus', label: 'Tag Corpus', icon: BarChart3 },
     { id: 'wildcards', label: 'Wildcard Generator', icon: WandSparkles },
     { id: 'merge', label: 'Model Merge', icon: Combine },
@@ -148,7 +148,7 @@ export function BoardBrowser() {
               pointerEvents: activeTab === 'aitoolkit' ? 'auto' : 'none',
             }}
           >
-            <AIToolkitTab isActive={activeTab === 'aitoolkit'} />
+            <TrainingWorkspace isActive={activeTab === 'aitoolkit'} />
           </div>
         )}
       </div>

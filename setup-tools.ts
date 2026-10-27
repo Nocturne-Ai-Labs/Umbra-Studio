@@ -1,3 +1,4 @@
+import { assertFizgigStopped, installFizgig } from './setup/Fizgig';
 /**
  * Tool Setup Script - Auto-installs and configures tools
  * 
@@ -3005,6 +3006,11 @@ async function main() {
     console.log(`${c.cyan}+------------------------------------------------+${c.reset}\n`);
 
     const arg = process.argv[2]?.toLowerCase();
+    if (arg === 'fizgig' || arg === 'update-fizgig') {
+        const release = joinToolMaintenance(ROOT_DIR, 'fizgig');
+        try { await assertFizgigStopped(ROOT_DIR); await installFizgig(ROOT_DIR, line => log('->', line)); console.log('UMBRA_VERIFY_OK|setup-tools'); } finally { release(); }
+        return;
+    }
     const aiToolkitActions = new Set(['aitoolkit', 'update-aitoolkit', 'update-python-aitoolkit', 'update-pytorch-aitoolkit']);
     const independentActions = new Set(['python-helpers', 'waifu-tagger', 'shortcuts', 'umbra-ui-models']);
     // Direct install-tools callers need the same admission as Setup's UI, before

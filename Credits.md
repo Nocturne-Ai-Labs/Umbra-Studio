@@ -1,5 +1,10 @@
 # Credits
 
+## Fizgig
+
+- Native LoRA training interface and trainer: [shootthesound/Fizgig](https://github.com/shootthesound/Fizgig), Apache-2.0.
+- Optional managed installation; upstream UI and source are preserved. Its license and notices remain in the installed repository. Model licenses apply separately.
+
 ## MOSS Image
 
 - Models and original implementation: [OpenMOSS MOSS-Image](https://github.com/OpenMOSS/MOSS-Image), Apache-2.0.

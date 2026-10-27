@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.91.3 - 2026-10-27
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Fizgig is optional. Open `UmbraSetup.bat` (Windows) or `./umbra-setup.sh` (Linux), then **Guided Setup > Training** or **Advanced > Tools > Fizgig > Install**. Choose AI Toolkit, Fizgig, or both; AI Toolkit remains supported.
+- Fizgig downloads its own Python environment and CUDA dependencies (several GB; the Windows PyTorch wheel alone is about 2.7 GiB). Training models are separate downloads governed by their licenses. No existing model downloads or ComfyUI reinstall are required for this update.
+- Open **Data Forge > Training** to choose an installed trainer. Fizgig runs its original upstream interface locally; it is not exposed through Umbra Remote. Finish training before maintaining the trainer. Closing Studio leaves Fizgig running.
+- AI Toolkit requires host Git and Node.js 20 or newer. Linux managed extensions may require `python3-dev`, `build-essential`, `libgl1`, `libglib2.0-0` and `lsof`, or distribution equivalents. Fizgig uses the reviewed NVIDIA CUDA dependency recipe; other hardware is not qualified by this integration.
+
+### Fizgig Training Integration
+
+- Managed install and update of the reviewed official Fizgig revision, in a separate Python environment; existing environments and user data are retained.
+- Installation-aware trainer selection, launch, native embedded workspace and separate-window link. Empty and incomplete installations direct users to Setup.
+- Active-worker and occupied-port checks prevent maintenance from changing a running trainer. Existing independently started trainers are not adopted or stopped.
+- Credits: [Fizgig by shootthesound](https://github.com/shootthesound/Fizgig), Apache-2.0. Upstream UI and source remain unchanged.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Setup recognizes equivalent Windows path spellings when checking its running Studio, without accepting a different installation.
+- Fixed: Skipping training no longer makes an absent AI Toolkit installation appear ready in the trainer readiness result.
+- Improved: Setup offers either trainer or both, while Data Forge shows the trainers actually installed.
+- Improved: Fizgig launches are protected against repeated clicks during startup, and temporary status failures preserve the embedded workspace.
+
 ## v0.91.2 - 2026-10-27
 
 ### TL;DR - Setup After Updating

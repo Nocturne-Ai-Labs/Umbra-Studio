@@ -1,3 +1,4 @@
+import { FizgigService } from './backend/FizgigService';
 import { normalizeMossPromptField } from './shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './backend/GeneratedImageMetadata';
 import { applyImagePipelineSettings, normalizeImagePipelineSettings, type ImagePipelineSettings } from './shared/umbra-ui/imagePipelineSettings';
@@ -14484,6 +14485,7 @@ import { spawnSync, type ChildProcess } from 'child_process';
 
 let comfyProcess: ChildProcess | null = null;
 let galleryBridgeProcess: ChildProcess | null = null;
+const fizgigService = new FizgigService(ROOT_DIR);
 let aitoolkitProcess: ChildProcess | null = null;
 let aitoolkitLaunchedPort: number | null = null;
 let comfyStartTime: number | null = null;
@@ -35422,6 +35424,16 @@ const server = Bun.serve<UmbraSocketData>({
           stale: controlPlane.stale,
           refreshing: controlPlane.refreshing,
         });
+      }
+
+      if (path.startsWith('/api/data-forge/fizgig/')) {
+        if (isRemoteRequest(req, url, server)) return json({ error: 'Fizgig is available on the host PC. Use its own authenticated remote access separately.' }, 403);
+        try {
+          if (path === '/api/data-forge/fizgig/status' && method === 'GET') return json(await fizgigService.status());
+          if (path === '/api/data-forge/fizgig/launch' && method === 'POST') return json(await fizgigService.launch());
+          if (path === '/api/data-forge/fizgig/stop' && method === 'POST') return json(await fizgigService.stop());
+        } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 409); }
+        return json({ error: 'Unknown Fizgig action.' }, 404);
       }
 
       if (path === '/api/data-forge/ai-toolkit/status' && method === 'GET') {
