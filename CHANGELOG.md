@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.91.2 - 2026-10-27
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+Update normally, then reopen UmbraSetup.bat on Windows or ./umbra-setup.sh on Linux. No new models or tool reinstallations are required.
+
+Optional AI Toolkit requires host Git and Node.js 20 or newer. Linux managed extensions may require python3-dev, build-essential, libgl1 and libglib2.0-0, or distribution equivalents.
+
+### Setup First-Use Fix
+
+Saving the language while Setup is still checking the installation now waits for that check and advances to the ComfyUI step. Repeated clicks are prevented while the save is in progress, and a failed initial check can be retried without leaving Setup stuck.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Early Save Language clicks no longer leave Guided Setup stuck until a refresh.
+- Improved: The language button reflects its pending save and becomes available again after an error.
 ## v0.91.1 - 2026-10-27
 
 ### TL;DR - Setup After Updating
