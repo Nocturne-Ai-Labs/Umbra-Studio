@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.91.1 - 2026-10-27
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+Update normally, then reopen UmbraSetup.bat on Windows or ./umbra-setup.sh on Linux. No new models are required.
+
+If Setup reports an occupied port, close Studio and retry. If Studio is already closed, include the reported address in your support request; another application may own that port. Setup preserves its shutdown protection.
+
+For an unsupported Python Helpers installation path, extract Umbra to a short, writable folder such as C:\Umbra and retry. Keep your old installation until the new location works. This patch detects the failure early; it does not change Windows policy or relocate installations automatically.
+
+Optional AI Toolkit requires host Git and Node.js 20 or newer. Linux managed extensions may require python3-dev, build-essential, libgl1 and libglib2.0-0, or distribution equivalents.
+
+### Validation
+
+Targeted checks cover IPv6-only conflicts, closed-port recovery, unknown connection states, actual Python deep/short paths and failure presentation. Changed behavior was exercised through isolated Windows Setup controls. The reported remote user's exact cause remains unconfirmed.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Setup checks IPv4 and IPv6 consistently before installation and identifies the occupied address instead of assuming an unknown listener is Umbra.
+- Improved: Python Helpers checks its installation path before package downloads and provides recovery instructions for unsupported folders.
+- Fixed: Compact installer errors lead with the reason and recovery steps. Technical details remain in saved logs.
+
 ## v0.91.0 - 2026-10-26
 
 ### TL;DR - Setup After Updating
