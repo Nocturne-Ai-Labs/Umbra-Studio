@@ -16492,23 +16492,26 @@ async function runWaifuTagger(options: WaifuTaggerRunOptions): Promise<any> {
   throw new Error(`Waifu tagger failed. ${failures.slice(-3).join(' | ')}`);
 }
 
-async function runPixaiTaggerBatch(
+async function runTaggerBatch(
   imagePaths: string[],
-  options: Omit<WaifuTaggerRunOptions, 'imagePath' | 'modelRepo'>,
+  options: Omit<WaifuTaggerRunOptions, 'imagePath'>,
 ): Promise<Map<string, { result?: any; error?: string; raw?: unknown }>> {
+  if (!DATASET_TAGGER_MODEL_REPOS.has(options.modelRepo)) throw new Error('Unsupported tagger model.');
+  const pixai = options.modelRepo === PIXAI_TAGGER_REPO;
+  const scriptName = pixai ? 'pixai_tagger.py' : 'waifu_tagger.py';
   const scriptCandidates = [
-    join(ROOT_DIR, 'backend', 'python', 'pixai_tagger.py'),
-    join(ROOT_DIR, 'resources', 'app', 'backend', 'python', 'pixai_tagger.py'),
-    join(SOURCE_DIR, 'backend', 'python', 'pixai_tagger.py'),
+    join(ROOT_DIR, 'backend', 'python', scriptName),
+    join(ROOT_DIR, 'resources', 'app', 'backend', 'python', scriptName),
+    join(SOURCE_DIR, 'backend', 'python', scriptName),
   ];
   const scriptPath = scriptCandidates.find((candidate) => existsSync(candidate));
-  if (!scriptPath) throw new Error('PixAI tagger script is missing.');
-  if (options.generalMcutEnabled || options.characterMcutEnabled) {
+  if (!scriptPath) throw new Error('Tagger script is missing.');
+  if (pixai && (options.generalMcutEnabled || options.characterMcutEnabled)) {
     throw new Error('MCUT is not supported by PixAI Tagger. Disable MCUT for this model.');
   }
   const tempDir = join(USER_DIR, 'Temp');
   await fs.mkdir(tempDir, { recursive: true });
-  const manifestPath = join(tempDir, `pixai-tag-batch-${crypto.randomUUID()}.json`);
+  const manifestPath = join(tempDir, `tagger-batch-${crypto.randomUUID()}.json`);
   const localModelRoot = String(process.env.UMBRA_WAIFU_MODEL_ROOT || '').trim()
     || join(ROOT_DIR, 'User', 'Models', 'WaifuTagger');
   await fs.writeFile(manifestPath, JSON.stringify({ images: imagePaths.map((path) => ({
@@ -16522,6 +16525,11 @@ async function runPixaiTaggerBatch(
       '--character-threshold', String(options.characterThreshold),
       '--rating-threshold', String(options.ratingThreshold),
       '--max-tags', String(options.maxTags)];
+    if (!pixai) {
+      scriptArgs.push('--model', options.modelRepo);
+      if (options.generalMcutEnabled) scriptArgs.push('--general-mcut-enabled');
+      if (options.characterMcutEnabled) scriptArgs.push('--character-mcut-enabled');
+    }
     const failures: string[] = [];
     for (const candidate of getPythonCommandCandidates()) {
       const run = await runCommandCapture(candidate.command, [...candidate.prefixArgs, ...scriptArgs], ROOT_DIR, captionProgressReader(options.onProgress));
@@ -16530,12 +16538,12 @@ async function runPixaiTaggerBatch(
         continue;
       }
       const parsed = parseJsonFromProcessOutput(run.stdout);
-      if (!Array.isArray(parsed?.results)) throw new Error('PixAI tagger returned no image results.');
+      if (!Array.isArray(parsed?.results)) throw new Error('Tagger returned no image results.');
       return new Map(parsed.results.map((entry: any) => [String(entry.filename || ''), {
         result: entry.result, error: entry.error, raw: entry,
       }]));
     }
-    throw new Error(`PixAI tagger failed. ${failures.slice(-2).join(' | ')}`);
+    throw new Error(`Tagger failed. ${failures.slice(-2).join(' | ')}`);
   } finally {
     await fs.rm(manifestPath, { force: true }).catch(() => undefined);
   }
@@ -37136,9 +37144,9 @@ const server = Bun.serve<UmbraSocketData>({
           }
           const naturalCaptionResults = new Map<string, { caption?: string; error?: string; raw?: unknown }>();
           let batchError = '';
-          const pixaiResults = autoTag && captionMode === 'tags' && modelRepo === PIXAI_TAGGER_REPO
-            ? await runPixaiTaggerBatch(imageFiles.map((filename) => join(conceptPath, filename)), {
-              device: taggerDevice, onProgress,
+          const taggerResults = autoTag && captionMode === 'tags'
+            ? await runTaggerBatch(imageFiles.map((filename) => join(conceptPath, filename)), {
+              modelRepo, device: taggerDevice, onProgress,
               generalThreshold, characterThreshold, ratingThreshold,
               generalMcutEnabled, characterMcutEnabled, maxTags,
             }).catch((error) => { batchError = String(error.message || error); return null; })
@@ -37179,7 +37187,7 @@ const server = Bun.serve<UmbraSocketData>({
 
           for (const filename of imageFiles) {
             progress.filename = filename;
-            progress.phase = pixaiResults || captionMode === 'natural' ? 'Saving captions' : autoTag ? 'Tagging' : 'Saving captions';
+            progress.phase = taggerResults || captionMode === 'natural' ? 'Saving captions' : autoTag ? 'Tagging' : 'Saving captions';
             const imagePath = join(conceptPath, filename);
             const captionPath = datasetCaptionPath(conceptPath, filename);
 
@@ -37192,11 +37200,11 @@ const server = Bun.serve<UmbraSocketData>({
               let generatedTags: string[] = [];
 
               if (autoTag && captionMode === 'tags') {
-                const result = pixaiResults
+                const result = taggerResults
                   ? (() => {
-                    const entry = pixaiResults.get(filename);
+                    const entry = taggerResults.get(filename);
                     if (entry?.error) throw new Error(entry.error);
-                    if (!entry?.result) throw new Error('PixAI tagger returned no result for this image.');
+                    if (!entry?.result) throw new Error('Tagger returned no result for this image.');
                     return entry.result;
                   })()
                   : await runWaifuTagger({
@@ -37271,7 +37279,7 @@ const server = Bun.serve<UmbraSocketData>({
                 error: error?.message || 'Caption update failed',
               });
             }
-            if (!pixaiResults && captionMode !== 'natural') {
+            if (!taggerResults && captionMode !== 'natural') {
               progress.completed = results.length;
               progress.failed = results.filter(entry => !entry.success).length;
             }

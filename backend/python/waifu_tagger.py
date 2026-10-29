@@ -310,7 +310,9 @@ def infer_tags(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Tag image with Waifu Diffusion wd-tagger model")
-    parser.add_argument("--image", required=True, help="Path to image")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--image", help="Path to image")
+    source.add_argument("--manifest", help="Batch image manifest")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF repo id for wd model")
     parser.add_argument("--general-threshold", type=float, default=DEFAULT_GENERAL_THRESHOLD)
@@ -339,12 +341,18 @@ def main() -> int:
         }))
         return 1
 
-    image_path = str(args.image or "").strip()
-    if not image_path:
-        print(json.dumps({"error": "Image path is required"}))
-        return 2
-    if not os.path.isfile(image_path):
-        print(json.dumps({"error": f"Image not found: {image_path}"}))
+    try:
+        if args.image:
+            images = [{"filename": os.path.basename(args.image), "path": args.image}]
+        else:
+            with open(args.manifest, encoding="utf-8") as source:
+                images = json.load(source)["images"]
+            if not isinstance(images, list) or not 1 <= len(images) <= 10000:
+                raise ValueError("Invalid WD image manifest.")
+            if any(not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("filename"), str) for item in images):
+                raise ValueError("Invalid WD image entry.")
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}))
         return 2
 
     general_threshold = clamp(float(args.general_threshold), 0.0, 1.0)
@@ -359,50 +367,70 @@ def main() -> int:
             local_model_root=args.local_model_root,
             device=args.device,
         )
-        result = infer_tags(
-            session=session,
-            tags_df=tags_df,
-            image_path=image_path,
-            general_threshold=general_threshold,
-            character_threshold=character_threshold,
-            rating_threshold=rating_threshold,
-            general_mcut_enabled=bool(args.general_mcut_enabled),
-            character_mcut_enabled=bool(args.character_mcut_enabled),
-            max_tags=max_tags,
-        )
+        def tag_image(image_path):
+            result = infer_tags(
+                session=session,
+                tags_df=tags_df,
+                image_path=image_path,
+                general_threshold=general_threshold,
+                character_threshold=character_threshold,
+                rating_threshold=rating_threshold,
+                general_mcut_enabled=bool(args.general_mcut_enabled),
+                character_mcut_enabled=bool(args.character_mcut_enabled),
+                max_tags=max_tags,
+            )
 
-        general_tags = [tag for tag, _ in result.general]
-        artist_tags = [tag for tag, _ in result.artist]
-        copyright_tags = [tag for tag, _ in result.copyright]
-        character_tags = [tag for tag, _ in result.character]
-        meta_tags = [tag for tag, _ in result.meta]
-        booru_tags = character_tags + general_tags
+            general_tags = [tag for tag, _ in result.general]
+            artist_tags = [tag for tag, _ in result.artist]
+            copyright_tags = [tag for tag, _ in result.copyright]
+            character_tags = [tag for tag, _ in result.character]
+            meta_tags = [tag for tag, _ in result.meta]
+            booru_tags = character_tags + general_tags
 
-        payload = {
-            "success": True,
-            "modelRepo": args.model,
-            "modelSource": model_source,
-            "generalThreshold": general_threshold,
-            "characterThreshold": character_threshold,
-            "ratingThreshold": rating_threshold,
-            "generalMcutEnabled": bool(args.general_mcut_enabled),
-            "characterMcutEnabled": bool(args.character_mcut_enabled),
-            "usedGeneralThreshold": round(result.used_general_threshold, 6),
-            "usedCharacterThreshold": round(result.used_character_threshold, 6),
-            "rating": {k: round(float(v), 6) for k, v in result.rating.items()},
-            "general": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.general],
-            "artist": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.artist],
-            "copyright": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.copyright],
-            "character": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.character],
-            "meta": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.meta],
-            "booruTags": booru_tags,
-            "booruTagString": ", ".join(booru_tags),
-            "generalTagString": ", ".join(general_tags),
-            "artistTagString": ", ".join(artist_tags),
-            "copyrightTagString": ", ".join(copyright_tags),
-            "characterTagString": ", ".join(character_tags),
-            "metaTagString": ", ".join(meta_tags),
-        }
+            payload = {
+                "success": True,
+                "modelRepo": args.model,
+                "modelSource": model_source,
+                "generalThreshold": general_threshold,
+                "characterThreshold": character_threshold,
+                "ratingThreshold": rating_threshold,
+                "generalMcutEnabled": bool(args.general_mcut_enabled),
+                "characterMcutEnabled": bool(args.character_mcut_enabled),
+                "usedGeneralThreshold": round(result.used_general_threshold, 6),
+                "usedCharacterThreshold": round(result.used_character_threshold, 6),
+                "rating": {k: round(float(v), 6) for k, v in result.rating.items()},
+                "general": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.general],
+                "artist": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.artist],
+                "copyright": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.copyright],
+                "character": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.character],
+                "meta": [{"tag": tag, "score": round(float(score), 6)} for tag, score in result.meta],
+                "booruTags": booru_tags,
+                "booruTagString": ", ".join(booru_tags),
+                "generalTagString": ", ".join(general_tags),
+                "artistTagString": ", ".join(artist_tags),
+                "copyrightTagString": ", ".join(copyright_tags),
+                "characterTagString": ", ".join(character_tags),
+                "metaTagString": ", ".join(meta_tags),
+            }
+            return payload
+
+        results = []
+        failed = 0
+        for image in images:
+            try:
+                payload = tag_image(image["path"])
+                results.append({"filename": image["filename"], "result": payload})
+            except Exception as exc:
+                failed += 1
+                results.append({"filename": image["filename"], "error": str(exc)})
+            if not args.image:
+                print("UMBRA_PROGRESS " + json.dumps({"completed": len(results), "filename": image["filename"], "failed": failed}), flush=True)
+        if args.image:
+            if results[0].get("error"):
+                raise RuntimeError(results[0]["error"])
+            payload = results[0]["result"]
+        else:
+            payload = {"results": results}
         print(json.dumps(payload))
         return 0
     except Exception as exc:
