@@ -1,3 +1,4 @@
+import { UmbraMegapixelControls } from '@/components/umbra-ui/UmbraMegapixelControls';
 import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import { UmbraLoraEntryCard } from '@/components/umbra-ui/UmbraLoraEntryCard';
 import { extractUmbraUiLoraTriggerWords, isUmbraUiModelOnlyLoraFamily } from '@/lib/umbraUiModels';
@@ -41,7 +42,6 @@ import {
   normalizePowerPrompterPromptText,
   normalizeQueueTraversalRole,
   normalizeWildcardRerolls,
-  POWER_PROMPTER_ASPECT_RATIO_OPTIONS,
   POWER_PROMPTER_MAX_QUEUE_CYCLE_WEIGHT,
   POWER_PROMPTER_MAX_QUEUE_SETS,
   POWER_PROMPTER_MAX_RESOLUTION_SPLIT_TARGETS,
@@ -2017,17 +2017,6 @@ function normalizeVariantNameList(rawNames: unknown): string[] {
     if (normalized.length >= 64) break;
   }
   return normalized;
-}
-
-function getDimensionsFromAspectRatioOption(rawOption: unknown): { width: number; height: number } | null {
-  const option = String(rawOption || '').trim();
-  if (!option || option.toLowerCase() === 'custom') return null;
-  const match = option.match(/(\d{2,5})\s*x\s*(\d{2,5})\s*$/i);
-  if (!match) return null;
-  const width = Math.max(64, Math.min(8192, Math.floor(Number(match[1]) || 0)));
-  const height = Math.max(64, Math.min(8192, Math.floor(Number(match[2]) || 0)));
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  return { width, height };
 }
 
 function normalizeVariantTag(rawTag: unknown): string {
@@ -9306,58 +9295,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                     </label>
                   </div>
 
-                  <label className="block text-[10px] uppercase tracking-widest text-zinc-400">
-                    Aspect Ratio
-                    <div className="relative mt-1">
-                      <UmbraSelectControl
-                        value={generation.aspectRatio}
-                        onChange={(event) => {
-                          const aspectRatio = event.target.value;
-                          const dimensions = getDimensionsFromAspectRatioOption(aspectRatio);
-                          updateGeneration(dimensions ? { aspectRatio, ...dimensions } : { aspectRatio });
-                        }}
-                        onClick={(event) => event.stopPropagation()}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        className={`w-full appearance-none bg-black/45 border border-white/20 rounded px-2 py-1.5 pr-7 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300 ${UMBRA_THEMED_SELECT_CLASS}`}
-                      >
-                        {POWER_PROMPTER_ASPECT_RATIO_OPTIONS.map((option) => (
-                          <option key={`generation-aspect-${option}`} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </UmbraSelectControl>
-                      <ChevronDown size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    </div>
-                  </label>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-[10px] uppercase tracking-widest text-zinc-400">
-                      Width
-                      <input
-                        type="number"
-                        min={64}
-                        max={8192}
-                        step={8}
-                        value={generation.width}
-                        onChange={(event) => updateGeneration({ width: parseIntegerInput(event.target.value, generation.width) })}
-                        onClick={(event) => event.stopPropagation()}
-                        className="mt-1 w-full bg-black/40 border border-white/15 rounded px-2 py-1.5 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300"
-                      />
-                    </label>
-                    <label className="text-[10px] uppercase tracking-widest text-zinc-400">
-                      Height
-                      <input
-                        type="number"
-                        min={64}
-                        max={8192}
-                        step={8}
-                        value={generation.height}
-                        onChange={(event) => updateGeneration({ height: parseIntegerInput(event.target.value, generation.height) })}
-                        onClick={(event) => event.stopPropagation()}
-                        className="mt-1 w-full bg-black/40 border border-white/15 rounded px-2 py-1.5 text-[11px] text-zinc-200 focus:outline-none focus:border-cyan-300"
-                      />
-                    </label>
-                  </div>
+                  <UmbraMegapixelControls width={generation.width} height={generation.height}
+                    bounds={hasDeclaredPipelineCapabilities ? imageCapabilities.resolution : undefined}
+                    disabled={hasDeclaredPipelineCapabilities && imageCapabilities.resolution.support !== 'adjustable'}
+                    onChange={(width, height) => updateGeneration({width, height, aspectRatio: 'custom'})} />
 
                   <button
                     onClick={(event) => {
@@ -9479,27 +9420,7 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 <span className="shrink-0 text-[10px] font-black text-zinc-300">
                                   {targetIndex + 1}
                                 </span>
-                                <div className="relative min-w-0 flex-1">
-                                  <UmbraSelectControl
-                                    value={target.aspectRatio}
-                                    onChange={(event) => {
-                                      const aspectRatio = event.target.value;
-                                      const dimensions = getDimensionsFromAspectRatioOption(aspectRatio);
-                                      updateResolutionSplitTarget(
-                                        target.id,
-                                        dimensions ? { aspectRatio, ...dimensions } : { aspectRatio },
-                                      );
-                                    }}
-                                    onClick={(event) => event.stopPropagation()}
-                                    onMouseDown={(event) => event.stopPropagation()}
-                                    className={`w-full appearance-none rounded border border-white/15 bg-black/45 px-2 py-1.5 pr-7 text-[10px] text-zinc-200 focus:border-cyan-300 focus:outline-none ${UMBRA_THEMED_SELECT_CLASS}`}
-                                  >
-                                    {POWER_PROMPTER_ASPECT_RATIO_OPTIONS.map((option) => (
-                                      <option key={`${target.id}-${option}`} value={option}>{option}</option>
-                                    ))}
-                                  </UmbraSelectControl>
-                                  <ChevronDown size={11} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500" />
-                                </div>
+                                <span className="min-w-0 flex-1 text-[10px] text-zinc-400">Resolution target</span>
                                 <span className="w-9 shrink-0 text-right text-[10px] font-black text-cyan-200">
                                   {target.enabled ? resolutionSplitShareById.get(target.id) || 0 : 0}%
                                 </span>
@@ -9517,55 +9438,10 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
                                 </button>
                               </div>
 
-                              <div className="grid grid-cols-[minmax(0,1fr)_52px_52px] items-end gap-2">
-                                <label className="text-[9px] uppercase tracking-wider text-zinc-500">
-                                  Weight {target.weight}
-                                  <input
-                                    type="range"
-                                    min={1}
-                                    max={100}
-                                    step={1}
-                                    value={target.weight}
-                                    disabled={!target.enabled}
-                                    onChange={(event) => updateResolutionSplitTarget(target.id, {
-                                      weight: parseIntegerInput(event.target.value, target.weight),
-                                    })}
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="mt-1 block w-full accent-cyan-400"
-                                  />
-                                </label>
-                                <label className="text-[9px] uppercase tracking-wider text-zinc-500">
-                                  W
-                                  <input
-                                    type="number"
-                                    min={64}
-                                    max={8192}
-                                    step={8}
-                                    value={target.width}
-                                    onChange={(event) => updateResolutionSplitTarget(target.id, {
-                                      aspectRatio: 'custom',
-                                      width: parseIntegerInput(event.target.value, target.width),
-                                    })}
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="mt-1 w-full rounded border border-white/15 bg-black/40 px-1.5 py-1 text-[10px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
-                                  />
-                                </label>
-                                <label className="text-[9px] uppercase tracking-wider text-zinc-500">
-                                  H
-                                  <input
-                                    type="number"
-                                    min={64}
-                                    max={8192}
-                                    step={8}
-                                    value={target.height}
-                                    onChange={(event) => updateResolutionSplitTarget(target.id, {
-                                      aspectRatio: 'custom',
-                                      height: parseIntegerInput(event.target.value, target.height),
-                                    })}
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="mt-1 w-full rounded border border-white/15 bg-black/40 px-1.5 py-1 text-[10px] text-zinc-200 focus:border-cyan-300 focus:outline-none"
-                                  />
-                                </label>
+                              <UmbraMegapixelControls width={target.width} height={target.height} disabled={!target.enabled}
+                                bounds={hasDeclaredPipelineCapabilities ? imageCapabilities.resolution : undefined}
+                                onChange={(width, height) => updateResolutionSplitTarget(target.id, {width, height, aspectRatio: 'custom'})} />
+                              <div className="grid grid-cols-1 items-end gap-2">
                               </div>
                             </div>
                           ))}

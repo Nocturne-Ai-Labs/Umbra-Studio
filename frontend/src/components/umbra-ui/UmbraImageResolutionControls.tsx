@@ -2,13 +2,9 @@
 
 import React from 'react';
 import { Images, Ratio } from 'lucide-react';
-import { UmbraSelect } from '@/components/ui/UmbraSelect';
+import { UmbraMegapixelControls } from './UmbraMegapixelControls';
 import type { UmbraUiPipelineResolutionCapability } from '../../../../shared/umbra-ui/pipelineTypes';
-import {
-  UMBRA_IMAGE_ASPECT_PRESETS,
-  resolveUmbraImageDimensions,
-  type UmbraImageAspectPresetId,
-} from '@/lib/umbraUiImageResolution';
+import { inferUmbraImageAspectRatio, inferUmbraImageBaseResolution, type UmbraImageAspectPresetId } from '@/lib/umbraUiImageResolution';
 
 interface UmbraImageResolutionControlsProps {
   aspectRatio: UmbraImageAspectPresetId;
@@ -27,8 +23,6 @@ const inputClass = 'w-full rounded-md border border-white/10 bg-black/35 px-2.5 
 const labelClass = 'text-[9px] font-black uppercase tracking-[0.14em] text-zinc-500';
 
 export function UmbraImageResolutionControls({
-  aspectRatio,
-  baseResolution,
   width,
   height,
   batchSize,
@@ -39,22 +33,6 @@ export function UmbraImageResolutionControls({
   onBatchSizeChange,
 }: UmbraImageResolutionControlsProps) {
   const resolutionAdjustable = resolution.support === 'adjustable';
-  const applyPreset = React.useCallback((nextAspect: UmbraImageAspectPresetId, nextBase: number) => {
-    if (!resolutionAdjustable) return;
-    const dimensions = resolveUmbraImageDimensions(nextAspect, nextBase, resolution);
-    if (dimensions) onDimensionsChange(String(dimensions.width), String(dimensions.height));
-  }, [onDimensionsChange, resolution, resolutionAdjustable]);
-
-  const handleAspectChange = (nextAspect: UmbraImageAspectPresetId) => {
-    onAspectRatioChange(nextAspect);
-    applyPreset(nextAspect, baseResolution);
-  };
-
-  const handleBaseChange = (nextBase: number) => {
-    const normalized = Math.max(512, Math.min(2048, Math.round(nextBase / 64) * 64));
-    onBaseResolutionChange(normalized);
-    applyPreset(aspectRatio, normalized);
-  };
 
   return (
     <section className="overflow-hidden rounded-md border border-white/10 bg-white/[0.02]">
@@ -67,23 +45,7 @@ export function UmbraImageResolutionControls({
       </header>
 
       <div className="space-y-2.5 p-2.5">
-        <div className={resolutionAdjustable ? 'grid grid-cols-[minmax(0,1fr)_84px] gap-2' : ''}>
-          {resolutionAdjustable ? (
-            <label className="min-w-0 space-y-1.5">
-              <span className={labelClass}>Aspect Ratio</span>
-              <UmbraSelect
-                value={aspectRatio}
-                onValueChange={(value) => handleAspectChange(value as UmbraImageAspectPresetId)}
-                ariaLabel="Aspect Ratio"
-                menuTitle="Aspect Ratio"
-                options={[
-                  ...UMBRA_IMAGE_ASPECT_PRESETS.map((preset) => ({ value: preset.id, label: preset.label })),
-                  { value: 'custom', label: 'Custom' },
-                ]}
-                size="md"
-              />
-            </label>
-          ) : null}
+        <div className="max-w-28">
           <label className="space-y-1.5">
             <span className={labelClass}>Batch Count</span>
             <input
@@ -99,47 +61,11 @@ export function UmbraImageResolutionControls({
           </label>
         </div>
 
-        {resolutionAdjustable ? (
-          <label className="block space-y-1.5">
-            <span className="flex items-center gap-2">
-              <span className={labelClass}>Long Side Resolution</span>
-              <span className="ml-auto font-mono text-[10px] text-zinc-300">{baseResolution}px</span>
-            </span>
-            <input
-              type="range"
-              min={512}
-              max={2048}
-              step={64}
-              value={baseResolution}
-              disabled={aspectRatio === 'custom'}
-              onChange={(event) => handleBaseChange(Number(event.target.value))}
-              className="h-5 w-full accent-cyan-300 disabled:cursor-not-allowed disabled:opacity-30"
-            />
-          </label>
-        ) : null}
-
-        {resolutionAdjustable ? (
-          <div className="grid grid-cols-2 gap-2">
-            <label className="space-y-1.5">
-              <span className={labelClass}>Width</span>
-              <input
-                value={width}
-                inputMode="numeric"
-                onChange={(event) => onDimensionsChange(event.target.value, height, true)}
-                className={inputClass}
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className={labelClass}>Height</span>
-              <input
-                value={height}
-                inputMode="numeric"
-                onChange={(event) => onDimensionsChange(width, event.target.value, true)}
-                className={inputClass}
-              />
-            </label>
-          </div>
-        ) : null}
+        {resolutionAdjustable && <UmbraMegapixelControls width={Number(width)} height={Number(height)} bounds={resolution} onChange={(w, h) => {
+          onAspectRatioChange(inferUmbraImageAspectRatio(w, h));
+          onBaseResolutionChange(inferUmbraImageBaseResolution(w, h));
+          onDimensionsChange(String(w), String(h));
+        }} />}
 
         <div className="flex items-center gap-1.5 border-t border-white/[0.07] pt-2 font-mono text-[9px] text-zinc-600">
           <Images size={10} />

@@ -802,8 +802,8 @@ function normalizePowerPrompterResolutionSplitControls(rawValue: unknown): NonNu
         id: String(target.id || `resolution-${index + 1}`).trim().slice(0, 64) || `resolution-${index + 1}`,
         enabled: target.enabled !== false,
         aspectRatio: normalizeAspectRatio(target.aspectRatio ?? fallback.aspectRatio),
-        width: clampInteger(target.width, fallback.width, 64, 8192),
-        height: clampInteger(target.height, fallback.height, 64, 8192),
+        width: clampInteger(target.width, fallback.width, 64, Number.MAX_SAFE_INTEGER),
+        height: clampInteger(target.height, fallback.height, 64, Number.MAX_SAFE_INTEGER),
         weight: clampInteger(target.weight, fallback.weight, 1, 100),
       };
     });

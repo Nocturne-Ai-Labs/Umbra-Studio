@@ -1,13 +1,15 @@
+import {resolveImageMegapixels} from '../../../../shared/umbra-ui/imageSizing';
 import {normalizePowerPrompterGenerationControls} from '../../../../shared/power-prompter/powerPrompter';
 import type {UmbraUiPipelineDefaults,UmbraUiPipelineResolutionCapability} from '../../../../shared/umbra-ui/pipelineTypes';
 import type {UmbraImageQueueOptions} from '../../../../shared/umbra-ui/imageQueueTypes';
 export type MangaEnhancements=Pick<UmbraImageQueueOptions,'imagePipeline'|'hiresFix'|'detailerPipeline'|'outputUpscale'|'tiledVae'|'loras'|'clipSkip'>;
 export interface MangaGenerationSettings {
+  pixelSizing?:{megapixels:number;aspect:string;width:number;height:number};
   prompt:string;negativePrompt:string;modelFamily:string;modelType:'checkpoint'|'diffusers'|'diffusion_model'|'unet'|'gguf';checkpointName:string;
   enhancements?:MangaEnhancements;workflowResources:Record<string,string>;steps:number;cfg:number;seed:number;samplerName:string;scheduler:string;baseResolution:number;samples:number;
 }
 export interface MangaGenerationRequest {requestId:string;received:string[]}
-export const defaultMangaGeneration = ():MangaGenerationSettings=>({prompt:'',negativePrompt:'',modelFamily:'',modelType:'checkpoint',checkpointName:'',workflowResources:{},steps:28,cfg:4,seed:0,samplerName:'euler',scheduler:'normal',baseResolution:1024,samples:1});
+export const defaultMangaGeneration = ():MangaGenerationSettings=>({prompt:'',negativePrompt:'',modelFamily:'',modelType:'checkpoint',checkpointName:'',workflowResources:{},steps:28,cfg:4,seed:0,samplerName:'euler',scheduler:'normal',baseResolution:1024,samples:1,pixelSizing:{megapixels:1,aspect:'source',width:1000,height:1000}});
 // Apply sampling defaults only when the user chooses a family, never on catalog refresh or project hydration.
 export function mangaFamilySamplingDefaults(defaults:UmbraUiPipelineDefaults | undefined):Partial<MangaGenerationSettings>{
   return {
@@ -25,7 +27,9 @@ export function parseMangaGeneration(value:unknown):MangaGenerationSettings{
   const modelType=str('modelType');if(!['checkpoint','diffusers','diffusion_model','unet','gguf'].includes(modelType))fail();
   if(!raw.workflowResources || typeof raw.workflowResources!=='object' || Array.isArray(raw.workflowResources))fail();
   const resources=Object.entries(raw.workflowResources as Record<string,unknown>);if(resources.length>128 || resources.some(([key,value])=>key.length>240 || typeof value!=='string' || value.length>4096))fail();
-  return {...(raw.enhancements === undefined ? {} : {enhancements:parseMangaEnhancements(raw.enhancements)}),prompt:str('prompt',100000),negativePrompt:str('negativePrompt',100000),modelFamily:str('modelFamily',256),modelType:modelType as MangaGenerationSettings['modelType'],checkpointName:str('checkpointName'),workflowResources:Object.fromEntries(resources) as Record<string,string>,steps:num('steps',1,10000,true),cfg:num('cfg',0,100),seed:num('seed',0,Number.MAX_SAFE_INTEGER,true),samplerName:str('samplerName',256),scheduler:str('scheduler',256),baseResolution:num('baseResolution',64,Number.MAX_SAFE_INTEGER,true),samples:num('samples',1,64,true)};
+  const pixel=raw.pixelSizing as MangaGenerationSettings['pixelSizing'];
+  if(pixel!==undefined && (!pixel || typeof pixel!=='object' || !Number.isFinite(pixel.megapixels) || pixel.megapixels<=0 || typeof pixel.aspect!=='string' || !/^(source|custom|[1-9][0-9]*:[1-9][0-9]*)$/.test(pixel.aspect) || !Number.isSafeInteger(pixel.width) || pixel.width<=0 || !Number.isSafeInteger(pixel.height) || pixel.height<=0))fail();
+  return {...(pixel ? {pixelSizing:{megapixels:pixel.megapixels,aspect:pixel.aspect,width:pixel.width,height:pixel.height}} : {}),...(raw.enhancements === undefined ? {} : {enhancements:parseMangaEnhancements(raw.enhancements)}),prompt:str('prompt',100000),negativePrompt:str('negativePrompt',100000),modelFamily:str('modelFamily',256),modelType:modelType as MangaGenerationSettings['modelType'],checkpointName:str('checkpointName'),workflowResources:Object.fromEntries(resources) as Record<string,string>,steps:num('steps',1,10000,true),cfg:num('cfg',0,100),seed:num('seed',0,Number.MAX_SAFE_INTEGER,true),samplerName:str('samplerName',256),scheduler:str('scheduler',256),baseResolution:num('baseResolution',64,Number.MAX_SAFE_INTEGER,true),samples:num('samples',1,64,true)};
 }
 export function mangaGenerationDimensions(frame:{width:number;height:number},base:number,capability?:UmbraUiPipelineResolutionCapability){
   if(!Number.isSafeInteger(base) || base<64 || !Number.isFinite(frame.width) || frame.width<=0 || !Number.isFinite(frame.height) || frame.height<=0)throw new Error('Invalid Manga generation dimensions.');
@@ -69,4 +73,12 @@ export function parseMangaEnhancements(value:unknown):MangaEnhancements {
   return {imagePipeline:normalized.imagePipeline,hiresFix:normalized.hiresFix!,detailerPipeline:normalized.detailerPipeline!,outputUpscale:normalized.outputUpscale!,clipSkip:normalized.clipSkip,
     tiledVae:{enabled:tile.enabled===true,tileSize:finite(tile.tileSize,512,64,8192),overlap:finite(tile.overlap,64,0,4096)},
     loras:normalized.loras.map(lora=>{const source=(raw.loras as Array<Record<string,unknown>> || []).find(item=>item.id===lora.id) || {};const words=(value:unknown)=>Array.isArray(value)?value.filter((word):word is string=>typeof word==='string' && word.length<=1000).slice(0,256):[];return {id:lora.id,name:lora.name,enabled:lora.enabled,strengthModel:lora.strengthModel,strengthClip:lora.strengthClip,trainedTags:words(source.trainedTags),triggerWords:words(source.triggerWords),...(typeof source.modelFamilyKey==='string' ? {modelFamilyKey:source.modelFamilyKey.slice(0,256)} : {})};})};
+}
+
+export function mangaSettingsDimensions(frame:{width:number;height:number},settings:MangaGenerationSettings,capability?:UmbraUiPipelineResolutionCapability){
+  const sizing=settings.pixelSizing;
+  if(!sizing || capability && capability.support!=='adjustable')return mangaGenerationDimensions(frame,settings.baseResolution,capability);
+  if(sizing.aspect==='custom')return {width:sizing.width,height:sizing.height};
+  const [w,h]=sizing.aspect.split(':').map(Number);
+  return resolveImageMegapixels(sizing.megapixels,sizing.aspect==='source'?frame.width/frame.height:w/h,capability);
 }

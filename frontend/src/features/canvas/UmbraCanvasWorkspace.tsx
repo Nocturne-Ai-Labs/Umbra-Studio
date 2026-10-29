@@ -12,6 +12,7 @@ import { normalizeUmbraUiModelFamilyKey } from '../../../../shared/umbra-ui/pipe
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { usePinnedOutputFolder } from '@/components/umbra-ui/UmbraPinnedOutputControl';
 import { UmbraGenerationActionBar } from '@/components/umbra-ui/UmbraGenerationActionBar';
+import { UmbraMegapixelControls } from '@/components/umbra-ui/UmbraMegapixelControls';
 import React from 'react';
 import { useInpaintSamplingPreview } from '@/hooks/useInpaintSamplingPreview';
 import { useNsfwPrivacy } from '@/components/privacy/NsfwPrivacyProvider';
@@ -266,15 +267,6 @@ const UMBRA_GALLERY_DRAG_PATHS_MIME = 'application/x-umbra-gallery-paths';
 const UMBRA_CANVAS_VECTOR_TOOLS_ENABLED = false;
 const UMBRA_CANVAS_COLOR_PICKER_ENABLED = false;
 const UMBRA_CANVAS_RASTER_PAINT_ENABLED = false;
-const UMBRA_CANVAS_GENERATION_RATIO_OPTIONS = [
-  { value: '1:1', label: '1:1 Square' },
-  { value: '3:4', label: '3:4 Portrait' },
-  { value: '4:3', label: '4:3 Landscape' },
-  { value: '9:16', label: '9:16 Portrait' },
-  { value: '16:9', label: '16:9 Landscape' },
-  { value: '21:9', label: '21:9 Ultrawide' },
-] as const;
-
 type CanvasInpaintTaskModeId = 'touch_up' | 'recolor' | 'replace';
 type CanvasInpaintBlendModeId = 'tight' | 'balanced' | 'soft';
 
@@ -2950,30 +2942,13 @@ export function UmbraCanvasWorkspace({
         <div data-umbra-canvas-tool-settings="" role="group" aria-label="Canvas tool settings" className="flex min-h-10 min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/25 px-3 py-1">
           {tool === 'bbox' ? (
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              {(['x', 'y', 'width', 'height'] as const).map((field) => (
-                <label key={field} className="font-mono text-[10px] uppercase text-zinc-400">{field === 'width' ? 'W' : field === 'height' ? 'H' : field.toUpperCase()}
+              {(['x', 'y'] as const).map((field) => (
+                <label key={field} className="font-mono text-[10px] uppercase text-zinc-400">{field.toUpperCase()}
                   <input type="number" aria-label={`Generation ${field}`} value={Math.round(project.generationBbox[field])} onChange={(event) => setGenerationBbox({ [field]: Number(event.target.value) })} className="ml-1 h-7 w-16 rounded-md border border-white/10 bg-black/35 px-1.5 font-mono text-[10px] text-zinc-300 outline-none focus:border-rose-300/35" />
                 </label>
               ))}
               {generationResolutionIssue ? <span role="alert" className="max-w-56 text-[8px] leading-tight text-amber-200">{generationResolutionIssue}</span> : null}
-              <UmbraSelect
-                ariaLabel="Generation aspect ratio"
-                value=""
-                placeholder="Ratio"
-                menuTitle="Generation Ratio"
-                size="xs"
-                className="w-[112px]"
-                options={[...UMBRA_CANVAS_GENERATION_RATIO_OPTIONS]}
-                onValueChange={(value) => {
-                  const [ratioWidth, ratioHeight] = value.split(':').map(Number);
-                  if (!ratioWidth || !ratioHeight) return;
-                  const longSide = Math.max(project.generationBbox.width, project.generationBbox.height);
-                  setGenerationBbox(ratioWidth >= ratioHeight
-                    ? { width: longSide, height: longSide * ratioHeight / ratioWidth }
-                    : { width: longSide * ratioWidth / ratioHeight, height: longSide });
-                }}
-                buttonClassName="font-mono uppercase text-zinc-400 focus-visible:border-rose-300/35"
-              />
+              <div className="w-full max-w-sm"><UmbraMegapixelControls width={project.generationBbox.width} height={project.generationBbox.height} bounds={capabilities.resolution} onChange={(width, height) => setGenerationBbox({width, height})} /></div>
               <button type="button" title="Fit generation box to enabled layers" aria-label="Fit generation box to enabled layers" onClick={() => fitGenerationBbox('drawables')} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-cyan-100"><Layers3 size={11} /></button>
               <button type="button" title="Fit generation box to enabled masks" aria-label="Fit generation box to enabled masks" onClick={() => fitGenerationBbox('masks')} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-zinc-500 hover:text-rose-100"><Brush size={11} /></button>
             </div>
