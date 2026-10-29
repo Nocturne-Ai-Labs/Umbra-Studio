@@ -27,7 +27,7 @@ import { ArrowRight, Ban, Check, ChevronDown, ChevronRight, ChevronUp, Copy, Ell
 import { useStore } from '@/store/useStore';
 import { useToastStore } from '@/store/useToastStore';
 import { openUmbraUiExtrasTool } from '@/lib/umbraUiExtrasNavigation';
-import { fetchAppSettingsFromBackend, loadAppSettings, pushAppSettingsToBackend } from '@/lib/appSettings';
+import { fetchAppSettingsFromBackend, loadAppSettings } from '@/lib/appSettings';
 import { deleteUserConfig, readUserConfig, writeUserConfig } from '@/lib/userConfig';
 import { deletePathsWithSettings } from '@/utils/trashActions';
 import { extractGenerationParams, extractMetadataFromFile } from '@/utils/metadata';
@@ -3744,7 +3744,6 @@ export const PowerPrompterCardChainEditor = React.memo(forwardRef<PowerPrompterC
         source: 'powerprompter-recent-output-pin',
       },
     }));
-    void pushAppSettingsToBackend(loadAppSettings()).catch(() => undefined);
     showToast(`Pinned folder: ${folderPath}`, 'success');
   }, [pinnedFoldersSetting, setAppSetting, showToast]);
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { selectSettingsPatch } from '@/lib/appSettingsPatch';
 import React, {
   createContext,
   useCallback,
@@ -179,7 +180,7 @@ export function NsfwPrivacyProvider({ children }: { children: React.ReactNode })
   const commitSettings = useCallback((updates: Partial<AppSettings>) => {
     const nextSettings = saveAppSettings(updates);
     applyAppSettings(nextSettings);
-    void pushAppSettingsToBackend(nextSettings).catch((error) => {
+    void pushAppSettingsToBackend(selectSettingsPatch(updates, nextSettings)).catch((error) => {
       console.warn('[NsfwPrivacy] Failed to persist privacy settings:', error);
       useStore.getState().showToast('Failed to save NSFW privacy settings', 'error');
     });

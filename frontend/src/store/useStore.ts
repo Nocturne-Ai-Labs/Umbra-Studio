@@ -1,3 +1,4 @@
+import { selectSettingsPatch } from '@/lib/appSettingsPatch';
 import { comfyToolActions, type ToolActionState } from '@/lib/toolActionController';
 import { create } from 'zustand';
 import { debugMiddleware } from './debugMiddleware';
@@ -283,7 +284,7 @@ export const useStore = create<AppState>()(
       const initialLocalServerAppId = normalizeLocalServerAppId(deviceShellResume?.selectedLocalServerAppId);
       const setAppSettings = (patch: Partial<AppSettings>) => set((state) => {
         const nextSettings = saveAppSettings(patch);
-        void pushAppSettingsToBackend(nextSettings).catch((error) => {
+        void pushAppSettingsToBackend(selectSettingsPatch(patch, nextSettings)).catch((error) => {
           console.warn('[useStore] Failed to persist app setting:', error);
         });
         return {

@@ -47,6 +47,7 @@ import {
   saveAppSettings,
 } from '@/lib/appSettings';
 import { useI18n } from '@/i18n';
+import { selectSettingsPatch } from '@/lib/appSettingsPatch';
 
 interface GlobalSettingsProps {
   isOpen: boolean;
@@ -95,6 +96,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   useComponentDebug('GlobalSettings', { activeSection, isOpen });
   const [settings, setSettings] = useState<Settings>({ ...defaultSettings });
+  const editedSettings = useRef<Partial<Settings>>({});
   const [saveError, setSaveError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -127,6 +129,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
       const merged = backend
         ? normalizeAppSettings(backend)
         : loadAppSettings();
+      editedSettings.current = {};
       setSettings(merged);
       saveAppSettings(merged, { broadcast: false, replace: true });
       useStore.getState().applyAppSettings(merged);
@@ -143,21 +146,24 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
       const normalized = normalizeAppSettings(settings);
       const toolkitUrlError = validateAIToolkitUrl(normalized['aitoolkit.url']);
       if (toolkitUrlError) throw new Error(toolkitUrlError);
-      await pushAppSettingsToBackend(normalized);
+      const patch = selectSettingsPatch(editedSettings.current, normalized);
       const bundleResponse = await fetch('/api/settings/bundle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bundle: {
             schemaVersion: 1,
-            appSettings: normalized,
+            appSettings: patch,
             themeSettings: getThemeSettingsSnapshot(),
           },
         }),
       });
       if (!bundleResponse.ok) throw new Error(`Settings bundle sync failed (${bundleResponse.status})`);
-      saveAppSettings(normalized, { replace: true });
-      useStore.getState().applyAppSettings(normalized);
+      const saved = await bundleResponse.json();
+      const latest = normalizeAppSettings(saved.settings);
+      editedSettings.current = {};
+      saveAppSettings(latest, { replace: true });
+      useStore.getState().applyAppSettings(latest);
       console.log('[GlobalSettings] Settings saved successfully');
       onClose();
     } catch (err) {
@@ -171,6 +177,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
   const resetSettings = () => {
     if (confirm('Reset all settings to defaults? This cannot be undone.')) {
       const reset = resetAppSettings();
+      editedSettings.current = {};
       setSettings(reset);
       useStore.getState().applyAppSettings(reset);
       applyThemeSettingsSnapshot(null);
@@ -287,6 +294,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
           }
 
           const importedSettings = normalizeAppSettings(result?.settings || bundlePayload.appSettings || {});
+          editedSettings.current = {};
           setSettings(importedSettings);
           saveAppSettings(importedSettings, { broadcast: false });
           useStore.getState().applyAppSettings(importedSettings);
@@ -372,6 +380,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
   };
 
   const updateSetting = (key: keyof Settings, value: any) => {
+    editedSettings.current = { ...editedSettings.current, [key]: value };
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
