@@ -42,7 +42,6 @@ import {
   fetchAppSettingsFromBackend,
   loadAppSettings,
   normalizeAppSettings,
-  pushAppSettingsToBackend,
   resetAppSettings,
   saveAppSettings,
 } from '@/lib/appSettings';
@@ -151,6 +150,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          filesystemSettingsEdited: ['library.externalRoots', 'library.enableExternalRoots', 'comfyui.externalOutputPath'].some(key => Object.prototype.hasOwnProperty.call(patch, key)),
           bundle: {
             schemaVersion: 1,
             appSettings: patch,
@@ -158,8 +158,8 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
           },
         }),
       });
-      if (!bundleResponse.ok) throw new Error(`Settings bundle sync failed (${bundleResponse.status})`);
       const saved = await bundleResponse.json();
+      if (!bundleResponse.ok) throw new Error(saved?.error || `Settings bundle sync failed (${bundleResponse.status})`);
       const latest = normalizeAppSettings(saved.settings);
       editedSettings.current = {};
       saveAppSettings(latest, { replace: true });
@@ -183,11 +183,11 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
       applyThemeSettingsSnapshot(null);
       void (async () => {
         try {
-          await pushAppSettingsToBackend(reset);
           await fetch('/api/settings/bundle', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              filesystemSettingsEdited: true,
               bundle: {
                 schemaVersion: 1,
                 appSettings: reset,
@@ -286,7 +286,7 @@ export function GlobalSettings({ isOpen, onClose }: GlobalSettingsProps) {
           const response = await fetch('/api/settings/bundle', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bundle: bundlePayload }),
+            body: JSON.stringify({ bundle: bundlePayload, filesystemSettingsEdited: true }),
           });
           const result = await response.json().catch(() => ({}));
           if (!response.ok || result?.success === false) {

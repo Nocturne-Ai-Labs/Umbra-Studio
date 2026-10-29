@@ -243,7 +243,7 @@ import { getComfyHttpBaseUrl, getComfyWebSocketUrl, resolveComfyEndpoint } from 
 import { getTrackedComfyProcessPids } from './backend/comfyProcessOwnership';
 import { officialComfySessionFromEnvironment, officialComfySessionMutationIssue } from './backend/OfficialComfySession';
 import { inspectActiveManagedWorkflowRuntimePackages } from './updater/ManagedDependencyStatus';
-import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges, preserveRemoteComfyUrl } from './backend/hostOnlySettings';
+import { HOST_ONLY_SERVICE_SETTING_DEFAULTS, validateHostOnlySettingChanges, preserveRemoteComfyUrl, validateFilesystemGrantRemoval } from './backend/hostOnlySettings';
 import { validateAIToolkitUrl } from './shared/aiToolkitUrl';
 import { getComfyVramLaunchArguments } from './backend/comfyLaunchArguments';
 import {
@@ -38624,6 +38624,8 @@ const server = Bun.serve<UmbraSocketData>({
           if (comfySettingsError) return json({ error: comfySettingsError }, hostRequest ? 400 : 403);
           const trashStorageError = validateRequestedTrashStorageSetting(mergedNextSettings);
           if (trashStorageError) return json({ error: trashStorageError }, 400);
+          const grantError = validateFilesystemGrantRemoval(mergedNextSettings, currentSettings, (body as any)?.filesystemSettingsEdited === true);
+          if (grantError) return json({ error: grantError }, 409);
           settingsManager.updateAppSettings(mergedNextSettings);
           handleVideoRoutePolicySettingChange(currentSettings);
           let comfySecurityResult: ComfySecurityApplyResult | undefined;
@@ -38663,7 +38665,9 @@ const server = Bun.serve<UmbraSocketData>({
             const currentBundle = await loadUserSettingsBundleSnapshot();
             const nextBundle = normalizeUmbraUserSettingsBundle(rawBundle, currentBundle);
 
-            let portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(nextBundle.appSettings);
+            // Persist only submitted keys. Bundle defaults can become stale while awaiting IO.
+            const requestedAppSettings = normalizeSettingsRecord((rawBundle as any)?.appSettings);
+            let portableBundleAppSettings = normalizeGalleryAppSettingsForStorage(requestedAppSettings);
             const hostRequest = isHostRequest(req, url, server);
             const currentSettings = settingsManager.getAppSettings();
             portableBundleAppSettings = preserveRemoteComfyUrl(portableBundleAppSettings, currentSettings, hostRequest,
@@ -38674,9 +38678,11 @@ const server = Bun.serve<UmbraSocketData>({
             if (comfySettingsError) return json({ error: comfySettingsError }, hostRequest ? 400 : 403);
             const trashStorageError = validateRequestedTrashStorageSetting(portableBundleAppSettings);
             if (trashStorageError) return json({ error: trashStorageError }, 400);
+            const grantError = validateFilesystemGrantRemoval(portableBundleAppSettings, currentSettings, (body as any)?.filesystemSettingsEdited === true);
+            if (grantError) return json({ error: grantError }, 409);
             settingsManager.updateAppSettings(portableBundleAppSettings);
             handleVideoRoutePolicySettingChange(currentSettings);
-            nextBundle.appSettings = portableBundleAppSettings;
+            nextBundle.appSettings = settingsManager.getAppSettings();
             nextBundle.powerPrompterSettings = await savePPSettings(nextBundle.powerPrompterSettings);
 
             let comfySecurityResult: ComfySecurityApplyResult | undefined;

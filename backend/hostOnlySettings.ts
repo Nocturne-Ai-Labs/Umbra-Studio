@@ -49,3 +49,27 @@ export function validateHostOnlySettingChanges(
   }
   return null;
 }
+
+/** Old browser snapshots must not revoke directory grants during unrelated saves. */
+export function validateFilesystemGrantRemoval(
+  patch: Record<string, unknown>, current: Record<string, unknown>, explicitFilesystemEdit: boolean,
+): string | null {
+  if (explicitFilesystemEdit) return null;
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(patch, key);
+  const pathKey = (value: unknown) => {
+    const path = String(value ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    return process.platform === 'win32' ? path.toLowerCase() : path;
+  };
+  const roots = (value: unknown) => Array.isArray(value) ? value.map(pathKey).filter(Boolean) : [];
+  const previous = roots(current['library.externalRoots']);
+  const next = new Set(roots(patch['library.externalRoots']));
+  const removesRoot = has('library.externalRoots') && previous.some(root => !next.has(root));
+  const disablesRoots = previous.length > 0 && current['library.enableExternalRoots'] !== false
+    && patch['library.enableExternalRoots'] === false;
+  const changesOutput = has('comfyui.externalOutputPath') && pathKey(current['comfyui.externalOutputPath'])
+    && pathKey(patch['comfyui.externalOutputPath']) !== pathKey(current['comfyui.externalOutputPath']);
+  if (removesRoot || disablesRoots || changesOutput) {
+    return 'An outdated settings save tried to remove saved folder access. Your folders were preserved. Refresh this Studio tab; use Settings > Storage to intentionally change folder access.';
+  }
+  return null;
+}
