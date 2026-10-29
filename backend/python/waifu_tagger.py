@@ -97,7 +97,20 @@ def mcut_threshold(scores: List[float]) -> float:
     return float((sorted_scores[max_gap_idx] + sorted_scores[max_gap_idx + 1]) / 2.0)
 
 
-def load_model(model_repo: str, cache_dir: str | None = None) -> Tuple[ort.InferenceSession, pd.DataFrame]:
+def create_session(model_path: str, device: str):
+    available = set(ort.get_available_providers())
+    if device == "cuda" and "CUDAExecutionProvider" not in available:
+        raise RuntimeError("GPU tagging requires ONNX Runtime CUDA support. Choose CPU or install GPU tagging prerequisites.")
+    providers = ["CPUExecutionProvider"]
+    if device != "cpu" and "CUDAExecutionProvider" in available:
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    session = ort.InferenceSession(model_path, providers=providers)
+    if device == "cuda" and "CUDAExecutionProvider" not in session.get_providers():
+        raise RuntimeError("GPU tagging could not initialize CUDA. Choose CPU or repair GPU dependencies.")
+    return session
+
+
+def load_model(model_repo: str, cache_dir: str | None = None, device: str = "auto") -> Tuple[ort.InferenceSession, pd.DataFrame]:
     if np is None or ort is None or pd is None or hf_hub_download is None:
         raise RuntimeError("Required Python dependencies are missing.")
 
@@ -112,12 +125,7 @@ def load_model(model_repo: str, cache_dir: str | None = None) -> Tuple[ort.Infer
         cache_dir=cache_dir,
     )
 
-    providers = ["CPUExecutionProvider"]
-    available = set(ort.get_available_providers())
-    if "CUDAExecutionProvider" in available:
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
-    session = ort.InferenceSession(model_path, providers=providers)
+    session = create_session(model_path, device)
     tags_df = pd.read_csv(tags_path)
     return session, tags_df
 
@@ -159,6 +167,7 @@ def load_model_with_source(
     model_repo: str,
     cache_dir: str | None = None,
     local_model_root: str | None = None,
+    device: str = "auto",
 ) -> Tuple[ort.InferenceSession, pd.DataFrame, str]:
     if np is None or ort is None or pd is None:
         raise RuntimeError("Required Python dependencies are missing.")
@@ -166,15 +175,11 @@ def load_model_with_source(
     local_files = resolve_local_model_files(model_repo, local_model_root)
     if local_files:
         model_path, tags_path = local_files
-        providers = ["CPUExecutionProvider"]
-        available = set(ort.get_available_providers())
-        if "CUDAExecutionProvider" in available:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        session = ort.InferenceSession(model_path, providers=providers)
+        session = create_session(model_path, device)
         tags_df = pd.read_csv(tags_path)
         return session, tags_df, "local"
 
-    session, tags_df = load_model(model_repo=model_repo, cache_dir=cache_dir)
+    session, tags_df = load_model(model_repo=model_repo, cache_dir=cache_dir, device=device)
     return session, tags_df, "huggingface"
 
 
@@ -306,6 +311,7 @@ def infer_tags(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Tag image with Waifu Diffusion wd-tagger model")
     parser.add_argument("--image", required=True, help="Path to image")
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF repo id for wd model")
     parser.add_argument("--general-threshold", type=float, default=DEFAULT_GENERAL_THRESHOLD)
     parser.add_argument("--character-threshold", type=float, default=DEFAULT_CHARACTER_THRESHOLD)
@@ -351,6 +357,7 @@ def main() -> int:
             model_repo=args.model,
             cache_dir=args.cache_dir,
             local_model_root=args.local_model_root,
+            device=args.device,
         )
         result = infer_tags(
             session=session,

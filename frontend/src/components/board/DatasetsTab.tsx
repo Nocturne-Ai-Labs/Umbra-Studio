@@ -45,6 +45,7 @@ const DEFAULT_CONCEPT_SETTINGS: DatasetConceptSettings = {
   captionMode: 'tags',
   modelRepo: WAIFU_MODEL_OPTIONS[0].id,
   naturalModelRepo: NATURAL_MODEL_OPTIONS[0].id,
+  taggerDevice: 'auto',
   naturalDevice: 'auto',
   naturalMaxNewTokens: 192,
   generalThreshold: 0.35,
@@ -202,6 +203,10 @@ export function DatasetsTab() {
   const [captionMode, setCaptionMode] = useState<'tags' | 'natural'>('tags');
   const [taggerModel, setTaggerModel] = useState(WAIFU_MODEL_OPTIONS[0].id);
   const [naturalModel, setNaturalModel] = useState(NATURAL_MODEL_OPTIONS[0].id);
+  const [taggerDevice, setTaggerDevice] = useState<'auto' | 'cpu' | 'cuda'>('auto');
+  const [tagProgress, setTagProgress] = useState<{ total: number; completed: number; failed: number; filename: string; phase: string; concept: string } | null>(null);
+  const [captionJobId, setCaptionJobId] = useState('');
+  const activeCaptionJob = useRef('');
   const [naturalDevice, setNaturalDevice] = useState<'auto' | 'cpu' | 'cuda'>('auto');
   const [naturalMaxNewTokens, setNaturalMaxNewTokens] = useState(DEFAULT_CONCEPT_SETTINGS.naturalMaxNewTokens);
   const [generalThreshold, setGeneralThreshold] = useState(DEFAULT_CONCEPT_SETTINGS.generalThreshold);
@@ -398,6 +403,7 @@ export function DatasetsTab() {
     setCaptionMode(next.captionMode === 'natural' ? 'natural' : 'tags');
     setTaggerModel(next.modelRepo || DEFAULT_CONCEPT_SETTINGS.modelRepo);
     setNaturalModel(next.naturalModelRepo || DEFAULT_CONCEPT_SETTINGS.naturalModelRepo);
+    setTaggerDevice(next.taggerDevice === 'cpu' || next.taggerDevice === 'cuda' ? next.taggerDevice : 'auto');
     setNaturalDevice(next.naturalDevice === 'cpu' || next.naturalDevice === 'cuda' ? next.naturalDevice : 'auto');
     setNaturalMaxNewTokens(Number.isFinite(Number(next.naturalMaxNewTokens))
       ? Math.max(32, Math.min(512, Math.floor(Number(next.naturalMaxNewTokens))))
@@ -501,6 +507,7 @@ export function DatasetsTab() {
         captionMode,
         modelRepo: taggerModel,
         naturalModelRepo: naturalModel,
+        taggerDevice,
         naturalDevice,
         naturalMaxNewTokens,
         generalThreshold,
@@ -534,6 +541,7 @@ export function DatasetsTab() {
     includeMetaTags,
     includeRatingTags,
     maxTags,
+    taggerDevice,
     naturalDevice,
     naturalMaxNewTokens,
     naturalModel,
@@ -686,6 +694,25 @@ export function DatasetsTab() {
     return success;
   };
 
+  useEffect(() => {
+    if (!captionJobId) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/datasets/caption-progress?id=${encodeURIComponent(captionJobId)}`, { signal: controller.signal });
+        if (response.ok) {
+          const progress = await response.json();
+          if (!stopped && activeCaptionJob.current === captionJobId) setTagProgress(previous => previous ? { ...previous, ...progress } : previous);
+        }
+      } catch { /* The main request reports job errors. */ }
+      if (!stopped) timer = setTimeout(poll, 750);
+    };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); controller.abort(); };
+  }, [captionJobId]);
+
   const handleBatchCaption = async (autoTag: boolean) => {
     if (!selectedDataset || !selectedConcept || images.length === 0 || autoTagging || conceptSettingsReadyKey !== selectedConceptSettingsKey) return;
 
@@ -696,6 +723,10 @@ export function DatasetsTab() {
     }
 
     setAutoTagging(true);
+    const progressId = crypto.randomUUID();
+    setTagProgress({ total: targetImages.length || images.length, completed: 0, failed: 0, filename: '', phase: 'Preparing', concept: conceptKey });
+    activeCaptionJob.current = progressId;
+    setCaptionJobId(progressId);
     try {
       const session = conceptSessions.current.get(selectedConceptSettingsKey);
       if (!session || !await session.flush()) throw new Error('Save concept settings before captioning.');
@@ -711,9 +742,11 @@ export function DatasetsTab() {
           prependTags,
           autoTag,
           persistSettings: false,
+          progressId,
           captionMode,
           modelRepo: taggerModel,
           naturalModelRepo: naturalModel,
+          taggerDevice,
           naturalDevice,
           naturalMaxNewTokens,
           generalThreshold,
@@ -771,6 +804,7 @@ export function DatasetsTab() {
         await loadImages();
       }
 
+      setTagProgress(previous => previous ? { ...previous, completed: (payload?.updated || 0) + (payload?.failed || 0), failed: payload?.failed || 0, phase: payload?.failed ? 'Finished with errors' : 'Complete', filename: '' } : previous);
       const updated = payload?.updated || 0;
       const failed = payload?.failed || 0;
       showToast(
@@ -778,8 +812,11 @@ export function DatasetsTab() {
         failed > 0 ? 'error' : 'success'
       );
     } catch (error: any) {
+      setTagProgress(previous => previous ? { ...previous, phase: error?.message || 'Caption update failed' } : previous);
       showToast(error?.message || 'Caption update failed', 'error');
     } finally {
+      activeCaptionJob.current = '';
+      setCaptionJobId('');
       setAutoTagging(false);
     }
   };
@@ -1171,6 +1208,33 @@ export function DatasetsTab() {
                   ))}
                 </UmbraSelectControl>
               </div>
+              <label className="col-span-full flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                Processing device
+                <UmbraSelectControl
+                  aria-label="Caption processing device"
+                  value={captionMode === 'natural' ? naturalDevice : taggerDevice}
+                  disabled={autoTagging}
+                  onChange={event => (captionMode === 'natural' ? setNaturalDevice : setTaggerDevice)(event.target.value as 'auto' | 'cpu' | 'cuda')}
+                  className="umbra-input h-8 w-40 rounded px-2 text-xs"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="cpu">CPU</option>
+                  <option value="cuda">GPU (CUDA)</option>
+                </UmbraSelectControl>
+                <span>GPU requires CUDA support. CPU leaves GPU memory free.</span>
+              </label>
+              {tagProgress && tagProgress.concept === conceptKey && (
+                <div className="col-span-full space-y-1.5 rounded border border-white/10 bg-[var(--umbra-panel)] p-2">
+                  <div className="flex flex-wrap justify-between gap-2 text-xs" role="status" aria-live="polite">
+                    <span>{tagProgress.phase}</span>
+                    <span>{tagProgress.completed} / {tagProgress.total} processed{tagProgress.failed ? ` · ${tagProgress.failed} failed` : ''}</span>
+                  </div>
+                  <div role="progressbar" aria-label="Caption progress" aria-valuemin={0} aria-valuemax={tagProgress.total} aria-valuenow={tagProgress.completed} className="h-1.5 overflow-hidden rounded bg-white/10">
+                    <div className="h-full bg-[var(--umbra-accent)]" style={{ width: `${tagProgress.total ? Math.min(100, tagProgress.completed / tagProgress.total * 100) : 0}%` }} />
+                  </div>
+                  {tagProgress.filename && <div className="truncate text-xs text-zinc-400" title={tagProgress.filename}>{tagProgress.filename}</div>}
+                </div>
+              )}
               <div className="col-span-full flex flex-wrap items-center justify-end gap-2">
                 <span className="mr-auto text-xs text-zinc-400">{selectedImages.size ? `${selectedImages.size} selected images` : `All ${images.length} images in this folder`}</span>
                 <label className="flex h-8 items-center gap-1.5 rounded border border-white/10 px-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-400">
@@ -1330,18 +1394,7 @@ export function DatasetsTab() {
             </details>
             {captionMode === 'natural' && (
               <div className="mt-2 flex flex-wrap items-end gap-2 rounded border border-white/10 bg-[var(--umbra-accent-glow)] p-2">
-                <label className="w-32">
-                  <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Device</span>
-                  <UmbraSelectControl
-                    value={naturalDevice}
-                    onChange={(e) => setNaturalDevice(e.target.value as 'auto' | 'cpu' | 'cuda')}
-                    className="umbra-input h-8 w-full rounded px-2 text-xs"
-                  >
-                    <option value="auto">Auto</option>
-                    <option value="cuda">GPU</option>
-                    <option value="cpu">CPU</option>
-                  </UmbraSelectControl>
-                </label>
+
                 <label className="w-32">
                   <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Max tokens</span>
                   <input

@@ -7,6 +7,7 @@ export interface DatasetConceptSettings {
   captionMode: 'tags' | 'natural';
   modelRepo: string;
   naturalModelRepo: string;
+  taggerDevice: 'auto' | 'cpu' | 'cuda';
   naturalDevice: 'auto' | 'cpu' | 'cuda';
   naturalMaxNewTokens: number;
   generalThreshold: number;

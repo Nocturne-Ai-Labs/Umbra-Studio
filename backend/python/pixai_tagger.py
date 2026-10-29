@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--general-threshold", type=float, default=0.17)
     parser.add_argument("--character-threshold", type=float, default=0.27)
     parser.add_argument("--rating-threshold", type=float, default=0.41)
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default=None)
     parser.add_argument("--max-tags", type=int, default=120)
     return parser.parse_args()
 
@@ -103,7 +104,7 @@ def main() -> int:
             "in Umbra's Python runtime."
         ) from exc
 
-    device = os.environ.get("UMBRA_PIXAI_DEVICE", "auto").lower()
+    device = args.device or os.environ.get("UMBRA_PIXAI_DEVICE", "auto").lower()
     if device not in {"auto", "cpu", "cuda"}:
         raise ValueError("UMBRA_PIXAI_DEVICE must be auto, cpu or cuda.")
     if device == "cuda" and not torch.cuda.is_available():
@@ -134,6 +135,7 @@ def main() -> int:
             results.append({"filename": str(image["filename"]), "result": build_result(scores, args)})
         except Exception as exc:
             results.append({"filename": str(image.get("filename", "")), "error": str(exc)})
+        print("UMBRA_PROGRESS " + json.dumps({"completed": len(results), "filename": str(image.get("filename", "")), "failed": sum(bool(item.get("error")) for item in results)}), flush=True)
     if args.image:
         item = results[0]
         if item.get("error"):

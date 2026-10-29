@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.91.5 - 2026-10-29
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update with `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then refresh Studio. No new model downloads are required if your caption models are already installed.
+- Open **Data Forge > Datasets > Caption tools** to choose **Auto**, **CPU**, or **GPU (CUDA)**. The selection is saved per dataset folder, separately for tag lists and descriptions.
+- GPU tagging requires a compatible NVIDIA CUDA runtime: WD taggers need CUDA-enabled ONNX Runtime, while PixAI and descriptions need CUDA-enabled PyTorch. Explicit GPU selection reports unavailable GPU support instead of silently running on CPU. CPU remains available.
+- Optional AI Toolkit requires host Git and Node.js 20 or newer. Linux managed extensions may require `python3-dev`, `build-essential`, `libgl1`, `libglib2.0-0` and `lsof`, or distribution equivalents.
+
+### Dataset Tagging Feedback
+
+- Caption tools now show a progress bar, processed/total files, failure counts and the current file, with preparation, model-loading and saving stages.
+- PixAI and description batches report per-image progress while retaining their existing batch processing.
+- Processing-device selection is available beside the caption model for both tag lists and descriptions.
+- Source build, lint, type checks and focused device/progress checks passed. Hands-on model inference is left to the maintainer for this release; no fresh CPU/GPU inference qualification is claimed.
+
+### Fixes And Quality-of-Life Recap
+
+- Improved: Dataset tagging now provides visible progress and completion/error counts.
+- Improved: CPU/GPU selection is saved with dataset caption settings.
+- Fixed: Explicit CUDA selection in WD tagging no longer silently falls back to CPU when CUDA initialization fails.
+
 ## v0.91.4 - 2026-10-29
 
 ### TL;DR - Setup After Updating

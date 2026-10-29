@@ -1,3 +1,4 @@
+import { captionProgressReader, type CaptionProgress } from './backend/DatasetTaggingProgress';
 import { FizgigService } from './backend/FizgigService';
 import { normalizeMossPromptField } from './shared/umbra-ui/mossPromptFields';
 import { stampGeneratedImageMetadata } from './backend/GeneratedImageMetadata';
@@ -572,6 +573,7 @@ type DatasetConceptCaptionSettings = {
   captionMode: 'tags' | 'natural';
   modelRepo: string;
   naturalModelRepo: string;
+  taggerDevice: 'auto' | 'cpu' | 'cuda';
   naturalDevice: 'auto' | 'cpu' | 'cuda';
   naturalMaxNewTokens: number;
   generalThreshold: number;
@@ -606,6 +608,7 @@ function createDefaultDatasetConceptSettings(_datasetName: string, conceptFolder
     captionMode: 'tags',
     modelRepo: 'SmilingWolf/wd-vit-tagger-v3',
     naturalModelRepo: 'prithivMLmods/Qwen2-VL-2B-Abliterated-Caption-it',
+    taggerDevice: 'auto',
     naturalDevice: 'auto',
     naturalMaxNewTokens: 192,
     generalThreshold: 0.35,
@@ -660,6 +663,7 @@ function normalizeDatasetConceptSettings(
     captionMode: input?.captionMode === 'natural' ? 'natural' : 'tags',
     modelRepo: String(input?.modelRepo || defaults.modelRepo).trim() || defaults.modelRepo,
     naturalModelRepo: String(input?.naturalModelRepo || defaults.naturalModelRepo).trim() || defaults.naturalModelRepo,
+    taggerDevice: input?.taggerDevice === 'cpu' || input?.taggerDevice === 'cuda' ? input.taggerDevice : 'auto',
     naturalDevice: input?.naturalDevice === 'cpu' || input?.naturalDevice === 'cuda' ? input.naturalDevice : 'auto',
     naturalMaxNewTokens: parseInteger(input?.naturalMaxNewTokens, defaults.naturalMaxNewTokens, 32, 512),
     generalThreshold: parseNumber(input?.generalThreshold, defaults.generalThreshold, 0, 1),
@@ -16217,7 +16221,11 @@ interface PythonCommandCandidate {
   prefixArgs: string[];
 }
 
+const datasetCaptionProgress = new Map<string, CaptionProgress>();
+
 interface WaifuTaggerRunOptions {
+  device?: 'auto' | 'cpu' | 'cuda';
+  onProgress?: (progress: { completed: number; failed: number; filename: string }) => void;
   imagePath: string;
   modelRepo: string;
   generalThreshold: number;
@@ -16229,6 +16237,7 @@ interface WaifuTaggerRunOptions {
 }
 
 interface NaturalCaptionRunOptions {
+  onProgress?: WaifuTaggerRunOptions['onProgress'];
   imagePaths: string[];
   modelRepo: string;
   device: 'auto' | 'cpu' | 'cuda';
@@ -16347,7 +16356,7 @@ function getPythonCommandCandidates(): PythonCommandCandidate[] {
   return candidates;
 }
 
-async function runCommandCapture(command: string, args: string[], cwd: string): Promise<{
+async function runCommandCapture(command: string, args: string[], cwd: string, onStdout?: (chunk: string) => void): Promise<{
   code: number | null;
   stdout: string;
   stderr: string;
@@ -16367,6 +16376,7 @@ async function runCommandCapture(command: string, args: string[], cwd: string): 
 
       proc.stdout?.on('data', (chunk) => {
         stdout += String(chunk ?? '');
+        onStdout?.(String(chunk ?? ''));
       });
       proc.stderr?.on('data', (chunk) => {
         stderr += String(chunk ?? '');
@@ -16437,6 +16447,7 @@ async function runWaifuTagger(options: WaifuTaggerRunOptions): Promise<any> {
     '--max-tags', String(options.maxTags),
     '--local-model-root', localModelRoot,
   ];
+  if (options.device) scriptArgs.push('--device', options.device);
   if (!pixai) {
     scriptArgs.push('--model', options.modelRepo);
     if (options.generalMcutEnabled) scriptArgs.push('--general-mcut-enabled');
@@ -16504,6 +16515,7 @@ async function runPixaiTaggerBatch(
   })) }), 'utf8');
   try {
     const scriptArgs = [scriptPath, '--manifest', manifestPath,
+      '--device', options.device || 'auto',
       '--local-model-root', localModelRoot,
       '--general-threshold', String(options.generalThreshold),
       '--character-threshold', String(options.characterThreshold),
@@ -16511,7 +16523,7 @@ async function runPixaiTaggerBatch(
       '--max-tags', String(options.maxTags)];
     const failures: string[] = [];
     for (const candidate of getPythonCommandCandidates()) {
-      const run = await runCommandCapture(candidate.command, [...candidate.prefixArgs, ...scriptArgs], ROOT_DIR);
+      const run = await runCommandCapture(candidate.command, [...candidate.prefixArgs, ...scriptArgs], ROOT_DIR, captionProgressReader(options.onProgress));
       if (run.error || run.code !== 0) {
         failures.push(run.error || `${candidate.command}: ${run.stdout || run.stderr || `exit ${run.code}`}`);
         continue;
@@ -16571,7 +16583,7 @@ async function runNaturalCaptioner(options: NaturalCaptionRunOptions): Promise<a
   try {
     for (const candidate of getPythonCommandCandidates()) {
       const args = [...candidate.prefixArgs, ...scriptArgs];
-      const run = await runCommandCapture(candidate.command, args, ROOT_DIR);
+      const run = await runCommandCapture(candidate.command, args, ROOT_DIR, captionProgressReader(options.onProgress));
       const commandLabel = [candidate.command, ...candidate.prefixArgs].join(' ');
       if (run.error) {
         failures.push(`${commandLabel}: ${run.error}`);
@@ -36846,7 +36858,13 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       // Batch prepend trigger text and optionally run the selected dataset caption model.
+      if (path === '/api/datasets/caption-progress' && method === 'GET') {
+        const progress = datasetCaptionProgress.get(url.searchParams.get('id') || '');
+        return progress ? json(progress) : json({ error: 'No active caption job' }, 404);
+      }
+
       if (path === '/api/datasets/auto-tag-captions' && method === 'POST') {
+        let progressId = '';
         try {
           const imageExts = DATASET_IMPORT_IMAGE_EXTENSIONS;
           const parseBool = (value: unknown, fallback: boolean): boolean => {
@@ -36994,6 +37012,7 @@ const server = Bun.serve<UmbraSocketData>({
           if (!DATASET_TAGGER_MODEL_REPOS.has(modelRepo) || naturalModelRepo !== DATASET_NATURAL_MODEL_REPO) {
             return json({ error: 'Unsupported Data Forge caption model' }, 400);
           }
+          const taggerDevice = body.taggerDevice === 'cpu' || body.taggerDevice === 'cuda' ? body.taggerDevice : 'auto';
           const naturalDevice = body.naturalDevice === 'cpu' || body.naturalDevice === 'cuda' ? body.naturalDevice : 'auto';
           const naturalMaxNewTokens = parseInteger(body.naturalMaxNewTokens, 192, 32, 512);
           const generalThreshold = parseNumber(body.generalThreshold, 0.35, 0, 1);
@@ -37046,6 +37065,7 @@ const server = Bun.serve<UmbraSocketData>({
             modelRepo,
             naturalModelRepo,
             naturalDevice,
+            taggerDevice,
             naturalMaxNewTokens,
             generalThreshold,
             characterThreshold,
@@ -37066,6 +37086,19 @@ const server = Bun.serve<UmbraSocketData>({
             console.warn('[Datasets] Failed to persist concept auto-tag settings:', error);
           });
 
+          if (typeof body.progressId === 'string' && /^[0-9a-f-]{36}$/i.test(body.progressId)) {
+            if (datasetCaptionProgress.has(body.progressId)) return json({ error: 'Caption job is already running' }, 409);
+            if (datasetCaptionProgress.size >= 64) return json({ error: 'Too many caption jobs. Try again shortly.' }, 429);
+            progressId = body.progressId;
+          }
+          const progress: CaptionProgress = { total: imageFiles.length, completed: 0, failed: 0, filename: '', phase: autoTag ? 'Loading model' : 'Saving captions' };
+          if (progressId) datasetCaptionProgress.set(progressId, progress);
+          const onProgress: WaifuTaggerRunOptions['onProgress'] = (entry) => {
+            progress.phase = 'Tagging';
+            progress.completed = Math.min(imageFiles.length, entry.completed);
+            progress.failed = Math.max(0, Math.min(progress.completed, entry.failed));
+            progress.filename = basename(entry.filename || '');
+          };
           const identities = new Map<string, Awaited<ReturnType<typeof captionMediaIdentity>>>();
           if (autoTag) for (const filename of imageFiles) {
             await readCaptionRecord(conceptPath, filename);
@@ -37075,6 +37108,7 @@ const server = Bun.serve<UmbraSocketData>({
           let batchError = '';
           const pixaiResults = autoTag && captionMode === 'tags' && modelRepo === PIXAI_TAGGER_REPO
             ? await runPixaiTaggerBatch(imageFiles.map((filename) => join(conceptPath, filename)), {
+              device: taggerDevice, onProgress,
               generalThreshold, characterThreshold, ratingThreshold,
               generalMcutEnabled, characterMcutEnabled, maxTags,
             }).catch((error) => { batchError = String(error.message || error); return null; })
@@ -37085,6 +37119,7 @@ const server = Bun.serve<UmbraSocketData>({
               imagePaths: imageFiles.map((filename) => join(conceptPath, filename)),
               modelRepo: naturalModelRepo,
               device: naturalDevice,
+              onProgress,
               maxNewTokens: naturalMaxNewTokens,
             });
             for (const entry of naturalRun.results || []) {
@@ -37113,13 +37148,15 @@ const server = Bun.serve<UmbraSocketData>({
           let filterCaptionCategories: ReturnType<typeof createCaptionCategoryFilter> | undefined;
 
           for (const filename of imageFiles) {
+            progress.filename = filename;
+            progress.phase = pixaiResults || captionMode === 'natural' ? 'Saving sources' : autoTag ? 'Tagging' : 'Saving captions';
             const imagePath = join(conceptPath, filename);
             const captionPath = datasetCaptionPath(conceptPath, filename);
             let rawProducer: unknown;
             let sourceSaved = false;
             const sourceSettings = captionMode === 'natural'
               ? { model: naturalModelRepo, device: naturalDevice, maxNewTokens: naturalMaxNewTokens, triggerTags, prependTags }
-              : { model: modelRepo, generalThreshold, characterThreshold, ratingThreshold, generalMcutEnabled, characterMcutEnabled, maxTags, includeGeneralTags, includeStyleTags, includeCharacterTags, includeCopyrightTags, includeArtistTags, includeMetaTags, includeRatingTags, replaceUnderscoresWithSpaces, triggerTags, prependTags };
+              : { model: modelRepo, device: taggerDevice, generalThreshold, characterThreshold, ratingThreshold, generalMcutEnabled, characterMcutEnabled, maxTags, includeGeneralTags, includeStyleTags, includeCharacterTags, includeCopyrightTags, includeArtistTags, includeMetaTags, includeRatingTags, replaceUnderscoresWithSpaces, triggerTags, prependTags };
             try {
               const existingCaption = await readExistingDatasetCaption(captionPath);
               if (batchError) throw new Error(batchError);
@@ -37140,6 +37177,7 @@ const server = Bun.serve<UmbraSocketData>({
                   : await runWaifuTagger({
                   imagePath,
                   modelRepo,
+                  device: taggerDevice,
                   generalThreshold,
                   characterThreshold,
                   ratingThreshold,
@@ -37219,7 +37257,14 @@ const server = Bun.serve<UmbraSocketData>({
                 error: error?.message || 'Caption update failed',
               });
             }
+            if (!pixaiResults && captionMode !== 'natural') {
+              progress.completed = results.length;
+              progress.failed = results.filter(entry => !entry.success).length;
+            }
           }
+          progress.phase = 'Complete';
+          progress.completed = imageFiles.length;
+          progress.failed = results.filter(entry => !entry.success).length;
 
           return json({
             success: true,
@@ -37234,6 +37279,8 @@ const server = Bun.serve<UmbraSocketData>({
           });
         } catch (error: any) {
           return json({ error: error.message }, error instanceof RequestBodyTooLargeError ? 413 : 500);
+        } finally {
+          if (progressId) datasetCaptionProgress.delete(progressId);
         }
       }
 

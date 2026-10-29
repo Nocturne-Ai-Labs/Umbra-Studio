@@ -124,6 +124,8 @@ def main() -> int:
         except Exception as exc:
             results.append({"filename": filename, "success": False, "error": str(exc), "raw": generated_text, "instruction": CAPTION_INSTRUCTION})
 
+        print("UMBRA_PROGRESS " + json.dumps({"completed": len(results), "filename": filename, "failed": sum(not item.get("success") for item in results)}), flush=True)
+
     payload = {
         "success": any(result.get("success") for result in results),
         "device": device,
