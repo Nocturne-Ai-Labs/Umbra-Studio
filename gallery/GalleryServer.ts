@@ -1,3 +1,4 @@
+import { createConfiguredGalleryAuthorizer } from '../backend/GalleryConfiguredRoots';
 import { createGalleryActionOwnership } from '../shared/backendActionOwnership';
 import { createActionLogger } from '../shared/backendActionLogger';
 import { existsSync, readFileSync, type Dirent } from 'fs';
@@ -1080,10 +1081,6 @@ function getConfiguredGalleryTrashRoot(): string {
     if (typeof value === 'string' && value.trim() && !value.includes('\0')) configured = value.trim();
   } catch { /* Use the default Trash root until settings are available. */ }
   const root = resolveGalleryLiteralPath(configured.replace(/\$\{PROJECT_ROOT\}/g, ROOT_DIR));
-  if (trashStorageRootCache && trashStorageRootCache.root !== root) {
-    directPathAuthorizer = null;
-    directPathAuthorizerExpiresAt = 0;
-  }
   trashStorageRootCache = { root, expiresAt: now + 5000 };
   return root;
 }
@@ -1101,33 +1098,9 @@ function resolveGalleryPath(input: string): string {
   return resolveGalleryLiteralPath(raw);
 }
 
-type GalleryPathAuthorizer = Awaited<ReturnType<typeof createGalleryPathAuthorizer>>;
-let directPathAuthorizer: Promise<GalleryPathAuthorizer> | null = null;
-let directPathAuthorizerExpiresAt = 0;
-
-async function getDirectPathAuthorizer(): Promise<GalleryPathAuthorizer> {
-  if (directPathAuthorizer && Date.now() < directPathAuthorizerExpiresAt) return directPathAuthorizer;
-  directPathAuthorizerExpiresAt = Date.now() + 5000;
-  directPathAuthorizer = (async () => {
-    const roots = [ROOT_DIR, getConfiguredGalleryTrashRoot()];
-    let app: Record<string, unknown> = {};
-    try {
-      const settings = JSON.parse(await fs.readFile(join(ROOT_DIR, 'User', 'Config', 'settings.json'), 'utf8')) as { app?: unknown };
-      if (settings.app && typeof settings.app === 'object' && !Array.isArray(settings.app)) app = settings.app as Record<string, unknown>;
-    } catch { /* Default roots remain available when settings cannot be read. */ }
-    const addRoot = (value: unknown) => {
-      if (typeof value !== 'string' || !value.trim() || value.includes('\0')) return;
-      roots.push(resolveGalleryLiteralPath(value.replace(/\$\{PROJECT_ROOT\}/g, ROOT_DIR)));
-    };
-    addRoot(app['comfyui.externalOutputPath']);
-    if (app['library.enableExternalRoots'] !== false && Array.isArray(app['library.externalRoots'])) {
-      for (const root of app['library.externalRoots']) addRoot(root);
-    }
-    return createGalleryPathAuthorizer(roots);
-  })();
-  try { return await directPathAuthorizer; }
-  catch (error) { directPathAuthorizer = null; throw error; }
-}
+const getDirectPathAuthorizer = createConfiguredGalleryAuthorizer(
+  ROOT_DIR, getConfiguredGalleryTrashRoot, resolveGalleryLiteralPath,
+);
 
 async function isDirectGalleryPathAllowed(pathValue: string): Promise<boolean> {
   const path = resolveGalleryPath(pathValue);
