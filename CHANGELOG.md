@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.91.7 - 2026-10-29
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through Umbra Setup, then refresh Studio. No new model downloads or ComfyUI reinstall are needed.
+- Workflow prompt fields automatically expand and shrink to fit their text. Power Prompter is unchanged.
+- WD dataset taggers now load once per batch and release their process memory after the batch finishes, matching PixAI and natural-language captioning.
+- Fizgig control can reconnect after Studio restarts. A Fizgig session launched before this fix needs one normal relaunch to establish recoverable control; do not interrupt training to do this.
+- Optional AI Toolkit requires host Git and Node.js 20 or newer. Linux managed extensions may require `python3-dev`, `build-essential`, `libgl1`, `libglib2.0-0` and `lsof`, or distribution equivalents.
+
+### Workflow Usability And Trainer Recovery
+
+- Positive, negative, segmented, MOSS, Canvas/Edit, Manga generation and video prompt editors resize for typing, pasted/restored text, and available width. Existing shortcuts and text editing remain available.
+- WD batching preserves device selection, thresholds, MCUT, per-image progress, and error isolation. Caption output remains matching plain `.txt` files.
+- Fizgig recovery verifies the running process and its saved local control key. Close still refuses when training is active or process ownership/authentication cannot be verified. Reopening Studio does not start a second trainer.
+- Gallery refreshes external-root authorization when settings change instead of retaining stale permissions for five seconds. Removing or disabling roots also takes effect on the next check; folder containment checks remain enforced.
+
+### Validation
+
+- Focused Fizgig recovery, WD batch, and Gallery root-permission regressions passed. Prompt expansion/shrinking was checked in the browser with the production renderer, including narrow widths and hidden fields.
+- The maintainer confirmed Gallery navigation works in the updated isolated dev build. No personal media or captions were viewed.
+- Fresh GPU inference and a live training restart were not run for this update.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Stale external-folder permissions immediately after changing Gallery roots.
+- Fixed: Lost Fizgig stop control after restarting Studio for newly launched managed sessions.
+- Improved: Automatic prompt sizing across workflow editors, excluding Power Prompter.
+- Improved: WD tagging keeps its model loaded for the batch rather than reloading per image.
+
 ## v0.91.6 - 2026-10-29
 
 ### TL;DR - Setup After Updating
