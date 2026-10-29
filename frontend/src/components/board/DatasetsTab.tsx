@@ -1,7 +1,7 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { useI18n } from '@/i18n';
 import { useState, useEffect, useMemo, useRef, type DragEvent, type MouseEvent, type KeyboardEvent } from 'react';
-import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen, Search, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, ArrowUpAZ, ArrowDownAZ, PanelRight, FolderTree, ZoomIn, MoreHorizontal, FileOutput } from 'lucide-react';
+import { Archive, Trash2, Move, Tag, Check, CheckSquare, Square, Loader2, Upload, X, Flag, Sparkles, Copy, FolderOpen, Search, ChevronRight, ChevronDown, SlidersHorizontal, RefreshCw, ArrowUpAZ, ArrowDownAZ, PanelRight, FolderTree, ZoomIn, MoreHorizontal } from 'lucide-react';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import type { ContextMenuItem } from '@/hooks/useContextMenu';
 import { useStore } from '@/store/useStore';
@@ -11,7 +11,6 @@ import { showInFileExplorer } from '@/utils/fileExplorer';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 import { DatasetTree } from './components/DatasetTree';
 import { CaptionEditor } from './components/CaptionEditor';
-import { CaptionExportDialog } from './components/CaptionExportDialog';
 import { DatasetLightbox } from './components/DatasetLightbox';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { useDatasets } from './hooks/useDatasets';
@@ -112,7 +111,7 @@ function extractNativeDroppedImages(dataTransfer: DataTransfer): DroppedImage[] 
 }
 
 export function DatasetsTab() {
-  const [exportDataset, setExportDataset] = useState<string | null>(null);
+  const [recoveringCaptions, setRecoveringCaptions] = useState(false);
   const { t } = useI18n();
   const { showToast } = useStore();
   const {
@@ -808,7 +807,7 @@ export function DatasetsTab() {
       const updated = payload?.updated || 0;
       const failed = payload?.failed || 0;
       showToast(
-        `${autoTag ? 'Saved sources for' : 'Updated captions for'} ${updated} images${failed ? `, ${failed} failed` : ''}`,
+        `Updated captions for ${updated} images${failed ? `, ${failed} failed` : ''}`,
         failed > 0 ? 'error' : 'success'
       );
     } catch (error: any) {
@@ -1081,7 +1080,17 @@ export function DatasetsTab() {
             <button type="button" disabled={!selectedConcept || isImporting} title={selectedConcept ? 'Import images from your device, or drag them into this workspace' : 'Choose a dataset folder first'} onClick={() => importInputRef.current?.click()} className="forge-button forge-button-primary">{isImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}Import images</button>
             {selectedConcept && <>
               <button type="button" aria-expanded={tagSettingsOpen} aria-controls="dataset-tag-settings" onClick={() => setTagSettingsOpen(value => !value)} className="forge-button"><Sparkles size={14} />Caption tools<ChevronDown size={12} className={tagSettingsOpen ? 'rotate-180' : ''} /></button>
-              <button type="button" disabled={autoTagging || !selectedDataset} onClick={() => setExportDataset(selectedDataset)} className="forge-button forge-button-primary"><FileOutput size={14} />Training export</button>
+              {images.some(image => image.captionSources) && <button type="button" disabled={autoTagging || recoveringCaptions} onClick={async () => {
+                setRecoveringCaptions(true);
+                try {
+                  const response = await fetch('/api/datasets/recover-captions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset: selectedDataset, concept: selectedConcept }) });
+                  const result = await response.json();
+                  if (!response.ok) throw new Error(result.error || 'Caption recovery failed');
+                  if (activeConcept.current === conceptKey) await loadImages();
+                  showToast(`Recovered ${result.recovered} captions${result.errors?.length ? `; ${result.errors.length} could not be recovered: ${result.errors[0]}` : ''}`, result.errors?.length ? 'error' : 'success');
+                } catch (error) { showToast(error instanceof Error ? error.message : 'Caption recovery failed', 'error'); }
+                finally { setRecoveringCaptions(false); }
+              }} className="forge-button"><RefreshCw size={14} />{recoveringCaptions ? 'Recovering…' : 'Recover previous captions'}</button>}
               <button type="button" aria-label="Dataset folder actions" aria-haspopup="menu" aria-expanded={!!folderMenu} title="Folder and ZIP actions" onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); setFolderMenu({ x: bounds.right, y: bounds.bottom }); }} className="forge-button forge-button-icon"><MoreHorizontal size={15} /></button>
               <span className="mx-1 h-5 w-px bg-white/10" aria-hidden="true" />
             </>}
@@ -1250,7 +1259,7 @@ export function DatasetsTab() {
                 </label>
                 <button
                   onClick={() => void handleBatchCaption(false)}
-                  disabled={autoTagging || images.length === 0}
+                  disabled={autoTagging || recoveringCaptions || images.length === 0}
                   className="umbra-icon-button h-8 rounded px-2 text-xs font-bold uppercase tracking-[0.12em] disabled:cursor-not-allowed disabled:opacity-50"
                   title="Apply trigger/prepend text without running the selected caption model"
                 >
@@ -1258,9 +1267,9 @@ export function DatasetsTab() {
                 </button>
                 <button
                   onClick={() => void handleBatchCaption(true)}
-                  disabled={autoTagging || images.length === 0}
+                  disabled={autoTagging || recoveringCaptions || images.length === 0}
                   className="flex h-8 items-center gap-1.5 rounded border border-[var(--umbra-accent)] bg-[var(--umbra-accent-glow)] px-2 text-xs font-bold uppercase tracking-[0.12em] text-[var(--umbra-text)] transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                  title={captionMode === 'natural' ? 'Save a separate description source; existing .txt stays unchanged' : 'Save a separate tag source; existing .txt stays unchanged'}
+                  title={captionMode === 'natural' ? 'Write the description to the matching .txt caption, retaining its tag paragraph' : 'Write tags to the matching .txt caption, retaining its description'}
                 >
                   {autoTagging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                   {selectedImages.size > 0
@@ -1408,7 +1417,7 @@ export function DatasetsTab() {
                   />
                 </label>
                 <p className="min-w-0 flex-1 text-[10px] leading-relaxed text-zinc-500">
-                  Runs locally and saves a separate description source. The model loads once for the selected batch. Existing .txt files stay intact; use Training export to combine descriptions and tags.
+                  Saves directly beside each image as a matching .txt caption. Tags and descriptions share one file, separated by a blank line. The model loads once for the batch.
                 </p>
                 <div className="h-8 min-w-[120px] rounded border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-500">
                   <span className="block text-[9px] text-zinc-600">Saved</span>
@@ -1586,7 +1595,7 @@ export function DatasetsTab() {
       <ContextMenu isOpen={Boolean(imageContextMenu)} position={{ x: imageContextMenu?.x || 0, y: imageContextMenu?.y || 0 }} items={imageContextItems} onClose={() => setImageContextMenu(null)} />
 
       {/* Modals */}
-      {exportDataset && <CaptionExportDialog dataset={exportDataset} onClose={() => setExportDataset(null)} />}
+
       {/* Rename Dataset Modal */}
       {renameDatasetTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">

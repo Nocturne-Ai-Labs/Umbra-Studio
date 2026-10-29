@@ -37,7 +37,7 @@ export function CaptionEditor({
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-zinc-500">
         <TextCursorInput size={24} />
         <p className="text-sm text-zinc-300">Image captions</p>
-        <p className="text-xs leading-relaxed">Select an image to review its sources and edit its training caption.</p>
+        <p className="text-xs leading-relaxed">Select an image to edit its training caption.</p>
       </div>
     );
   }
@@ -64,15 +64,7 @@ export function CaptionEditor({
         <DatasetRedownloadButton image={image} busy={isRedownloading} onRedownload={onRedownload} />
       </div>
 
-      <div className="shrink-0 space-y-2 border-b border-white/10 p-3 text-xs">
-        <p className="font-bold uppercase tracking-widest text-zinc-400">Paired sources</p>
-        {image.captionSourceError && <p role="alert" className="text-red-300">{image.captionSourceError}</p>}
-        {(['natural', 'tags'] as const).map(kind => {
-          const source = image.captionSources?.[kind];
-          return <details key={kind} className="forge-disclosure"><summary><span>{kind === 'natural' ? 'Description' : 'Generated tags'}</span><span className={`ml-auto text-[10px] ${source?.error ? 'text-red-300' : source?.text ? 'text-emerald-300' : 'text-zinc-500'}`}>{source?.error ? 'Failed' : source?.text ? 'Saved' : 'Missing'}</span></summary><p className="custom-scrollbar mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-2 text-zinc-400" data-i18n-skip="">{source?.error || source?.text || 'Run this caption mode to save its source separately.'}</p></details>;
-        })}
-        <p className="text-[11px] leading-relaxed text-zinc-500">Training export combines descriptions and tags into matching .txt files.</p>
-      </div>
+      <p className="shrink-0 px-3 pt-3 text-xs text-zinc-400">Saved beside the image as a matching .txt file. Tags and descriptions are separated by a blank line.</p>
       {/* Caption editor */}
       <div className="flex min-h-64 flex-1 flex-col space-y-2 p-3">
         <div className="flex items-center justify-between">

@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.91.6 - 2026-10-29
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update with `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then refresh Studio. No model downloads or ComfyUI reinstall are required.
+- Dataset tagging now saves training captions directly beside the image as matching `.txt` files. Tags and descriptions share one file, separated by a blank line. No caption JSON sidecar or Training export step is required.
+- Previously generated captions are preserved: missing `.txt` captions recover from valid old source records when opening the folder. If a caption already exists, use **Datasets > Recover previous captions** to append recovered text without overwriting your edits. Original legacy records remain intact. Recovery checks that the image still matches its saved record.
+- Optional AI Toolkit requires host Git and Node.js 20 or newer. Linux managed extensions may require `python3-dev`, `build-essential`, `libgl1`, `libglib2.0-0` and `lsof`, or distribution equivalents.
+
+### Direct Dataset Captions
+
+- Tags and descriptions write directly to the training caption and appear in the caption editor immediately after completion.
+- Regenerating tags retains the description section; regenerating descriptions retains the leading tag paragraph.
+- Failed generation leaves the existing caption unchanged. Images sharing the same filename stem must be renamed before generation so their captions cannot overwrite one another.
+- The previous JSON-source writer and caption-export API have been removed. Legacy records are read only for recovery.
+- Build/type/lint checks and focused plain-caption merge/recovery tests passed. Fresh model inference remains deferred to the maintainer.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Generated captions now go directly into matching training `.txt` files.
+- Improved: Tags and prose can be used together without an export step.
+- Improved: Existing generated captions can be recovered while preserving edited text.
+
 ## v0.91.5 - 2026-10-29
 
 ### TL;DR - Setup After Updating

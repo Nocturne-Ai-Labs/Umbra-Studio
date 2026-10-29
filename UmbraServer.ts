@@ -1,3 +1,4 @@
+import { mergeGeneratedDatasetCaption, recoverLegacyDatasetCaption } from './backend/DatasetPlainCaption';
 import { captionProgressReader, type CaptionProgress } from './backend/DatasetTaggingProgress';
 import { FizgigService } from './backend/FizgigService';
 import { normalizeMossPromptField } from './shared/umbra-ui/mossPromptFields';
@@ -61,7 +62,7 @@ import { parseTaggerNumber } from './backend/TaggerNumericOptions';
 import { MAX_DATASET_CONCEPT_SETTINGS_REQUEST_BYTES, readDatasetConceptSettingsText, serializeDatasetConceptSettings } from './backend/DatasetConceptSettingsFile';
 import { isRecoverableUiSessionKey, readUiSessionConfigValue } from './backend/UiSessionConfigRecovery';
 import { checkDatasetCaptionSize, DatasetCaptionTooLargeError, MAX_DATASET_CAPTION_REQUEST_BYTES, readExistingDatasetCaption } from './backend/DatasetCaptionFile';
-import { captionMediaIdentity, captionSourceSidecar, readCaptionRecord, saveCaptionAttempt, normalizeCaptionExportOptions, previewCaptionExport, exportDatasetCaptions } from './backend/DatasetCaptionSources';
+import { captionMediaIdentity, captionSourceSidecar, readCaptionRecord } from './backend/DatasetCaptionSources';
 import { createReadStream, createWriteStream, existsSync, statSync, realpathSync, readdirSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, openSync, closeSync, renameSync, rmSync, type Dirent, type Stats, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import { Readable } from 'node:stream';
@@ -36469,22 +36470,6 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       // Review a training export, then write a new independent folder; source captions stay intact.
-      const captionExportMatch = path.match(/^\/api\/datasets\/([^/]+)\/caption-export$/);
-      if (captionExportMatch && method === 'POST') {
-        try {
-          const name = sanitizeDatasetSegment(decodeURIComponent(captionExportMatch[1]));
-          const datasetPath = name ? resolveDatasetPathSafe(name) : null;
-          if (!datasetPath || !existsSync(datasetPath)) return json({ error: 'Dataset not found' }, 404);
-          const body = await readJsonObject(req, false, 64 * 1024);
-          if (!body || !['preview', 'export'].includes(String(body.action))) return json({ error: 'Choose preview or export.' }, 400);
-          const options = normalizeCaptionExportOptions(body.options || {});
-          if (body.action === 'preview') return json(await previewCaptionExport(datasetPath, options));
-          if (typeof body.revision !== 'string') return json({ error: 'Review a preview before exporting.' }, 409);
-          return json(await exportDatasetCaptions(datasetPath, join(USER_DIR, 'Exports', 'Datasets'), options, body.revision));
-        } catch (error: any) { return json({ error: error.message }, 409); }
-      }
-
-      // Create or replace a maximum-compression, lossless dataset share archive.
       const datasetArchiveMatch = path.match(/^\/api\/datasets\/([^/]+)\/archive$/);
       if (datasetArchiveMatch && method === 'POST') {
         const datasetName = sanitizeDatasetSegment(decodeURIComponent(datasetArchiveMatch[1] || ''));
@@ -36672,8 +36657,21 @@ const server = Bun.serve<UmbraSocketData>({
                   caption = await fs.readFile(captionPath, 'utf-8');
                 }
 
-                let captionSources;
                 let captionSourceError = '';
+                // Older versions stored generated text separately. Recover only a
+                // missing caption automatically; existing text requires explicit recovery.
+                if (!captionStat && !findDatasetImageStemSibling(f, files.map(file => file.name)) && existsSync(join(conceptPath, captionSourceSidecar(f)))) {
+                  try { await withDatasetConceptLocks([conceptPath], async () => {
+                    if (existsSync(captionPath)) return;
+                    const record = await readCaptionRecord(conceptPath, f);
+                    if (!record || record.media.sha256 !== (await captionMediaIdentity(conceptPath, f)).sha256) return;
+                    const recovered = recoverLegacyDatasetCaption('', record);
+                    if (recovered) await writeTextFileAtomic(captionPath, recovered, false);
+                  });
+                  caption = await readExistingDatasetCaption(captionPath);
+                  } catch (error) { captionSourceError = error instanceof Error ? error.message : String(error); }
+                }
+                let captionSources;
                 try {
                   const record = await readCaptionRecord(conceptPath, f);
                   if (record) {
@@ -36858,6 +36856,35 @@ const server = Bun.serve<UmbraSocketData>({
       }
 
       // Batch prepend trigger text and optionally run the selected dataset caption model.
+      if (path === '/api/datasets/recover-captions' && method === 'POST') {
+        try {
+          const body = await readJsonObject(req, false, 512 * 1024);
+          const dataset = sanitizeDatasetSegment(body.dataset);
+          const concept = sanitizeDatasetSegment(body.concept);
+          const directory = dataset && concept ? resolveDatasetConceptPathSafe(dataset, concept) : null;
+          if (!directory) return json({ error: 'Invalid dataset folder' }, 400);
+          return await withDatasetConceptLocks([directory], async () => {
+            const files = await fs.readdir(directory);
+            let recovered = 0;
+            const errors: string[] = [];
+            for (const filename of files.filter(file => DATASET_IMPORT_IMAGE_EXTENSIONS.has(extname(file).toLowerCase()))) {
+              if (!existsSync(join(directory, captionSourceSidecar(filename)))) continue;
+              try {
+                const sibling = findDatasetImageStemSibling(filename, files);
+                if (sibling) throw new Error(datasetImageStemCollisionMessage(filename, sibling));
+                const record = await readCaptionRecord(directory, filename);
+                if (!record || record.media.sha256 !== (await captionMediaIdentity(directory, filename)).sha256) throw new Error('Image no longer matches its previous captions.');
+                const target = datasetCaptionPath(directory, filename);
+                const current = await readExistingDatasetCaption(target);
+                const text = recoverLegacyDatasetCaption(current, record);
+                if (text !== current) { await writeTextFileAtomic(target, text, false); recovered++; }
+              } catch (error) { errors.push(`${filename}: ${error instanceof Error ? error.message : String(error)}`); }
+            }
+            return json({ recovered, errors });
+          });
+        } catch (error) { return json({ error: error instanceof Error ? error.message : String(error) }, 500); }
+      }
+
       if (path === '/api/datasets/caption-progress' && method === 'GET') {
         const progress = datasetCaptionProgress.get(url.searchParams.get('id') || '');
         return progress ? json(progress) : json({ error: 'No active caption job' }, 404);
@@ -37099,9 +37126,12 @@ const server = Bun.serve<UmbraSocketData>({
             progress.failed = Math.max(0, Math.min(progress.completed, entry.failed));
             progress.filename = basename(entry.filename || '');
           };
+          for (const filename of imageFiles) {
+            const sibling = findDatasetImageStemSibling(filename, allFiles);
+            if (sibling) return json({ error: datasetImageStemCollisionMessage(filename, sibling) }, 409);
+          }
           const identities = new Map<string, Awaited<ReturnType<typeof captionMediaIdentity>>>();
           if (autoTag) for (const filename of imageFiles) {
-            await readCaptionRecord(conceptPath, filename);
             identities.set(filename, await captionMediaIdentity(conceptPath, filename));
           }
           const naturalCaptionResults = new Map<string, { caption?: string; error?: string; raw?: unknown }>();
@@ -37149,14 +37179,10 @@ const server = Bun.serve<UmbraSocketData>({
 
           for (const filename of imageFiles) {
             progress.filename = filename;
-            progress.phase = pixaiResults || captionMode === 'natural' ? 'Saving sources' : autoTag ? 'Tagging' : 'Saving captions';
+            progress.phase = pixaiResults || captionMode === 'natural' ? 'Saving captions' : autoTag ? 'Tagging' : 'Saving captions';
             const imagePath = join(conceptPath, filename);
             const captionPath = datasetCaptionPath(conceptPath, filename);
-            let rawProducer: unknown;
-            let sourceSaved = false;
-            const sourceSettings = captionMode === 'natural'
-              ? { model: naturalModelRepo, device: naturalDevice, maxNewTokens: naturalMaxNewTokens, triggerTags, prependTags }
-              : { model: modelRepo, device: taggerDevice, generalThreshold, characterThreshold, ratingThreshold, generalMcutEnabled, characterMcutEnabled, maxTags, includeGeneralTags, includeStyleTags, includeCharacterTags, includeCopyrightTags, includeArtistTags, includeMetaTags, includeRatingTags, replaceUnderscoresWithSpaces, triggerTags, prependTags };
+
             try {
               const existingCaption = await readExistingDatasetCaption(captionPath);
               if (batchError) throw new Error(batchError);
@@ -37169,7 +37195,6 @@ const server = Bun.serve<UmbraSocketData>({
                 const result = pixaiResults
                   ? (() => {
                     const entry = pixaiResults.get(filename);
-                    rawProducer = entry?.raw;
                     if (entry?.error) throw new Error(entry.error);
                     if (!entry?.result) throw new Error('PixAI tagger returned no result for this image.');
                     return entry.result;
@@ -37185,7 +37210,6 @@ const server = Bun.serve<UmbraSocketData>({
                   characterMcutEnabled,
                   maxTags,
                 });
-                rawProducer ??= result;
                 if (result && typeof result === 'object' && result.error) {
                   throw new Error(String(result.error));
                 }
@@ -37213,7 +37237,6 @@ const server = Bun.serve<UmbraSocketData>({
               let tagCount = 0;
               if (captionMode === 'natural') {
                 const naturalResult = naturalCaptionResults.get(filename);
-                rawProducer = naturalResult?.raw;
                 if (autoTag && (!naturalResult || naturalResult.error || !naturalResult.caption)) {
                   throw new Error(naturalResult?.error || 'Natural caption result was missing');
                 }
@@ -37231,26 +37254,17 @@ const server = Bun.serve<UmbraSocketData>({
               if (autoTag && !caption.trim()) throw new Error('No usable caption text was produced. Review the model output and caption filters before retrying.');
               checkDatasetCaptionSize(caption);
               if (autoTag) {
-                await saveCaptionAttempt(conceptPath, filename, identities.get(filename)!, captionMode, {
-                  at: new Date().toISOString(), producer: captionMode === 'natural' ? naturalModelRepo : modelRepo,
-                  settings: sourceSettings, text: caption, raw: rawProducer,
-                }, existingCaption);
-                sourceSaved = true;
-              } else await writeTextFileAtomic(captionPath, caption, false);
+                if ((await captionMediaIdentity(conceptPath, filename)).sha256 !== identities.get(filename)!.sha256) throw new Error('Image changed during captioning. Retry this image.');
+                caption = mergeGeneratedDatasetCaption(existingCaption, caption, captionMode);
+              }
+              await writeTextFileAtomic(captionPath, caption, false);
               results.push({
                 filename,
                 success: true,
-                caption: autoTag ? existingCaption : caption,
+                caption,
                 tagCount,
               });
             } catch (error: any) {
-              if (autoTag && !sourceSaved) {
-                try { await saveCaptionAttempt(conceptPath, filename, identities.get(filename)!, captionMode, {
-                  at: new Date().toISOString(), producer: captionMode === 'natural' ? naturalModelRepo : modelRepo,
-                  settings: sourceSettings, text: '', raw: rawProducer ?? null, error: error?.message || 'Caption generation failed',
-                }, await readExistingDatasetCaption(captionPath)); }
-                catch (recordError: any) { error = new Error(`${error.message}; source record not saved: ${recordError.message}`); }
-              }
               results.push({
                 filename,
                 success: false,
