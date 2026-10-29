@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.91.8 - 2026-10-29
+
+### Settings persistence hotfix
+
+- Fixed unrelated preference changes overwriting saved settings with stale browser values. Added Gallery folder roots now survive filmstrip, privacy, and other preference changes.
+- The Settings dialog saves only edited preferences and reloads the server-confirmed settings after saving.
+- Removed a redundant full-settings save when pinning a Power Prompter output folder.
+- After updating through Umbra Setup, refresh all open Studio and Remote tabs so they load the corrected save behavior. If an added folder root was already lost, add it again once after refreshing.
+- No new models, dependency downloads, or ComfyUI reinstall are needed.
+
+### Validation
+
+- Four targeted settings regressions passed, including retaining folder roots and explicitly removing them.
+- Direct preference and Settings bundle save/reload checks passed against the isolated dev server.
+- Frontend type checks, lint, and production build passed. This hotfix does not change generation pipelines.
+
 ## v0.91.7 - 2026-10-29
 
 ### TL;DR - Setup After Updating
