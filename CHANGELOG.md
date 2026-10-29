@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.91.9 - 2026-10-29
+
+### Gallery folder access and settings hotfix
+
+- Fixed settings bundles writing back older, unrelated preferences. Bundle saves now apply only submitted app-setting fields.
+- Added server-side protection against stale browser saves silently removing saved Gallery folder roots, disabling their access, or clearing an existing external output path.
+- Intentional Storage changes, resets, and settings imports still work. Rejected stale writes explain that the tab needs refreshing.
+- After updating through Umbra Setup, refresh all open Studio and Remote tabs. If an earlier release already lost an added folder root, add it again in Settings > Storage.
+- No model downloads or ComfyUI reinstall are required. Folder contents are not modified by this fix.
+
+### Validation
+
+- Reproduced a stale save clearing a root before the fix; verified both settings endpoints reject it afterward and retain the root.
+- Five targeted regression tests passed. Actual browser checks covered saving, navigating a synthetic subfolder, reloading, and intentionally replacing a root.
+- Frontend type checks, lint, frontend build, and backend bundle build passed. After applying the repair, 58 personal-build directory navigation checks passed without viewing media.
+
 ## v0.91.8 - 2026-10-29
 
 ### Settings persistence hotfix
