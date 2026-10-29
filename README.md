@@ -867,8 +867,10 @@ Install **MOSS Image — Reference2IMG** in Umbra Setup and restart ComfyUI when
 
 Install Fizgig through **Umbra Setup > Guided Setup > Training** or
 **Advanced > Tools > Fizgig**. Data Forge > Training shows the installed trainers
-and opens Fizgig's unchanged native interface. AI Toolkit remains available.
+and opens Fizgig's native interface. AI Toolkit remains available.
 Fizgig has its own Python environment and local port (8680 by default), preserves
 training when Studio closes, and requires training to finish before maintenance.
+Use **Umbra Setup > Advanced > Tools > Fizgig > Update** for managed updates.
+Its About screen and protected standalone updater scripts direct users to Setup.
 See [requirements](REQUIREMENTS.md#optional-fizgig-trainer) for hardware and
 installation details. This integration is available on the host PC.

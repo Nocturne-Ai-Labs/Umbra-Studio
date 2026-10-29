@@ -2312,18 +2312,20 @@ export function UmbraFilmstrip({
 
   const openLatestFolder = useCallback(() => {
     setAppSetting('comfyui.filmstripFollowLatest', true);
-    if (folderActivity.latestFolder) openFilmstripFolder(folderActivity.latestFolder, 'filmstrip-latest');
-  }, [folderActivity.latestFolder, openFilmstripFolder, setAppSetting]);
+    const target = folderActivity.latestFolder || (folderActivity.hasSnapshot ? rootPath : '');
+    if (target) openFilmstripFolder(target, 'filmstrip-latest');
+  }, [folderActivity.latestFolder, folderActivity.hasSnapshot, rootPath, openFilmstripFolder, setAppSetting]);
 
   useEffect(() => {
-    if (!followLatest || !folderActivity.latestFolder || !useStore.getState().appSettings['comfyui.filmstripFollowLatest']) return;
-    if (pathKey(folderActivity.latestFolder) === pathKey(currentFolderRef.current)) return;
-    openFilmstripFolder(folderActivity.latestFolder, 'filmstrip-latest');
-  }, [currentFolder, followLatest, folderActivity.latestFolder, openFilmstripFolder]);
+    if (!followLatest || !folderActivity.hasSnapshot || !useStore.getState().appSettings['comfyui.filmstripFollowLatest']) return;
+    const target = folderActivity.latestFolder || rootPath;
+    if (!target || pathKey(target) === pathKey(currentFolderRef.current)) return;
+    openFilmstripFolder(target, 'filmstrip-latest');
+  }, [currentFolder, followLatest, folderActivity.latestFolder, folderActivity.hasSnapshot, rootPath, openFilmstripFolder]);
 
   useEffect(() => {
     if (followLatest && folderActivity.latestFolder) refreshImages({ force: true });
-  }, [followLatest, folderActivity.latestFolder, refreshImages]);
+  }, [followLatest, folderActivity.latestFolder, folderActivity.latestUpdatedAt, refreshImages]);
 
   const removePinnedFolder = useCallback((folderPath: string) => {
     const normalized = normalizePath(folderPath);

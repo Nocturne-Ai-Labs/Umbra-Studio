@@ -2,7 +2,8 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, openSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { inspectFizgig } from '../setup/Fizgig';
+import { inspectFizgig, assertFizgigStopped } from '../setup/Fizgig';
+import { protectFizgigUpdates } from '../setup/FizgigManagedUpdates';
 import { ownedPath } from '../setup/ComfyPythonRuntime';
 import { fizgigPort } from '../shared/fizgig';
 import { inspectLoopbackListeners } from '../shared/loopbackListener';
@@ -66,6 +67,8 @@ export class FizgigService {
       if (!status.ready) throw new Error(status.error);
       if ((await inspectLoopbackListeners(status.port)).some(probe => probe.state !== 'closed')) throw new Error('Fizgig port is busy or unverified. No existing process was changed.');
       const tool = this.cached!.value;
+      await assertFizgigStopped(this.root);
+      protectFizgigUpdates(this.root);
       const logs = ownedPath(this.root, 'User', 'Logs'); mkdirSync(logs, { recursive: true });
       const descriptor = openSync(join(logs, 'fizgig.log'), 'a');
       try {

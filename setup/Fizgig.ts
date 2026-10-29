@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { ensureFizgigPython, ensureSetupGit, ownedPath } from './ComfyPythonRuntime';
 import { FIZGIG_REPOSITORY, FIZGIG_REVISION, fizgigPort } from '../shared/fizgig';
 import { inspectLoopbackListeners } from '../shared/loopbackListener';
+import { protectFizgigUpdates, restoreFizgigUpdateAdapters, validateFizgigUpdateAdapters } from './FizgigManagedUpdates';
 
 export function fizgigPaths(root: string) {
   const path = ownedPath(root, 'Tools', 'Fizgig');
@@ -61,30 +62,36 @@ export async function installFizgig(root: string, log: (line: string) => void) {
   const git = (args: string[]) => spawnSync('git', args, { cwd: path, encoding: 'utf8', windowsHide: true, timeout: 15000 });
   const origin = git(['remote', 'get-url', 'origin']);
   if (origin.status !== 0 || origin.stdout.trim().replace(/\.git$/, '') !== FIZGIG_REPOSITORY.replace(/\.git$/, '')) throw new Error('Fizgig folder has a different upstream. Keep it intact and review its origin.');
-  const previous = git(['rev-parse', '--verify', 'HEAD']);
-  const dirty = git(['diff', '--name-only', 'HEAD']);
-  // A new --no-checkout clone has no index; checkout is safe only for that fresh path.
-  const hasSource = existsSync(join(path, 'fizgig.py'));
-  if (hasSource && (dirty.status !== 0 || dirty.stdout.trim() || git(['diff', '--cached', '--name-only']).stdout.trim())) throw new Error('Fizgig has local source changes. Preserve and review them before updating.');
-  run('git', ['fetch', 'origin', FIZGIG_REVISION]);
-  if (hasSource && previous.stdout.trim() !== FIZGIG_REVISION && git(['merge-base', '--is-ancestor', previous.stdout.trim(), FIZGIG_REVISION]).status !== 0) throw new Error('Installed Fizgig is newer or divergent. Umbra will not downgrade it.');
-  if (hasSource && previous.stdout.trim() === FIZGIG_REVISION && inspectFizgig(root).ready) { log('Fizgig is already installed at the reviewed revision.'); return; }
-  run('git', ['checkout', '--detach', FIZGIG_REVISION]);
+  if (existsSync(marker)) restoreFizgigUpdateAdapters(root);
   try {
-    const environment = `venv-umbra-${randomUUID()}`;
-    const envPath = ownedPath(root, 'Tools', 'Fizgig', environment);
-    run(basePython, ['-m', 'venv', '--copies', envPath]);
-    const python = join(envPath, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
-    run(python, ['-m', 'pip', 'install', 'uv']);
-    // Upstream splits torch's CUDA index from ordinary PyPI dependencies and disables HQQ's optional CUDA build.
-    run(python, ['uv_install_deps.py', 'requirements.txt', envPath]);
-    run(python, ['-c', verifyScript]);
-    const temporary = ownedPath(root, 'Tools', 'Fizgig', '.umbra-environment.json.tmp');
-    writeFileSync(temporary, JSON.stringify({ environment, revision: FIZGIG_REVISION }));
-    renameSync(temporary, marker);
-    log('Fizgig verified. Models are selected separately in its native UI. Previous environments and user_data are preserved.');
-  } catch (error) {
-    if (hasSource && previous.status === 0) run('git', ['checkout', '--detach', previous.stdout.trim()]);
-    throw error;
+    const previous = git(['rev-parse', '--verify', 'HEAD']);
+    const dirty = git(['diff', '--name-only', 'HEAD']);
+    // A new --no-checkout clone has no index; checkout is safe only for that fresh path.
+    const hasSource = existsSync(join(path, 'fizgig.py'));
+    if (hasSource && (dirty.status !== 0 || dirty.stdout.trim() || git(['diff', '--cached', '--name-only']).stdout.trim())) throw new Error('Fizgig has local source changes. Preserve and review them before updating.');
+    run('git', ['fetch', 'origin', FIZGIG_REVISION]);
+    if (hasSource && previous.stdout.trim() !== FIZGIG_REVISION && git(['merge-base', '--is-ancestor', previous.stdout.trim(), FIZGIG_REVISION]).status !== 0) throw new Error('Installed Fizgig is newer or divergent. Umbra will not downgrade it.');
+    if (hasSource && previous.stdout.trim() === FIZGIG_REVISION && inspectFizgig(root).ready) { log('Fizgig is already installed at the reviewed revision.'); return; }
+    run('git', ['checkout', '--detach', FIZGIG_REVISION]);
+    try {
+      validateFizgigUpdateAdapters(root);
+      const environment = `venv-umbra-${randomUUID()}`;
+      const envPath = ownedPath(root, 'Tools', 'Fizgig', environment);
+      run(basePython, ['-m', 'venv', '--copies', envPath]);
+      const python = join(envPath, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+      run(python, ['-m', 'pip', 'install', 'uv']);
+      // Upstream splits torch's CUDA index from ordinary PyPI dependencies and disables HQQ's optional CUDA build.
+      run(python, ['uv_install_deps.py', 'requirements.txt', envPath]);
+      run(python, ['-c', verifyScript]);
+      const temporary = ownedPath(root, 'Tools', 'Fizgig', '.umbra-environment.json.tmp');
+      writeFileSync(temporary, JSON.stringify({ environment, revision: FIZGIG_REVISION }));
+      renameSync(temporary, marker);
+      log('Fizgig verified. Models are selected separately in its native UI. Previous environments and user_data are preserved.');
+    } catch (error) {
+      if (hasSource && previous.status === 0) run('git', ['checkout', '--detach', previous.stdout.trim()]);
+      throw error;
+    }
+  } finally {
+    protectFizgigUpdates(root);
   }
 }

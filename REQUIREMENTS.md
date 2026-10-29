@@ -306,3 +306,11 @@ The integration is host-only and does not expose Fizgig through Umbra Remote.
 Finish training and close Fizgig before updating or repairing it. Maintenance
 refuses active workers or an occupied/unverifiable port; existing environments
 and user data are retained. Closing Studio does not terminate Fizgig training.
+
+Update managed Fizgig through **Umbra Setup > Advanced > Tools > Fizgig > Update**.
+Setup installs Umbra's reviewed revision, which may differ from the newest upstream
+release. Its managed installation protects the standalone updater scripts and
+shows Setup instructions in Fizgig's About screen. Existing installations receive
+this protection on their next managed launch or Setup maintenance operation;
+an already running session is not interrupted. Standalone Fizgig installations
+outside Umbra keep their own normal update process.

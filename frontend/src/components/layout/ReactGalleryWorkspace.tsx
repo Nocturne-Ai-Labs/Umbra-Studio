@@ -7,6 +7,7 @@ import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import { buildGalleryBreadcrumbs } from '@/lib/galleryBreadcrumbs';
 import { FrozenGalleryBrowser, GalleryBrowserBoundary } from './GalleryBrowserSurface';
+import { useGalleryGridWidth } from './useGalleryGridWidth';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -5043,7 +5044,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const galleryUiSessionClientIdRef = useRef(createGalleryUiSessionClientId());
   const galleryUiSessionDirtyRef = useRef(false);
   const pendingLocalFolderNavigationRef = useRef<{ folder: string; at: number } | null>(null);
-  const [gridWidth, setGridWidth] = useState(0);
+  const { width: gridWidth, ref: galleryScrollRef } = useGalleryGridWidth(scrollParentRef);
   const isTouchRemote = remoteMode === 'phone' || remoteMode === 'tablet';
 
   const markGalleryUiSessionDirty = useCallback(() => {
@@ -9785,16 +9786,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
   const parentFolder = buildGalleryBreadcrumbs(displayFolder, rootChoices).at(-1)?.parent || '';
   const openingDifferentFolder = Boolean(openingFolder && !pathsEqual(openingFolder, currentFolder));
 
-  useEffect(() => {
-    const node = scrollParentRef.current;
-    if (!node) return;
-    const updateWidth = () => setGridWidth(Math.max(0, Math.floor(node.clientWidth)));
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
   const effectiveGridWidth = useMemo(() => {
     if (gridWidth > 0) return gridWidth;
     if (isPhoneRemote && typeof window !== 'undefined') {
@@ -9875,8 +9866,6 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
     let frame = 0;
     let secondFrame = 0;
     const measure = () => {
-      const node = scrollParentRef.current;
-      if (node) setGridWidth(Math.max(0, Math.floor(node.clientWidth)));
       rowVirtualizer.measure();
     };
     frame = window.requestAnimationFrame(() => {
@@ -11058,7 +11047,7 @@ export function ReactGalleryWorkspace({ active = true }: { active?: boolean }) {
           </div>
 
           <div
-            ref={scrollParentRef}
+            ref={galleryScrollRef}
             data-umbra-gallery-scroll=""
             onContextMenu={event => {
               if (!singleFolderExplorer || (event.target as Element).closest('[data-umbra-gallery-tile], [data-gallery-archives], button, input, a')) return;

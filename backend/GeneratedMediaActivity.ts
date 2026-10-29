@@ -1,4 +1,5 @@
 import { readFileSync, realpathSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, resolve, sep } from 'node:path';
 import { writeUpdateJsonAtomic } from '../shared/updateStateFile';
@@ -110,7 +111,7 @@ export class GeneratedMediaActivity {
     if (changed) await this.flush();
   }
 
-  snapshot(paths: string[], allowed: (path: string) => boolean, clientPath: (path: string) => string) {
+  snapshot(paths: string[], allowed: (path: string) => boolean, clientPath: (path: string) => string, recentLimit = 8) {
     const entries = [...this.folders.entries()].filter(([, entry]) => allowed(entry.path));
     const folders = paths.map(path => ({ path, entries: [] as Array<{ id: string; count: number; direct: boolean }> }));
     const requestedByKey = new Map<string, typeof folders>();
@@ -137,8 +138,23 @@ export class GeneratedMediaActivity {
     return {
       epoch: this.epoch,
       folders,
-      recentFolders: entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, 8).map(([, entry]) => ({ path: clientPath(entry.path), updatedAt: entry.updatedAt })),
+      recentFolders: entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, recentLimit).map(([, entry]) => ({ path: clientPath(entry.path), updatedAt: entry.updatedAt })),
     };
+  }
+
+  async availableSnapshot(paths: string[], allowed: (path: string) => boolean, clientPath: (path: string) => string) {
+    const snapshot = this.snapshot(paths, allowed, path => path, Infinity);
+    const recentFolders: typeof snapshot.recentFolders = [];
+    // Check before applying the limit so stale entries cannot hide valid older
+    // outputs. Preserve history: disconnected drives can become available again.
+    for (const folder of snapshot.recentFolders) {
+      try {
+        if (!(await stat(this.resolvePath(folder.path))).isDirectory()) continue;
+        recentFolders.push({ ...folder, path: clientPath(folder.path) });
+        if (recentFolders.length === 8) break;
+      } catch { /* Missing or inaccessible folders are not navigation targets. */ }
+    }
+    return { ...snapshot, recentFolders };
   }
 
   async flush(): Promise<void> {

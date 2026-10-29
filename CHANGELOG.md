@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.91.4 - 2026-10-29
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update Umbra normally using `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then refresh open Studio pages. No new models or ComfyUI reinstall are required.
+- Already have Fizgig? After training finishes, close it and launch it again through **Data Forge > Training**, or use **Umbra Setup > Advanced > Tools > Fizgig > Update**. The managed-update protection is applied automatically; reinstalling Fizgig is unnecessary. An already-running training session is not interrupted.
+- Update managed Fizgig through Setup. Its standalone updater scripts now explain the safe update path instead of changing the managed environment. Setup installs Umbra's reviewed Fizgig revision, which may differ from the newest upstream release.
+- Optional AI Toolkit requires host Git and Node.js 20 or newer. Linux managed extensions may require `python3-dev`, `build-essential`, `libgl1`, `libglib2.0-0` and `lsof`, or distribution equivalents. Fizgig uses the reviewed NVIDIA CUDA dependency recipe.
+
+### Fizgig Maintenance and Launch Experience
+
+- Clear ready, starting, missing-dependency and connection states, with direct Setup access and a compact workspace toolbar.
+- Reload or open the trainer separately while keeping its embedded session available when switching workspaces. Launch errors remain visible until retried.
+- About and desktop update instructions direct managed installations to Setup. Windows, Python and shell updater entry points recognize Umbra-managed installations and stop before changing code or dependencies.
+- Setup recognizes its own update protections while retaining safeguards for genuine local modifications. Existing environments and user data are retained.
+
+### Gallery and Latest Folder
+
+- Gallery measures its grid when it actually opens, preventing the intermittent single-column startup layout. Resizing and returning to Gallery update the layout correctly.
+- Latest skips missing or inaccessible folders, finds the next available output folder, and refreshes when another generation lands in the same folder. Unavailable folder history is retained so reconnected drives can be used again.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Standalone Fizgig updaters cannot alter an Umbra-managed installation after protection is applied.
+- Fixed: Gallery no longer remains in its initial single-column layout after opening from another workspace.
+- Fixed: Latest-folder navigation avoids unavailable historical folders and notices new outputs in the current folder.
+- Improved: Fizgig launch, connection and repair feedback matches the rest of Data Forge.
+
 ## v0.91.3 - 2026-10-27
 
 ### TL;DR - Setup After Updating

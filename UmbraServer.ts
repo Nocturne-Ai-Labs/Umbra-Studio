@@ -34835,7 +34835,7 @@ const server = Bun.serve<UmbraSocketData>({
       if (path === '/api/fs/generated-media-activity' && method === 'GET') {
         const folders = url.searchParams.getAll('folder').filter(value => value.length <= 4096).slice(0, 256);
         const host = isHostRequest(req, url, server);
-        return json(generatedMediaActivity.snapshot(folders, folder => host || isPathInsideAllowedRoots(folder), toClientPath));
+        return json(await generatedMediaActivity.availableSnapshot(folders, folder => host || isPathInsideAllowedRoots(folder), toClientPath));
       }
       if (path === '/api/fs/search' && method === 'GET') return handleFsSearch(url, req.signal);
       if (path === '/api/fs/metadata-search' && method === 'GET') return handleFsMetadataSearch(url, req.signal);

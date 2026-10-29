@@ -143,6 +143,8 @@ export function useFilmstripFolderActivity(paths: string[], rememberFolders: (pa
   return {
     ...useMemo(() => folderActivityCounts(snapshot, read), [snapshot, read]),
     latestFolder: snapshot?.recentFolders[0]?.path || '',
+    latestUpdatedAt: snapshot?.recentFolders[0]?.updatedAt || 0,
+    hasSnapshot: snapshot !== null,
     markOpened,
     clearNotifications,
   };
