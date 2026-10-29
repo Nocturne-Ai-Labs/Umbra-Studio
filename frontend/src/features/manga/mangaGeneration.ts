@@ -9,7 +9,7 @@ export interface MangaGenerationSettings {
   enhancements?:MangaEnhancements;workflowResources:Record<string,string>;steps:number;cfg:number;seed:number;samplerName:string;scheduler:string;baseResolution:number;samples:number;
 }
 export interface MangaGenerationRequest {requestId:string;received:string[]}
-export const defaultMangaGeneration = ():MangaGenerationSettings=>({prompt:'',negativePrompt:'',modelFamily:'',modelType:'checkpoint',checkpointName:'',workflowResources:{},steps:28,cfg:4,seed:0,samplerName:'euler',scheduler:'normal',baseResolution:1024,samples:1,pixelSizing:{megapixels:1,aspect:'source',width:1000,height:1000}});
+export const defaultMangaGeneration = ():MangaGenerationSettings=>({prompt:'',negativePrompt:'',modelFamily:'',modelType:'checkpoint',checkpointName:'',workflowResources:{},steps:28,cfg:4,seed:0,samplerName:'euler',scheduler:'normal',baseResolution:1024,samples:1,pixelSizing:{megapixels:1,aspect:'source',width:1024,height:1024}});
 // Apply sampling defaults only when the user chooses a family, never on catalog refresh or project hydration.
 export function mangaFamilySamplingDefaults(defaults:UmbraUiPipelineDefaults | undefined):Partial<MangaGenerationSettings>{
   return {

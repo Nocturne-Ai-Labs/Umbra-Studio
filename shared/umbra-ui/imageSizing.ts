@@ -1,7 +1,9 @@
+// Image-generation MP units use a 1024-square baseline, not decimal megapixels.
+export const IMAGE_PIXELS_PER_MP = 1024 * 1024;
 export const IMAGE_MEGAPIXEL_PRESETS = [1, 1.25, 1.5, 2, 3, 4] as const;
 export const IMAGE_ASPECT_RATIOS = ['1:1', '3:4', '2:3', '4:5', '9:16', '4:3', '3:2', '5:4', '16:9', '21:9', '2:1', '1:2'] as const;
 export interface ImageSizingBounds { step?: number; minimumWidth?: number; minimumHeight?: number; maximumWidth?: number; maximumHeight?: number }
-export function imageMegapixels(width: number, height: number): number { return width * height / 1_000_000; }
+export function imageMegapixels(width: number, height: number): number { return width * height / IMAGE_PIXELS_PER_MP; }
 export function imageAspectRatio(width: number, height: number): string {
   if (!(width > 0 && height > 0)) return '1:1';
   let best = 'custom', error = Infinity;
@@ -29,7 +31,7 @@ export function resolveImageMegapixels(megapixels: number, ratio: number, bounds
     return result;
   };
   return {
-    width: align(Math.sqrt(megapixels * 1_000_000 * ratio), bounds.minimumWidth, bounds.maximumWidth),
-    height: align(Math.sqrt(megapixels * 1_000_000 / ratio), bounds.minimumHeight, bounds.maximumHeight),
+    width: align(Math.sqrt(megapixels * IMAGE_PIXELS_PER_MP * ratio), bounds.minimumWidth, bounds.maximumWidth),
+    height: align(Math.sqrt(megapixels * IMAGE_PIXELS_PER_MP / ratio), bounds.minimumHeight, bounds.maximumHeight),
   };
 }
