@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.91.10 - 2026-10-29
+
+### Image sizing and Latest folder repair
+
+- Added MP budgets and aspect ratios across image workflows, including Power Prompter and its resolution distribution targets, Canvas/Edit, and Manga. Video Studio is unchanged.
+- Presets: 1, 1.25, 1.5, 2, 3, and 4 MP. The image-generation 1 MP baseline is 1024 x 1024, with other sizes scaled from that area and aligned to pipeline requirements. Custom budgets and dimensions remain available.
+- Existing saved dimensions are preserved until a new size is selected. Manga can retain its budget while following panel proportions.
+- Fixed Latest staying on old folders when save nodes return a temporary preview alongside the saved original path. Originals now update activity; actual previews and inputs remain excluded.
+- Refresh Studio and Remote tabs after updating. No model downloads or ComfyUI reinstall required. Latest follows newly completed outputs; previously skipped activity is not reconstructed.
+
+### Validation
+
+- Passed all 72 preset/aspect combinations, Power Prompter dimension checks, Manga persistence/panel changes, legacy-project compatibility, and custom-budget checks.
+- Browser checks verified TXT2IMG sizing and refresh persistence, and Power Prompter aspect changes.
+- Reproduced the Latest failure with synthetic save-node responses and verified the correction. Frontend typecheck, lint, frontend build, and backend bundle passed.
+
 ## v0.91.9 - 2026-10-29
 
 ### Gallery folder access and settings hotfix
