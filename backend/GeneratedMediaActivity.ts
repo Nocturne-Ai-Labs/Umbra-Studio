@@ -185,8 +185,19 @@ export function recordGeneratedMediaOutputs(outputs: unknown[]) {
   for (const value of outputs) {
     if (!value || typeof value !== 'object') continue;
     const output = value as Record<string, unknown>;
-    if (output.type && output.type !== 'output') continue;
     const path = [output.fullpath, output.fullPath, output.path].find(value => typeof value === 'string' && value.trim());
+    if (output.type && output.type !== 'output') {
+      // Umbra save nodes return a temp preview plus the real saved fullpath.
+      // Only the preview belongs to temp; the original still counts as output.
+      if (output.type !== 'temp' || typeof path !== 'string' || !isAbsolute(path)) continue;
+      const key = (value: string) => {
+        const normalized = resolve(value);
+        return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+      };
+      const saved = key(path);
+      const previewRoots = ['temp', 'input'].map(name => key(resolve(outputRoot(), '..', name)));
+      if (previewRoots.some(root => saved === root || saved.startsWith(root + sep))) continue;
+    }
     if (typeof path === 'string') paths.push(path);
     else if (typeof output.filename === 'string' && output.filename) {
       paths.push(resolve(outputRoot(), typeof output.subfolder === 'string' ? output.subfolder : '', output.filename));
