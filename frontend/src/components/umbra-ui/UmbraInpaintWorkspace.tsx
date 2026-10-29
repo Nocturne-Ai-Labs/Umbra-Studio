@@ -1,3 +1,4 @@
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
 'use client';
@@ -9993,7 +9994,7 @@ export function UmbraInpaintWorkspace({
       <UmbraMobileSettingsSection enabled={phoneMode} title="Negative prompt" summary={negativePrompt.trim() ? 'Configured' : 'None'}>
         <label className="block space-y-1.5">
           <span className={labelClass}>Negative Prompt</span>
-          <textarea value={negativePrompt} onChange={(event) => onNegativePromptChange(event.target.value)}
+          <AutoSizePromptTextarea value={negativePrompt} onChange={(event) => onNegativePromptChange(event.target.value)}
             onKeyDown={handleNegativePromptKeyDown} className={`${inputClass} min-h-16 resize-y leading-relaxed`} />
         </label>
       </UmbraMobileSettingsSection>

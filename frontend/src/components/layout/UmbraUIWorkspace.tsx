@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import { compileMossPromptFields } from '../../../../shared/umbra-ui/mossPromptFields';
 import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
@@ -2971,7 +2972,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
         <UmbraMobileSettingsSection enabled={phoneImageGeneration} title="Negative prompt" summary={negativePrompt.trim() ? 'Configured' : 'None'}>
         <label className="block space-y-1.5">
           <span className={labelClass}>Negative Prompt</span>
-          <textarea
+          <AutoSizePromptTextarea
             value={negativePrompt}
             onChange={(event) => setNegativePrompt(event.target.value)}
             onKeyDown={(event) => handleImagePromptKeyDown(event, setNegativePrompt)}

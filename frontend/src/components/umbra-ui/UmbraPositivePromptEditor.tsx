@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import {
   Braces,
@@ -439,7 +440,7 @@ export function UmbraPositivePromptEditor({
               {mossEnabled && <MossPromptFieldControls value={normalizeMossPromptField(segment.moss) || { enabled: true, purpose: 'scene', label: 'object', text: '' }}
                 onChange={moss => emitSegments(segments.map(field => field.id === segment.id ? { ...field, moss } : field))} />}
               {renderFieldAction?.(segment)}
-              <textarea
+              <AutoSizePromptTextarea
                 aria-label={singleField ? heading : `Prompt field ${index + 1}`}
                 ref={(node) => {
                   if (node) textareaRefs.current.set(segment.id, node);

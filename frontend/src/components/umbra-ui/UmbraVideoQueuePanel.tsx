@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import {
   AlertTriangle,
@@ -672,7 +673,7 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
             {liveSelectedJob.error ? <p role="alert" className="break-words text-xs text-red-300">{liveSelectedJob.error}</p> : null}
             <p className="text-xs text-zinc-400">This is the captured native configuration. Requeue preserves its seeds, resources, and stages. Configure changes in ComfyUI and capture a new snapshot.</p>
             <p className="break-all font-mono text-[10px] text-zinc-500">{officialSelection.captureId}</p>
-            <label className="block space-y-2"><span className={labelClass}>Captured native prompt</span><textarea aria-label="Recorded native prompt" readOnly value={liveSelectedJob.prompt} className={`${inputClass} min-h-24 resize-y`} /></label>
+            <label className="block space-y-2"><span className={labelClass}>Captured native prompt</span><AutoSizePromptTextarea aria-label="Recorded native prompt" readOnly value={liveSelectedJob.prompt} className={`${inputClass} min-h-24 resize-y`} /></label>
             {liveSelectedJob.outputs.map(output => <div key={output.id} className="overflow-hidden rounded border border-white/10"><ReviewOutputPreview output={output} protectedMedia={classifyUmbraPrompt(liveSelectedJob.prompt) === 'nsfw'} /><p data-i18n-skip="" className="truncate border-t border-white/10 px-2 py-1 text-[10px] text-zinc-500">{output.name}</p></div>)}
           </div>
           <footer className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-t border-white/10 p-3"><button type="button" onClick={() => useStore.getState().setActiveWorkspace('comfyui')} className="min-h-9 rounded border border-white/10 px-3 text-[11px] text-zinc-300">Open ComfyUI</button><button type="button" onClick={() => void requeueOfficial()} disabled={requeueing || !!requeueIssue} title={requeueIssue || 'Requeue the exact captured native configuration'} className="ml-auto inline-flex min-h-9 items-center gap-2 rounded border border-[var(--umbra-accent)] px-3 text-[11px] font-bold text-[var(--umbra-text)] disabled:opacity-40">{requeueing ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}Requeue captured workflow</button></footer>
@@ -769,7 +770,7 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
                               />
                             </label>
                           </div>
-                          <textarea
+                          <AutoSizePromptTextarea
                             value={selectedClip ? draftPrompt : clip.prompt}
                             onChange={(event) => {
                               const promptValue = event.target.value;
@@ -796,7 +797,7 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
                 ) : (
                   <label className="block space-y-1.5">
                     <span className={labelClass}>Prompt</span>
-                    <textarea value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} className={`${inputClass} min-h-32 resize-y leading-relaxed`} />
+                    <AutoSizePromptTextarea value={draftPrompt} onChange={(event) => setDraftPrompt(event.target.value)} className={`${inputClass} min-h-32 resize-y leading-relaxed`} />
                   </label>
                 )}
                 {draftVideo.family === 'minimax_h3' ? (
@@ -806,7 +807,7 @@ export function UmbraVideoQueuePanel({ previewJobId, onPreviewJob, jobs, loading
                 ) : (
                   <label className="block space-y-1.5">
                     <span className={labelClass}>Negative Prompt</span>
-                    <textarea value={draftNegative} onChange={(event) => setDraftNegative(event.target.value)} className={`${inputClass} min-h-20 resize-y leading-relaxed`} />
+                    <AutoSizePromptTextarea value={draftNegative} onChange={(event) => setDraftNegative(event.target.value)} className={`${inputClass} min-h-20 resize-y leading-relaxed`} />
                   </label>
                 )}
 

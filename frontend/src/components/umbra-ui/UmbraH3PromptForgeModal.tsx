@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { FolderOpen, Loader2, RefreshCw, Sparkles, X } from 'lucide-react';
@@ -186,7 +187,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
         </header>
         <div className="min-h-0 space-y-3 overflow-y-auto p-3">
           {!useExistingPrompt ? <label className="block text-xs text-zinc-400">Video idea
-            <textarea className={`${fieldClass} mt-1 min-h-24 resize-y`} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the shot" />
+            <AutoSizePromptTextarea className={`${fieldClass} mt-1 min-h-24 resize-y`} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="Describe the shot" />
           </label> : null}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_80px_minmax(0,1fr)]">
             <div className="min-w-0 text-xs text-zinc-400">Model
@@ -229,7 +230,7 @@ export function UmbraH3PromptForgeModal({ video, prompt, durationSeconds, comfyC
           </div>
           {draft ? <div className="space-y-2 border-t border-white/10 pt-3">
             <label className="block text-xs text-zinc-400">Draft
-              {useExistingPrompt ? <p className="whitespace-pre-wrap text-xs text-zinc-200">{draft}</p> : <textarea aria-label="Prompt Forge draft" className={`${fieldClass} mt-1 min-h-40 resize-y`} value={draft} onChange={(event) => setDraft(event.target.value)} />}
+              {useExistingPrompt ? <p className="whitespace-pre-wrap text-xs text-zinc-200">{draft}</p> : <AutoSizePromptTextarea aria-label="Prompt Forge draft" className={`${fieldClass} mt-1 min-h-40 resize-y`} value={draft} onChange={(event) => setDraft(event.target.value)} />}
             </label>
             <button type="button" className={buttonClass} disabled={disabled || !draft.trim()} onClick={() => { if (!disabled) { onApplyPrompt(draft.trim()); onClose(); } }}>Use prompt</button>
           </div> : null}

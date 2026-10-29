@@ -1,3 +1,4 @@
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
 import type { MossPromptField } from '../../../../shared/umbra-ui/mossPromptFields';
 
@@ -9,7 +10,7 @@ export function MossPromptFieldControls({ value, onChange }: { value: MossPrompt
       options={[{ value: 'scene', label: 'Scene / Location' }, { value: 'meta', label: 'Style / Metadata' }, { value: 'character', label: 'Character' }, { value: 'object', label: 'Object' }, { value: 'text', label: 'Text' }, { value: 'custom', label: 'Custom label' }]}
       onValueChange={next => onChange({ ...value, purpose: next === 'scene' || next === 'meta' ? next : 'item', label: next === 'custom' ? 'subject' : next })} />
     {role === 'custom' && <input aria-label="MOSS item label" className={inputClass} value={value.label} onChange={event => onChange({ ...value, label: event.target.value })} />}
-    {role === 'text' && <textarea aria-label="Text to render" placeholder="Exact words to render" className={`${inputClass} h-16`} value={value.text} onChange={event => onChange({ ...value, text: event.target.value })} />}
+    {role === 'text' && <AutoSizePromptTextarea aria-label="Text to render" placeholder="Exact words to render" className={`${inputClass} h-16`} value={value.text} onChange={event => onChange({ ...value, text: event.target.value })} />}
 
   </div>;
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import { ArrowDown, ArrowUp, Download, FolderOpen, FolderUp, Image as ImageIcon, Loader2, Music2, Plus, RefreshCw, Sparkles, Trash2, Video, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -446,7 +447,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
             </UmbraSelectControl>
           </label>
           <label className="mt-2 block text-[10px] text-zinc-500">Next action
-            <textarea className={fieldClass} rows={3} value={continuity.idea} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, idea: event.target.value } })} />
+            <AutoSizePromptTextarea className={fieldClass} rows={3} value={continuity.idea} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, idea: event.target.value } })} />
           </label>
           <label className="mt-2 flex items-center gap-2 text-xs text-zinc-300">
             <input type="checkbox" checked={continuity.useReferences} onChange={(event) => onChange({ ...controls, continuity: { ...continuity, useReferences: event.target.checked } })} /> Use Director references
@@ -583,12 +584,12 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         </div>
         {controls.promptBuilder.structured ? <div className="space-y-2">
           {directorMode === 'REF2VA' ? <>
-            <label className="block text-[10px] text-zinc-500">Subject definitions<textarea value={controls.promptBuilder.subjects} onChange={(event) => updateBuilder({ subjects: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
-            <label className="block text-[10px] text-zinc-500">Reference summary<textarea value={controls.promptBuilder.summary} onChange={(event) => updateBuilder({ summary: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
-            <label className="block text-[10px] text-zinc-500">Retention analysis<textarea value={controls.promptBuilder.retention} onChange={(event) => updateBuilder({ retention: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+            <label className="block text-[10px] text-zinc-500">Subject definitions<AutoSizePromptTextarea value={controls.promptBuilder.subjects} onChange={(event) => updateBuilder({ subjects: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+            <label className="block text-[10px] text-zinc-500">Reference summary<AutoSizePromptTextarea value={controls.promptBuilder.summary} onChange={(event) => updateBuilder({ summary: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+            <label className="block text-[10px] text-zinc-500">Retention analysis<AutoSizePromptTextarea value={controls.promptBuilder.retention} onChange={(event) => updateBuilder({ retention: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
           </> : null}
-          <label className="block text-[10px] text-zinc-500">{directorMode === 'REF2VA' ? 'Detailed description' : 'Integrated multimodal description'}<textarea value={controls.promptBuilder.description} onChange={(event) => updateBuilder({ description: event.target.value })} className={`${fieldClass} min-h-24 resize-y`} /></label>
-          <label className="block text-[10px] text-zinc-500">Overall soundscape<textarea value={controls.promptBuilder.soundscape} onChange={(event) => updateBuilder({ soundscape: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
+          <label className="block text-[10px] text-zinc-500">{directorMode === 'REF2VA' ? 'Detailed description' : 'Integrated multimodal description'}<AutoSizePromptTextarea value={controls.promptBuilder.description} onChange={(event) => updateBuilder({ description: event.target.value })} className={`${fieldClass} min-h-24 resize-y`} /></label>
+          <label className="block text-[10px] text-zinc-500">Overall soundscape<AutoSizePromptTextarea value={controls.promptBuilder.soundscape} onChange={(event) => updateBuilder({ soundscape: event.target.value })} className={`${fieldClass} min-h-16 resize-y`} /></label>
           <label className="block text-[10px] text-zinc-500">Non-diegetic music<input value={controls.promptBuilder.music} onChange={(event) => updateBuilder({ music: event.target.value })} className={fieldClass} /></label>
         </div> : null}
       </div>
@@ -598,7 +599,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
           <h3 className="text-xs font-semibold text-zinc-200">DaSiWa Prompt Forge</h3>
           <a href="https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes" target="_blank" rel="noopener noreferrer" className="ml-auto text-[10px] text-zinc-500 underline hover:text-zinc-300">DaSiWa</a>
         </div>
-        <textarea value={brief} onChange={(event) => setBrief(event.target.value)} className={`${fieldClass} min-h-20 resize-y`} placeholder={continuitySource ? 'Next action (optional)' : 'Describe the shot to draft'} aria-label="Prompt Forge idea" />
+        <AutoSizePromptTextarea value={brief} onChange={(event) => setBrief(event.target.value)} className={`${fieldClass} min-h-20 resize-y`} placeholder={continuitySource ? 'Next action (optional)' : 'Describe the shot to draft'} aria-label="Prompt Forge idea" />
         <div className="mt-2 grid grid-cols-[minmax(0,1fr)_75px] gap-2">
           <div className="min-w-0 text-[10px] text-zinc-500">Model
             <div className="flex min-w-0 gap-1">
@@ -637,7 +638,7 @@ export function UmbraH3DirectorPanel({ mode, frameGuideMode, onFrameGuideModeCha
         {forgeError ? <p role="status" className="mt-2 text-xs text-amber-300">{forgeError}</p> : null}
         <H3ForgeRawResponse raw={forgeRawResponse} />
         {draft ? <div className="mt-3 space-y-2">
-          <textarea value={draft} onChange={(event) => setDraft(event.target.value)} className={`${fieldClass} min-h-40 resize-y`} aria-label="Prompt Forge draft" />
+          <AutoSizePromptTextarea value={draft} onChange={(event) => setDraft(event.target.value)} className={`${fieldClass} min-h-40 resize-y`} aria-label="Prompt Forge draft" />
           <button type="button" className="h-9 rounded border border-fuchsia-300/30 px-3 text-xs text-fuchsia-100" onClick={() => {
             if (continuitySource) onChange({ ...controls, continuity: { ...continuity, idea: draft.trim() } });
             else if (controls.promptBuilder.structured) updateBuilder({ description: draft.trim() });

@@ -1,3 +1,4 @@
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import { getMossLayoutFieldName } from '@/lib/mossLayoutPresentation';
 import { UmbraImagePipelineControls } from '@/components/umbra-ui/UmbraImagePipelineControls';
 import type { ImagePipelineSettings } from '../../../../shared/umbra-ui/imagePipelineSettings';
@@ -2912,7 +2913,7 @@ export function UmbraCanvasWorkspace({
           {capabilities.negativePrompt.support === 'adjustable' ? (
             <label className="block space-y-1.5">
               <span className="text-[9px] font-black uppercase tracking-[0.12em] text-zinc-500">Negative Prompt</span>
-              <textarea value={negativePrompt} onChange={(event) => onNegativePromptChange(event.target.value)} placeholder="Negative prompt" className="min-h-20 w-full resize-y rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-300/40" />
+              <AutoSizePromptTextarea value={negativePrompt} onChange={(event) => onNegativePromptChange(event.target.value)} placeholder="Negative prompt" className="min-h-20 w-full resize-y rounded-md border border-white/10 bg-black/35 px-2.5 py-2 text-xs leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-300/40" />
             </label>
           ) : null}
           {!mossLayout ? <>

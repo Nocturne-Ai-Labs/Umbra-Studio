@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import {
   ArrowDown,
@@ -135,7 +136,7 @@ export function UmbraLtxExtendedPanel({
 
             <label className="block space-y-1.5">
               <span className={labelClass}>Clip Prompt</span>
-              <textarea
+              <AutoSizePromptTextarea
                 value={clip.prompt}
                 onChange={(event) => updateClip(clip.id, { prompt: event.target.value.replace(/\|/g, ',') })}
                 maxLength={40_000}

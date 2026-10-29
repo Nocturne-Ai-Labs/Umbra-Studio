@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import {
   ArrowDown,
@@ -402,7 +403,7 @@ export function UmbraLtxStoryboardPanel({
 
           <label className="block space-y-1.5">
             <span className={labelClass}>Shot Prompt</span>
-            <textarea
+            <AutoSizePromptTextarea
               value={selectedShot.prompt}
               onChange={(event) => updateShot(selectedShot.id, { prompt: event.target.value.replace(/\|/g, ',') })}
               maxLength={40_000}

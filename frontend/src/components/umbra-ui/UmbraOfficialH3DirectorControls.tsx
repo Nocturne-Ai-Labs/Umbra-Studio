@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import { Film, FolderOpen, FolderUp, Loader2, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
@@ -122,7 +123,7 @@ export function UmbraOfficialH3DirectorControls({ settings, onChange, disabled, 
           <button type="button" className={`${buttonClass} justify-self-end`} aria-label={`Remove RefMod ${row.slot}`} title="Remove RefMod" disabled={disabled} onClick={() => onChange({ ...latest.current, refMods: latest.current.refMods.filter(item => item.slot !== row.slot) })}><Trash2 size={14} /></button>
           <UmbraSelectControl aria-label={`RefMod ${row.slot} file`} className={`${fieldClass} col-span-2`} value={row.name} disabled={disabled || !comfyConnected} onChange={event => onChange({ ...latest.current, refMods: latest.current.refMods.map(item => item.slot === row.slot ? { ...item, name: event.target.value } : item) })}><option value="">Select RefMod</option>{row.name && !library.some(item => item.name === row.name) ? <option value={row.name}>{row.name} (unavailable)</option> : null}{library.map(item => <option data-i18n-skip="" key={item.name} value={item.name}>{item.name} ({item.kind})</option>)}</UmbraSelectControl>
           <label className="space-y-1">Strength<input aria-label={`RefMod ${row.slot} strength`} type="number" min={0} max={1} step={0.05} value={row.strength} disabled={disabled} className={fieldClass} onChange={event => onChange({ ...latest.current, refMods: latest.current.refMods.map(item => item.slot === row.slot ? { ...item, strength: Number(event.target.value) } : item) })} /></label>
-          <label className="col-span-2 space-y-1">Description<textarea aria-label={`RefMod ${row.slot} description`} value={row.description} disabled={disabled} className={`${fieldClass} min-h-16`} onChange={event => onChange({ ...latest.current, refMods: latest.current.refMods.map(item => item.slot === row.slot ? { ...item, description: event.target.value } : item) })} /></label>
+          <label className="col-span-2 space-y-1">Description<AutoSizePromptTextarea aria-label={`RefMod ${row.slot} description`} value={row.description} disabled={disabled} className={`${fieldClass} min-h-16`} onChange={event => onChange({ ...latest.current, refMods: latest.current.refMods.map(item => item.slot === row.slot ? { ...item, description: event.target.value } : item) })} /></label>
         </div>)}
         <button type="button" disabled={disabled || settings.refMods.length >= 8} aria-label="Add RefMod" title="Add RefMod" className={buttonClass} onClick={() => { const slot = [1, 2, 3, 4, 5, 6, 7, 8].find(value => !latest.current.refMods.some(row => row.slot === value)); if (slot) onChange({ ...latest.current, refMods: [...latest.current.refMods, { slot, name: '', enabled: false, strength: 1, description: '' }] }); }}><Plus size={14} /></button>
         {refError ? <p role="alert" className="text-xs text-amber-300">{refError}</p> : null}

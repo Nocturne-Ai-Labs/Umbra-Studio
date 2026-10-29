@@ -1,4 +1,5 @@
 'use client';
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import { UmbraLoraEntryCard } from './UmbraLoraEntryCard';
 import { MINIMAX_H3_DEFAULT_VIDEO_VAE } from '../../../../shared/umbra-ui/minimaxH3Defaults';
 import { normalizeUmbraVideoLoraStack, type UmbraVideoLoraEntry } from '../../../../shared/umbra-ui/videoLoraStack';
@@ -3025,7 +3026,7 @@ export function UmbraVideoGenerationControls({
         ) : (
           <label className="block space-y-1.5">
             <span className={labelClass}>Negative Prompt</span>
-            <textarea
+            <AutoSizePromptTextarea
               value={negativePrompt}
               onChange={(event) => setNegativePrompt(event.target.value)}
               onKeyDown={(event) => handlePromptKeyDown(event, setNegativePrompt)}

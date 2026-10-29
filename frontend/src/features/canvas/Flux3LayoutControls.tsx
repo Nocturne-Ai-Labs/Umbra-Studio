@@ -1,3 +1,4 @@
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import type { UmbraUiPromptSegment } from '@/lib/umbraUiPromptSegments';
 import { BoxSelect, ChevronDown, Crosshair, Link2, Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
@@ -60,10 +61,10 @@ export function Flux3LayoutControls({ regions, drawing, onDraw, onChange, onAdd,
             onValueChange={value => update(region.id, { promptFieldId: value || undefined, promptItemIndex: undefined })} size="sm" />}
           {issue && <p role="alert" className="flex gap-1.5 text-[10px] leading-relaxed text-amber-200"><AlertTriangle size={12} className="mt-0.5 shrink-0" />{issue}</p>}
           {region.promptFieldId && moss ? field && <p className="line-clamp-2 text-[11px] leading-relaxed text-zinc-400" title={field.text}>{field.text || field.moss?.text}</p> : <>
-            <textarea aria-label={`Layout box ${index + 1} description`} value={region.description} maxLength={10000} onChange={event => update(region.id, { description: event.target.value })} placeholder="Describe this subject" className="w-full rounded border border-[var(--umbra-border)] bg-black/35 p-2 text-xs text-[var(--umbra-text)]" />
+            <AutoSizePromptTextarea aria-label={`Layout box ${index + 1} description`} value={region.description} maxLength={10000} onChange={event => update(region.id, { description: event.target.value })} placeholder="Describe this subject" className="w-full rounded border border-[var(--umbra-border)] bg-black/35 p-2 text-xs text-[var(--umbra-text)]" />
             {moss ? <>
               <UmbraSelect ariaLabel={`Layout box ${index + 1} type`} menuTitle="Layout item" value={region.label || 'object'} options={[{ value: 'object', label: 'Object' }, { value: 'text', label: 'Text' }]} onValueChange={value => update(region.id, { label: value === 'text' ? 'text' : 'object' })} size="sm" />
-              {region.label === 'text' ? <textarea aria-label={`Layout box ${index + 1} exact text`} value={region.text || ''} maxLength={10000} onChange={event => update(region.id, { text: event.target.value })} placeholder="Exact words to render" className="w-full rounded border border-[var(--umbra-border)] bg-black/35 p-2 text-xs text-[var(--umbra-text)]" /> : null}
+              {region.label === 'text' ? <AutoSizePromptTextarea aria-label={`Layout box ${index + 1} exact text`} value={region.text || ''} maxLength={10000} onChange={event => update(region.id, { text: event.target.value })} placeholder="Exact words to render" className="w-full rounded border border-[var(--umbra-border)] bg-black/35 p-2 text-xs text-[var(--umbra-text)]" /> : null}
             </> : null}
           </>}
           <details className="group" open={!moss || undefined}>

@@ -1,3 +1,4 @@
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -317,7 +318,7 @@ export function UmbraCanvasStudioShelf({ studio, onSelectRegion, onCreateRegion,
                         <option value="raster">Raster Layer</option>
                         <option value="cutout">Transparent Cutout</option>
                       </UmbraSelectControl>
-                      <textarea
+                      <AutoSizePromptTextarea
                         value={region.promptSegments.map((segment) => segment.text).filter(Boolean).join(', ')}
                         readOnly
                         className="col-span-2 min-h-14 resize-none border border-white/10 bg-black/35 px-2 py-1.5 font-mono text-[8px] leading-4 text-zinc-400 outline-none"

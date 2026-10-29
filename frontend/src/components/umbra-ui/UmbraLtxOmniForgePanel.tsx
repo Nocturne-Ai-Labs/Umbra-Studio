@@ -1,5 +1,6 @@
 'use client';
 
+import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import React from 'react';
 import { ArrowDown, ArrowUp, Image as ImageIcon, Loader2, Plus, Trash2, Upload, X } from 'lucide-react';
 import { UmbraSelect } from '@/components/ui/UmbraSelect';
@@ -434,7 +435,7 @@ export function UmbraLtxOmniForgePanel({
                   (guideStrength) => changeSegment(segment.id, { guideStrength }), 0, 1, 0.05)}
               </div>
               <label className="mt-2 block space-y-1"><span className={labelClass}>Local prompt</span>
-                <textarea className={`${inputClass} min-h-16 resize-y`} value={segment.prompt}
+                <AutoSizePromptTextarea className={`${inputClass} min-h-16 resize-y`} value={segment.prompt}
                   onChange={(event) => changeSegment(segment.id, { prompt: event.target.value })} /></label>
               {segment.prompt.includes('|') && <p role="alert" className="mt-1 text-xs text-red-300">The pipe character is not allowed in local prompts.</p>}
               {segment.start + segment.length > frames && <p role="alert" className="mt-1 text-xs text-red-300">Segment exceeds requested frames.</p>}
@@ -485,7 +486,7 @@ export function UmbraLtxOmniForgePanel({
               {numeric('Guide strength', controls.retake.strength, (strength) => change({ retake: { ...controls.retake, strength } }), 0, 1, 0.05)}
             </div>
             <label className="block space-y-1"><span className={labelClass}>Retake prompt</span>
-              <textarea className={`${inputClass} min-h-16 resize-y`} value={controls.retake.prompt}
+              <AutoSizePromptTextarea className={`${inputClass} min-h-16 resize-y`} value={controls.retake.prompt}
                 onChange={(event) => change({ retake: { ...controls.retake, prompt: event.target.value } })} /></label>
             {controls.retake.prompt.includes('|') && <p role="alert" className="text-xs text-red-300">The pipe character is not allowed in retake prompts.</p>}
             {controls.retake.start + controls.retake.length > frames && <p role="alert" className="text-xs text-red-300">Retake exceeds requested frames.</p>}
