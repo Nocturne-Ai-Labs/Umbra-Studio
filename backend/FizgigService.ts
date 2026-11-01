@@ -3,7 +3,7 @@ import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, renameSync
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { inspectFizgig, assertFizgigStopped } from '../setup/Fizgig';
-import { protectFizgigUpdates } from '../setup/FizgigManagedUpdates';
+import { prepareFizgigNativeUpdates } from '../setup/FizgigManagedUpdates';
 import { ownedPath } from '../setup/ComfyPythonRuntime';
 import { fizgigPort } from '../shared/fizgig';
 import { inspectLoopbackListeners } from '../shared/loopbackListener';
@@ -30,7 +30,7 @@ export class FizgigService {
     if (process.platform === 'win32') {
       const encodedPython = Buffer.from(python.replaceAll('\\', '/').toLowerCase()).toString('base64');
       const encodedScript = Buffer.from(script.replaceAll('\\', '/').toLowerCase()).toString('base64');
-      const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', `$ErrorActionPreference='Stop'; $py=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPython}')); $script=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedScript}')); $owners=@(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique); if($owners.Count -ne 1){exit 1}; $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$owners[0]); if(([string]$p.ExecutablePath).Replace('\\','/').ToLowerInvariant() -eq $py -and ([string]$p.CommandLine).Replace('\\','/').ToLowerInvariant().Contains($script)){ $p.ProcessId }`], { encoding: 'utf8', windowsHide: true, timeout: 4000 });
+      const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', `$ErrorActionPreference='Stop'; $py=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPython}')); $script=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedScript}')); $owners=@(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique); if($owners.Count -ne 1){exit 1}; $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$owners[0]); if(-not ([string]$p.CommandLine).Replace('\\','/').ToLowerInvariant().Contains($script)){exit 1}; if(([string]$p.ExecutablePath).Replace('\\','/').ToLowerInvariant() -eq $py){ $p.ProcessId; exit 0 }; $parent=Get-CimInstance Win32_Process -Filter ('ProcessId='+$p.ParentProcessId); if(([string]$parent.ExecutablePath).Replace('\\','/').ToLowerInvariant() -eq $py -and ([string]$parent.CommandLine).Replace('\\','/').ToLowerInvariant().Contains($script)){ $p.ProcessId }`], { encoding: 'utf8', windowsHide: true, timeout: 4000 });
       return result.status === 0 && /^\d+$/.test(result.stdout.trim()) ? Number(result.stdout.trim()) : 0;
     }
     const result = spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8', timeout: 3000 });
@@ -86,7 +86,7 @@ export class FizgigService {
       if ((await inspectLoopbackListeners(status.port)).some(probe => probe.state !== 'closed')) throw new Error('Fizgig port is busy or unverified. No existing process was changed.');
       const tool = this.cached!.value;
       await assertFizgigStopped(this.root);
-      protectFizgigUpdates(this.root);
+      prepareFizgigNativeUpdates(this.root);
       const logs = ownedPath(this.root, 'User', 'Logs'); mkdirSync(logs, { recursive: true });
       const descriptor = openSync(join(logs, 'fizgig.log'), 'a');
       try {

@@ -1,6 +1,6 @@
-import { normalizePowerPrompterPromptText } from '../../../shared/power-prompter/powerPrompter';
+import { normalizeMossPromptField, type MossPromptField } from '../../../shared/umbra-ui/mossPromptFields';
+import { readableMossPrompt, withoutLoraSyntax } from '../../../shared/umbra-ui/originalMossPrompt';
 import {
-  compileUmbraUiPromptSegments,
   createUmbraUiPromptSegment,
   type UmbraUiPromptSegment,
 } from './umbraUiPromptSegments';
@@ -20,6 +20,7 @@ export interface UmbraUiPowerPrompterHandoff {
     slotType?: string;
     variantId?: string;
     variantName?: string;
+    moss?: MossPromptField;
   }>;
   modelFamily: string;
   generation: Record<string, unknown>;
@@ -35,7 +36,7 @@ function normalizeRecord(value: unknown): Record<string, unknown> {
 
 export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPowerPrompterHandoff | null {
   const source = normalizeRecord(value);
-  const prompt = String(source.prompt || '').trim();
+  const prompt = withoutLoraSyntax(readableMossPrompt(source.prompt) ?? String(source.prompt || '').trim());
   const modelFamily = String(source.modelFamily || '').trim();
   const target = source.target === 'img2img' || source.target === 'inpaint'
     ? source.target
@@ -44,10 +45,11 @@ export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPow
     ? source.positivePromptSegments
       .map((entry) => {
         const segment = normalizeRecord(entry);
-        const text = String(segment.text || '').trim();
-        if (!text) return null;
+        const text = withoutLoraSyntax(readableMossPrompt(segment.text) ?? String(segment.text ?? ''));
+        if (!entry || typeof entry !== 'object') return null;
         return {
           text,
+          ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
           ...(String(segment.label || '').trim() ? { label: String(segment.label).trim() } : {}),
           ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
           ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
@@ -72,18 +74,17 @@ export function normalizeUmbraUiPowerPrompterHandoff(value: unknown): UmbraUiPow
 export function createUmbraUiPowerPrompterPromptSegments(
   handoff: UmbraUiPowerPrompterHandoff,
 ): UmbraUiPromptSegment[] {
-  const sourcePrompt = normalizePowerPrompterPromptText(handoff.prompt);
+  const sourcePrompt = withoutLoraSyntax(readableMossPrompt(handoff.prompt) ?? handoff.prompt);
   const cardSegments = (handoff.positivePromptSegments || [])
-    .map((segment) => createUmbraUiPromptSegment(segment.text, {
+    .map((segment) => createUmbraUiPromptSegment(withoutLoraSyntax(readableMossPrompt(segment.text) ?? segment.text), {
       label: segment.label,
       slotType: segment.slotType,
       variantId: segment.variantId,
       variantName: segment.variantName,
       preserveRepeatedTerms: true,
-    }))
-    .filter((segment) => segment.text.trim());
-  if (cardSegments.length > 0 && cardSegments.length <= 24
-    && compileUmbraUiPromptSegments(cardSegments) === sourcePrompt) {
+      moss: segment.moss,
+    }));
+  if (cardSegments.length > 0 && cardSegments.length <= 64) {
     return cardSegments;
   }
   return [createUmbraUiPromptSegment(sourcePrompt, { preserveRepeatedTerms: true })];

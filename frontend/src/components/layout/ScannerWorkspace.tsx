@@ -397,7 +397,7 @@ export function ScannerWorkspace({
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.45)]"></span>
                   Positive Prompt
                 </h4>
-                <div className="text-xs text-zinc-300 leading-relaxed"><PromptText value={parsed.positive} /></div>
+                <div className="text-xs text-zinc-300 leading-relaxed"><PromptText value={parsed.positive} metadata={item.metadata} /></div>
               </div>
             )}
 

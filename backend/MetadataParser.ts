@@ -1,3 +1,4 @@
+import { originalMossPrompt } from '../shared/umbra-ui/originalMossPrompt';
 /**
  * Metadata Parser - SIMPLIFIED
  * Extracts AI generation metadata from PNG and JPEG images
@@ -13,6 +14,7 @@ import { readJpegMetadataText } from './JpegMetadataText';
 
 export interface ImageMetadata {
   positive_prompt?: string;
+  original_positive_prompt?: string;
   negative_prompt?: string;
   model?: string;
   seed?: number;
@@ -395,6 +397,8 @@ export class MetadataParser {
     if (chunks.positive_prompt) meta.positive_prompt = chunks.positive_prompt;
     if (chunks.negative_prompt) meta.negative_prompt = chunks.negative_prompt;
     if (detected === 'unknown' && (chunks.positive_prompt || chunks.negative_prompt)) detected = 'a1111';
+    const original = originalMossPrompt(meta);
+    if (original !== undefined) meta.original_positive_prompt = original;
     if (detected !== 'unknown') meta.format = detected;
     return meta;
   }

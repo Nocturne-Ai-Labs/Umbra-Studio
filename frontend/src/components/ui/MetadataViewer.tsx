@@ -136,7 +136,7 @@ export function MetadataViewer({
                       <Copy size={14} className={copiedField === 'positive' ? 'text-green-400' : ''} />
                     </button>
                   </div>
-                  <div className="text-sm text-zinc-300 leading-relaxed"><PromptText value={prompts.positive} /></div>
+                  <div className="text-sm text-zinc-300 leading-relaxed"><PromptText value={prompts.positive} metadata={metadata} /></div>
                 </div>
               )}
 

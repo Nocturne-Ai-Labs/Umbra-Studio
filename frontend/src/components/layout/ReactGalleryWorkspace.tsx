@@ -3992,7 +3992,7 @@ function GalleryMediaViewer({
                       />
                     </div>
                   ) : (
-                    <div data-i18n-skip="" className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300"><PromptText value={positivePrompt} /></div>
+                    <div data-i18n-skip="" className="custom-scrollbar max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs leading-5 text-zinc-300"><PromptText value={positivePrompt} metadata={metadata} /></div>
                   )}
                 </div>
               ) : null}

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { ensureFizgigPython, ensureSetupGit, ownedPath } from './ComfyPythonRuntime';
 import { FIZGIG_REPOSITORY, FIZGIG_REVISION, fizgigPort } from '../shared/fizgig';
 import { inspectLoopbackListeners } from '../shared/loopbackListener';
-import { protectFizgigUpdates, restoreFizgigUpdateAdapters, validateFizgigUpdateAdapters } from './FizgigManagedUpdates';
+import { prepareFizgigNativeUpdates, restoreFizgigUpdateAdapters } from './FizgigManagedUpdates';
 
 export function fizgigPaths(root: string) {
   const path = ownedPath(root, 'Tools', 'Fizgig');
@@ -74,7 +74,6 @@ export async function installFizgig(root: string, log: (line: string) => void) {
     if (hasSource && previous.stdout.trim() === FIZGIG_REVISION && inspectFizgig(root).ready) { log('Fizgig is already installed at the reviewed revision.'); return; }
     run('git', ['checkout', '--detach', FIZGIG_REVISION]);
     try {
-      validateFizgigUpdateAdapters(root);
       const environment = `venv-umbra-${randomUUID()}`;
       const envPath = ownedPath(root, 'Tools', 'Fizgig', environment);
       run(basePython, ['-m', 'venv', '--copies', envPath]);
@@ -92,6 +91,6 @@ export async function installFizgig(root: string, log: (line: string) => void) {
       throw error;
     }
   } finally {
-    protectFizgigUpdates(root);
+    prepareFizgigNativeUpdates(root);
   }
 }

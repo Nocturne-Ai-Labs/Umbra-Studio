@@ -1800,6 +1800,11 @@ export function useUmbraPowerPrompterBridge(comfyUiConnected = false) {
     };
     const promptEntry = {
       prompt: promptWithLoras,
+      originalPromptSegments: (options.promptSegments || []).map((segment, order) => ({
+        order, slotId: segment.id, slotLabel: segment.label || '', slotType: segment.slotType || '',
+        variantId: segment.variantId || '', variantName: segment.variantName || '',
+        text: segment.text, moss: segment.moss, preserveRepeatedTerms: true,
+      })),
       tokens: (Array.isArray(options.promptSegments) ? options.promptSegments : [])
         .map((segment, order) => ({
           order,

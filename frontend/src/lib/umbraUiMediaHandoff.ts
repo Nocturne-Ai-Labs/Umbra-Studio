@@ -1,3 +1,4 @@
+import { reusableMossPrompt, readableMossPrompt, withoutLoraSyntax } from '../../../shared/umbra-ui/originalMossPrompt';
 import { parsePromptJson } from '@/utils/promptText';
 import { normalizeMossPromptField, type MossPromptField } from '../../../shared/umbra-ui/mossPromptFields';
 import { normalizeImagePipelineSettings, type ImagePipelineSettings } from '../../../shared/umbra-ui/imagePipelineSettings';
@@ -383,15 +384,16 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
     ? value.positivePromptSegments
       .map((candidate): UmbraUiMediaPromptSegment | null => {
         const segment = isRecord(candidate) ? candidate : {};
-        const text = cleanPromptText(String(segment.text || '').trim());
-        if (!text && !normalizeMossPromptField(segment.moss)?.text.trim()) return null;
+        const readable = readableMossPrompt(segment.text);
+        const text = withoutLoraSyntax(readable ?? (segment.preserveRepeatedTerms === true ? String(segment.text ?? '') : cleanPromptText(String(segment.text || '').trim())));
+        if (!text && segment.preserveRepeatedTerms !== true && !normalizeMossPromptField(segment.moss)?.text.trim()) return null;
         return {
           text,
           ...(String(segment.label || '').trim() ? { label: String(segment.label).trim().slice(0, 160) } : {}),
           ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim().slice(0, 80) } : {}),
           ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim().slice(0, 240) } : {}),
           ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim().slice(0, 240) } : {}),
-          ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
+          ...(readable === undefined && normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
           ...(segment.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true as const } : {}),
         };
       })
@@ -399,7 +401,7 @@ export function normalizeUmbraUiMediaGenerationSnapshot(value: unknown): UmbraUi
       .slice(0, 64)
     : [];
   return {
-    positivePrompt: String(value.positivePrompt || '').trim(),
+    positivePrompt: withoutLoraSyntax(readableMossPrompt(value.positivePrompt) ?? String(value.positivePrompt || '').trim()),
     ...(positivePromptSegments.length > 0 ? { positivePromptSegments } : {}),
     negativePrompt: String(value.negativePrompt || '').trim(),
     modelFamily: String(value.modelFamily || '').trim().slice(0, 160),
@@ -448,8 +450,11 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
     controlAfterGenerate: generation.controlAfterGenerate ?? generation.seedMode ?? inpaint.seedMode,
     seedIncrement: generation.seedIncrement ?? inpaint.seedIncrement,
   });
-  const powerPrompterSegments = Array.isArray(powerPrompter.segments) ? powerPrompter.segments : [];
-  const positivePromptWithSyntax = String(prompts.positive || powerPrompter.prompt || '').trim();
+  const powerPrompterSegments = [powerPrompter.originalPromptSegments, powerPrompter.segments, inpaint.promptSegments]
+    .find(value => Array.isArray(value) && value.length > 0) as unknown[] | undefined || [];
+  const savedPrompt = String(prompts.positive || powerPrompter.prompt || '').trim();
+  const restoredPrompt = reusableMossPrompt(metadata, savedPrompt);
+  const positivePromptWithSyntax = restoredPrompt.text;
   const syntaxLoras = parsePromptJson(positivePromptWithSyntax) ? [] : extractPromptSyntaxLoras(
     positivePromptWithSyntax || powerPrompterSegments.map((candidate) => {
       const segment = isRecord(candidate) ? candidate : {};
@@ -458,26 +463,25 @@ export function buildUmbraUiMediaGenerationSnapshot(metadata: ImageMetadata | nu
   );
   const structuredPrompt = !!parsePromptJson(positivePromptWithSyntax);
   const positivePrompt = structuredPrompt ? positivePromptWithSyntax : cleanPromptText(positivePromptWithSyntax.replace(/<lora:[^>]+>/gi, ''));
-  const positivePromptSegments = structuredPrompt ? [{ text: positivePrompt, label: 'JSON prompt' }] : powerPrompterSegments.length > 0
-    ? powerPrompterSegments
-      .map((candidate): UmbraUiMediaPromptSegment | null => {
-        const segment = isRecord(candidate) ? candidate : {};
-        const text = cleanPromptText(String(segment.text || '').replace(/<lora:[^>]+>/gi, ''));
-        if (!text && !normalizeMossPromptField(segment.moss)?.text.trim()) return null;
-        return {
-          text,
-          ...(String(segment.slotLabel || '').trim() ? { label: String(segment.slotLabel).trim() } : {}),
-          ...(String(segment.slotType || '').trim() ? { slotType: String(segment.slotType).trim() } : {}),
-          ...(String(segment.variantId || '').trim() ? { variantId: String(segment.variantId).trim() } : {}),
-          ...(String(segment.variantName || '').trim() ? { variantName: String(segment.variantName).trim() } : {}),
-          ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
-          ...(powerPrompter.source === 'power_prompter' || segment.preserveRepeatedTerms === true
-            ? { preserveRepeatedTerms: true as const }
-            : {}),
-        };
-      })
-      .filter((segment): segment is UmbraUiMediaPromptSegment => !!segment)
-    : [];
+  // Saved editor fields take precedence over a flattened display caption.
+  // A legacy compiled JSON fallback is not an original field layout.
+  const savedSegments = powerPrompterSegments
+    .filter((candidate) => isRecord(candidate) && readableMossPrompt(candidate.text) === undefined)
+    .map((candidate): UmbraUiMediaPromptSegment => {
+      const segment = candidate as Record<string, unknown>;
+      return {
+        text: withoutLoraSyntax(String(segment.text ?? '')),
+        label: String(segment.slotLabel || segment.label || ''),
+        slotType: String(segment.slotType || ''),
+        variantId: String(segment.variantId || ''),
+        variantName: String(segment.variantName || ''),
+        ...(normalizeMossPromptField(segment.moss) ? { moss: normalizeMossPromptField(segment.moss) } : {}),
+        preserveRepeatedTerms: true,
+      };
+    });
+  const completeSavedLayout = savedSegments.length > 0 && savedSegments.length === powerPrompterSegments.length;
+  const positivePromptSegments: UmbraUiMediaPromptSegment[] = completeSavedLayout ? savedSegments
+    : [{ text: withoutLoraSyntax(restoredPrompt.text), label: structuredPrompt ? 'JSON prompt' : 'Prompt', preserveRepeatedTerms: true }];
   const directLoras = Array.isArray(metadata.loras)
     ? metadata.loras.map((entry, index) => {
       const name = normalizePath(entry?.name);
@@ -582,7 +586,7 @@ export function applyUmbraUiMediaPromptOverride(
   promptTextValue: string,
   promptLabelValue = 'Inspector Caption',
 ): UmbraUiMediaGenerationSnapshot | undefined {
-  const promptText = cleanPromptText(String(promptTextValue || '').trim());
+  const promptText = cleanPromptText(readableMossPrompt(promptTextValue) ?? String(promptTextValue || '').trim());
   if (!promptText) return generation;
   return normalizeUmbraUiMediaGenerationSnapshot({
     ...(generation || {}),

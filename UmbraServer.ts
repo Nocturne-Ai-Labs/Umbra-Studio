@@ -10370,6 +10370,11 @@ async function emitBackendPowerPrompterSavedOutputs(
     const fullpath = String(output.fullpath || '').trim();
     if (fullpath && ['.png', '.jpg', '.jpeg'].includes(extname(fullpath).toLowerCase())) {
       try {
+        // Preserve both submitted and generated prompts in the durable PPUID receipt.
+        if (typeof outputPowerPrompterMetadata.originalPrompt === 'string') {
+          const saved = await MetadataParser.parse(fullpath);
+          if (typeof saved.positive_prompt === 'string') outputPowerPrompterMetadata.generationPrompt = saved.positive_prompt;
+        }
         await stampGeneratedImageMetadata(
           fullpath,
           'umbra_power_prompter',
@@ -11486,7 +11491,8 @@ function buildPowerPrompterMetadataSegments(
   const entry = promptEntry && typeof promptEntry === 'object'
     ? promptEntry as Record<string, unknown>
     : {};
-  const rawTokens = Array.isArray(entry.tokens) ? entry.tokens : [];
+  const hasOriginalLayout = Array.isArray(entry.originalPromptSegments) && entry.originalPromptSegments.length > 0;
+  const rawTokens = hasOriginalLayout ? entry.originalPromptSegments as unknown[] : Array.isArray(entry.tokens) ? entry.tokens : [];
   const snapshot = editorSnapshot && typeof editorSnapshot === 'object'
     ? editorSnapshot as Record<string, any>
     : {};
@@ -11501,8 +11507,8 @@ function buildPowerPrompterMetadataSegments(
       : {};
     const variantId = String(token.variantId || '').trim();
     const card = cardsById.get(variantId) as Record<string, unknown> | undefined;
-    const text = String(token.text || card?.text || '').trim();
-    if (!text && !normalizeMossPromptField(token.moss)?.text.trim()) return null;
+    const text = hasOriginalLayout ? String(token.text ?? '') : String(token.text || card?.text || '').trim();
+    if (!hasOriginalLayout && !text && !normalizeMossPromptField(token.moss)?.text.trim()) return null;
     return {
       order,
       slotId: String(token.slotId || card?.slotId || '').trim(),
@@ -11512,7 +11518,7 @@ function buildPowerPrompterMetadataSegments(
       variantName: String(token.variantName || card?.variantName || '').trim(),
       text,
       ...(normalizeMossPromptField(token.moss) ? { moss: normalizeMossPromptField(token.moss) } : {}),
-      ...(token.preserveRepeatedTerms === true ? { preserveRepeatedTerms: true } : {}),
+      ...((hasOriginalLayout || token.preserveRepeatedTerms === true) ? { preserveRepeatedTerms: true } : {}),
     };
   }).filter((segment): segment is NonNullable<typeof segment> => segment !== null);
 
@@ -12050,6 +12056,8 @@ async function runBackendPowerPrompterPipelineQueue(
           promptSetId,
           setId: promptSetId,
           prompt,
+          ...(Object.values(queuedWorkflow.promptGraph).some((node: any) => node?.class_type === 'CLIPLoader' && node.inputs?.type === 'moss_image')
+            ? { originalPrompt: prompt, originalPromptSegments: segments.map(segment => ({ ...segment })) } : {}),
           negativePrompt: generation.negativePrompt || '',
           generation,
           detailerPipeline: Array.isArray(generation.detailerPipeline)

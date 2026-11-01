@@ -1,3 +1,4 @@
+import { readableMossPrompt, withoutLoraSyntax } from '../../../shared/umbra-ui/originalMossPrompt';
 import type { ImageMetadata } from '@/utils/metadata';
 
 const MAX_RESTORE_BYTES = 32 * 1024 * 1024;
@@ -97,6 +98,14 @@ export async function decodePowerPrompterImageRestore(
     throw new Error('The embedded Power Prompter snapshot is not valid JSON.');
   }
 
+  // Keep card IDs, variants, wildcard selections and controls. Only unwrap MOSS text.
+  if (isRecord(snapshot) && isRecord(snapshot.document) && Array.isArray(snapshot.document.cards)) {
+    snapshot = { ...snapshot, document: { ...snapshot.document, cards: snapshot.document.cards.map(card => {
+      if (!isRecord(card)) return card;
+      const readable = readableMossPrompt(card.text);
+      return typeof card.text !== 'string' ? card : { ...card, text: withoutLoraSyntax(readable ?? card.text) };
+    }) } };
+  }
   return {
     ppuid: String(powerPrompter.ppuid || '').trim(),
     promptIndex: Math.max(0, Math.floor(Number(powerPrompter.promptIndex) || 0)),

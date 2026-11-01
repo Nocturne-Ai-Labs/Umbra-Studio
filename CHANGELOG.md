@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.91.11 - 2026-11-01
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through Umbra Setup, then refresh open Studio and Remote tabs. No model downloads or ComfyUI reinstall are required for these fixes.
+- Existing Fizgig installations regain their official updater when prepared through Setup or launched through Studio. Only recognized legacy Umbra modifications are restored; unrelated local edits are preserved.
+- MOSS Reference2IMG still requires its vision encoder extension. If it is missing, install the MOSS reference prerequisites through Setup and restart ComfyUI after its queue finishes.
+
+### MOSS prompts and image handoffs
+
+- Gallery, filmstrip, and the lightbox header now restore readable prompts when sending MOSS images to image workflows, including older enhanced-JSON metadata.
+- Saved original prompt fields retain their labels, order, blank fields, paragraph spacing, and supported field settings. LoRA directives are removed from editable prompt text while the separate LoRA stack remains available.
+- Power Prompter identifiers, saved cards, and output receipts retain original prompt information alongside the generated prompt. Older images without saved originals receive a readable fallback; missing original layout cannot be reconstructed.
+- Gallery and metadata views can switch between generated prompt data and the recovered original or readable prompt.
+
+### Fizgig and sizing
+
+- Restored official Fizgig updater code and prepared the managed environment and Git tracking for native updates.
+- Fixed Windows recognition of Fizgig's managed Python child process when reconnecting to an existing server.
+- Megapixel controls display the selected MP target alongside the actual dimensions, avoiding confusing rounded values such as 0.99 or 1.01 MP. Pipeline dimension alignment remains in effect.
+
+### Compatibility
+
+- Optional AI Toolkit requires host Git and Node.js 20 or newer.
+- Linux managed node installations may require python3-dev, build-essential, libgl1, and libglib2.0-0 or distribution equivalents.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: MOSS image transfers inserting enhanced JSON instead of reusable prompt fields.
+- Fixed: Prompt restoration losing field layout or reintroducing LoRA syntax.
+- Fixed: Legacy Umbra overrides replacing Fizgig's official updater.
+- Improved: Fizgig process recognition and MP target clarity.
+
 ## v0.91.10 - 2026-10-29
 
 ### Image sizing and Latest folder repair
