@@ -201,27 +201,6 @@
       ]
     },
     {
-      "id": "h3-ref2va-turbo-4step",
-      "family": "MiniMax H3 REF2VA VSA",
-      "creator": "LightX2V",
-      "repository": "lightx2v/Minimax-h3-Turbo",
-      "revision": "30f485ed874aa44c8183348ad361c5eabad318da",
-      "license": "Upstream model license \u2014 review repository terms",
-      "licenseUrl": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/30f485ed874aa44c8183348ad361c5eabad318da",
-      "installPolicy": "automatic",
-      "profiles": [
-        "h3-ref2va-vsa"
-      ],
-      "files": [
-        {
-          "sourcePath": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
-          "destination": "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
-          "bytes": 1956193000,
-          "sha256": "5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c"
-        }
-      ]
-    },
-    {
       "id": "minimax-h3-latent-upscale-v1",
       "installPolicy": "automatic",
       "profiles": [
@@ -1059,7 +1038,8 @@
       "licenseNotice": "Optional experimental adapter; not generation-qualified in Umbra. Ref2VA only. Repackaged under the Comfy-Org MiniMax H3 repository license; original LightX2V adapter card declares Apache-2.0. The base model community license still applies.",
       "installPolicy": "automatic",
       "profiles": [
-        "minimax-h3-turbo-reference"
+        "minimax-h3-turbo-reference",
+        "h3-ref2va-vsa"
       ],
       "purpose": "Optional native model-only MiniMax H3 Turbo LoRA",
       "files": [
