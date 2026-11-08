@@ -108,7 +108,7 @@ export function resizeVideoShot(draft: OfficialVideoEditorDraft, seconds: number
 export function switchVideoProjectMode(project: VideoStudioProject, shotId: string, mode: string): VideoStudioProject {
   const shot = project.shots.find(s => s.id === shotId);
   if (!shot || !(OFFICIAL_VIDEO_EDITOR_MODES[shot.workflowId] as readonly string[]).includes(mode)) return project;
-  const h3 = shot.workflowId === 'h3-26', frame = 1 / shot.draft.frameRate;
+  const h3 = shot.workflowId === 'h3-26' || shot.workflowId === 'h3-vsa', frame = 1 / shot.draft.frameRate;
   const old = shot.draft.references;
   let references = old.filter(r => r.enabled !== false);
   if (['T2VA', 'T2V'].includes(mode)) references = [];
@@ -134,7 +134,7 @@ export function setVideoShotFrame(shot: VideoStudioShot, media: VideoStudioMedia
   const references = shot.draft.references.filter(r => r.kind === 'image' && r.enabled !== false).slice(0, paired ? 2 : 1);
   if (index === 1 && !references[0]) throw new Error('Set the first frame before the last frame.');
   if (index < 0 || index > (paired ? 1 : 0)) throw new Error('Invalid frame slot.');
-  const h3 = shot.workflowId === 'h3-26', frame = 1 / shot.draft.frameRate;
+  const h3 = shot.workflowId === 'h3-26' || shot.workflowId === 'h3-vsa', frame = 1 / shot.draft.frameRate;
   references[index] = { ...media, id: crypto.randomUUID(), enabled: true, startSeconds: !h3 && index === 1 ? shot.draft.durationSeconds - frame : 0, durationSeconds: h3 ? 1 : frame };
   const draft = { ...shot.draft, references };
   if (draft.h3) draft.h3 = { ...draft.h3, continuity: { ...draft.h3.continuity, sourceId: '', sourceVideoId: '', nextPrompt: '' } };

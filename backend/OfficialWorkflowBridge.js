@@ -5,7 +5,7 @@
   window.__umbraOfficialWorkflowBridgeInstalled = true;
 
   const REQUESTS = new Set(['UMBRA_OFFICIAL_WORKFLOW_LOAD', 'UMBRA_OFFICIAL_WORKFLOW_SERIALIZE']);
-  const WORKFLOWS = new Set(['h3-26', 'ltx23-50']);
+  const WORKFLOWS = new Set(['h3-26', 'h3-vsa', 'ltx23-50']);
   const TIMEOUT_MS = 15000;
   const MAX_SOURCE_BYTES = 16 * 1024 * 1024;
   const MAX_NODES = 8192;

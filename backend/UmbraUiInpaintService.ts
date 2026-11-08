@@ -1787,7 +1787,7 @@ export class UmbraUiInpaintService {
         }
       }
       if (settings.softInpaintEnabled) {
-        if (settings.inpaintAdapter === 'native_edit') {
+        if (settings.inpaintAdapter === 'native_edit' && normalizeUmbraUiModelFamilyKey(settings.modelFamily) !== 'mossimage') {
           throw new Error('Soft inpaint compositing is not declared by this native edit provider.');
         }
         if (!nodeTypes.has('UmbraSoftInpaintComposite')) {
@@ -3378,6 +3378,20 @@ export class UmbraUiInpaintService {
           },
           _meta: { title: 'Final Native Inpaint Mask Preservation' },
         });
+        if (settings.softInpaintEnabled && normalizeUmbraUiModelFamilyKey(settings.modelFamily) === 'mossimage') {
+          graph[finalCompositeId] = {
+            class_type: 'UmbraSoftInpaintComposite',
+            inputs: {
+              original: sourceRef,
+              generated: generatedRef,
+              mask: maskRef,
+              preservation: Math.max(0, Math.min(1, finiteNumberOrFallback(settings.softInpaintPreservation, 0.5))),
+              transition_contrast: Math.max(0.25, Math.min(8, finiteNumberOrFallback(settings.softInpaintTransitionContrast, 2))),
+              mask_influence: Math.max(0, Math.min(1, finiteNumberOrFallback(settings.softInpaintMaskInfluence, 0))),
+            },
+            _meta: { title: 'MOSS Soft Inpaint Mask Preservation' },
+          };
+        }
         inputs[imageField] = [finalCompositeId, 0];
         outputNode.inputs = inputs;
       }

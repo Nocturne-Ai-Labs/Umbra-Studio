@@ -4,7 +4,7 @@ import type { OfficialVideoWorkflowId } from '../../../shared/umbra-ui/officialV
 export async function prepareOfficialVideoResolution(draft: OfficialVideoEditorDraft, workflowId: OfficialVideoWorkflowId): Promise<OfficialVideoEditorDraft> {
   if (draft.resolution?.mode !== 'workflow') return draft;
   const h3 = { ...DEFAULT_OFFICIAL_H3_RESOLUTION, ...draft.resolution.h3 };
-  const needsSource = workflowId === 'h3-26'
+  const needsSource = (workflowId === 'h3-26' || workflowId === 'h3-vsa')
     ? h3.aspect === 'auto' && !(h3.resolution === 'custom' && h3.custom_mode === 'fixed')
     : draft.resolution.followSourceAspect;
   const reference = draft.references.find(item => item.enabled !== false && item.kind !== 'audio' && item.mediaMode !== 'audio');

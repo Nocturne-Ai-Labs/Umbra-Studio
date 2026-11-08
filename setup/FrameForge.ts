@@ -5,7 +5,7 @@ import { managedChildPath } from './ManagedToolRequirements';
 import { ensureFrameForgePython, ensureSetupGit, managedGitForTool } from './ComfyPythonRuntime';
 
 export const FRAMEFORGE_REPO = 'https://github.com/spacesimeco-hue/Chain-Motion-AI-Video-Editor';
-export const FRAMEFORGE_COMMIT = 'a1dce2d34b543ca8ee7f74c3eeee258914e1ee22';
+export const FRAMEFORGE_COMMIT = '9d40f5c8435a4049cac523985303ae243c655a7c';
 export function frameForgePaths(root: string) {
   const home = managedChildPath(root, 'Tools/FrameForge');
   return { home, app: managedChildPath(home, 'app'), python: managedChildPath(home, process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python'),

@@ -66,7 +66,7 @@ export function UmbraOfficialVideoEditor({ phoneMode = false, projectMode = fals
     settingsDialog.current?.focus();
     return () => { if (previousFocus?.isConnected) previousFocus.focus(); };
   }, [settingsOpen]);
-  const h3 = workflowId === 'h3-26';
+  const h3 = (workflowId === 'h3-26' || workflowId === 'h3-vsa');
   const h3Settings = draft.h3 || readOfficialH3DirectorSettings({});
   const ltxSettings = draft.ltx || readOfficialLtxDirectorSettings({});
   const continuing = h3 && hasOfficialH3Continuity(h3Settings);
@@ -355,7 +355,7 @@ export function UmbraOfficialVideoEditor({ phoneMode = false, projectMode = fals
           <label className={`block space-y-1 ${labelClass}`}><span>{h3 ? 'Reference direction' : 'Scene prompt'}</span>{h3 ? <button type="button" disabled={disabled} aria-label={`Auto prompt reference ${index + 1}`} className={iconClass} onClick={() => { setForgeReference(reference.id); setForgeOpen(true); }}><Sparkles size={14} /></button> : null}<AutoSizePromptTextarea aria-label={`Reference ${index + 1} prompt`} value={reference.prompt} disabled={disabled} onChange={event => updateReference(reference.id, { prompt: event.target.value })} className={`${inputClass} min-h-20 resize-y`} /></label>
         </article>)}
       </div> : null}
-      {h3 ? <UmbraOfficialH3DirectorControls settings={h3Settings} onChange={h3 => change({ h3 })} disabled={disabled} comfyConnected={comfyConnected} mode={draft.mode} width={draft.width} height={draft.height} frameRate={draft.frameRate} durationSeconds={draft.durationSeconds} onMediaBusyChange={onMediaBusyChange} onMatchSource={source => change({ width: source.width, height: source.height, mode: source.mode, frameRate: 24, resolution: { mode: 'fixed' } })} /> : null}
+      {workflowId === 'h3-26' ? <UmbraOfficialH3DirectorControls settings={h3Settings} onChange={h3 => change({ h3 })} disabled={disabled} comfyConnected={comfyConnected} mode={draft.mode} width={draft.width} height={draft.height} frameRate={draft.frameRate} durationSeconds={draft.durationSeconds} onMediaBusyChange={onMediaBusyChange} onMatchSource={source => change({ width: source.width, height: source.height, mode: source.mode, frameRate: 24, resolution: { mode: 'fixed' } })} /> : null}
       {!h3 ? <UmbraOfficialLtxDirectorControls settings={ltxSettings} onChange={ltx => change({ ltx })} disabled={disabled} comfyConnected={comfyConnected} durationSeconds={draft.durationSeconds} frameRate={draft.frameRate} onMediaBusyChange={onMediaBusyChange} /> : null}
       {uploading ? <p role="status" className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 size={13} className="animate-spin" />{uploading}</p> : null}
       {uploadError ? <p role="alert" className="text-xs text-red-300">{uploadError}</p> : null}

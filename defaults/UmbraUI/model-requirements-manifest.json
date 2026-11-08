@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "profiles": {
+    "h3-ref2va-vsa": {"label": "H3 REF2VA Turbo + Sparse Attention (Experimental)", "description": "Requires BOTH the LightX2V four-step REF2VA Turbo LoRA and FastH3 VSA gate weights (about 5.81 GB total), plus the optional VSA nodes and CUDA comfy-kitchen sol_attn. Existing H3 REF2VA checkpoint, encoder and VAEs are also required. Not a replacement for standard DaSiWa. Model licenses are separate from the Apache-2.0 node license."},
     "moss-image": {"label": "MOSS Image SFT", "description": "MOSS 5B image generation, img2img and masked inpainting. Official INT8 SFT, Qwen3.5 9B encoder and FLUX.2 VAE. Apache-2.0."},
     "moss-image-base": {"label": "MOSS Image Base", "description": "Optional original MOSS 5B Base weights, sharing the MOSS Image pipelines and support files. Apache-2.0."},
 
@@ -178,6 +179,48 @@
     }
   },
   "models": [
+    {
+      "id": "h3-ref2va-vsa-gate",
+      "family": "MiniMax H3 REF2VA VSA",
+      "creator": "FastVideo / barelymining",
+      "repository": "barelymining/ComfyUI-MiniMax-H3-FastVideo",
+      "revision": "aa554050fe27ec3c62e20e57519beb46741c9000",
+      "license": "MiniMax H3 Community License",
+      "licenseUrl": "https://huggingface.co/FastVideo/FastVideo-FastH3-4-step-Preview-v1-LoRA/blob/main/LICENSE",
+      "installPolicy": "automatic",
+      "profiles": [
+        "h3-ref2va-vsa"
+      ],
+      "files": [
+        {
+          "sourcePath": "fasth3_vsa_gate.safetensors",
+          "destination": "loras/fasth3_vsa_gate.safetensors",
+          "bytes": 3853522616,
+          "sha256": "bf95408e335c4b0d6a1a44946a428a3e12849e6eab2de9566ecedae4a0043420"
+        }
+      ]
+    },
+    {
+      "id": "h3-ref2va-turbo-4step",
+      "family": "MiniMax H3 REF2VA VSA",
+      "creator": "LightX2V",
+      "repository": "lightx2v/Minimax-h3-Turbo",
+      "revision": "30f485ed874aa44c8183348ad361c5eabad318da",
+      "license": "Upstream model license \u2014 review repository terms",
+      "licenseUrl": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/30f485ed874aa44c8183348ad361c5eabad318da",
+      "installPolicy": "automatic",
+      "profiles": [
+        "h3-ref2va-vsa"
+      ],
+      "files": [
+        {
+          "sourcePath": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "destination": "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "bytes": 1956193000,
+          "sha256": "5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c"
+        }
+      ]
+    },
     {
       "id": "minimax-h3-latent-upscale-v1",
       "installPolicy": "automatic",

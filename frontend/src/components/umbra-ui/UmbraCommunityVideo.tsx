@@ -18,6 +18,8 @@ function LongshotStudio() {
   const [ready, setReady] = React.useState(false);
   const [revision, setRevision] = React.useState(0);
   const [error, setError] = React.useState('');
+  const [frameRevision, setFrameRevision] = React.useState(0);
+  const disconnected = React.useRef(false);
   React.useEffect(() => {
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -37,13 +39,19 @@ function LongshotStudio() {
         }
         if (abort.signal.aborted) return;
         if (missing.length) {
+          disconnected.current = true;
           setStatus('Required components are missing or failed to load: ' + missing.join(', ') + '. Open Umbra Setup → Tools → Longshot Studio, install the bundle, then restart ComfyUI.');
         } else {
+          if (disconnected.current) setFrameRevision(value => value + 1);
+          disconnected.current = false;
           setReady(true);
           setStatus('');
         }
       } catch (cause) {
-        if (!abort.signal.aborted) setStatus(cause instanceof Error ? cause.message : 'Unable to check Longshot Studio.');
+        if (!abort.signal.aborted) {
+          disconnected.current = true;
+          setStatus(cause instanceof Error ? cause.message : 'Unable to check Longshot Studio.');
+        }
       } finally {
         if (!abort.signal.aborted) timer = setTimeout(check, 10000);
       }
@@ -60,7 +68,7 @@ function LongshotStudio() {
     </div>
     {status || error ? <div role="status" className="border-b border-white/10 p-3 text-sm text-zinc-300">{error || status}</div> : null}
     {!ready ? <p className="p-3 text-sm text-zinc-400">Longshot requires its Studio, H3 Long Shot and H3 Prompt Compiler node packs. MiniMax H3 models and FFmpeg are also needed for generation.</p> : null}
-    {ready ? <iframe key={revision} src="/longshot/" title="Longshot Studio by r34vtraining" className="min-h-0 w-full flex-1 border-0" allow="fullscreen; autoplay; clipboard-read; clipboard-write" allowFullScreen /> : null}
+    {ready ? <iframe key={`${revision}-${frameRevision}`} src="/longshot/" title="Longshot Studio by r34vtraining" className="min-h-0 w-full flex-1 border-0" allow="fullscreen; autoplay; clipboard-read; clipboard-write" allowFullScreen /> : null}
   </section>;
 }
 

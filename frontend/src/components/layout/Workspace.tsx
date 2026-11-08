@@ -1097,7 +1097,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
   const loadWorkflowIntoComfy = useCallback(async (payload: Record<string, unknown>, options?: { silent?: boolean }) => {
     const workflow = payload?.workflow;
     const officialId = payload?.officialWorkflowId;
-    const isOfficial = officialId === 'h3-26' || officialId === 'ltx23-50';
+    const isOfficial = officialId === 'h3-26' || officialId === 'h3-vsa' || officialId === 'ltx23-50';
     if (!isOfficial && (!workflow || typeof workflow !== 'object')) {
       throw new Error('No workflow document was provided.');
     }
@@ -1126,7 +1126,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
 
   useEffect(() => {
     const acceptOfficial = (payload: Record<string, unknown>) => {
-      if (payload.officialWorkflowId !== 'h3-26' && payload.officialWorkflowId !== 'ltx23-50') return;
+      if (payload.officialWorkflowId !== 'h3-26' && payload.officialWorkflowId !== 'h3-vsa' && payload.officialWorkflowId !== 'ltx23-50') return;
       if (payload.loadRequestId && resolvedOfficialLoadRequestRef.current === payload.loadRequestId) return;
       setUiRequested(true);
       setShowManager(false);
@@ -1184,7 +1184,7 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
       const detail = (event as CustomEvent).detail;
       if (!detail || typeof detail.resolve !== 'function' || typeof detail.reject !== 'function') return;
       const workflowId = detail.workflowId;
-      if ((workflowId !== 'h3-26' && workflowId !== 'ltx23-50') || loadedOfficialWorkflowRef.current !== workflowId) {
+      if ((workflowId !== 'h3-26' && workflowId !== 'h3-vsa' && workflowId !== 'ltx23-50') || loadedOfficialWorkflowRef.current !== workflowId) {
         detail.reject(new Error('Load this official workflow in ComfyUI before capturing its configuration.'));
         return;
       }
@@ -1253,13 +1253,13 @@ const ComfyUIWorkspace = ({ isActive, mobileManager = false }: { isActive: boole
     const onLoadWorkflow = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return;
-      if (detail.officialWorkflowId === 'h3-26' || detail.officialWorkflowId === 'ltx23-50') return;
+      if (detail.officialWorkflowId === 'h3-26' || detail.officialWorkflowId === 'h3-vsa' || detail.officialWorkflowId === 'ltx23-50') return;
       runLoad(detail as Record<string, unknown>);
     };
 
     window.addEventListener('umbra:comfyui-load-workflow', onLoadWorkflow);
     const storedPayload = readStoredPayload();
-    if (storedPayload && storedPayload.officialWorkflowId !== 'h3-26' && storedPayload.officialWorkflowId !== 'ltx23-50') {
+    if (storedPayload && storedPayload.officialWorkflowId !== 'h3-26' && storedPayload.officialWorkflowId !== 'h3-vsa' && storedPayload.officialWorkflowId !== 'ltx23-50') {
       window.setTimeout(() => { if (!canceled) runLoad(storedPayload); }, 250);
     }
     return () => {

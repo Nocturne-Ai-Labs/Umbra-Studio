@@ -62,7 +62,7 @@ export function videoGenerationPolicyIssue(generationValue: unknown, policy: Umb
   const official = normalizeOfficialVideoWorkflowSelection(generation.officialWorkflow);
   if (official) {
     if (generation.mediaType !== 'video') return 'Held: official workflow captures require an explicit video job.';
-    const expected = official.workflowId === 'h3-26' ? 'h3-director' : 'ltx23-omniforge';
+    const expected = (official.workflowId === 'h3-26' || official.workflowId === 'h3-vsa') ? 'h3-director' : 'ltx23-omniforge';
     if (graph !== undefined && dasiwaVideoGraphRoute(graph) !== expected) return 'Held: the captured graph does not match its official DaSiWa workflow. Capture the pinned original again.';
     return null;
   }

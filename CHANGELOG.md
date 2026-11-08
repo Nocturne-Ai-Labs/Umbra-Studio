@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.91.12 - 2026-11-08
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update through `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux, then refresh Studio. Use Setup to update the DaSiWa and community-video requirements you use; restart ComfyUI after its queue finishes.
+- The new **H3 REF2VA Turbo + Sparse Attention (Experimental)** workflow is optional. Install its Setup prerequisites and the standard DaSiWa H3 requirements. It requires both the four-step Turbo LoRA and VSA gate weights (about 5.81 GB total), plus your existing H3 REF2VA checkpoint, text encoder and VAEs.
+- Sparse attention requires compatible NVIDIA CUDA hardware, BF16, and a comfy-kitchen CUDA backend exposing `sol_attn`. Keep other attention overrides and H3 caching disabled. Model licenses are separate from the VSA node's Apache-2.0 license; review the linked model terms before downloading.
+- MOSS adaptive soft inpaint requires the existing Umbra soft-inpaint node. No additional MOSS model download is needed for this fix.
+
+### Video workflows and community tools
+
+- Added a separate experimental REF2VA workflow with four-step Turbo defaults, adjustable sparse attention, reference media handoffs and saved-project support. Standard DaSiWa H3 and LTX workflows remain available. The experimental option does not expose unqualified continuity or RefMod combinations and is not shown in the simplified phone video selector.
+- Updated reviewed DaSiWa requirements and Longshot Studio, H3 Longshot and H3 Motion Context versions. FrameForge's reviewed upstream revision is current; its latest change is documentation-only.
+- Longshot reloads its embedded interface after the connection recovers. FrameForge refreshes managed process status, handles stale lifecycle requests, and provides an explicit iframe Reload button.
+- Real short reference-video tests completed in Longshot, FrameForge and the experimental DaSiWa Director workflow on an RTX 4090. These are compatibility checks, not general performance or quality guarantees. Native ComfyUI TAESD previews failed in the tested environment; selecting Auto live previews allowed the experimental test to complete.
+
+### Inpainting
+
+- Enabled adaptive soft-inpaint compositing for MOSS's native inpaint provider, preserving its source image and mask controls.
+- Replaced the misleading universal restart message with separate explanations for an unsupported provider, a disconnected backend, pending capability checks, or a missing node.
+
+### Compatibility
+
+- Optional AI Toolkit requires host Git and Node.js 20 or newer.
+- Linux managed node installations may require python3-dev, build-essential, libgl1, and libglib2.0-0 or distribution equivalents.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: MOSS soft inpaint being rejected despite its installed compositing node.
+- Fixed: Experimental workflow capture failing because of missing bridge recognition or conflicting native link IDs.
+- Improved: Community-video connection recovery and FrameForge launch status feedback.
+- Improved: Explicit Turbo LoRA, sparse-attention and CUDA prerequisite labels and Setup selections.
+
 ## v0.91.11 - 2026-11-01
 
 ### TL;DR - Setup After Updating

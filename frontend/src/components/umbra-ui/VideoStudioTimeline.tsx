@@ -59,7 +59,7 @@ export function VideoStudioTimeline({ project, onChange, disabled, comfyConnecte
   };
   const addShot = (duplicate: boolean) => {
     const draft = structuredClone(active.draft);
-    if (!duplicate) { draft.prompt = ''; draft.references = []; draft.mode = active.workflowId === 'h3-26' ? 'T2VA' : 'T2V'; }
+    if (!duplicate) { draft.prompt = ''; draft.references = []; draft.mode = active.workflowId === 'h3-vsa' ? 'REF2VA' : active.workflowId === 'h3-26' ? 'T2VA' : 'T2V'; }
     if (draft.h3) draft.h3.continuity = { ...draft.h3.continuity, sourceId: '', sourceVideoId: '', nextPrompt: '' };
     const shot = { id: crypto.randomUUID(), name: 'Shot ' + (project.shots.length + 1), workflowId: active.workflowId, draft };
     onChange({ ...project, activeShotId: shot.id, shots: [...project.shots, shot] });
@@ -95,7 +95,7 @@ export function VideoStudioTimeline({ project, onChange, disabled, comfyConnecte
       if (!media) return;
       const source = p.shots.find(s => s.id === p.activeShotId)!;
       const fresh = structuredClone(source.draft);
-      fresh.references = []; fresh.prompt = ''; fresh.mode = source.workflowId === 'h3-26' ? 'T2VA' : 'T2V';
+      fresh.references = []; fresh.prompt = ''; fresh.mode = source.workflowId === 'h3-vsa' ? 'REF2VA' : source.workflowId === 'h3-26' ? 'T2VA' : 'T2V';
       if (fresh.h3) fresh.h3.continuity = { ...fresh.h3.continuity, sourceId: '', sourceVideoId: '', nextPrompt: '' };
       const shot = shotId ? p.shots.find(s => s.id === shotId) : {
         id: crypto.randomUUID(), name: 'Shot ' + (p.shots.length + 1), workflowId: source.workflowId, draft: fresh,
@@ -112,11 +112,11 @@ export function VideoStudioTimeline({ project, onChange, disabled, comfyConnecte
       }
       if (shotId && draft.mode === 'V2V' && media.kind !== 'video') throw new Error('This shot needs a video source.');
       if (media.kind === 'audio') {
-        if (shot.workflowId !== 'h3-26' || placement !== 'reference') throw new Error('Audio is supported as an H3 reference.');
+        if ((shot.workflowId !== 'h3-26' && shot.workflowId !== 'h3-vsa') || placement !== 'reference') throw new Error('Audio is supported as an H3 reference.');
         draft = { ...draft, mode: 'REF2VA', references: [...draft.references, { ...media, id: crypto.randomUUID() }] };
       } else {
         if (placement !== 'reference' && media.kind !== 'image') throw new Error('Frame positions require an image.');
-        const h3DirectorRole = shot.workflowId === 'h3-26' && placement === 'reference' ? media.kind === 'video' ? 'motion_video' : 'reference_image' : undefined;
+        const h3DirectorRole = (shot.workflowId === 'h3-26' || shot.workflowId === 'h3-vsa') && placement === 'reference' ? media.kind === 'video' ? 'motion_video' : 'reference_image' : undefined;
         draft = applyOfficialVideoMediaHandoff(draft, shot.workflowId, {
           mode: 'video', path: media.filename, originalSourcePath: media.filename, imageUrl: '', name: media.name, source: 'video-project', createdAt: Date.now(),
           videoFrameRole: placement === 'last' ? 'last' : media.kind === 'video' ? 'source_video' : 'first',

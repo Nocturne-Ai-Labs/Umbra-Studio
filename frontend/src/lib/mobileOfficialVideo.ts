@@ -11,16 +11,16 @@ export function mobileOfficialVideoDraft(
   draft: OfficialVideoEditorDraft,
   requestedMode?: MobileVideoMode,
 ): OfficialVideoEditorDraft {
-  const h3 = workflowId === 'h3-26';
+  const h3 = workflowId === 'h3-26' || workflowId === 'h3-vsa';
   const image = draft.references.find(item => item.kind === 'image' && item.enabled !== false);
   const imageMode = requestedMode ? requestedMode === 'image'
-    : ['I2VA', 'I2V'].includes(draft.mode) || (!['T2VA', 'T2V'].includes(draft.mode) && !!image);
+    : ['I2VA', 'I2V', 'REF2VA'].includes(draft.mode) || (!['T2VA', 'T2V'].includes(draft.mode) && !!image);
   const values = { ...draft.values };
   // The pinned LTX graph needs its second pass to remove appended guide frames.
   if (!h3 && imageMode && !values['3676.value_1'] && !values['3676.value_2']) values['3676.value_1'] = true;
   return {
     ...draft,
-    mode: h3 ? imageMode ? 'I2VA' : 'T2VA' : imageMode ? 'I2V' : 'T2V',
+    mode: workflowId === 'h3-vsa' ? 'REF2VA' : h3 ? imageMode ? 'I2VA' : 'T2VA' : imageMode ? 'I2V' : 'T2V',
     references: imageMode && image ? [{
       id: image.id, kind: 'image', filename: image.filename, prompt: '', enabled: true,
       startSeconds: 0, durationSeconds: h3 ? 1 : 1 / draft.frameRate, guideStrength: 1,
@@ -34,7 +34,7 @@ export function mobileOfficialVideoDraft(
 }
 
 export function mobileOfficialVideoInputError(draft: OfficialVideoEditorDraft): string {
-  if (['I2VA', 'I2V'].includes(draft.mode)) {
+  if (['I2VA', 'I2V', 'REF2VA'].includes(draft.mode)) {
     return draft.references.some(item => item.kind === 'image' && item.enabled !== false) ? '' : 'Choose an image to animate.';
   }
   return draft.prompt.trim() ? '' : 'Describe the video you want to make.';

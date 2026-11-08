@@ -1068,7 +1068,7 @@ export function UmbraUIWorkspace({ renderComfyWorkspace }: { renderComfyWorkspac
   React.useEffect(() => {
     const prepareNativeVideo = (event: Event) => {
       const detail = (event as CustomEvent).detail;
-      if (detail?.background !== true || (detail.officialWorkflowId !== 'h3-26' && detail.officialWorkflowId !== 'ltx23-50')) return;
+      if (detail?.background !== true || (detail.officialWorkflowId !== 'h3-26' && detail.officialWorkflowId !== 'h3-vsa' && detail.officialWorkflowId !== 'ltx23-50')) return;
       setMountedModes(current => current.has('comfyui') ? current : new Set([...current, 'comfyui']));
     };
     window.addEventListener('umbra:comfyui-load-workflow', prepareNativeVideo);

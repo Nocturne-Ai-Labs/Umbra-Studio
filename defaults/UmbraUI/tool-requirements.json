@@ -2,6 +2,36 @@
   "schemaVersion": 1,
   "features": [
     {
+      "id": "official-dasiwa-h3-vsa",
+      "label": "H3 REF2VA Turbo + Sparse Attention (Experimental)",
+      "optional": true,
+      "optIn": true,
+      "workflowIds": [
+        "h3-vsa"
+      ],
+      "minimumComfyVersion": "0.38.0",
+      "modelProfiles": [
+        "h3-ref2va-vsa"
+      ],
+      "requiredBuiltinClasses": [
+        "MiniMaxH3ReferenceToVideo",
+        "MiniMaxH3SigmaShift",
+        "LoraLoaderModelOnly"
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Ref2VA-VSA",
+          "minimumCommit": "323a0a5f7c636cc70f95464145732f81f04a72e9",
+          "repository": "https://github.com/Kablex/ComfyUI-Ref2VA-VSA",
+          "license": "Apache-2.0",
+          "requiredClasses": [
+            "Ref2VAVSAGatePatch"
+          ]
+        }
+      ],
+      "notes": "Requires BOTH the LightX2V four-step REF2VA Turbo LoRA and FastH3 VSA gate weights (about 5.81 GB total), plus the optional VSA nodes and CUDA comfy-kitchen sol_attn. Existing H3 REF2VA checkpoint, encoder and VAEs are also required. Not a replacement for standard DaSiWa. Model licenses are separate from the Apache-2.0 node license. Install official DaSiWa H3 requirements separately. CUDA BF16 and a comfy-kitchen CUDA backend exposing sol_attn are mandatory; a Python installation alone does not establish GPU readiness. Other attention overrides and H3 caching must stay disabled for this experiment. Restart ComfyUI when ready after installation."
+    },
+    {
       "id": "moss-spectrum",
       "label": "MOSS Spectrum acceleration (experimental)",
       "optional": true,
@@ -44,7 +74,7 @@
       "customNodes": [
         {
           "name": "ComfyUI-H3-Motion-Context",
-          "minimumCommit": "5335715abe54c1a9bfbe3494da29aae3e8635ce3",
+          "minimumCommit": "518c083d11d80fa5920222ad89889924ee4401c9",
           "requiredClasses": [
             "MiniMaxH3MotionContext",
             "MiniMaxH3MotionContextTrim",
@@ -132,7 +162,7 @@
         },
         {
           "name": "H3_Longshot",
-          "minimumCommit": "644432cb01eecda7c35b4f1c488580a52d4e64ce",
+          "minimumCommit": "b0cf11c5a3e526eb7338dc6262bc731c27bcabbd",
           "requiredClasses": [
             "MiniMaxH3LongShot",
             "MiniMaxH3TimelineShot",
@@ -143,7 +173,7 @@
         },
         {
           "name": "Longshot_Studio",
-          "minimumCommit": "6b9dce6ed6d85e762efc14416f9936780488442a",
+          "minimumCommit": "fbec0b160895e7d6ce83c6741e2ef5a774c5fcc6",
           "requiredClasses": []
         }
       ],
@@ -155,7 +185,7 @@
           "reason": "When KJNodes is installed, Longshot's default Auto attention uses its SageAttention patch. Use Install / repair SageAttention in Setup > Tools before selecting Auto or a Sage mode, or choose Advanced > Sage attention > disabled for standard PyTorch attention. This package is optional when Sage attention is disabled."
         }
       ],
-      "notes": "Optional upstream application by r34vtraining. Setup downloads the original repositories on request; no upstream code is bundled or patched. Restart ComfyUI after installation. H3 model files and FFmpeg are also required; Turbo, RTX VSR and RefMods are upstream optional extensions."
+      "notes": "Optional upstream application by r34vtraining. Setup downloads the original repositories on request; no upstream code is bundled or patched. Restart ComfyUI after installation. H3 model files and FFmpeg are also required; Reviewed with Longshot Studio 0.17.32 and H3 Long Shot 1.8.1. Turbo, RTX VSR, RefMods, MelBand audio separation and Face Refine resources remain upstream optional extensions; use their installation controls in Longshot."
     },
     {
       "id": "iris-3b",
@@ -257,9 +287,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
+          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.16",
+          "version": "0.5.39",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -300,9 +330,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
+          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.16",
+          "version": "0.5.39",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -343,9 +373,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
+          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.16",
+          "version": "0.5.39",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -608,9 +638,9 @@
         },
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
+          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.16",
+          "version": "0.5.39",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -711,7 +741,8 @@
       "id": "official-dasiwa-h3-26",
       "label": "Official DaSiWa H3 MythicAlchemy C-MMH3-33",
       "workflowIds": [
-        "h3-26"
+        "h3-26",
+        "h3-vsa"
       ],
       "minimumComfyVersion": "0.38.0",
       "minimumFrontendVersion": "1.53.6",
@@ -737,9 +768,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "738ed2cd5932951633c84aaffbf196a4dfc0b547",
+          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.28",
+          "version": "0.5.39",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -869,9 +900,9 @@
         },
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c99e9c4dab652010a6e051e94dc51bd8b60ee20b",
+          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.16",
+          "version": "0.5.39",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [

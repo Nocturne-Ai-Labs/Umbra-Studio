@@ -12,6 +12,7 @@ export type OfficialApiGraph = Record<string, Node>;
 const SOURCE_COMMIT = '143bd6a47d844ddd7a68175db5c5ff3867f5febb';
 export const OFFICIAL_VIDEO_SOURCES = {
   'h3-26': { name: 'DaSiWa H3 MythicAlchemy C-MMH3-33', sourceCommit: '43bc259f14bdcc790d10234a53321b1c1011c29c', family: 'minimax_h3', sha256: 'cba462ef659ebb9c61d6a62f954164ece0b4b293220e5cdbad747b5ba79a1502', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-33.json' },
+  'h3-vsa': { name: 'H3 REF2VA Turbo + Sparse Attention (Experimental)', sourceCommit: '43bc259f14bdcc790d10234a53321b1c1011c29c', family: 'minimax_h3', sha256: 'a59c255e51385f7ee81efae08712113b9f1a9408374493ecae02aaa9e38f8623', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-33.json' },
   'ltx23-50': { name: 'DaSiWa LTX OmniForge C-LTX23-50', sourceCommit: SOURCE_COMMIT, family: 'ltx23', sha256: 'f4a9e0c3abfff2c4e94525b312c463981090da7e5cb8a41cd479bb9779ab6933', path: 'C-LTX23/DaSiWa LTX OmniForge C-LTX23-50.json' },
 } as const;
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -201,8 +202,19 @@ export function assertOfficialApiGraph(graph: OfficialApiGraph, workflowId: Offi
       if (!Array.isArray(actual) || actual.length !== 2 || actual[0] !== originId || actual[1] !== slot) throw new Error(`Official API connection ${id}.${input.name} differs from its native UI export. Export both files together again.`);
     }
   }
+  if (workflowId === 'h3-vsa') {
+    const gate = Object.values(graph).find(node => node.class_type === 'Ref2VAVSAGatePatch');
+    const turbo = gate && Array.isArray(gate.inputs.model) ? graph[String(gate.inputs.model[0])] : undefined;
+    if (!gate || gate.inputs.gate_file !== 'fasth3_vsa_gate.safetensors'
+      || turbo?.class_type !== 'LoraLoaderModelOnly'
+      || turbo.inputs.lora_name !== 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors'
+      || turbo.inputs.strength_model !== 1) throw new Error('Sparse Attention requires its gate weights and four-step Turbo LoRA at strength 1.');
+    if (Object.values(graph).some(node => ['ModelAttentionBackend', 'MiniMaxH3Cache'].includes(node.class_type))) throw new Error('Sparse Attention cannot run with attention overrides or H3 caching.');
+    const director = Object.values(graph).find(node => node.class_type === 'MiniMaxH3Director');
+    if (director?.inputs.mode !== 'REF2VA') throw new Error('The Sparse Attention experiment supports REF2VA only.');
+  }
   const route = dasiwaVideoGraphRoute(graph);
-  if (route !== (workflowId === 'h3-26' ? 'h3-director' : 'ltx23-omniforge')) throw new Error('The native API graph does not contain the connected official DaSiWa route. No adapted fallback is available.');
+  if (route !== ((workflowId === 'h3-26' || workflowId === 'h3-vsa') ? 'h3-director' : 'ltx23-omniforge')) throw new Error('The native API graph does not contain the connected official DaSiWa route. No adapted fallback is available.');
 }
 export function assertOfficialApiRuntime(graph: OfficialApiGraph, objectInfo: Record<string, any> | null): void {
   if (!objectInfo) throw new Error('Official workflow readiness is blocked: managed ComfyUI node and model catalogs are unavailable. Open the ComfyUI workspace and refresh readiness.');
@@ -325,7 +337,16 @@ export class OfficialVideoWorkflowService {
       if (!objectInfo) issues.push('Managed ComfyUI catalogs are unavailable. Open its workspace, then refresh readiness.');
       const runtimeTypes = nodeTypes.filter(type => !['Note', 'MarkdownNote', 'Reroute', 'Lable (DaSiWa)'].includes(type));
       if (objectInfo) for (const type of runtimeTypes) if (!objectInfo[type]) issues.push(`Missing installed node: ${type}. This workflow is held; no adapted fallback.`);
-      return { id, ...definition, sourceUrl: `https://github.com/darksidewalker/dasiwa-comfyui-workflows/blob/${definition.sourceCommit}/${encodeURI(definition.path)}`, sourceCommit: definition.sourceCommit, license: 'GPL-3.0', nodeTypes, requiredRuntimeNodes: runtimeTypes, readiness: { ready: issues.length === 0, issues }, qualification: 'GPU execution and quality are unverified.' };
+      if (id === 'h3-vsa' && objectInfo) {
+        for (const [type, field, file] of [
+          ['Ref2VAVSAGatePatch', 'gate_file', 'fasth3_vsa_gate.safetensors'],
+          ['LoraLoaderModelOnly', 'lora_name', 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors'],
+        ]) {
+          const choices = readComfyInputChoices(objectInfo[type]?.input?.required?.[field]);
+          if (!choices?.includes(file)) issues.push(`Required experimental weight missing: ${file}. Install H3 REF2VA Turbo + Sparse Attention in Setup.`);
+        }
+      }
+      return { id, ...definition, sourceUrl: `https://github.com/darksidewalker/dasiwa-comfyui-workflows/blob/${definition.sourceCommit}/${encodeURI(definition.path)}`, sourceCommit: definition.sourceCommit, license: 'GPL-3.0', nodeTypes, requiredRuntimeNodes: runtimeTypes, readiness: { ready: issues.length === 0, issues }, qualification: id === 'h3-vsa' ? 'Umbra adaptation of DaSiWa with Kablex Ref2VA-VSA (Apache-2.0). Requires Turbo LoRA, VSA gate and CUDA sol_attn; Short Director GPU render verified on RTX 4090; other hardware and extended modes remain unqualified.' : 'GPU execution and quality are unverified.' };
     }));
   }
   async importNativeExports(id: OfficialVideoWorkflowId, payload: any, objectInfo: Record<string, any> | null) {
@@ -363,7 +384,7 @@ export class OfficialVideoWorkflowService {
     const metadata = officialCaptureMetadata(document);
     if (!metadata) throw new Error('Official workflow provenance is invalid. Capture the pinned original again.');
     const graph = videoGraphNodes(document) as OfficialApiGraph;
-    const director = Object.values(graph).find(node => node.class_type === (metadata.workflowId === 'h3-26' ? 'MiniMaxH3Director' : 'LTXDirector'));
+    const director = Object.values(graph).find(node => node.class_type === ((metadata.workflowId === 'h3-26' || metadata.workflowId === 'h3-vsa') ? 'MiniMaxH3Director' : 'LTXDirector'));
     const mode = String(director?.inputs.mode || '');
     const videoMode: 'reference_to_video' | 'image_to_video' | 'text_to_video' = mode === 'REF2VA' ? 'reference_to_video' : ['I2VA', 'L2VA', 'FL2VA', 'I2V', 'FLF2V', 'L2V'].includes(mode) ? 'image_to_video' : 'text_to_video';
     let prompt = typeof director?.inputs.prompt === 'string' ? director.inputs.prompt : typeof director?.inputs.global_prompt === 'string' ? director.inputs.global_prompt : '';

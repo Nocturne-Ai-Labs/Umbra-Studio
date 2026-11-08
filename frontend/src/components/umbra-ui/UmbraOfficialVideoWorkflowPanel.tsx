@@ -64,7 +64,7 @@ interface UmbraOfficialVideoWorkflowPanelProps {
 const buttonClass = 'inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/15 px-3 text-[11px] font-bold text-[var(--umbra-text)] hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:cursor-not-allowed disabled:opacity-40';
 const labelClass = 'text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400';
 const MAX_NATIVE_EXPORT_BYTES = 16 * 1024 * 1024;
-const isWorkflowId = (value: unknown): value is OfficialWorkflowId => value === 'h3-26' || value === 'ltx23-50';
+const isWorkflowId = (value: unknown): value is OfficialWorkflowId => value === 'h3-26' || value === 'h3-vsa' || value === 'ltx23-50';
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error || 'Official workflow action failed.');
 const draftStorageKey = (item: OfficialWorkflow, phoneMode = false) => `umbra.official-video-draft.${item.id}.${item.sha256}${phoneMode ? '.phone' : ''}`;
 function restoredDraft(item: OfficialWorkflow, fallback: OfficialVideoEditorDraft, phoneMode = false): OfficialVideoEditorDraft {
@@ -241,7 +241,7 @@ export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = tr
       const payload = await response.json();
       if (!response.ok || payload?.success === false) throw new Error(String(payload?.error || 'Official workflows could not be checked.'));
       const nextItems: OfficialWorkflow[] = (Array.isArray(payload?.items) ? payload.items : [])
-        .filter((item: OfficialWorkflow) => isWorkflowId(item?.id))
+        .filter((item: OfficialWorkflow) => isWorkflowId(item?.id) && (!phoneMode || item.id !== 'h3-vsa'))
         .map((item: OfficialWorkflow) => ({ ...item, readiness: { ready: item.readiness?.ready === true, issues: Array.isArray(item.readiness?.issues) ? item.readiness.issues.map(String) : ['Workflow readiness could not be verified.'] } }));
       if (!mountedRef.current) return;
       setItems(nextItems);
@@ -251,7 +251,7 @@ export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = tr
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, []);
+  }, [phoneMode]);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -462,11 +462,11 @@ export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = tr
               }
               setSelectedId(item.id); setCaptured(null); setActionError(''); setStatus('');
             })()} className={cn('min-w-0 rounded border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-50', selectedId === item.id ? 'border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_8%,transparent)]' : 'border-white/10 bg-black/15 hover:bg-white/5')}>
-              <span data-i18n-skip="" className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-26' ? 'C-MMH3-33' : 'C-LTX23-50'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
+              <span data-i18n-skip="" className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-vsa' ? 'Requires Turbo LoRA + Sparse Attention / CUDA' : item.id === 'h3-26' ? 'C-MMH3-33' : 'C-LTX23-50'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
             </button>)}
           </div>
           {selected ? <section className="space-y-3 border-b border-white/10 pb-3" aria-label="Selected official workflow">
-            <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400"><span>{selected.license}</span><span title={selected.sourceCommit}>Revision {selected.sourceCommit.slice(0, 10)}</span><span title={selected.sha256}>SHA-256 {selected.sha256.slice(0, 12)}</span><a href={selected.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 text-[var(--umbra-accent)] hover:underline">Upstream source<ExternalLink size={12} /></a></div>
+            <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400"><span>{selected.license}</span>{selected.id === 'h3-vsa' ? <span>Umbra experimental adaptation / Kablex VSA: Apache-2.0 / CUDA sol_attn required</span> : null}<span title={selected.sourceCommit}>Revision {selected.sourceCommit.slice(0, 10)}</span><span title={selected.sha256}>SHA-256 {selected.sha256.slice(0, 12)}</span><a href={selected.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 text-[var(--umbra-accent)] hover:underline">Upstream source<ExternalLink size={12} /></a></div>
             {!selected.readiness.ready ? <div role="status" data-official-readiness-blocked="" className="space-y-1 text-xs text-amber-200"><h4 className={labelClass}>Setup required</h4>{selected.readiness.issues.map((issue, index) => <p key={`${index}:${issue}`} className="break-words">{issue}</p>)}</div> : null}
             {!comfyConnected ? <p className="text-xs text-zinc-400">ComfyUI is not connected. Open its workspace to use the managed controls.</p> : null}
           </section> : null}

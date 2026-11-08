@@ -85,6 +85,7 @@ export type OfficialVideoSettingsCategory = (typeof OFFICIAL_VIDEO_SETTINGS_CATE
 // not new graph routes. Advanced lanes stay in their native timeline fields.
 export const OFFICIAL_VIDEO_EDITOR_MODES = {
   'h3-26': ['T2VA', 'I2VA', 'FL2VA', 'L2VA', 'REF2VA'],
+  'h3-vsa': ['REF2VA'],
   'ltx23-50': ['T2V', 'I2V', 'FLF2V', 'V2V'],
 } as const;
 
@@ -119,6 +120,7 @@ const PINNED_SETTING_CATEGORIES: Record<number, Record<string, OfficialVideoSett
 function settingCategory(setting: Setting): OfficialVideoSettingsCategory {
   const pinned = PINNED_SETTING_CATEGORIES[setting.node.id]?.[setting.name];
   if (pinned) return pinned;
+  if (setting.node.type === 'Ref2VAVSAGatePatch') return 'performance';
   if (setting.node.type === 'CLIPTextEncode') return 'sampling';
   if (setting.node.type === 'DaSiWa_ResolutionScaleCalculator') return 'resolution';
   if (setting.node.type === 'DaSiWa_LTX2LoraLoader') return 'performance';
@@ -135,6 +137,7 @@ function settingCategory(setting: Setting): OfficialVideoSettingsCategory {
 export type OfficialVideoEditorWorkflow = Ui & { nodes: Ui[]; links: unknown[] };
 const MAX_SEED = BigInt('18446744073709551615');
 const TOP_FIELDS: Record<string, string[]> = {
+  Ref2VAVSAGatePatch: ['sparsity'],
   MiniMaxH3Director: ['ref_image_size'],
   LTXDirector: ['epsilon', 'display_mode', 'resize_method', 'img_compression'],
   CLIPTextEncode: ['text'],
@@ -162,8 +165,8 @@ function workflow(source: unknown, id: OfficialVideoWorkflowId): OfficialVideoEd
   const value = typeof source === 'string' ? JSON.parse(source.replace(/^\uFEFF/, '')) : source;
   if (!record(value) || !Array.isArray(value.nodes) || !Array.isArray(value.links)
     || !Array.isArray(value.definitions?.subgraphs)) fail('expected the pinned native UI JSON with subgraph definitions.');
-  const directorId = id === 'h3-26' ? 2730 : 3678;
-  const directorType = id === 'h3-26' ? 'MiniMaxH3Director' : 'LTXDirector';
+  const directorId = (id === 'h3-26' || id === 'h3-vsa') ? 2730 : 3678;
+  const directorType = (id === 'h3-26' || id === 'h3-vsa') ? 'MiniMaxH3Director' : 'LTXDirector';
   if (value.nodes.find((node: Ui) => node.id === directorId)?.type !== directorType) fail('the source does not match this pinned workflow.');
   const result = structuredClone(value) as OfficialVideoEditorWorkflow;
   // C-MMH3-32 predates the two appended 0.5.16 memory widgets. Match the
@@ -275,7 +278,7 @@ function settings(graph: Ui): Setting[] {
 export function getOfficialVideoEditorFields(source: unknown, id: OfficialVideoWorkflowId, objectInfo: unknown): OfficialVideoEditorField[] {
   const graph = workflow(source, id);
   if (!record(objectInfo)) return [];
-  return settings(graph).flatMap(setting => {
+  return settings(graph).filter(setting => id !== 'h3-vsa' || !['1512.enabled', '1512.enabled_1'].includes(setting.key)).flatMap(setting => {
     const descriptors = setting.targets.map(target => {
       const input = objectInfo[target.node.type]?.input;
       return input?.required?.[target.name] || input?.optional?.[target.name];
@@ -334,11 +337,11 @@ function ltxDimensions(graph: Ui): [number, number] {
  * fresh safe uint32 at configuration time; decimal strings select Fixed mode. */
 export function createOfficialVideoEditorDraft(id: OfficialVideoWorkflowId, source: unknown): OfficialVideoEditorDraft {
   const graph = workflow(source, id);
-  const director = nodeById(graph, id === 'h3-26' ? 2730 : 3678);
+  const director = nodeById(graph, (id === 'h3-26' || id === 'h3-vsa') ? 2730 : 3678);
   const state = jsonWidget(director, 'timeline_data');
-  const seed = jsonWidget(nodeById(graph, id === 'h3-26' ? 2739 : 3720, 'DaSiWa_SeedControl'), 'seed_control_state');
-  const isH3 = id === 'h3-26';
-  if (isH3 && !(OFFICIAL_VIDEO_EDITOR_MODES['h3-26'] as readonly string[]).includes(String(readWidget(director, 'mode')))) fail('Image Inpaint remains disabled; unsupported H3 mode.');
+  const seed = jsonWidget(nodeById(graph, (id === 'h3-26' || id === 'h3-vsa') ? 2739 : 3720, 'DaSiWa_SeedControl'), 'seed_control_state');
+  const isH3 = (id === 'h3-26' || id === 'h3-vsa');
+  if (isH3 && !(OFFICIAL_VIDEO_EDITOR_MODES[id] as readonly string[]).includes(String(readWidget(director, 'mode')))) fail('Image Inpaint remains disabled; unsupported H3 mode.');
   const fps = Number(readWidget(director, 'frame_rate'));
   const references = isH3 ? (state.items || []).map((item: Ui) => {
     return { id: item.id, kind: item.type, filename: item.value, prompt: item.prompt || '', enabled: item.enabled !== false,
@@ -547,14 +550,19 @@ export function configureOfficialVideoEditor(source: unknown, id: OfficialVideoW
     || (draft.resolution.followSourceAspect !== undefined && typeof draft.resolution.followSourceAspect !== 'boolean')
     || (draft.resolution.h3 !== undefined && !record(draft.resolution.h3)))) fail('invalid resolution configuration.');
   if (!(OFFICIAL_VIDEO_EDITOR_MODES[id] as readonly string[]).includes(draft.mode)) fail(`unsupported mode ${draft.mode}; Image Inpaint remains disabled.`);
-  const grid = id === 'h3-26' ? 32 : 64;
+  const grid = (id === 'h3-26' || id === 'h3-vsa') ? 32 : 64;
   for (const [label, value] of [['width', draft.width], ['height', draft.height]] as const) {
     finite(value, grid, 8192, label);
     if (!Number.isInteger(value) || value % grid) fail(`${label} must be a multiple of ${grid} pixels for this pinned workflow.`);
   }
-  finite(draft.durationSeconds, id === 'h3-26' ? 0.1 : 1 / draft.frameRate, 1000, 'durationSeconds');
-  finite(draft.frameRate, id === 'h3-26' ? 0.1 : 1, 240, 'frameRate');
+  finite(draft.durationSeconds, (id === 'h3-26' || id === 'h3-vsa') ? 0.1 : 1 / draft.frameRate, 1000, 'durationSeconds');
+  finite(draft.frameRate, (id === 'h3-26' || id === 'h3-vsa') ? 0.1 : 1, 240, 'frameRate');
   if (id === 'ltx23-50' && !Number.isInteger(draft.frameRate)) fail('LTX frameRate must be an integer.');
+  if (id === 'h3-vsa') {
+    if (draft.values['1512.enabled'] || draft.values['1512.enabled_1']) fail('Sparse Attention requires attention overrides and H3 cache disabled.');
+    if (hasOfficialH3Continuity(draft.h3) || draft.h3?.continuity.capture) fail('Use standard DaSiWa for continuation; Sparse Attention continuity is not qualified.');
+    if (draft.h3?.refMods.some(row => row.enabled && row.name && row.strength > 0)) fail('RefMods are not qualified for the Sparse Attention experiment.');
+  }
   validateReferences(draft);
   const graph = structuredClone(original);
   const available = new Map(settings(graph).map(setting => [setting.key, setting]));
@@ -572,15 +580,15 @@ export function configureOfficialVideoEditor(source: unknown, id: OfficialVideoW
       if (node.type === 'DaSiWa_EnhancedVideoCombine') writeWidget(node, 'save_last_frame', false);
     }
   }
-  if (id === 'h3-26') configureH3(graph, draft);
+  if ((id === 'h3-26' || id === 'h3-vsa')) configureH3(graph, draft);
   else configureLtx(graph, draft);
-  if (id === 'h3-26' && (hasOfficialH3Continuity(draft.h3) || draft.h3?.continuity.capture)) {
+  if ((id === 'h3-26' || id === 'h3-vsa') && (hasOfficialH3Continuity(draft.h3) || draft.h3?.continuity.capture)) {
     if (allNodes(graph).some(node => node.type === 'DaSiWa_EnhancedVideoCombine' && (readWidget(node, 'pingpong') || readWidget(node, 'crop_to_audio')))) {
       fail('continuity checkpoints require unchanged timing. Turn off Ping-pong and Crop to audio before generating.');
     }
   }
-  if (draft.loraStack !== undefined) writeWidget(nodeById(graph, id === 'h3-26' ? 2678 : 3589, 'DaSiWa_LTX2LoraLoader'), 'stack_data', serializeOfficialVideoLoraStack(draft.loraStack));
-  const seedNode = nodeById(graph, id === 'h3-26' ? 2739 : 3720, 'DaSiWa_SeedControl');
+  if (draft.loraStack !== undefined) writeWidget(nodeById(graph, (id === 'h3-26' || id === 'h3-vsa') ? 2678 : 3589, 'DaSiWa_LTX2LoraLoader'), 'stack_data', serializeOfficialVideoLoraStack(draft.loraStack));
+  const seedNode = nodeById(graph, (id === 'h3-26' || id === 'h3-vsa') ? 2739 : 3720, 'DaSiWa_SeedControl');
   const state = jsonWidget(seedNode, 'seed_control_state');
   // The native INT widget can coerce uint64 strings to lossy numbers. For the
   // editor's random mode, sample a safe exact uint32 and prevent the upstream

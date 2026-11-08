@@ -1,4 +1,4 @@
-export type OfficialVideoWorkflowId = 'h3-26' | 'ltx23-50';
+export type OfficialVideoWorkflowId = 'h3-26' | 'h3-vsa' | 'ltx23-50';
 export interface OfficialVideoBinding {
   nodeId: string;
   inputName: string;
@@ -9,7 +9,7 @@ export interface OfficialVideoWorkflowSelection {
   captureId: string;
   bindings: OfficialVideoBinding[];
 }
-export const isOfficialVideoWorkflowId = (value: unknown): value is OfficialVideoWorkflowId => value === 'h3-26' || value === 'ltx23-50';
+export const isOfficialVideoWorkflowId = (value: unknown): value is OfficialVideoWorkflowId => value === 'h3-26' || value === 'h3-vsa' || value === 'ltx23-50';
 export function normalizeOfficialVideoWorkflowSelection(value: unknown): OfficialVideoWorkflowSelection | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;

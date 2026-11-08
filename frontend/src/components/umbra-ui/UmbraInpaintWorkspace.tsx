@@ -287,6 +287,7 @@ import type {
 import {
   filterUmbraUiDetailerStages,
   resolveUmbraUiHiresResizeMode,
+  normalizeUmbraUiModelFamilyKey,
 } from '../../../../shared/umbra-ui/pipelineTypes';
 
 type CanvasTool = UmbraCanvasPointerTool;
@@ -3235,7 +3236,8 @@ export function UmbraInpaintWorkspace({
   const semanticCutoutAvailable = inpaintRuntimeCapabilities?.semanticCutout === true && maskedOutputAvailable;
   const colorMatchAvailable = inpaintRuntimeCapabilities?.colorMatch === true && inpaintAdapter !== 'native_edit';
   const differentialDiffusionAvailable = inpaintRuntimeCapabilities?.differentialDiffusion === true && inpaintAdapter !== 'native_edit';
-  const softInpaintCompositeAvailable = inpaintRuntimeCapabilities?.softInpaintComposite === true && inpaintAdapter !== 'native_edit';
+  const softInpaintProviderSupported = inpaintAdapter !== 'native_edit' || normalizeUmbraUiModelFamilyKey(modelFamily) === 'mossimage';
+  const softInpaintCompositeAvailable = inpaintRuntimeCapabilities?.softInpaintComposite === true && softInpaintProviderSupported;
   const maskExpansionAvailable = inpaintRuntimeCapabilities?.maskExpand === true;
   const effectiveSeamlessAvailable = seamlessAvailable && inpaintRuntimeCapabilities?.seamless === true;
   const modelCompatibilityIssue = getUmbraUiInpaintPrimaryModelIssue(inpaintAdapter, checkpointName);
@@ -10405,7 +10407,13 @@ export function UmbraInpaintWorkspace({
             </label>
             {!softInpaintCompositeAvailable ? (
               <p className="border-l-2 border-amber-400/50 pl-2 text-[10px] leading-4 text-amber-200/70">
-                Restart ComfyUI after updating Umbra Nodes to enable adaptive soft inpaint.
+                {!softInpaintProviderSupported
+                  ? 'Soft inpaint is not supported by this editing pipeline.'
+                  : !comfyConnected
+                    ? 'Connect ComfyUI to check soft-inpaint support.'
+                    : !inpaintRuntimeCapabilities
+                      ? 'Soft-inpaint support has not been verified yet. Reconnect ComfyUI to retry.'
+                      : 'ComfyUI is missing the soft-inpaint node. Update Umbra Nodes, then restart ComfyUI.'}
               </p>
             ) : (
               <p className="text-[10px] leading-4 text-zinc-500">

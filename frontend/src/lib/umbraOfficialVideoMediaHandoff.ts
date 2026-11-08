@@ -24,7 +24,7 @@ export async function readOfficialVideoReferenceDimensions(
 }
 
 export function officialVideoHandoffWorkflow(current: OfficialVideoWorkflowId, handoff: UmbraUiMediaHandoff): OfficialVideoWorkflowId {
-  if (handoff.h3DirectorRole) return 'h3-26';
+  if (handoff.h3DirectorRole) return current === 'h3-vsa' ? current : 'h3-26';
   return handoff.videoFrameRole === 'middle' || handoff.videoFrameRole === 'source_video' ? 'ltx23-50' : current;
 }
 
@@ -38,10 +38,10 @@ export function applyOfficialVideoMediaHandoff(
   if (!filename || /[\x00-\x1f:]|^[\\/]|(^|[\\/])\.\.?([\\/]|$)/.test(filename)) {
     throw new Error('The transferred media did not return a valid ComfyUI input filename.');
   }
-  const h3 = workflowId === 'h3-26';
+  const h3 = (workflowId === 'h3-26' || workflowId === 'h3-vsa');
   const role = handoff.h3DirectorRole || handoff.videoFrameRole || 'first';
   const video = role === 'motion_video' || role === 'source_video';
-  const addingReference = h3 && (role === 'reference_image' || video);
+  const addingReference = h3 && (workflowId === 'h3-vsa' || role === 'reference_image' || video);
   const frame = 1 / current.frameRate;
   const lastStart = Math.max(0, current.durationSeconds - frame);
   const prompt = handoff.generation?.positivePrompt

@@ -1873,6 +1873,7 @@ const COMFY_NODES = [
     { name: 'ComfyUI-Manager', repo: 'https://github.com/ltdrdata/ComfyUI-Manager.git', required: true },
     { name: 'ComfyUI-GGUF', repo: 'https://github.com/city96/ComfyUI-GGUF.git', required: true },
     { name: 'ComfyUI-Iris', repo: 'https://github.com/envy-ai/ComfyUI-Iris.git', defaultEnabled: false },
+    { name: 'ComfyUI-Ref2VA-VSA', repo: 'https://github.com/Kablex/ComfyUI-Ref2VA-VSA.git', defaultEnabled: false },
     { name: 'ComfyUI-Spectrum-MOSS', repo: 'https://github.com/Rkkss/ComfyUI-Spectrum-MOSS.git', defaultEnabled: false },
     { name: 'ComfyUI-MOSSImageTextEncoder', repo: 'https://github.com/ThetaCursed/ComfyUI-MOSSImageTextEncoder.git', defaultEnabled: false },
     { name: 'Longshot_Studio', repo: 'https://github.com/r34vtraining/Longshot_Studio.git', defaultEnabled: false },
