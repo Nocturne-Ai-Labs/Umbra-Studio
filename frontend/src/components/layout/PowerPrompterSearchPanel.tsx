@@ -92,6 +92,8 @@ interface PowerPrompterSearchPanelProps {
 
 type CatalogView = 'catalog' | 'favorites' | 'sources';
 
+const CATALOG_REQUEST_TIMEOUT_MS = 15_000;
+
 const CATEGORY_LABELS: Record<number, string> = {
   0: 'General',
   1: 'Artist',
@@ -170,6 +172,7 @@ export const PowerPrompterSearchPanel = React.memo(({
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   const [suggestionError, setSuggestionError] = useState('');
   const [relationCorpusStatus, setRelationCorpusStatus] = useState<RelationCorpusStatus | null>(null);
+  const [relationCorpusUnavailable, setRelationCorpusUnavailable] = useState(false);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [classifiers, setClassifiers] = useState<ClassifierSummary[]>([]);
   const [csvList, setCsvList] = useState<{ tags: string[]; characters: string[] }>({ tags: [], characters: [] });
@@ -196,6 +199,9 @@ export const PowerPrompterSearchPanel = React.memo(({
   const explicitCatalogEnabled = useStore((state) => state.appSettings['ui.tagCatalogExplicitEnabled'] === true);
   const setAppSetting = useStore((state) => state.setAppSetting);
   const effectiveDrawerOpen = drawerOpen ?? internalDrawerOpen;
+  const catalogActive = activeView === 'catalog' && (!drawerMode || effectiveDrawerOpen);
+  const csvSources = enabledCSVs.join(',');
+  const searchQuery = query.trim();
   const setDrawerOpen = useCallback((open: boolean) => {
     if (drawerOpen === undefined) setInternalDrawerOpen(open);
     onDrawerOpenChange?.(open);
@@ -268,28 +274,37 @@ export const PowerPrompterSearchPanel = React.memo(({
   }, [explicitCatalogEnabled]);
 
   useEffect(() => {
-    if (drawerMode && !effectiveDrawerOpen) return undefined;
-    let cancelled = false;
+    if (!catalogActive) return undefined;
+    const controller = new AbortController();
+    let timer: number;
     const loadStatus = async () => {
       try {
-        const response = await fetch('/api/booru/corpus/status', { cache: 'no-store' });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(String(payload?.error || 'Could not load relation corpus status.'));
-        if (!cancelled) setRelationCorpusStatus(payload.status || null);
+        const response = await fetch('/api/booru/corpus/status', {
+          cache: 'no-store',
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(CATALOG_REQUEST_TIMEOUT_MS)]),
+        });
+        if (!response.ok) throw new Error('Could not load relation corpus status.');
+        const { status } = await response.json();
+        if (controller.signal.aborted) return;
+        setRelationCorpusStatus(status || null);
+        setRelationCorpusUnavailable(!status);
+        timer = window.setTimeout(() => void loadStatus(), status?.state === 'running' ? 3_000 : 15_000);
       } catch {
-        if (!cancelled) setRelationCorpusStatus(null);
+        if (controller.signal.aborted) return;
+        setRelationCorpusStatus(null);
+        setRelationCorpusUnavailable(true);
+        timer = window.setTimeout(() => void loadStatus(), 15_000);
       }
     };
     void loadStatus();
-    const timer = window.setInterval(() => void loadStatus(), relationCorpusStatus?.state === 'running' ? 3_000 : 15_000);
     return () => {
-      cancelled = true;
-      window.clearInterval(timer);
+      controller.abort();
+      window.clearTimeout(timer);
     };
-  }, [drawerMode, effectiveDrawerOpen, relationCorpusStatus?.state]);
+  }, [catalogActive]);
 
   useEffect(() => {
-    if (activeView !== 'catalog' || suggestionSeeds.length === 0 || !relationCorpusReady) {
+    if (!catalogActive || suggestionSeeds.length === 0 || !relationCorpusReady) {
       setSuggestionResult(null);
       setSuggestionError('');
       setSuggestionLoading(false);
@@ -310,8 +325,11 @@ export const PowerPrompterSearchPanel = React.memo(({
           minimumSupport: '20',
           sampleLimit: '50000',
         });
-        const response = await fetch(`/api/booru/corpus/related?${params}`, { cache: 'no-store', signal: controller.signal });
-        const payload = await response.json().catch(() => ({}));
+        const response = await fetch(`/api/booru/corpus/related?${params}`, {
+          cache: 'no-store',
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(CATALOG_REQUEST_TIMEOUT_MS)]),
+        });
+        const payload = await response.json();
         if (!response.ok) throw new Error(String(payload?.error || 'Could not calculate related tags.'));
         if (controller.signal.aborted) return;
         setSuggestionResult(payload as RelatedResult);
@@ -327,23 +345,29 @@ export const PowerPrompterSearchPanel = React.memo(({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeView, explicitCatalogEnabled, relationCorpusReady, suggestionClassifier, suggestionSeeds]);
+  }, [catalogActive, explicitCatalogEnabled, relationCorpusReady, suggestionClassifier, suggestionSeeds]);
 
   useEffect(() => {
-    if (activeView !== 'catalog' || enabledCSVs.length === 0) {
-      setClassifiers([]);
-      setClassifier('all');
+    if (!catalogActive || !csvSources) {
+      setClassifiersLoading(false);
+      if (activeView !== 'catalog' || !csvSources) {
+        setClassifiers([]);
+        setClassifier('all');
+      }
       return undefined;
     }
     const controller = new AbortController();
     const params = new URLSearchParams({
-      csvs: enabledCSVs.join(','),
+      csvs: csvSources,
       includeExplicit: explicitCatalogEnabled ? '1' : '0',
     });
     setClassifiersLoading(true);
-    void fetch(`/api/powerprompter/classifiers?${params}`, { cache: 'no-store', signal: controller.signal })
+    void fetch(`/api/powerprompter/classifiers?${params}`, {
+      cache: 'no-store',
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(CATALOG_REQUEST_TIMEOUT_MS)]),
+    })
       .then(async (response) => {
-        const payload = await response.json().catch(() => ({}));
+        const payload = await response.json();
         if (!response.ok) throw new Error(String(payload?.error || 'Could not load tag classifiers.'));
         if (controller.signal.aborted) return;
         const values = Array.isArray(payload?.values) ? payload.values : [];
@@ -359,33 +383,31 @@ export const PowerPrompterSearchPanel = React.memo(({
         if (!controller.signal.aborted) setClassifiersLoading(false);
       });
     return () => controller.abort();
-  }, [activeView, enabledCSVs, explicitCatalogEnabled, refreshRevision, showToast]);
+  }, [activeView, catalogActive, csvSources, explicitCatalogEnabled, refreshRevision, showToast]);
 
   const loadResults = useCallback(async (nextPage: number, append: boolean, signal: AbortSignal, revision: number) => {
     const isCurrentRequest = () => !signal.aborted && revision === catalogRequestRevisionRef.current;
     if (!isCurrentRequest()) return;
-    if (activeView !== 'catalog' || enabledCSVs.length === 0 || query.trim().length === 1) {
-      setResults([]);
-      setHasMore(false);
-      setLoading(false);
-      return;
-    }
+    const timeout = AbortSignal.timeout(CATALOG_REQUEST_TIMEOUT_MS);
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({
-        q: query.trim(),
+        q: searchQuery,
         page: String(nextPage),
         limit: '120',
-        csvs: enabledCSVs.join(','),
+        csvs: csvSources,
         browse: '1',
         sort: sortOrder,
         includeExplicit: explicitCatalogEnabled ? '1' : '0',
       });
       if (category !== 'all') params.set('category', category);
       if (classifier !== 'all') params.set('classifier', classifier);
-      const response = await fetch(`/api/powerprompter/search?${params}`, { cache: 'no-store', signal });
-      const payload = await response.json().catch(() => ({}));
+      const response = await fetch(`/api/powerprompter/search?${params}`, {
+        cache: 'no-store',
+        signal: AbortSignal.any([signal, timeout]),
+      });
+      const payload = await response.json();
       if (!response.ok) throw new Error(String(payload?.error || 'Could not search the tag catalog.'));
       if (!isCurrentRequest()) return;
       const values = Array.isArray(payload?.results) ? payload.results : [];
@@ -396,11 +418,13 @@ export const PowerPrompterSearchPanel = React.memo(({
     } catch (nextError) {
       if (!isCurrentRequest()) return;
       if (!append) setResults([]);
-      setError(nextError instanceof Error ? nextError.message : 'Could not search the tag catalog.');
+      setError(timeout.aborted
+        ? 'The tag catalog took too long to respond.'
+        : nextError instanceof Error ? nextError.message : 'Could not search the tag catalog.');
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [activeView, category, classifier, enabledCSVs, explicitCatalogEnabled, query, sortOrder]);
+  }, [category, classifier, csvSources, explicitCatalogEnabled, searchQuery, sortOrder]);
 
   useEffect(() => {
     const revision = ++catalogRequestRevisionRef.current;
@@ -412,18 +436,19 @@ export const PowerPrompterSearchPanel = React.memo(({
     setHasMore(false);
     setLoading(false);
     setError('');
-    if (activeView !== 'catalog' || enabledCSVs.length === 0 || query.trim().length === 1) return undefined;
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    if (!catalogActive || !csvSources || searchQuery.length === 1) return undefined;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void loadResults(0, false, controller.signal, revision);
-    }, query.trim() ? 180 : 0);
+    }, searchQuery ? 180 : 0);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
       paginationAbortRef.current?.abort();
       paginationAbortRef.current = null;
     };
-  }, [activeView, enabledCSVs, loadResults, query, refreshRevision]);
+  }, [catalogActive, csvSources, loadResults, searchQuery, refreshRevision]);
 
   const classifierLabels = useMemo(
     () => new Map(classifiers.map((entry) => [entry.id, entry.label])),
@@ -502,7 +527,7 @@ export const PowerPrompterSearchPanel = React.memo(({
   }, [drawerMode, setActiveWorkspace, setDrawerOpen]);
 
   const handleScroll = () => {
-    if (!scrollRef.current || loading || !hasMore || paginationAbortRef.current) return;
+    if (!catalogActive || !scrollRef.current || loading || error || !hasMore || paginationAbortRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     if (scrollHeight - scrollTop <= clientHeight + 120) {
       const controller = new AbortController();
@@ -793,7 +818,7 @@ export const PowerPrompterSearchPanel = React.memo(({
                 </div>
                 <div className="custom-scrollbar h-9 shrink-0 flex items-center gap-1.5 overflow-x-auto px-2 py-1.5">
                   {!relationCorpusStatus ? (
-                    <span className="shrink-0 text-[9px] text-zinc-600">Checking corpus...</span>
+                    <span className="shrink-0 text-[9px] text-zinc-600">{relationCorpusUnavailable ? 'Suggestions temporarily unavailable.' : 'Checking corpus...'}</span>
                   ) : relationCorpusStatus.indexedPosts === 0 ? (
                     <button type="button" onClick={openCorpusBuilder} className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-cyan-300/25 bg-cyan-500/10 px-2 text-[8px] font-black uppercase tracking-[0.08em] text-cyan-100"><DatabaseZap className="h-3 w-3" /> Build Corpus</button>
                   ) : suggestionError ? (
@@ -840,7 +865,10 @@ export const PowerPrompterSearchPanel = React.memo(({
             ) : query.trim().length === 1 ? (
               <div className="flex min-h-28 items-center justify-center rounded-md border border-dashed border-white/10 text-[10px] text-zinc-600">Type one more character to search.</div>
             ) : error ? (
-              <div className="flex min-h-28 items-center justify-center rounded-md border border-red-300/15 bg-red-500/[0.04] px-4 text-center text-[10px] text-red-200/80">{error}</div>
+              <div className="flex min-h-28 flex-col items-center justify-center gap-2 rounded-md border border-red-300/15 bg-red-500/[0.04] px-4 text-center text-[10px] text-red-200/80">
+                <span role="status">{error}</span>
+                <button type="button" onClick={() => setRefreshRevision((value) => value + 1)} className="min-h-9 rounded-sm border border-white/15 px-3 text-zinc-200 hover:border-cyan-300/35">Retry search</button>
+              </div>
             ) : loading && results.length === 0 ? (
               <div className="flex min-h-28 items-center justify-center text-zinc-600"><Loader2 className="h-5 w-5 animate-spin" /></div>
             ) : results.length === 0 ? (
