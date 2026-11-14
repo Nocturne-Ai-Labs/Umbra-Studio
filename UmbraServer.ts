@@ -854,6 +854,9 @@ type DanbooruDatasetGeneratorJob = {
   error: string;
   animaArtistTokens: boolean;
   tagCategory: string;
+  ratePercent: number;
+  progress: Record<string, any> | null;
+  progressBuffer: string;
   process: ReturnType<typeof Bun.spawn> | null;
 };
 
@@ -946,11 +949,15 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
   }
 
   if (body.removeUnderscores === true) args.push('--remove-underscores');
+  const ratePercent = Math.max(10, Math.min(100, Number(body.ratePercent) || 100));
+  args.push('--rate-percent', String(Math.round(ratePercent)));
+  if (body.resumeExisting === true && mode === 'combined') args.push('--resume-existing');
   args.push('--output-language', outputLanguage);
   args.push('--out-file', outFile);
 
   return {
     mode,
+    ratePercent,
     outFile,
     outputDir,
     args,
@@ -1049,7 +1056,16 @@ async function runDanbooruDatasetGeneratorJob(job: DanbooruDatasetGeneratorJob) 
     try {
       [exitCode] = await Promise.all([
         proc.exited,
-        readGeneratorStream(proc.stdout, (chunk) => { job.stdout = appendDatasetGeneratorLog(job.stdout, chunk); }),
+        readGeneratorStream(proc.stdout, (chunk) => {
+          job.stdout = appendDatasetGeneratorLog(job.stdout, chunk);
+          job.progressBuffer += chunk;
+          const lines = job.progressBuffer.split('\n');
+          job.progressBuffer = (lines.pop() || '').slice(-DATASET_GENERATOR_LOG_LIMIT);
+          for (const line of lines) {
+            if (!line.startsWith('UMBRA_CSV_PROGRESS ')) continue;
+            try { job.progress = JSON.parse(line.slice('UMBRA_CSV_PROGRESS '.length)); } catch { /* incomplete progress is not a job failure */ }
+          }
+        }),
         readGeneratorStream(proc.stderr, (chunk) => { job.stderr = appendDatasetGeneratorLog(job.stderr, chunk); }),
       ]);
     } finally {
@@ -1108,6 +1124,8 @@ function serializeDanbooruDatasetGeneratorJob(job: DanbooruDatasetGeneratorJob) 
     stderr: job.stderr,
     preview: job.preview,
     args: job.args,
+    ratePercent: job.ratePercent,
+    progress: job.progress,
   };
 }
 
@@ -1130,7 +1148,7 @@ async function handleBooruDatasetGeneratorRun(req: Request): Promise<Response> {
     try {
       await fs.mkdir(command.outputDir, { recursive: true });
       await fs.mkdir(dirname(controlPath), { recursive: true });
-      await fs.writeFile(controlPath, JSON.stringify({ paused: false, stopRequested: false }), { encoding: 'utf8', flag: 'wx' });
+      await fs.writeFile(controlPath, JSON.stringify({ paused: false, stopRequested: false, ratePercent: command.ratePercent }), { encoding: 'utf8', flag: 'wx' });
       const job: DanbooruDatasetGeneratorJob = {
         id,
         mode: command.mode,
@@ -1151,6 +1169,9 @@ async function handleBooruDatasetGeneratorRun(req: Request): Promise<Response> {
         error: '',
         animaArtistTokens: command.animaArtistTokens,
         tagCategory: command.tagCategory,
+        ratePercent: command.ratePercent,
+        progress: null,
+        progressBuffer: '',
         process: null,
       };
       danbooruDatasetGeneratorJobs.set(id, job);
@@ -1184,11 +1205,15 @@ async function handleBooruDatasetGeneratorControl(req: Request): Promise<Respons
     const job = danbooruDatasetGeneratorJobs.get(id);
     if (!job) return json({ error: 'Generator job not found' }, 404);
     if (!job.running) return json(serializeDanbooruDatasetGeneratorJob(job));
-    if (!['pause', 'resume', 'stop'].includes(action)) {
-      return json({ error: 'Action must be pause, resume, or stop.' }, 400);
+    if (!['pause', 'resume', 'stop', 'speed'].includes(action)) {
+      return json({ error: 'Action must be pause, resume, stop, or speed.' }, 400);
     }
 
-    if (action === 'pause') {
+    if (action === 'speed') {
+      const rate = Number(body.ratePercent);
+      if (!Number.isFinite(rate) || rate < 10 || rate > 100) return json({ error: 'Speed must be between 10 and 100 percent.' }, 400);
+      job.ratePercent = Math.round(rate);
+    } else if (action === 'pause') {
       job.paused = true;
       job.status = 'paused';
     } else if (action === 'resume') {
@@ -1203,6 +1228,7 @@ async function handleBooruDatasetGeneratorControl(req: Request): Promise<Respons
     await fs.writeFile(job.controlPath, JSON.stringify({
       paused: job.paused,
       stopRequested: job.stopRequested,
+      ratePercent: job.ratePercent,
     }), 'utf8');
 
     if (action === 'stop') {

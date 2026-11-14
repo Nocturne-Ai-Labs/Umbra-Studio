@@ -32,10 +32,15 @@ type GeneratorResult = {
   stdout: string;
   stderr: string;
   preview: string;
+  ratePercent?: number;
+  progress?: { stage: string; completed: number; total: number | null; catalogRows: number; current: string; retryUntil: number };
 };
 
 export function DanbooruDatasetGeneratorTab() {
   const [mode, setMode] = useState<GeneratorMode>('combined');
+  const [ratePercent, setRatePercent] = useState(100);
+  const [resumeExisting, setResumeExisting] = useState(false);
+  const [clock, setClock] = useState(Date.now());
   const [preferCorpus, setPreferCorpus] = useState(true);
   const [characterSource, setCharacterSource] = useState<CharacterSource>('danbooru');
   const [tag, setTag] = useState('');
@@ -70,6 +75,8 @@ export function DanbooruDatasetGeneratorTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode,
+          ratePercent,
+          resumeExisting,
           preferCorpus,
           characterSource,
           tag,
@@ -100,7 +107,7 @@ export function DanbooruDatasetGeneratorTab() {
     }
   };
 
-  const controlGenerator = async (action: 'pause' | 'resume' | 'stop') => {
+  const controlGenerator = async (action: 'pause' | 'resume' | 'stop' | 'speed') => {
     if (!result?.id || controlling) return;
     setControlling(true);
     setError('');
@@ -108,7 +115,7 @@ export function DanbooruDatasetGeneratorTab() {
       const response = await fetch('/api/booru/dataset-generator/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: result.id, action }),
+        body: JSON.stringify({ id: result.id, action, ratePercent }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || `Failed to ${action} generator`);
@@ -170,6 +177,14 @@ export function DanbooruDatasetGeneratorTab() {
     }
   };
 
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+  const progress = result?.progress;
+  const percent = progress?.total ? Math.min(100, 100 * progress.completed / progress.total) : null;
+  const retrySeconds = Math.max(0, Math.ceil(((progress?.retryUntil || 0) - clock) / 1000));
   const previewRows = parseCsvPreview(result?.preview || '');
   const previewHeaders = previewRows[0] || [];
   const previewBody = previewRows.slice(1);
@@ -241,6 +256,10 @@ export function DanbooruDatasetGeneratorTab() {
             </>
           )}
 
+          {mode === 'combined' ? <Checkbox label="Resume saved CSV" checked={resumeExisting} onChange={setResumeExisting} /> : null}
+          {mode === 'combined' && resumeExisting ? <p className="text-xs text-zinc-400">Use after the full tag list has been collected. Keep the same filename and collection settings; completed character rows are retained.</p> : null}
+          <NumberInput label="Request speed (%)" value={ratePercent} onChange={setRatePercent} min={10} max={100} help="100% allows up to 3 requests/second. Rate-limit waits can slow it further." />
+          {running ? <button disabled={controlling} onClick={() => void controlGenerator('speed')} className="settings-input w-full !py-2 text-xs">Apply speed · currently {result?.ratePercent ?? 100}%</button> : null}
           <NumberInput label="Concurrency" value={concurrency} onChange={setConcurrency} min={1} max={5} help="Capped at 5 to reduce Danbooru rate-limit errors." />
           <Checkbox label="Output tags with spaces instead of underscores" checked={removeUnderscores} onChange={setRemoveUnderscores} />
           <div>
@@ -330,12 +349,22 @@ export function DanbooruDatasetGeneratorTab() {
                   </button>
                 ) : null}
               </div>
-              {result.running ? <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10"><div className={`h-full w-1/3 rounded-full ${result.paused ? 'bg-amber-300' : 'animate-pulse bg-emerald-300'}`} /></div> : null}
+              {progress ? <div className="mt-4 space-y-2">
+                <div className="flex flex-wrap justify-between gap-2 text-sm text-zinc-200">
+                  <span>{progress.stage === 'collecting' ? `Collecting ${progress.current || 'tags'}` : progress.stage === 'completed' ? 'Collection complete' : 'Collecting character attributes'}</span>
+                  <span>{percent === null ? `${progress.catalogRows.toLocaleString()} entries found` : `${progress.completed.toLocaleString()} / ${progress.total?.toLocaleString()} · ${percent.toFixed(1)}%`}</span>
+                </div>
+                <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-2 overflow-hidden rounded-full bg-white/10">
+                  <div className={`h-full rounded-full ${result.paused ? 'bg-amber-300' : 'bg-emerald-300'} ${percent === null && running ? 'animate-pulse' : ''}`} style={{ width: percent === null ? '25%' : `${percent}%` }} />
+                </div>
+                <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} catalog entries · Request speed {result.ratePercent ?? 100}%</div>
+                {result.running && !result.paused && retrySeconds > 0 ? <div role="status" className="text-xs text-amber-200">Danbooru rate limit / server retry · waiting {retrySeconds}s. Completed rows are saved.</div> : null}
+              </div> : result.running ? <div role="status" className="mt-3 text-xs text-zinc-400">Preparing collection…</div> : null}
             </section>
             <section className="rounded-md border border-white/10 bg-black/25 p-4">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">Preview</h3>
-                <span className="text-[10px] uppercase tracking-wide text-zinc-600">{previewBody.length} rows</span>
+                <span className="text-[10px] uppercase tracking-wide text-zinc-600">{previewBody.length} preview rows</span>
               </div>
               {previewHeaders.length > 0 ? (
                 <div className="custom-scrollbar max-h-96 overflow-auto rounded-md border border-white/10">
@@ -368,7 +397,7 @@ export function DanbooruDatasetGeneratorTab() {
             </section>
             <section className="rounded-md border border-white/10 bg-black/25 p-4">
               <h3 className="mb-2 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">Log</h3>
-              <pre className="custom-scrollbar max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5 text-zinc-400">{[result.stdout, result.stderr].filter(Boolean).join('\n')}</pre>
+              <pre className="custom-scrollbar max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5 text-zinc-400">{[result.stdout.split('\n').filter(line => !line.startsWith('UMBRA_CSV_PROGRESS ')).join('\n'), result.stderr].filter(Boolean).join('\n')}</pre>
             </section>
           </div>
         )}

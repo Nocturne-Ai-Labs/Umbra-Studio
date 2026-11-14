@@ -11,6 +11,7 @@ import {
   normalizeOutputLanguage,
 } from './lib/danbooru-localization.mjs';
 import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
+import { parseCombinedCheckpoint, requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,24 @@ const MAX_FETCH_ATTEMPTS = 10;
 const GENERATOR_STOP_EXIT_CODE = 75;
 let runtimeControlFile = '';
 let pauseWasAnnounced = false;
+let requestRatePercent = 100;
+let nextRequestAt = 0;
+let requestGate = Promise.resolve();
+let progress = { stage: 'collecting', completed: 0, total: null, catalogRows: 0, current: '', retryUntil: 0, ratePercent: 100 };
+function reportProgress(update = {}) {
+  progress = { ...progress, ...update, ratePercent: requestRatePercent };
+  console.log(`UMBRA_CSV_PROGRESS ${JSON.stringify(progress)}`);
+}
+async function waitForRequestSlot() {
+  const turn = requestGate.then(async () => {
+    await waitForGeneratorControl();
+    await controlledSleep(Math.max(0, nextRequestAt - Date.now()));
+    nextRequestAt = Date.now() + requestIntervalMs(requestRatePercent);
+  });
+  requestGate = turn.catch(() => {});
+  await turn;
+}
+
 const TAG_CATEGORIES = {
   general: 0,
   artist: 1,
@@ -254,6 +273,8 @@ function parseArgs(argv) {
     tagCategory: 0,
     mode: 'character-attributes',
     corpusPath: '',
+    ratePercent: 100,
+    resumeExisting: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -262,6 +283,11 @@ function parseArgs(argv) {
 
     if (arg === '--corpus-path' && next) {
       options.corpusPath = path.resolve(next);
+      i += 1;
+    } else if (arg === '--resume-existing') {
+      options.resumeExisting = true;
+    } else if (arg === '--rate-percent' && next) {
+      options.ratePercent = Math.max(10, Math.min(100, parsePositiveInt(next, 'rate-percent')));
       i += 1;
     } else if (arg === '--help' || arg === '-h') {
       options.help = true;
@@ -512,6 +538,8 @@ Options:
   --min-tag-posts <num>        Minimum post count. Defaults: general 150, artist 100, other categories 10
   --min-frequency <0..1>       How common a tag must be to keep it. Default: 0.12
   --post-filter <tags>         Extra Danbooru filters, comma-separated. Use underscores inside tags. Default: "solo"
+  --rate-percent <number>      Request speed 10-100%; 100% caps requests at 3/second.
+  --resume-existing           Resume a combined CSV after its tag list is fully collected. Keep the same collection settings.
   --concurrency <number>       Parallel Danbooru post requests. Default: 4
   --page-concurrency <number>  Parallel series-discovery page requests. Default: 2
   --delay-ms <number>          Delay after each request inside each worker. Default: 0
@@ -717,6 +745,7 @@ async function fetchCharacterTagsFromDanbooru(limit, options) {
 
   console.log(`Loading ${formatLimit(limit)} character tags from Danbooru...`);
   while (tags.length < limit) {
+    reportProgress({ stage: 'collecting', current: categoryName, total: null });
     await waitForGeneratorControl();
     const remaining = Number.isFinite(limit) ? limit - tags.length : DANBOORU_MAX_TAG_LIMIT;
     const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
@@ -763,6 +792,7 @@ async function fetchTagRowsForCategory(options, categoryId, onProgress) {
     console.log(`  minimum post count: ${minPostCount.toLocaleString()}`);
   }
   while (rows.length < options.limit) {
+    reportProgress({ stage: 'collecting', current: categoryName, total: null });
     await waitForGeneratorControl();
     const remaining = Number.isFinite(options.limit) ? options.limit - rows.length : DANBOORU_MAX_TAG_LIMIT;
     const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
@@ -828,6 +858,7 @@ async function fetchTagRowsFromDanbooru(options) {
       ? { ...options, minTagPosts: options.minCharacterPosts }
       : options;
     const categoryRows = await fetchTagRowsForCategory(categoryOptions, categoryId, async (partialRows) => {
+      reportProgress({ catalogRows: rows.length + partialRows.length });
       if (typeof options.writeRows === 'function') {
         await options.writeRows([...rows, ...partialRows]);
       }
@@ -979,7 +1010,7 @@ async function fetchPostsForCharacter(characterTag, options) {
 }
 
 async function danbooruFetch(url, label, attempt = 1) {
-  await waitForGeneratorControl();
+  await waitForRequestSlot();
   const response = await fetch(url, {
     headers: {
       'Accept': 'application/json',
@@ -996,6 +1027,8 @@ async function danbooruFetch(url, label, attempt = 1) {
         ? Math.min(60_000, 5_000 * attempt)
         : Math.min(20_000, 1_000 * attempt);
     console.warn(`Danbooru returned ${response.status} for ${label}; retrying in ${Math.round(waitMs / 1000)}s (${attempt + 1}/${MAX_FETCH_ATTEMPTS})...`);
+    nextRequestAt = Math.max(nextRequestAt, Date.now() + waitMs);
+    reportProgress({ retryUntil: nextRequestAt, current: label });
     await controlledSleep(waitMs);
     return danbooruFetch(url, label, attempt + 1);
   }
@@ -1135,7 +1168,7 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
   const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
   const combined = (rows[0]?.options || fallbackOptions).mode === 'combined';
   const headers = ['tag', 'category', 'color', 'post_count', 'classifiers'];
-  if (combined) headers.push('type', 'attributes');
+  if (combined) headers.push('type', 'attributes', 'attributes_collected');
   if (localized) headers.push('localized_name', 'localized_aliases');
   const lines = [
     headers.join(','),
@@ -1150,6 +1183,7 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
       if (combined) canonicalCells.push(
         csvCell(row.category === 4 ? 'character' : 'tag'),
         csvCell((row.attributes || []).map(([tag]) => displayTag(tag, row.options)).join(', ')),
+        csvCell(row.attributesCollected ? '1' : ''),
       );
       if (!localized) return canonicalCells.join(',');
       const localization = getLocalizedTag(row.options.localizationMap, row.tag);
@@ -1200,6 +1234,7 @@ async function readGeneratorControl() {
     return {
       paused: parsed?.paused === true,
       stopRequested: parsed?.stopRequested === true,
+      ratePercent: Number(parsed?.ratePercent),
     };
   } catch {
     return { paused: false, stopRequested: false };
@@ -1208,6 +1243,7 @@ async function readGeneratorControl() {
 
 async function waitForGeneratorControl() {
   let control = await readGeneratorControl();
+  if (Number.isFinite(control.ratePercent)) requestRatePercent = Math.max(10, Math.min(100, control.ratePercent));
   if (control.stopRequested) throw new GeneratorStoppedError();
   while (control.paused) {
     if (!pauseWasAnnounced) {
@@ -1254,6 +1290,7 @@ async function mapWithConcurrency(items, concurrency, worker, onResult) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   runtimeControlFile = options.controlFile;
+  requestRatePercent = options.ratePercent;
   if (options.help) {
     printHelp();
     return;
@@ -1275,22 +1312,33 @@ async function main() {
     options.tagCategory = 'all';
     await mkdir(path.dirname(options.outFile), { recursive: true });
     options.writeRows = (rows) => writeFile(options.outFile, tagRowsToCsv(rows, options), 'utf8');
-    await options.writeRows([]);
-    const rows = await fetchTagRowsFromDanbooru(options);
+    const rows = options.resumeExisting
+      ? parseCombinedCheckpoint(await readFile(options.outFile, 'utf8'), options)
+      : await fetchTagRowsFromDanbooru(options);
     const characters = rows.filter(row => row.category === 4);
+    const pending = characters.filter(row => !row.attributesCollected);
+    let completed = characters.length - pending.length;
+    reportProgress({ stage: 'attributes', completed, total: characters.length, catalogRows: rows.length });
+    console.log(`Resuming ${completed.toLocaleString()} completed characters; ${pending.length.toLocaleString()} remaining.`);
     let checkpointWrite = Promise.resolve();
-    await mapWithConcurrency(characters, options.concurrency, async (row) => {
+    await mapWithConcurrency(pending, options.concurrency, async (row) => {
       const posts = await fetchPostsForCharacter(row.tag, options);
       row.attributes = getCommonAttributes(row.tag, posts, options);
+      row.attributesCollected = true;
       console.log(`${row.tag}: collected ${row.attributes.length} character attributes.`);
       if (options.delayMs > 0) await controlledSleep(options.delayMs);
       return row;
     }, () => {
       const csv = tagRowsToCsv(rows, options);
-      checkpointWrite = checkpointWrite.then(() => writeFile(options.outFile, csv, 'utf8'));
+      checkpointWrite = checkpointWrite.then(async () => {
+        await writeFile(options.outFile, csv, 'utf8');
+        completed += 1;
+        reportProgress({ completed });
+      });
       return checkpointWrite;
     });
     await options.writeRows(rows);
+    reportProgress({ stage: 'completed', completed: characters.length, retryUntil: 0 });
     console.log(`Wrote ${rows.length.toLocaleString()} catalog entries, including ${characters.length.toLocaleString()} characters, to ${options.outFile}`);
     return;
   }
@@ -1301,6 +1349,7 @@ async function main() {
     options.writeRows = (rows) => writeFile(options.outFile, tagRowsToCsv(rows, options), 'utf8');
     const rows = await fetchTagRowsFromDanbooru(options);
     await writeFile(options.outFile, tagRowsToCsv(rows, options), 'utf8');
+    reportProgress({ stage: 'completed', completed: rows.length, total: rows.length, catalogRows: rows.length, retryUntil: 0 });
     console.log(`Wrote ${rows.length.toLocaleString()} tag rows to ${path.relative(repoRoot, options.outFile)}`);
     return;
   }
@@ -1315,6 +1364,7 @@ async function main() {
   await mkdir(path.dirname(options.outFile), { recursive: true });
   await writeFile(options.outFile, toCsv([], options), 'utf8');
   let checkpointWrite = Promise.resolve();
+  reportProgress({ stage: 'attributes', completed: 0, total: characters.length });
   const rows = await mapWithConcurrency(characters, options.concurrency, async (character, i) => {
     await waitForGeneratorControl();
     const posts = await fetchPostsForCharacter(character, options);
@@ -1331,11 +1381,15 @@ async function main() {
     return { character: outputCharacter, localizationTag: character, attributes, options };
   }, (completedRows) => {
     const csv = toCsv(completedRows, options);
-    checkpointWrite = checkpointWrite.then(() => writeFile(options.outFile, csv, 'utf8'));
+    checkpointWrite = checkpointWrite.then(async () => {
+      await writeFile(options.outFile, csv, 'utf8');
+      reportProgress({ completed: completedRows.length });
+    });
     return checkpointWrite;
   });
 
   await writeFile(options.outFile, toCsv(rows, options), 'utf8');
+  reportProgress({ stage: 'completed', completed: rows.length, total: rows.length });
   console.log(`Wrote ${rows.length.toLocaleString()} character rows to ${path.relative(repoRoot, options.outFile)}`);
 }
 
