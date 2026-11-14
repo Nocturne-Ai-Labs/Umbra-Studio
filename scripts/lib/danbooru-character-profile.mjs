@@ -1,7 +1,7 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 12, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  version: 13, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
   fallbackOutfitFrequency: 0.7,
   outfitFrequency: 0.9, minimumSamples: 3, identityFrequency: 0.35,
 });
@@ -43,7 +43,7 @@ export function isCoreOutfitTag(tag) {
 const garmentSlots = {
   top: ['tank_top', 'crop_top', 'tube_top', 'halter_top', 'camisole', 'blouse', 'shirt', 'sweater', 'hoodie'],
   bottom: ['miniskirt', 'skirt', 'shorts', 'pants', 'trousers'],
-  body: ['dress', 'kimono', 'leotard', 'robe', 'overalls', 'bodysuit', 'jumpsuit'],
+  body: ['dress', 'china_dress', 'kimono', 'yukata', 'leotard', 'robe', 'overalls', 'bodysuit', 'jumpsuit'],
   outer: ['jacket', 'coat', 'cape', 'blazer'],
   signature: ['detached_sleeves'],
   armor: ['armor', 'japanese_armor', 'power_armor', 'full_armor'],
@@ -61,7 +61,8 @@ function garmentTokens(post) {
   return Object.fromEntries(Object.entries(garmentSlots).map(([slot, values]) => {
     const found = values.filter(value => tags.some(tag => tag === value || tag.endsWith(`_${value}`)));
     // A specific subtype replaces its implied parent; color and trim don't split outfits.
-    const specific = found.filter(value => !found.some(other => other !== value && other.endsWith(value)));
+    const specific = found.filter(value => !found.some(other => other !== value && (other.endsWith(value)
+      || (value === 'kimono' && other === 'yukata'))));
     return [slot, slot === 'footwear' && specific.some(value => value !== 'shoes') ? specific.filter(value => value !== 'shoes') : specific];
   }));
 }
@@ -131,7 +132,7 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
     }
   }
   // A supported dress describes the complete garment; shirt tags must not crowd it out.
-  const garmentPriority = candidate => candidate.slot === 'uniform' ? 2 : candidate.entry[0] === 'dress' ? 1 : 0;
+  const garmentPriority = candidate => candidate.slot === 'uniform' ? 2 : /(?:^|_)dress$/.test(candidate.entry[0]) ? 1 : 0;
   candidates.sort((a, b) => garmentPriority(b) - garmentPriority(a) || b.entry[1] - a.entry[1] || a.slot.localeCompare(b.slot));
   const selected = [];
   let supporting = garments.map((_, i) => i);
