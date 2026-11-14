@@ -89,7 +89,8 @@ export function parsePowerPrompterCsv(
 
   const expectedHeader = type === 'tag' ? 'tag' : 'character';
   const headers = rows[0].map((value) => value.trim().toLowerCase());
-  const hasHeader = headers.includes(expectedHeader);
+  const combined = headers.includes('tag') && headers.includes('type') && headers.includes('attributes');
+  const hasHeader = combined || headers.includes(expectedHeader);
   const dataRows = hasHeader ? rows.slice(1) : rows;
   const sourceId = getSourceId(type, fileName);
 
@@ -123,7 +124,8 @@ export function parsePowerPrompterCsv(
     });
   }
 
-  const tagIndex = getHeaderIndex(headers, expectedHeader);
+  const tagIndex = getHeaderIndex(headers, combined ? 'tag' : expectedHeader);
+  const typeIndex = getHeaderIndex(headers, 'type');
   const categoryIndex = getHeaderIndex(headers, 'category');
   const attributesIndex = getHeaderIndex(headers, 'attributes');
   const postCountIndex = getHeaderIndex(headers, 'post_count', 'post count', 'postcount', 'count');
@@ -133,18 +135,21 @@ export function parsePowerPrompterCsv(
   const classifiersIndex = getHeaderIndex(headers, 'classifiers', 'classifier');
 
   return dataRows.flatMap((row) => {
+    const itemType: PowerPrompterCsvItemType = combined
+      ? readCell(row, typeIndex) === 'character' ? 'character' : 'tag'
+      : type;
     const tag = readCell(row, tagIndex);
     if (!tag) return [];
     const displayTag = readCell(row, displayIndex);
     const rawPostCount = readCell(row, postCountIndex);
     const parsedPostCount = rawPostCount === '' ? null : Number.parseInt(rawPostCount, 10);
-    const category = type === 'character'
+    const category = itemType === 'character'
       ? 4
       : Number.parseInt(readCell(row, categoryIndex), 10) || 0;
-    const storedClassifiers = type === 'tag'
+    const storedClassifiers = itemType === 'tag'
       ? parseDanbooruTagClassifiers(readCell(row, classifiersIndex))
       : [];
-    const classifiers = type === 'tag' && storedClassifiers.length === 0
+    const classifiers = itemType === 'tag' && storedClassifiers.length === 0
       ? classifyDanbooruTag(tag, category)
       : storedClassifiers;
     const searchAliases = [
@@ -160,14 +165,14 @@ export function parsePowerPrompterCsv(
       ...(parsedPostCount !== null && Number.isFinite(parsedPostCount) && parsedPostCount >= 0
         ? { count: parsedPostCount }
         : {}),
-      ...(type === 'character' && readCell(row, attributesIndex)
+      ...(itemType === 'character' && readCell(row, attributesIndex)
         ? { extra: readCell(row, attributesIndex) }
         : {}),
       ...(displayTag ? { displayTag } : {}),
       ...(searchAliases ? { searchAliases } : {}),
       source: fileName,
       sourceId,
-      type,
+      type: itemType,
     }];
   });
 }

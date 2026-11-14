@@ -3,18 +3,18 @@ import { useEffect, useState } from 'react';
 import { Database, FileText, FolderOpen, Pause, Play, Square } from 'lucide-react';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 
-type GeneratorMode = 'character-attributes' | 'tags';
+type GeneratorMode = 'character-attributes' | 'tags' | 'combined';
 type CharacterSource = 'danbooru' | 'single' | 'series';
 type OutputLanguage = 'canonical' | 'ja' | 'zh-CN';
 
 const getDefaultOutputFileName = (mode: GeneratorMode, outputLanguage: OutputLanguage) => {
-  const base = mode === 'tags' ? 'danbooru-tags' : 'danbooru-character-attributes';
+  const base = mode === 'combined' ? 'danbooru-catalog' : mode === 'tags' ? 'danbooru-tags' : 'danbooru-character-attributes';
   const suffix = outputLanguage === 'canonical' ? '' : outputLanguage === 'ja' ? '-ja' : '-zh-cn';
   return `${base}${suffix}.csv`;
 };
 
 const DEFAULT_OUTPUT_FILE_NAMES = new Set(
-  (['character-attributes', 'tags'] as GeneratorMode[]).flatMap((mode) => (
+  (['character-attributes', 'tags', 'combined'] as GeneratorMode[]).flatMap((mode) => (
     (['canonical', 'ja', 'zh-CN'] as OutputLanguage[]).map((language) => getDefaultOutputFileName(mode, language))
   )),
 );
@@ -35,7 +35,8 @@ type GeneratorResult = {
 };
 
 export function DanbooruDatasetGeneratorTab() {
-  const [mode, setMode] = useState<GeneratorMode>('character-attributes');
+  const [mode, setMode] = useState<GeneratorMode>('combined');
+  const [preferCorpus, setPreferCorpus] = useState(true);
   const [characterSource, setCharacterSource] = useState<CharacterSource>('danbooru');
   const [tag, setTag] = useState('');
   const [seriesTag, setSeriesTag] = useState('');
@@ -53,7 +54,7 @@ export function DanbooruDatasetGeneratorTab() {
   const [appendCopyright, setAppendCopyright] = useState(true);
   const [animaArtistTokens, setAnimaArtistTokens] = useState(false);
   const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>('canonical');
-  const [outputFileName, setOutputFileName] = useState('danbooru-character-attributes.csv');
+  const [outputFileName, setOutputFileName] = useState('danbooru-catalog.csv');
   const [running, setRunning] = useState(false);
   const [controlling, setControlling] = useState(false);
   const [error, setError] = useState('');
@@ -69,6 +70,7 @@ export function DanbooruDatasetGeneratorTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode,
+          preferCorpus,
           characterSource,
           tag,
           seriesTag,
@@ -189,32 +191,36 @@ export function DanbooruDatasetGeneratorTab() {
         <div className="mt-5 space-y-4">
           <div>
             <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">Generator</label>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
+              <button onClick={() => setModeAndDefaultOutput('combined')} className={`rounded-md border px-2 py-2 text-[10px] font-black uppercase tracking-wide ${mode === 'combined' ? 'border-emerald-400/45 bg-emerald-500/15 text-emerald-100' : 'border-white/10 bg-white/[0.03] text-zinc-500'}`}>Combined CSV</button>
               <button onClick={() => setModeAndDefaultOutput('character-attributes')} className={`rounded-md border px-2 py-2 text-[10px] font-black uppercase tracking-wide ${mode === 'character-attributes' ? 'border-emerald-400/45 bg-emerald-500/15 text-emerald-100' : 'border-white/10 bg-white/[0.03] text-zinc-500'}`}>Character CSV</button>
               <button onClick={() => setModeAndDefaultOutput('tags')} className={`rounded-md border px-2 py-2 text-[10px] font-black uppercase tracking-wide ${mode === 'tags' ? 'border-emerald-400/45 bg-emerald-500/15 text-emerald-100' : 'border-white/10 bg-white/[0.03] text-zinc-500'}`}>Tag CSV</button>
             </div>
           </div>
 
-          {mode === 'character-attributes' ? (
+          {mode !== 'tags' ? (
             <>
-              <div>
+              {mode === 'combined' ? <p className="text-xs leading-5 text-zinc-400">One catalog for general, artist, series, character, and meta tags. Character rows include collected attributes. Enable the resulting file in the tag catalog’s Sources.</p> : <div>
                 <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">Character Source</label>
                 <UmbraSelectControl value={characterSource} onChange={(event) => setCharacterSource(event.target.value as CharacterSource)} className="settings-input !py-2 text-sm">
                   <option value="danbooru">Top Danbooru characters</option>
                   <option value="single">Single character tag</option>
                   <option value="series">Characters from series/copyright</option>
                 </UmbraSelectControl>
-              </div>
-              {characterSource === 'single' ? <TextInput label="Character Tag" value={tag} onChange={setTag} placeholder="hatsune_miku" /> : null}
-              {characterSource === 'series' ? <TextInput label="Series / Copyright Tag" value={seriesTag} onChange={setSeriesTag} placeholder="zenless_zone_zero" /> : null}
-              <TextInput label="Characters" value={limit} onChange={setLimit} placeholder="100 or all" help="Use a number, or type all to process every matching character." />
-              {characterSource === 'series' ? <NumberInput label="Series Posts To Scan" value={seriesPostSample} onChange={setSeriesPostSample} min={1} max={5000} /> : null}
+              </div>}
+              {mode !== 'combined' && characterSource === 'single' ? <TextInput label="Character Tag" value={tag} onChange={setTag} placeholder="hatsune_miku" /> : null}
+              {mode !== 'combined' && characterSource === 'series' ? <TextInput label="Series / Copyright Tag" value={seriesTag} onChange={setSeriesTag} placeholder="zenless_zone_zero" /> : null}
+              <TextInput label={mode === 'combined' ? 'Entries Per Category' : 'Characters'} value={limit} onChange={setLimit} placeholder="100 or all" help={mode === 'combined' ? 'Use all for every qualifying tag in all five categories. Each character needs an attribute sample.' : 'Use a number, or type all to process every matching character.'} />
+              {mode !== 'combined' && characterSource === 'series' ? <NumberInput label="Series Posts To Scan" value={seriesPostSample} onChange={setSeriesPostSample} min={1} max={5000} /> : null}
+              <Checkbox label="Prefer tag corpus for character attributes" checked={preferCorpus} onChange={setPreferCorpus} />
+              <p className="text-xs leading-5 text-zinc-400">Uses local posts when enough match the character and filter. Otherwise samples live Danbooru and records the source in the log. New corpus batches retain character associations; older batches may need recollection.</p>
+              {mode === 'combined' ? <NumberInput label="Min Tag Posts" value={minTagPosts} onChange={setMinTagPosts} min={0} max={10000000} /> : null}
               <NumberInput label="Posts Per Character" value={postSample} onChange={setPostSample} min={1} max={200} help="Capped at 200 to match Danbooru/API safety limits." />
               <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} help="Reserves space for observed eye color, hair color, and up to three garment tags. Raise this limit for more outfit and accessory details." />
               <NumberInput label="Min Character Posts" value={minCharacterPosts} onChange={setMinCharacterPosts} min={0} max={10000000} />
               <NumberInput label="Min Frequency" value={minFrequency} onChange={setMinFrequency} min={0} max={1} step={0.01} help="0.12 keeps tags found in at least 12% of sampled posts. Lower it to include less frequently tagged details. Missing source tags cannot be inferred." />
               <TextInput label="Post Filter" value={postFilter} onChange={setPostFilter} placeholder="solo, rating:g" />
-              <Checkbox label="Append copyright to ambiguous character names" checked={appendCopyright} onChange={setAppendCopyright} />
+              {mode !== 'combined' ? <Checkbox label="Append copyright to ambiguous character names" checked={appendCopyright} onChange={setAppendCopyright} /> : null}
             </>
           ) : (
             <>

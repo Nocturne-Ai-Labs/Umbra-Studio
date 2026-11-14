@@ -11,6 +11,7 @@ import {
   normalizeOutputLanguage,
 } from './lib/danbooru-localization.mjs';
 import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
+import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -252,13 +253,17 @@ function parseArgs(argv) {
     tag: '',
     tagCategory: 0,
     mode: 'character-attributes',
+    corpusPath: '',
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = argv[i + 1];
 
-    if (arg === '--help' || arg === '-h') {
+    if (arg === '--corpus-path' && next) {
+      options.corpusPath = path.resolve(next);
+      i += 1;
+    } else if (arg === '--help' || arg === '-h') {
       options.help = true;
     } else if (arg === '--mode' && next) {
       options.mode = parseMode(next);
@@ -389,13 +394,16 @@ function parseArgs(argv) {
     }
   }
 
+  if (options.mode === 'combined' && options.outFile === DEFAULT_OUT_FILE) {
+    options.outFile = path.join(repoRoot, 'User', 'PowerPrompter', 'CSV', 'tags', 'danbooru-catalog.csv');
+  }
   return options;
 }
 
 function parseMode(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'character-attributes' || normalized === 'tags') return normalized;
-  throw new Error('--mode must be "character-attributes" or "tags".');
+  if (['character-attributes', 'tags', 'combined'].includes(normalized)) return normalized;
+  throw new Error('--mode must be "character-attributes", "tags" or "combined".');
 }
 
 function parseTagCategory(value) {
@@ -482,7 +490,8 @@ Recommended:
 
 Options:
   -i, --interactive            Open a prompt menu
-  --mode <value>               character-attributes or tags. Default: character-attributes
+  --mode <value>               character-attributes, tags or combined. Default: character-attributes
+  --corpus-path <path>         Prefer indexed character posts from this corpus; fall back to live sampling
   --tags                       Shortcut for --mode tags
   --tag-category <value>       Tag CSV category: all, 0 general, 1 artist, 3 copyright, 4 character, or 5 meta
   --remove-underscores         Output tags with spaces instead of underscores
@@ -815,7 +824,10 @@ async function fetchTagRowsFromDanbooru(options) {
   const seenTags = new Set();
 
   for (const categoryId of categoryIds) {
-    const categoryRows = await fetchTagRowsForCategory(options, categoryId, async (partialRows) => {
+    const categoryOptions = options.mode === 'combined' && categoryId === 4
+      ? { ...options, minTagPosts: options.minCharacterPosts }
+      : options;
+    const categoryRows = await fetchTagRowsForCategory(categoryOptions, categoryId, async (partialRows) => {
       if (typeof options.writeRows === 'function') {
         await options.writeRows([...rows, ...partialRows]);
       }
@@ -947,6 +959,14 @@ async function fetchSeriesPage(seriesTag, page, limit) {
 }
 
 async function fetchPostsForCharacter(characterTag, options) {
+  if (options.corpusPath) {
+    const local = readCharacterCorpus(options.corpusPath, characterTag, normalizePostFilter(options.postFilter), options.postSample);
+    if (local.posts.length >= options.postSample) {
+      console.log(`${characterTag}: using ${local.posts.length} posts from the local tag corpus.`);
+      return local.posts;
+    }
+    console.log(`${characterTag}: ${local.reason}; using live Danbooru sampling.`);
+  }
   const tags = [characterTag, normalizePostFilter(options.postFilter)].filter(Boolean).join(' ').trim();
   const url = new URL(DANBOORU_POSTS_URL);
   url.searchParams.set('tags', tags);
@@ -1111,11 +1131,12 @@ function toCsv(rows, fallbackOptions = {}) {
   return `${lines.join('\n')}\n`;
 }
 
-function tagRowsToCsv(rows, fallbackOptions = {}) {
+export function tagRowsToCsv(rows, fallbackOptions = {}) {
   const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
-  const headers = localized
-    ? ['tag', 'category', 'color', 'post_count', 'classifiers', 'localized_name', 'localized_aliases']
-    : ['tag', 'category', 'color', 'post_count', 'classifiers'];
+  const combined = (rows[0]?.options || fallbackOptions).mode === 'combined';
+  const headers = ['tag', 'category', 'color', 'post_count', 'classifiers'];
+  if (combined) headers.push('type', 'attributes');
+  if (localized) headers.push('localized_name', 'localized_aliases');
   const lines = [
     headers.join(','),
     ...rows.map((row) => {
@@ -1126,6 +1147,10 @@ function tagRowsToCsv(rows, fallbackOptions = {}) {
         csvCell(row.postCount),
         csvCell((row.classifiers || classifyDanbooruTag(row.tag, row.category)).join('|')),
       ];
+      if (combined) canonicalCells.push(
+        csvCell(row.category === 4 ? 'character' : 'tag'),
+        csvCell((row.attributes || []).map(([tag]) => displayTag(tag, row.options)).join(', ')),
+      );
       if (!localized) return canonicalCells.join(',');
       const localization = getLocalizedTag(row.options.localizationMap, row.tag);
       return [
@@ -1245,6 +1270,30 @@ async function main() {
     outputLanguage: options.outputLanguage,
     waitForControl: waitForGeneratorControl,
   });
+
+  if (options.mode === 'combined') {
+    options.tagCategory = 'all';
+    await mkdir(path.dirname(options.outFile), { recursive: true });
+    options.writeRows = (rows) => writeFile(options.outFile, tagRowsToCsv(rows, options), 'utf8');
+    await options.writeRows([]);
+    const rows = await fetchTagRowsFromDanbooru(options);
+    const characters = rows.filter(row => row.category === 4);
+    let checkpointWrite = Promise.resolve();
+    await mapWithConcurrency(characters, options.concurrency, async (row) => {
+      const posts = await fetchPostsForCharacter(row.tag, options);
+      row.attributes = getCommonAttributes(row.tag, posts, options);
+      console.log(`${row.tag}: collected ${row.attributes.length} character attributes.`);
+      if (options.delayMs > 0) await controlledSleep(options.delayMs);
+      return row;
+    }, () => {
+      const csv = tagRowsToCsv(rows, options);
+      checkpointWrite = checkpointWrite.then(() => writeFile(options.outFile, csv, 'utf8'));
+      return checkpointWrite;
+    });
+    await options.writeRows(rows);
+    console.log(`Wrote ${rows.length.toLocaleString()} catalog entries, including ${characters.length.toLocaleString()} characters, to ${options.outFile}`);
+    return;
+  }
 
   if (options.mode === 'tags') {
     await mkdir(path.dirname(options.outFile), { recursive: true });

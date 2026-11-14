@@ -450,7 +450,7 @@ export function TagCorpusTab() {
           <h2 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-100">Tag Corpus</h2>
         </div>
         <p className="mt-2 text-xs leading-5 text-zinc-500">
-          Build and monitor the local Danbooru relation index used by tag suggestions.
+          Build and monitor the local Danbooru index used by tag suggestions and CSV character attributes. New batches retain character and series associations for the dataset generator.
         </p>
 
         <div className="mt-5">

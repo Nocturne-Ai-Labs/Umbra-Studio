@@ -880,19 +880,21 @@ function pruneDanbooruDatasetGeneratorJobs() {
 
 function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
   const mode = String(body.mode || 'character-attributes');
+  if (!['character-attributes', 'tags', 'combined'].includes(mode)) throw new Error('Unknown CSV generator mode.');
   const requestedOutputLanguage = String(body.outputLanguage || 'canonical').trim().toLowerCase();
   if (!['canonical', 'ja', 'zh-cn'].includes(requestedOutputLanguage)) {
     throw new Error('Localized search aliases must be canonical, Japanese, or Chinese.');
   }
   const outputLanguage = requestedOutputLanguage === 'zh-cn' ? 'zh-CN' : requestedOutputLanguage;
   const args: string[] = [];
-  const outputDir = mode === 'tags'
+  const outputDir = mode === 'tags' || mode === 'combined'
     ? join(USER_DIR, 'PowerPrompter', 'CSV', 'tags')
     : join(USER_DIR, 'PowerPrompter', 'CSV', 'Characters');
-  const outFile = join(outputDir, sanitizeCsvFileName(body.outputFileName, mode === 'tags' ? 'danbooru-tags.csv' : 'danbooru-character-attributes.csv'));
+  const outFile = join(outputDir, sanitizeCsvFileName(body.outputFileName, mode === 'combined' ? 'danbooru-catalog.csv' : mode === 'tags' ? 'danbooru-tags.csv' : 'danbooru-character-attributes.csv'));
 
   const pushNumber = (flag: string, value: unknown, fallback: number, min: number, max: number) => {
-    const numeric = Math.max(min, Math.min(max, Math.round(Number(value) || fallback)));
+    const requested = value === '' || value == null ? fallback : Number(value);
+    const numeric = Math.max(min, Math.min(max, Math.round(Number.isFinite(requested) ? requested : fallback)));
     args.push(flag, String(numeric));
   };
   const pushLimit = (value: unknown, fallback: number) => {
@@ -912,12 +914,17 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
     pushLimit(body.limit, 1000);
     pushNumber('--min-tag-posts', body.minTagPosts, 150, 0, 10000000);
   } else {
+    if (mode === 'combined') {
+      args.push('--mode', 'combined');
+      pushNumber('--min-tag-posts', body.minTagPosts, 150, 0, 10000000);
+    }
+    if (body.preferCorpus !== false) args.push('--corpus-path', danbooruTagCorpusService.databasePath);
     const source = String(body.characterSource || 'danbooru');
-    if (source === 'single') {
+    if (mode !== 'combined' && source === 'single') {
       const tag = normalizeDanbooruTag(body.tag);
       if (!tag) throw new Error('Character tag is required.');
       args.push('--tag', tag);
-    } else if (source === 'series') {
+    } else if (mode !== 'combined' && source === 'series') {
       const series = normalizeDanbooruTag(body.seriesTag);
       if (!series) throw new Error('Series/copyright tag is required.');
       args.push('--series', series);

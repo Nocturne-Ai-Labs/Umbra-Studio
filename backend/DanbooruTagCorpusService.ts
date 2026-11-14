@@ -28,6 +28,8 @@ type DanbooruCorpusPost = {
   rating?: unknown;
   created_at?: unknown;
   tag_string_general?: unknown;
+  tag_string_character?: unknown;
+  tag_string_copyright?: unknown;
 };
 
 export type DanbooruCorpusStatus = {
@@ -416,6 +418,8 @@ export class DanbooruTagCorpusService {
     const tx = this.db.transaction(() => {
       this.db.run('DELETE FROM danbooru_corpus_posts');
       this.db.run('DELETE FROM danbooru_corpus_fts');
+      this.db.run('DELETE FROM danbooru_corpus_characters');
+      this.db.run('DELETE FROM danbooru_corpus_context');
       this.db.run('DELETE FROM danbooru_corpus_related_cache');
       this.db.run('DELETE FROM danbooru_corpus_meta');
     });
@@ -441,6 +445,9 @@ export class DanbooruTagCorpusService {
       VALUES (?, ?, ?, ?, ?)
     `);
     const insertTags = this.db.query('INSERT INTO danbooru_corpus_fts(rowid, tags) VALUES (?, ?)');
+    const insertContext = this.db.query('INSERT OR REPLACE INTO danbooru_corpus_context(post_id, copyrights) VALUES (?, ?)');
+    const clearCharacters = this.db.query('DELETE FROM danbooru_corpus_characters WHERE post_id = ?');
+    const insertCharacter = this.db.query('INSERT OR IGNORE INTO danbooru_corpus_characters(character, post_id) VALUES (?, ?)');
     let inserted = 0;
     let lastPostId: number | null = null;
     const normalizedPosts = posts.map((post) => {
@@ -453,6 +460,8 @@ export class DanbooruTagCorpusService {
         rating: String(post?.rating || '').slice(0, 2),
         createdAt: String(post?.created_at || ''),
         tags: normalizeTagString(post?.tag_string_general),
+        characters: typeof post.tag_string_character === 'string' ? normalizeTagString(post.tag_string_character) : null,
+        copyrights: normalizeTagString(post.tag_string_copyright).join(' '),
       };
     }).filter((post): post is NonNullable<typeof post> => Boolean(post));
 
@@ -476,6 +485,12 @@ export class DanbooruTagCorpusService {
         if (Number(result.changes || 0) > 0) {
           insertTags.run(post.id, post.tags.join(' '));
           inserted += 1;
+        }
+        // Existing general-only rows can acquire context when fetched again.
+        if (post.characters !== null) {
+          insertContext.run(post.id, post.copyrights);
+          clearCharacters.run(post.id);
+          for (const character of post.characters) insertCharacter.run(character, post.id);
         }
       }
       this.setMetaValues({
@@ -568,6 +583,9 @@ export class DanbooruTagCorpusService {
         updated_at INTEGER NOT NULL
       )
     `);
+    this.db.run('CREATE TABLE IF NOT EXISTS danbooru_corpus_context (post_id INTEGER PRIMARY KEY, copyrights TEXT NOT NULL)');
+    this.db.run('CREATE TABLE IF NOT EXISTS danbooru_corpus_characters (character TEXT NOT NULL, post_id INTEGER NOT NULL, PRIMARY KEY(character, post_id)) WITHOUT ROWID');
+    this.db.run('CREATE INDEX IF NOT EXISTS danbooru_corpus_character_post ON danbooru_corpus_characters(post_id)');
     this.seedMeta();
   }
 
@@ -676,7 +694,7 @@ export class DanbooruTagCorpusService {
             const params = new URLSearchParams({
               limit: String(DANBOORU_POST_BATCH_SIZE),
               tags: rangeTags.join(' '),
-              only: 'id,score,rating,created_at,tag_string_general',
+              only: 'id,score,rating,created_at,tag_string_general,tag_string_character,tag_string_copyright',
             });
             return this.fetchPostBatch(`https://danbooru.donmai.us/posts.json?${params}`, headers, options.signal);
           }));
@@ -701,7 +719,7 @@ export class DanbooruTagCorpusService {
 
         const params = new URLSearchParams({
           limit: String(DANBOORU_POST_BATCH_SIZE),
-          only: 'id,score,rating,created_at,tag_string_general',
+          only: 'id,score,rating,created_at,tag_string_general,tag_string_character,tag_string_copyright',
         });
         if (options.minimumScore > 0) params.set('tags', `score:>=${options.minimumScore}`);
         if (status.lastPostId) params.set('page', `b${status.lastPostId}`);
