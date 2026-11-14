@@ -43,7 +43,7 @@ export function DanbooruDatasetGeneratorTab() {
   const [limit, setLimit] = useState('100');
   const [postSample, setPostSample] = useState(100);
   const [seriesPostSample, setSeriesPostSample] = useState(200);
-  const [maxAttributes, setMaxAttributes] = useState(12);
+  const [maxAttributes, setMaxAttributes] = useState(24);
   const [minCharacterPosts, setMinCharacterPosts] = useState(100);
   const [minTagPosts, setMinTagPosts] = useState(150);
   const [minFrequency, setMinFrequency] = useState(0.12);
@@ -210,9 +210,9 @@ export function DanbooruDatasetGeneratorTab() {
               <TextInput label="Characters" value={limit} onChange={setLimit} placeholder="100 or all" help="Use a number, or type all to process every matching character." />
               {characterSource === 'series' ? <NumberInput label="Series Posts To Scan" value={seriesPostSample} onChange={setSeriesPostSample} min={1} max={5000} /> : null}
               <NumberInput label="Posts Per Character" value={postSample} onChange={setPostSample} min={1} max={200} help="Capped at 200 to match Danbooru/API safety limits." />
-              <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} />
+              <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} help="Reserves space for observed eye color, hair color, and up to three garment tags. Raise this limit for more outfit and accessory details." />
               <NumberInput label="Min Character Posts" value={minCharacterPosts} onChange={setMinCharacterPosts} min={0} max={10000000} />
-              <NumberInput label="Min Frequency" value={minFrequency} onChange={setMinFrequency} min={0} max={1} step={0.01} />
+              <NumberInput label="Min Frequency" value={minFrequency} onChange={setMinFrequency} min={0} max={1} step={0.01} help="0.12 keeps tags found in at least 12% of sampled posts. Lower it to include less frequently tagged details. Missing source tags cannot be inferred." />
               <TextInput label="Post Filter" value={postFilter} onChange={setPostFilter} placeholder="solo, rating:g" />
               <Checkbox label="Append copyright to ambiguous character names" checked={appendCopyright} onChange={setAppendCopyright} />
             </>

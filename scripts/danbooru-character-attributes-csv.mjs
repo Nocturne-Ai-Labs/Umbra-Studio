@@ -237,7 +237,7 @@ function parseArgs(argv) {
     concurrency: 4,
     delayMs: 0,
     limit: 100,
-    maxAttributes: 12,
+    maxAttributes: 24,
     minCharacterPosts: 100,
     minFrequency: 0.12,
     minTagPosts: null,
@@ -498,7 +498,7 @@ Options:
   --copyright <danbooru_tag>   Alias for --series
   --series-post-sample <num>   Recent series posts to scan, or all. Default: 200
   --post-sample <number>       Danbooru posts sampled per character, max 200. Default: 100
-  --max-attributes <number>    Max attributes per character. Default: 12
+  --max-attributes <number>    Max attributes per character. Default: 24
   --min-character-posts <num>  Minimum Danbooru post count / series appearances. Default: 100
   --min-tag-posts <num>        Minimum post count. Defaults: general 150, artist 100, other categories 10
   --min-frequency <0..1>       How common a tag must be to keep it. Default: 0.12
@@ -682,13 +682,13 @@ function applyPickerPreset(options, preset) {
 
   if (preset === '3') {
     options.postSample = 80;
-    options.maxAttributes = 16;
+    options.maxAttributes = 32;
     options.minFrequency = 0.08;
     return;
   }
 
   options.postSample = 100;
-  options.maxAttributes = 12;
+  options.maxAttributes = 24;
   options.minFrequency = 0.12;
 }
 
@@ -997,7 +997,7 @@ function formatPostFilterForPrompt(value) {
   return String(value || '').trim().replace(/\s+/g, ', ') || 'none';
 }
 
-function getCommonAttributes(characterTag, posts, options) {
+export function getCommonAttributes(characterTag, posts, options) {
   const counts = new Map();
   let usablePostCount = 0;
 
@@ -1013,10 +1013,20 @@ function getCommonAttributes(characterTag, posts, options) {
   }
 
   const minCount = Math.max(1, Math.ceil(usablePostCount * options.minFrequency));
-  return [...counts.entries()]
+  const candidates = [...counts.entries()]
     .filter(([, count]) => count >= minCount)
-    .sort((a, b) => getTagPriority(a[0]) - getTagPriority(b[0]) || b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, options.maxAttributes);
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  // Reserve space for observed identity colors and garments before common
+  // body/accessory tags fill the limit. Frequency filtering still applies.
+  const prioritized = [
+    ...candidates.filter(([tag]) => isEyeColorTag(tag)).slice(0, 1),
+    ...candidates.filter(([tag]) => isHairColorTag(tag)).slice(0, 1),
+    ...candidates.filter(([tag]) => isCoreOutfitTag(tag)).slice(0, 3),
+    ...candidates,
+  ];
+  const selected = new Map(prioritized.map(([tag, count]) => [tag, count]));
+  return [...selected.entries()].slice(0, options.maxAttributes)
+    .sort((a, b) => getTagPriority(a[0]) - getTagPriority(b[0]) || b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 function getPrimaryCopyright(posts) {
@@ -1046,24 +1056,32 @@ function isCharacterAttributeTag(tag) {
   if (!tag || DEFAULT_IGNORE_TAGS.has(tag)) return false;
   if (DENY_KEYWORDS.some((keyword) => tag === keyword || tag.includes(keyword))) return false;
   if (ALWAYS_KEEP_TAGS.has(tag)) return true;
+  if (isEyeColorTag(tag) || classifyDanbooruTag(tag).some(group => ['clothing', 'accessory', 'hair'].includes(group))) return true;
   if (ATTRIBUTE_KEYWORDS.some((keyword) => tag === keyword || tag.includes(keyword))) return true;
   return ATTRIBUTE_PATTERNS.some((pattern) => pattern.test(tag));
 }
 
 function getTagPriority(tag) {
   if (tag === '1girl' || tag === '1boy') return 0;
-  if (/^(loli|shota|adult|mature_|old_)/.test(tag)) return 1;
-  if (tag.includes('breast') || tag === 'flat_chest' || tag === 'pettanko' || tag === 'oppai') return 2;
-  if (isOutfitTag(tag)) return 3;
-  if (tag.includes('hair') || tag.includes('eyes')) return 4;
+  if (isEyeColorTag(tag) || isHairColorTag(tag)) return 1;
+  if (classifyDanbooruTag(tag).includes('hair')) return 2;
+  if (classifyDanbooruTag(tag).includes('clothing')) return 3;
   return 5;
 }
 
-function isOutfitTag(tag) {
-  return ATTRIBUTE_KEYWORDS.some((keyword) => {
-    if (keyword === 'hair' || keyword === 'eyes' || keyword === 'breasts') return false;
-    return tag === keyword || tag.includes(keyword);
-  });
+function isCoreOutfitTag(tag) {
+  // Small wearable details remain eligible, but must not displace the outfit.
+  return classifyDanbooruTag(tag).includes('clothing')
+    && !/(?:^|_)(?:gloves|socks|stockings|thighhighs|pantyhose|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag);
+}
+
+function isEyeColorTag(tag) {
+  return /^(?:(?:light|dark)_)?(?:aqua|amber|black|blue|brown|cyan|gold|green|grey|gray|hazel|orange|pink|purple|red|silver|white|yellow|multicolored)_eyes$/.test(tag)
+    || tag === 'heterochromia';
+}
+
+function isHairColorTag(tag) {
+  return /^(?:(?:light|dark)_)?(?:aqua|black|blonde|blue|brown|cyan|green|grey|gray|orange|pink|platinum_blonde|purple|red|silver|white|yellow|multicolored|two-tone)_hair$/.test(tag);
 }
 
 function toCsv(rows, fallbackOptions = {}) {
@@ -1272,7 +1290,7 @@ async function main() {
   console.log(`Wrote ${rows.length.toLocaleString()} character rows to ${path.relative(repoRoot, options.outFile)}`);
 }
 
-main().catch((error) => {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((error) => {
   if (error instanceof GeneratorStoppedError) {
     console.log('Generator stopped. The completed rows remain in the output CSV.');
     process.exitCode = GENERATOR_STOP_EXIT_CODE;

@@ -927,9 +927,10 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
     }
     pushLimit(body.limit, 100);
     pushNumber('--post-sample', body.postSample, 100, 1, 200);
-    pushNumber('--max-attributes', body.maxAttributes, 12, 1, 80);
+    pushNumber('--max-attributes', body.maxAttributes, 24, 1, 80);
     pushNumber('--min-character-posts', body.minCharacterPosts, 100, 0, 10000000);
-    const minFrequency = Math.max(0, Math.min(1, Number(body.minFrequency) || 0.12));
+    const requestedFrequency = Number(body.minFrequency ?? 0.12);
+    const minFrequency = Number.isFinite(requestedFrequency) ? Math.max(0, Math.min(1, requestedFrequency)) : 0.12;
     args.push('--min-frequency', String(minFrequency));
     const postFilter = String(body.postFilter || '').trim();
     if (postFilter) args.push('--post-filter', postFilter);
