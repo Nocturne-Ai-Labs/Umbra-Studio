@@ -13,6 +13,7 @@ import {
 import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
 import { createBatchedCombinedCollector } from './lib/danbooru-combined-collector.mjs';
 import { writeCollectionCheckpoint } from './lib/danbooru-checkpoint-file.mjs';
+import { soloGeneralFallbackFilter, selectSingleCharacterGeneralPosts } from './lib/danbooru-character-sampling.mjs';
 import { parseCombinedCheckpoint, requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
 
@@ -1006,17 +1007,34 @@ async function fetchPostsForCharacter(characterTag, options) {
       console.log(`${characterTag}: using ${local.posts.length} posts from the local tag corpus.`);
       return local.posts;
     }
-    console.log(`${characterTag}: ${local.reason}; using live Danbooru sampling.`);
+    console.log(`${characterTag}: local cache insufficient; checking live Danbooru (${local.posts.length} cached matches).`);
   }
   const tags = [characterTag, normalizePostFilter(options.postFilter)].filter(Boolean).join(' ').trim();
   const url = new URL(DANBOORU_POSTS_URL);
   url.searchParams.set('tags', tags);
   url.searchParams.set('limit', String(options.postSample));
+  url.searchParams.set('only', 'id,rating,tag_string_general,tag_string_character,tag_string_copyright');
 
   const response = await danbooruFetch(url, characterTag);
 
   const posts = await response.json();
-  return Array.isArray(posts) ? posts : [];
+  if (!Array.isArray(posts)) throw new Error(`Invalid post response for ${characterTag}`);
+  if (posts.length) {
+    console.log(`${characterTag}: sampled ${posts.length} posts matching ${normalizePostFilter(options.postFilter)}.`);
+    return posts;
+  }
+  const fallbackFilter = soloGeneralFallbackFilter(options.postFilter);
+  if (fallbackFilter) {
+    url.searchParams.set('tags', `${characterTag} ${fallbackFilter}`);
+    const fallbackResponse = await danbooruFetch(url, `${characterTag} General fallback`);
+    const fallbackPosts = await fallbackResponse.json();
+    if (!Array.isArray(fallbackPosts)) throw new Error(`Invalid fallback post response for ${characterTag}`);
+    const usable = selectSingleCharacterGeneralPosts(fallbackPosts, characterTag);
+    console.log(`${characterTag}: no solo matches; ${usable.length}/${fallbackPosts.length} General posts contain only this named character and no tagged group.`);
+    return usable;
+  }
+  console.log(`${characterTag}: no posts match ${normalizePostFilter(options.postFilter)}.`);
+  return [];
 }
 
 async function danbooruFetch(url, label, attempt = 1) {
@@ -1328,6 +1346,10 @@ async function main() {
       concurrency: options.concurrency,
       report: reportProgress,
       enrich: async (row) => {
+        if (row.postCount === 0) {
+          console.log(`${row.tag}: no indexed posts; skipping attribute requests.`);
+          return [];
+        }
         const posts = await fetchPostsForCharacter(row.tag, options);
         const attributes = getCommonAttributes(row.tag, posts, options);
         console.log(`${row.tag}: collected ${attributes.length} character attributes.`);

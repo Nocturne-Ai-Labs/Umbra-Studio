@@ -303,6 +303,7 @@ export function DanbooruDatasetGeneratorTab() {
               <NumberInput label="Min Character Posts" value={minCharacterPosts} onChange={setMinCharacterPosts} min={0} max={10000000} />
               <NumberInput label="Min Frequency" value={minFrequency} onChange={setMinFrequency} min={0} max={1} step={0.01} help="0.12 keeps tags found in at least 12% of sampled posts. Lower it to include less frequently tagged details. Missing source tags cannot be inferred." />
               <TextInput label="Post Filter" value={postFilter} onChange={setPostFilter} placeholder="solo, rating:g" />
+              {/(^|[\s,])solo([\s,]|$)/.test(postFilter) && /(^|[\s,])rating:(g|general)([\s,]|$)/i.test(postFilter) ? <p className="text-xs text-zinc-400">Tries solo General posts first. If none match, uses General posts tagged with only this character and no group tags. Missing attributes are never invented.</p> : null}
               {mode !== 'combined' ? <Checkbox label="Append copyright to ambiguous character names" checked={appendCopyright} onChange={setAppendCopyright} /> : null}
             </>
           ) : (
