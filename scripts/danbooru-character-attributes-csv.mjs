@@ -16,7 +16,7 @@ import { writeCollectionCheckpoint } from './lib/danbooru-checkpoint-file.mjs';
 import { soloGeneralFallbackFilter, selectSingleCharacterGeneralPosts } from './lib/danbooru-character-sampling.mjs';
 import { requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
 import { CollectionStore, CharacterSampleCache, characterSampleCacheFile, collectionPolicy, mergeCharacterSamples } from './lib/danbooru-collection-store.mjs';
-import { CHARACTER_PROFILE_POLICY, characterProfileEvidence, postTags, isClothingAttributeTag, isAccessoryAttributeTag, isIdentityAttributeTag, isCoreOutfitTag } from './lib/danbooru-character-profile.mjs';
+import { CHARACTER_PROFILE_POLICY, characterProfileEvidence, postTags, isClothingAttributeTag, isAccessoryAttributeTag, isIdentityAttributeTag, minimalOutfitEvidence, selectMinimalIdentity, selectDistinctiveTraits } from './lib/danbooru-character-profile.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1114,31 +1114,19 @@ export function getCharacterProfile(characterTag, posts, options) {
     return counts;
   };
   const counts = countsFor(evidence.standard);
-  const outfitCounts = countsFor(evidence.outfit);
-  const minCount = Math.max(1, Math.ceil(evidence.standard.length * options.minFrequency));
-  const outfitMinCount = Math.max(1, Math.ceil(evidence.outfit.length * Math.max(options.minFrequency, CHARACTER_PROFILE_POLICY.outfitFrequency)));
+  const minCount = Math.max(1, Math.ceil(evidence.standard.length * Math.max(options.minFrequency, 0.5)));
   const byFrequency = (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]);
-  const identity = [...counts].filter(([tag, count]) => isIdentityAttributeTag(tag) && count >= minCount).sort(byFrequency);
-  const identityPriority = [...identity.filter(([tag]) => isEyeColorTag(tag)).slice(0, 1),
-    ...identity.filter(([tag]) => isHairColorTag(tag)).slice(0, 1), ...identity];
-  const selectedIdentity = [...new Map(identityPriority)].slice(0, CHARACTER_PROFILE_POLICY.identityLimit);
-  const wearable = [...outfitCounts].filter(([tag, count]) => (isClothingAttributeTag(tag) || isAccessoryAttributeTag(tag)) && count >= outfitMinCount).sort(byFrequency);
-  // Every selected wearable must also coexist in one observed post.
-  const representative = evidence.outfit.map(post => {
-    const tags = new Set(postTags(post));
-    return { tags, score: wearable.reduce((sum, [tag, count]) => sum + (tags.has(tag) ? count : 0), 0) };
-  }).sort((a, b) => b.score - a.score)[0]?.tags || new Set();
-  const coherent = wearable.filter(([tag]) => representative.has(tag));
-  const clothing = coherent.filter(([tag]) => isClothingAttributeTag(tag));
-  const clothingPriority = [...clothing.filter(([tag]) => isCoreOutfitTag(tag)), ...clothing];
-  const selectedClothing = [...new Map(clothingPriority)].slice(0, CHARACTER_PROFILE_POLICY.clothingLimit);
-  const accessories = coherent.filter(([tag]) => isAccessoryAttributeTag(tag)).slice(0, CHARACTER_PROFILE_POLICY.accessoryLimit);
+  const selectedIdentity = selectMinimalIdentity(counts, evidence.standard, options.minFrequency);
+  const outfit = minimalOutfitEvidence(characterTag, evidence.standard, options.minFrequency);
+  const selectedClothing = outfit.clothing;
+  const accessories = outfit.accessories;
+  const distinctive = selectDistinctiveTraits(evidence.standard, options.minFrequency);
   const subjects = [...counts].filter(([tag, count]) => (tag === '1girl' || tag === '1boy') && count >= minCount).sort(byFrequency).slice(0, 1);
   const attributes = evidence.standard.length < CHARACTER_PROFILE_POLICY.minimumSamples ? []
-    : [...subjects, ...selectedIdentity, ...selectedClothing, ...accessories].slice(0, options.maxAttributes)
+    : [...subjects, ...selectedIdentity, ...selectedClothing, ...accessories, ...distinctive].slice(0, options.maxAttributes)
       .sort((a, b) => getTagPriority(a[0]) - getTagPriority(b[0]) || byFrequency(a, b));
-  return { attributes, profileStatus: evidence.profileStatus,
-    eligibleSampleCount: evidence.eligibleSampleCount, outfitSampleCount: evidence.outfitSampleCount };
+  return { attributes, profileStatus: evidence.standard.length < CHARACTER_PROFILE_POLICY.minimumSamples ? 'needs_review_insufficient_samples' : outfit.profileStatus,
+    eligibleSampleCount: evidence.eligibleSampleCount, outfitSampleCount: outfit.outfitSampleCount };
 }
 
 function getPrimaryCopyright(posts) {
