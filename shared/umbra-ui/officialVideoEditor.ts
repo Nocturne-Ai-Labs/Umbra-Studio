@@ -112,6 +112,7 @@ const PINNED_SETTING_CATEGORIES: Record<number, Record<string, OfficialVideoSett
   3420: {
     enabled: 'post-processing', enabled_4: 'post-processing', enabled_5: 'post-processing', image: 'post-processing', watermark_path: 'post-processing', watermark_path_1: 'post-processing',
     enabled_1: 'upscaling', enabled_2: 'upscaling', enabled_3: 'upscaling',
+    model_name: 'post-processing', enabled_6: 'post-processing', enabled_7: 'post-processing',
   },
   3577: { enabled: 'performance', chunks: 'performance', enabled_1: 'sampling' },
   3676: { enabled: 'performance', value: 'performance', value_1: 'sampling', value_2: 'sampling' },
@@ -169,11 +170,11 @@ function workflow(source: unknown, id: OfficialVideoWorkflowId): OfficialVideoEd
   const directorType = (id === 'h3-26' || id === 'h3-vsa') ? 'MiniMaxH3Director' : 'LTXDirector';
   if (value.nodes.find((node: Ui) => node.id === directorId)?.type !== directorType) fail('the source does not match this pinned workflow.');
   const result = structuredClone(value) as OfficialVideoEditorWorkflow;
-  // C-MMH3-32 predates the two appended 0.5.16 memory widgets. Match the
-  // reviewed native migration on a working copy; the upstream file stays exact.
+  // Older H3 exports predate these append-only Enhanced Upscale widgets.
+  // Match the native widget order on the editable copy.
   for (const node of allNodes(result)) {
     if (node.id !== 2810 || node.type !== 'DaSiWaH3TiledUpscale') continue;
-    for (const [name, fallback] of Object.entries({ enforce_memory_budget: true, memory_reserve_pct: 5 })) {
+    for (const [name, fallback] of Object.entries({ enforce_memory_budget: true, memory_reserve_pct: 5, upscale_sharpness: 1 })) {
       if (!Object.hasOwn(node.widgets_values_named || {}, name)) {
         node.widgets_values_named[name] = fallback;
         node.widgets_values.push(fallback);
@@ -265,7 +266,9 @@ function settings(graph: Ui): Setting[] {
       const value = readWidget(node, name);
       if (!scalar(value)) continue;
       result.push({ node, name, targets, inputType: type, key: `${node.id}.${name}`,
-        label: `${node.type === 'LTXDirectorGuide' ? `${node.type} ${node.id}` : node.title || definition?.name || node.type}: ${input?.label || boundary?.label || name}`,
+        label: node.id === 3420 && name === 'model_name' ? 'RIFE interpolation model'
+          : node.type === 'DaSiWaH3TiledUpscale' && name === 'upscale_sharpness' ? '2D latent upscale sharpness'
+          : `${node.type === 'LTXDirectorGuide' ? `${node.type} ${node.id}` : node.title || definition?.name || node.type}: ${input?.label || boundary?.label || name}`,
         group: ['MiniMaxH3Director', 'LTXDirector'].includes(node.type) ? 'director' : 'generation' });
     }
   }

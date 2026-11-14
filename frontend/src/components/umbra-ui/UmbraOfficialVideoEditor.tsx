@@ -227,6 +227,7 @@ export function UmbraOfficialVideoEditor({ phoneMode = false, projectMode = fals
   const enhancementSettings = (label: string, description: string, controls: typeof fields) => {
     if (!controls.length) return null;
     const prominent = (field: (typeof fields)[number]) => /^Settings:/.test(field.label)
+      || ['3420.model_name', '3420.enabled_6', '3420.enabled_7', '2810.upscale_sharpness'].includes(field.key)
       || /(?:^|[:. ])(?:scale|multiplier|generation_type|upscale_quality)$/.test(field.label);
     const primary = controls.filter(prominent), advanced = controls.filter(field => !prominent(field));
     return <details key={label} open className="rounded border border-white/10">

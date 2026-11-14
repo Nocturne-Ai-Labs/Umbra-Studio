@@ -146,7 +146,7 @@ and broader model-specific documentation are pending.
 ## Video
 
 Video defaults to **DaSiWa only**. Choose the pinned official **H3 C-MMH3-26**
-or **LTX OmniForge C-LTX23-50** workflow, check readiness, then explicitly open
+or **LTX OmniForge C-LTX23-51** workflow, check readiness, then explicitly open
 its original in managed ComfyUI. Configure prompts, resources, timelines,
 sampling, output, and native uint64 seed controls there. Return to Video and
 capture the native workflow, then queue that capture. Umbra retains the native

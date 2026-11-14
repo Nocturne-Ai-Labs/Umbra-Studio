@@ -142,11 +142,11 @@ managed ComfyUI, installed nodes, and models.
 
 ### Official H3 and LTX video workflows
 
-Video defaults to **DaSiWa only**, using the bundled, pinned originals
-**MiniMax H3 MythicAlchemy C-MMH3-32** and **LTX OmniForge C-LTX23-50**.
-The original files and their GPL provenance are under
+Video defaults to **DaSiWa only**, using the bundled, pinned workflows
+**MiniMax H3 MythicAlchemy C-MMH3-33** and **LTX OmniForge C-LTX23-51**.
+The H3 original and the LTX workflow with Umbra’s model-loader repair are under
 [`defaults/PowerPrompter/Official Workflows/DaSiWa`](defaults/PowerPrompter/Official%20Workflows/DaSiWa/PROVENANCE.md).
-Umbra does not substitute an adapted graph when an official workflow is held.
+Both use ComfyUI’s native serializer. Recreate existing LTX captures after updating.
 
 The separate **Longshot Studio** option embeds the original interface by
 [r34vtraining and contributors](https://github.com/r34vtraining/Longshot_Studio).

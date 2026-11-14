@@ -462,7 +462,7 @@ export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = tr
               }
               setSelectedId(item.id); setCaptured(null); setActionError(''); setStatus('');
             })()} className={cn('min-w-0 rounded border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--umbra-accent)] disabled:opacity-50', selectedId === item.id ? 'border-[var(--umbra-accent)] bg-[color-mix(in_srgb,var(--umbra-accent)_8%,transparent)]' : 'border-white/10 bg-black/15 hover:bg-white/5')}>
-              <span data-i18n-skip="" className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-vsa' ? 'Requires Turbo LoRA + Sparse Attention / CUDA' : item.id === 'h3-26' ? 'C-MMH3-33' : 'C-LTX23-50'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
+              <span data-i18n-skip="" className="block break-words text-xs font-bold">{item.name}</span><span className="mt-1 block text-[10px] text-zinc-400">{item.id === 'h3-vsa' ? 'Requires Turbo LoRA + Sparse Attention / CUDA' : item.id === 'h3-26' ? 'C-MMH3-33' : 'C-LTX23-51'} · {item.readiness.ready ? 'Ready' : 'Setup required'}</span>
             </button>)}
           </div>
           {selected ? <section className="space-y-3 border-b border-white/10 pb-3" aria-label="Selected official workflow">

@@ -287,9 +287,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
+          "minimumCommit": "3c3fd6580e82e15143d56d6fba9ef39c86d65904",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.39",
+          "version": "0.5.51",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -330,9 +330,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
+          "minimumCommit": "3c3fd6580e82e15143d56d6fba9ef39c86d65904",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.39",
+          "version": "0.5.51",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -373,9 +373,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
+          "minimumCommit": "3c3fd6580e82e15143d56d6fba9ef39c86d65904",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.39",
+          "version": "0.5.51",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -638,9 +638,9 @@
         },
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
+          "minimumCommit": "3c3fd6580e82e15143d56d6fba9ef39c86d65904",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.39",
+          "version": "0.5.51",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -768,9 +768,9 @@
       "customNodes": [
         {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
+          "minimumCommit": "3c3fd6580e82e15143d56d6fba9ef39c86d65904",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.39",
+          "version": "0.5.51",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -845,22 +845,26 @@
     },
     {
       "id": "official-dasiwa-ltx23-50",
-      "label": "Official DaSiWa LTX OmniForge C-LTX23-50",
+      "label": "Official DaSiWa LTX OmniForge C-LTX23-51",
       "workflowIds": [
         "ltx23-50"
       ],
       "minimumComfyVersion": "0.38.0",
       "minimumFrontendVersion": "1.53.6",
       "frontendSource": "https://github.com/comfyanonymous/ComfyUI/blob/v0.38.0/requirements.txt",
-      "modelProfiles": [],
+      "modelProfiles": ["ltx-2.3"],
       "requiredBuiltinClasses": [
         "BasicScheduler",
         "CFGGuider",
         "CLIPTextEncode",
         "ColorTransfer",
+        "ComfyMathExpression",
         "ComfySwitchNode",
         "ConditioningZeroOut",
         "DualCLIPLoader",
+        "FrameInterpolate",
+        "FrameInterpolationModelLoader",
+        "ImageUpscaleWithModel",
         "KSamplerSelect",
         "LTXVAudioVAEDecode",
         "LTXVConcatAVLatent",
@@ -881,28 +885,10 @@
       ],
       "customNodes": [
         {
-          "name": "rgthree-comfy",
-          "minimumCommit": "449c58fcdd612f7733e54c51f6758ead63fa180b",
-          "repository": "https://github.com/rgthree/rgthree-comfy",
-          "version": "1.0.2608312342",
-          "license": "MIT",
-          "webDirectory": "./web/comfyui",
-          "frontendAssets": [
-            {
-              "path": "web/comfyui/context.js",
-              "registration": "rgthree.Context"
-            }
-          ],
-          "requiredClasses": [
-            "Context (rgthree)",
-            "Context Switch (rgthree)"
-          ]
-        },
-        {
           "name": "ComfyUI-DaSiWa-Nodes",
-          "minimumCommit": "c52b1704d8250d1205515f1ce39c5d6c9ed9cd32",
+          "minimumCommit": "3c3fd6580e82e15143d56d6fba9ef39c86d65904",
           "repository": "https://github.com/darksidewalker/ComfyUI-DaSiWa-Nodes",
-          "version": "0.5.39",
+          "version": "0.5.51",
           "license": "GPL-3.0",
           "webDirectory": "./js",
           "frontendAssets": [
@@ -939,6 +925,7 @@
             "DaSiWa_LTX2LoraLoader",
             "DaSiWa_NodeStatusSwitch",
             "DaSiWa_RTX_UpscalerRefiner",
+            "DaSiWa_RTX_FrameGeneration",
             "DaSiWa_ResolutionScaleCalculator",
             "DaSiWa_SeedControl",
             "DaSiWa_TorchResize",
@@ -1005,21 +992,11 @@
           "requiredClasses": [
             "LTXVSpatioTemporalTiledVAEDecode"
           ]
-        },
-        {
-          "name": "comfyui-WhiteRabbit",
-          "minimumCommit": "4815da41473c99400da6ca4127f0e324dbfd865a",
-          "repository": "https://github.com/Artificial-Sweetener/comfyui-WhiteRabbit",
-          "version": "1.2.0",
-          "license": "AGPL-3.0-only",
-          "requiredClasses": [
-            "UpscaleWithModelAdvanced"
-          ]
         }
       ],
-      "sourceSha256": "f4a9e0c3abfff2c4e94525b312c463981090da7e5cb8a41cd479bb9779ab6933",
-      "sourceCommit": "143bd6a47d844ddd7a68175db5c5ff3867f5febb",
-      "notes": "Load the pinned original in native ComfyUI. All serialized classes and frontend assets remain required even for currently bypassed stages; no adapted fallback. Model assets and GPU execution are separate readiness gates.",
+      "sourceSha256": "11dd7a6497511848c8c8029dac0ad1b2538404efc6683bd329e99e947472dd47",
+      "sourceCommit": "befdca4f21e5bdd671a8ebf9e6c820f5f4aa7c50",
+      "notes": "Load the pinned C-LTX23-51 graph with Umbra’s model-loader link repair in native ComfyUI. RTX frame generation and RIFE interpolation are optional 2× stages. All serialized classes must be registered. GPU execution and model assets have separate readiness checks. The ltx23-50 storage key is retained; capture again after updating.",
       "runtimePackages": [
         {
           "module": "triton",

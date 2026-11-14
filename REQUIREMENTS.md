@@ -115,20 +115,19 @@ requiring a host Node installation.
 | Umbra Remote | Tailscale installed and signed in on the host and client; Tailscale Serve is recommended for HTTPS. |
 | Video generation | ComfyUI, compatible video models/custom nodes, sufficient VRAM, and video encode/decode support. |
 
-The default official H3 C-MMH3-32 and LTX C-LTX23-50 workflows have explicit
+The default official H3 C-MMH3-33 and LTX C-LTX23-51 workflows have explicit
 dependencies in `defaults/UmbraUI/tool-requirements.json`. Their reviewed baseline
-is ComfyUI 0.38.0 with frontend 1.53.6 and DaSiWa 0.5.16, plus the declared
+is ComfyUI 0.38.0 with frontend 1.53.6 and DaSiWa 0.5.51, plus the declared
 provider suites and frontend assets. Setup repairs these through
 the existing managed installer after a dependency-plan review. Local conflicts,
 busy runtimes and unverified shutdowns hold the repair; generation models remain
 a separate user selection/setup step.
 
-H3 C-MMH3-32 uses DaSiWa Enhanced Upscale and optional RTX frame generation.
-Learned latent upscaling can use the optional **MiniMax H3 Latent Upscaler**
-selection in Setup's generation prerequisites (about 691 MB); interpolation
-does not need that model. RTX features require supported NVIDIA hardware and
-the corresponding SDK capabilities. Existing H3 captures must be recreated
-against C-MMH3-32; LTX-50 keeps its previous source revision.
+H3 Enhanced Upscale uses either optional **MiniMax H3 2D Latent Upscaler**
+(about 364 MB) or **MiniMax H3 Latent Upscaler** (3D, about 691 MB) from Setup.
+The 2D model supports six sharpness tiers. LTX C-LTX23-51 adds optional 2× RIFE
+interpolation and RTX frame generation. RTX features require supported NVIDIA
+hardware and SDK capabilities. Recreate existing LTX captures after updating.
 
 Longshot Studio is opt-in. Its Setup bundle installs `Longshot_Studio`,
 `H3_Longshot`, and `H3_Prompt_Compiler` from their upstream repositories.

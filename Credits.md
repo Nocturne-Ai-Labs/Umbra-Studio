@@ -577,7 +577,7 @@ upstream default branches. They are not frozen to Umbra-selected commit hashes.
   - MiniMax H3 Director, Director Guide, Prompt Forge, references, and continuity tools
   - LTX-2.3 Advanced LoRA Loader, Enhanced Video Combine, and optional workflow helpers
 - Earlier adapted routes use DaSiWa / darksidewalker's H3 Director and OmniForge concepts; those Umbra adapters remain available through explicit All video routes.
-- Official workflow repository: https://github.com/darksidewalker/dasiwa-comfyui-workflows. Original `C-MMH3-32` and `C-LTX23-50` UI JSON files are redistributed under GPL-3.0 in `defaults/PowerPrompter/Official Workflows/DaSiWa`, with the complete upstream license, pinned revision, exact hashes, and source links in `PROVENANCE.md`. These files retain their own license separately from Umbra's MIT code. Node extensions and model weights are installed separately and retain their respective terms.
+- Official workflow repository: https://github.com/darksidewalker/dasiwa-comfyui-workflows. Original `C-MMH3-33` and Umbra’s model-loader repair of `C-LTX23-51` UI JSON files are redistributed under GPL-3.0 in `defaults/PowerPrompter/Official Workflows/DaSiWa`, with the complete upstream license, pinned revision, exact hashes, and source links in `PROVENANCE.md`. These files retain their own license separately from Umbra's MIT code. Node extensions and model weights are installed separately and retain their respective terms.
 
 ### whatdreamscost-comfyui
 - Managed install source: https://github.com/PodJamz/whatdreamscost-comfyui (fork)

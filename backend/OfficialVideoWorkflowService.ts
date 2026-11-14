@@ -9,11 +9,11 @@ import { expandComfyRuntimeInputs } from './ComfyDynamicInputs';
 
 type Node = { class_type: string; inputs: Record<string, unknown>; _meta?: Record<string, unknown> };
 export type OfficialApiGraph = Record<string, Node>;
-const SOURCE_COMMIT = '143bd6a47d844ddd7a68175db5c5ff3867f5febb';
+const SOURCE_COMMIT = 'befdca4f21e5bdd671a8ebf9e6c820f5f4aa7c50';
 export const OFFICIAL_VIDEO_SOURCES = {
   'h3-26': { name: 'DaSiWa H3 MythicAlchemy C-MMH3-33', sourceCommit: '43bc259f14bdcc790d10234a53321b1c1011c29c', family: 'minimax_h3', sha256: 'cba462ef659ebb9c61d6a62f954164ece0b4b293220e5cdbad747b5ba79a1502', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-33.json' },
   'h3-vsa': { name: 'H3 REF2VA Turbo + Sparse Attention (Experimental)', sourceCommit: '43bc259f14bdcc790d10234a53321b1c1011c29c', family: 'minimax_h3', sha256: 'a59c255e51385f7ee81efae08712113b9f1a9408374493ecae02aaa9e38f8623', path: 'C-MMH3/DaSiWa MiniMaxH3 MythicAlchemy C-MMH3-33.json' },
-  'ltx23-50': { name: 'DaSiWa LTX OmniForge C-LTX23-50', sourceCommit: SOURCE_COMMIT, family: 'ltx23', sha256: 'f4a9e0c3abfff2c4e94525b312c463981090da7e5cb8a41cd479bb9779ab6933', path: 'C-LTX23/DaSiWa LTX OmniForge C-LTX23-50.json' },
+  'ltx23-50': { name: 'DaSiWa LTX OmniForge C-LTX23-51', sourceCommit: SOURCE_COMMIT, family: 'ltx23', sha256: '11dd7a6497511848c8c8029dac0ad1b2538404efc6683bd329e99e947472dd47', path: 'C-LTX23/DaSiWa LTX OmniForge C-LTX23-51.json' },
 } as const;
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 export const officialGraphSha256 = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
