@@ -750,7 +750,7 @@ async function fetchCharacterTagsFromDanbooru(limit, options) {
 
   console.log(`Loading ${formatLimit(limit)} character tags from Danbooru...`);
   while (tags.length < limit) {
-    reportProgress({ stage: 'collecting', current: categoryName, total: null });
+    reportProgress({ stage: 'collecting', current: 'characters', total: null });
     await waitForGeneratorControl();
     const remaining = Number.isFinite(limit) ? limit - tags.length : DANBOORU_MAX_TAG_LIMIT;
     const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
