@@ -36,7 +36,7 @@ type GeneratorResult = {
   ratePercent?: number;
   mode?: GeneratorMode;
   args?: string[];
-  progress?: { stage: string; completed: number; total: number | null; catalogRows: number; characters?: number; current: string; retryUntil: number };
+  progress?: { stage: string; completed: number; total: number | null; catalogRows: number; characters?: number; charactersChecked?: number; batchNumber?: number; batchSize?: number; scanned?: number; current: string; retryUntil: number };
 };
 
 export function DanbooruDatasetGeneratorTab() {
@@ -419,13 +419,13 @@ export function DanbooruDatasetGeneratorTab() {
               </div>
               {progress ? <div className="mt-4 space-y-2">
                 <div className="flex flex-wrap justify-between gap-2 text-sm text-zinc-200">
-                  <span>{progress.stage === 'combined' ? 'Collecting tags and character attributes' : progress.stage === 'collecting' ? `Collecting ${progress.current || 'tags'}` : progress.stage === 'completed' ? 'Collection complete' : 'Collecting character attributes'}</span>
+                  <span>{progress.stage === 'batch-discovery' ? `Batch ${progress.batchNumber}: collecting ${(progress.batchSize ?? 50000).toLocaleString()} new entries` : progress.stage === 'batch-attributes' ? `Batch ${progress.batchNumber}: collecting character attributes` : progress.stage === 'combined' ? 'Collecting tags and character attributes' : progress.stage === 'collecting' ? `Collecting ${progress.current || 'tags'}` : progress.stage === 'completed' ? 'Collection complete' : 'Collecting character attributes'}</span>
                   <span>{percent === null ? `${progress.catalogRows.toLocaleString()} entries found` : `${progress.completed.toLocaleString()} / ${progress.total?.toLocaleString()} · ${percent.toFixed(1)}%`}</span>
                 </div>
                 <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-2 overflow-hidden rounded-full bg-white/10">
                   <div className={`h-full rounded-full ${result.paused ? 'bg-amber-300' : 'bg-emerald-300'} ${percent === null && running ? 'animate-pulse' : ''}`} style={{ width: percent === null ? '25%' : `${percent}%` }} />
                 </div>
-                <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} entries discovered{progress.stage === 'combined' ? ` · ${progress.completed.toLocaleString()} / ${(progress.characters ?? 0).toLocaleString()} discovered characters have attributes checked` : ''} · Request speed {result.ratePercent ?? 100}%</div>
+                <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} entries discovered{progress.stage === 'combined' || progress.stage.startsWith('batch-') ? ` · ${(progress.charactersChecked ?? progress.completed).toLocaleString()} / ${(progress.characters ?? 0).toLocaleString()} discovered characters have attributes checked` : ''}{progress.stage === 'batch-discovery' ? ` · ${(progress.scanned ?? 0).toLocaleString()} tag entries scanned (saved entries skipped)` : ''} · Request speed {result.ratePercent ?? 100}%</div>
                 {result.running && !result.paused && retrySeconds > 0 ? <div role="status" className="text-xs text-amber-200">Danbooru rate limit / server retry · waiting {retrySeconds}s. Completed rows are saved.</div> : null}
               </div> : result.running ? <div role="status" className="mt-3 text-xs text-zinc-400">Preparing collection…</div> : null}
             </section>

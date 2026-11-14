@@ -11,7 +11,7 @@ import {
   normalizeOutputLanguage,
 } from './lib/danbooru-localization.mjs';
 import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
-import { createCombinedCollector } from './lib/danbooru-combined-collector.mjs';
+import { createBatchedCombinedCollector } from './lib/danbooru-combined-collector.mjs';
 import { writeCollectionCheckpoint } from './lib/danbooru-checkpoint-file.mjs';
 import { parseCombinedCheckpoint, requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
@@ -797,7 +797,7 @@ async function* fetchTagRowsForCategory(options, categoryId) {
     if (options.mode !== 'combined') reportProgress({ stage: 'collecting', current: categoryName, total: null });
     await waitForGeneratorControl();
     const remaining = Number.isFinite(options.limit) ? options.limit - rows.length : DANBOORU_MAX_TAG_LIMIT;
-    const pageLimit = Math.min(options.mode === 'combined' && categoryId === 4 ? 32 : DANBOORU_MAX_TAG_LIMIT, remaining);
+    const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
     const url = new URL(DANBOORU_TAGS_URL);
     url.searchParams.set('limit', String(pageLimit));
     url.searchParams.set('search[category]', String(categoryId));
@@ -1323,7 +1323,7 @@ async function main() {
     await mkdir(path.dirname(options.outFile), { recursive: true });
     const initialRows = options.resumeExisting
       ? parseCombinedCheckpoint(await readFile(options.outFile, 'utf8'), options) : [];
-    const collector = createCombinedCollector({
+    const collector = createBatchedCombinedCollector({
       initialRows,
       concurrency: options.concurrency,
       report: reportProgress,
@@ -1345,7 +1345,7 @@ async function main() {
       await collector.accept(initialRows);
       rows = await collector.finish();
     } catch (error) {
-      await collector.finish().catch(() => {});
+      await collector.checkpoint().catch(() => {});
       throw error;
     }
     const characters = rows.filter(row => row.category === 4).length;
