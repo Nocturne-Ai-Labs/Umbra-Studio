@@ -1,7 +1,7 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 7, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  version: 8, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
   outfitFrequency: 0.9, minimumSamples: 3, identityFrequency: 0.35,
 });
 
@@ -10,14 +10,14 @@ const alternateTags = new Set([
   'alternate_hairstyle', 'official_alternate_hairstyle', 'alternate_hair_color', 'official_alternate_hair_color',
   'alternate_eye_color', 'official_alternate_eye_color', 'alternate_color', 'alternate_form',
   'alternate_age', 'aged_up', 'aged_down', 'costume_switch', 'clothes_swap', 'hairstyle_switch',
-  'color_swap', 'palette_swap', 'cosplay',
+  'color_swap', 'palette_swap', 'cosplay', 'alternate_animal_ears', 'alternate_tail',
 ]);
 export const postTags = post => [...new Set(String(post?.tag_string_general || '').trim().split(/\s+/).filter(Boolean))];
 
 const additionalGarment = /(?:^|_)(?:tank_top|crop_top|tube_top|halter_top|camisole|blouse|blazer|leotard|tunic|robe|cape|overalls|overcoat|sarong|jumpsuit|trousers)$/;
 
 export function isClothingAttributeTag(tag) {
-  return ['maid', 'serafuku'].includes(tag) || classifyDanbooruTag(tag).includes('clothing')
+  return ['maid', 'serafuku', 'armor', 'japanese_armor', 'power_armor', 'full_armor', 'breastplate', 'pauldrons', 'gauntlets', 'greaves', 'chainmail'].includes(tag) || classifyDanbooruTag(tag).includes('clothing')
     || additionalGarment.test(tag)
     || /(?:^|_)(?:sleeves|sleeveless|strapless|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag)
     || /(?:^|_)(?:elbow_pads|knee_pads|shoulder_armor)$/.test(tag)
@@ -42,6 +42,7 @@ const garmentSlots = {
   body: ['dress', 'kimono', 'leotard', 'robe', 'overalls', 'bodysuit', 'jumpsuit'],
   outer: ['jacket', 'coat', 'cape', 'blazer'],
   signature: ['detached_sleeves'],
+  armor: ['armor', 'japanese_armor', 'power_armor', 'full_armor'],
   uniform: ['serafuku', 'maid', 'military_uniform'],
   legwear: ['striped_thighhighs', 'striped_stockings', 'striped_socks', 'argyle_thighhighs', 'argyle_pantyhose', 'fishnet_thighhighs', 'fishnet_pantyhose'],
 };
@@ -162,17 +163,38 @@ export function selectMinimalIdentity(counts, standard, minFrequency = 0) {
   return [...essential, ...details].slice(0, Math.max(CHARACTER_PROFILE_POLICY.identityLimit, essential.length));
 }
 
-const tailTypes = new Set(['shark_tail', 'fish_tail', 'cat_tail', 'dog_tail', 'fox_tail', 'rabbit_tail', 'dragon_tail', 'demon_tail', 'horse_tail', 'cow_tail', 'lizard_tail', 'snake_tail', 'monkey_tail']);
-export const isDistinctiveTraitTag = tag => tailTypes.has(tag);
+const animalTypes = ['cat', 'dog', 'fox', 'wolf', 'rabbit', 'horse', 'cow', 'mouse', 'rat', 'raccoon', 'squirrel', 'lion', 'tiger', 'leopard', 'cheetah', 'lynx', 'deer', 'sheep', 'goat', 'bear', 'panda', 'red_panda', 'hyena', 'bat', 'bird', 'monkey', 'dragon'];
+const tailTypes = new Set([...animalTypes.map(type => `${type}_tail`), 'shark_tail', 'fish_tail', 'demon_tail', 'lizard_tail', 'snake_tail', 'scorpion_tail']);
+const earTypes = new Set([...animalTypes.map(type => `${type}_ears`), 'animal_ears']);
+const breastSizes = new Set(['flat_chest', 'small_breasts', 'medium_breasts', 'large_breasts', 'huge_breasts', 'gigantic_breasts']);
+const furColor = /^(?:white|black|grey|gray|brown|blue|red|orange|yellow|green|pink|purple|cream|tan|multicolored)_fur$/;
+export const isDistinctiveTraitTag = tag => tailTypes.has(tag) || earTypes.has(tag) || tag === 'fake_animal_ears' || tag === 'fur' || furColor.test(tag) || breastSizes.has(tag);
+
 export function selectDistinctiveTraits(standard, minFrequency = 0) {
-  const counts = new Map(); let typedPosts = 0;
-  for (const post of standard) {
-    let tags = postTags(post).filter(isDistinctiveTraitTag);
-    if (tags.includes('shark_tail')) tags = tags.filter(tag => tag !== 'fish_tail');
-    if (tags.length) typedPosts++;
-    for (const tag of tags) counts.set(tag, (counts.get(tag) || 0) + 1);
-  }
+  const rows = standard.map(postTags);
   const minimum = Math.max(CHARACTER_PROFILE_POLICY.minimumSamples, Math.ceil(standard.length * Math.max(0.3, minFrequency)));
-  return [...counts].filter(([,count]) => count >= minimum && count >= typedPosts * 0.9)
-    .sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0])).slice(0,1);
+  function strongest(samples, agreement, rejectTie = true) {
+    const counts = new Map();
+    for (const tags of samples) for (const tag of new Set(tags)) counts.set(tag, (counts.get(tag) || 0) + 1);
+    const tagged = samples.filter(tags => tags.length).length;
+    const ranked = [...counts].sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+    const best = ranked[0];
+    if (!best || best[1] < minimum || best[1] < tagged * agreement || (rejectTie && ranked[1]?.[1] === best[1])) return [];
+    return [best];
+  }
+  const tails = strongest(rows.map(tags => tags.filter(tag => tailTypes.has(tag) && !(tag === 'fish_tail' && tags.includes('shark_tail')))), 0.9);
+  // Fake-ear evidence is never counted as biological ears. Once supported, keep the qualifier alone.
+  const fake = rows.filter(tags => tags.includes('fake_animal_ears')).length;
+  const ears = fake >= minimum ? [['fake_animal_ears', fake]] : strongest(rows.map(tags => {
+    if (tags.includes('fake_animal_ears')) return [];
+    const typed = tags.filter(tag => earTypes.has(tag) && tag !== 'animal_ears');
+    return typed.length ? typed : tags.includes('animal_ears') ? ['animal_ears'] : [];
+  }), 0.9);
+  const fur = strongest(rows.map(tags => {
+    const colors = tags.filter(tag => furColor.test(tag));
+    return colors.length ? colors : tags.includes('fur') ? ['fur'] : [];
+  }), 0.6);
+  // Size labels vary by artist. Keep only a clear most-supported size, never tied alternatives.
+  const size = strongest(rows.map(tags => tags.filter(tag => breastSizes.has(tag))), 0.6);
+  return [...tails, ...ears, ...fur, ...size];
 }
