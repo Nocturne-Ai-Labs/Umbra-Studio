@@ -747,6 +747,7 @@ async function ask(rl, question, fallback) {
 
 async function fetchCharacterTagsFromDanbooru(limit, options) {
   const tags = [];
+  options.characterPostCounts = new Map();
   let page = 1;
 
   console.log(`Loading ${formatLimit(limit)} character tags from Danbooru...`);
@@ -772,7 +773,7 @@ async function fetchCharacterTagsFromDanbooru(limit, options) {
       const postCount = Number(tag?.post_count || 0);
       if (postCount < options.minCharacterPosts) continue;
       const name = normalizeTag(tag?.name);
-      if (name) tags.push(name);
+      if (name) { tags.push(name); options.characterPostCounts.set(name, postCount); }
       if (tags.length >= limit) break;
     }
 
@@ -1179,20 +1180,33 @@ function isHairColorTag(tag) {
   return /^(?:(?:light|dark)_)?(?:aqua|black|blonde|blue|brown|cyan|green|grey|gray|orange|pink|platinum_blonde|purple|red|silver|white|yellow|multicolored|two-tone)_hair$/.test(tag);
 }
 
-function toCsv(rows, fallbackOptions = {}) {
+// Sort a copy so output order cannot alter discovery cursors or enrichment order.
+export function sortRowsByCopyright(rows) {
+  const group = row => String(row.copyright || (row.category === 3 ? row.tag : '') || '').trim();
+  const count = row => row.postCount != null && Number.isFinite(Number(row.postCount)) ? Number(row.postCount) : -1;
+  return [...rows].sort((a,b) => {
+    const ac = group(a), bc = group(b);
+    return Number(!ac) - Number(!bc) || ac.localeCompare(bc, 'en')
+      || (ac && bc ? Number(b.category === 3) - Number(a.category === 3) : (a.category ?? 4) - (b.category ?? 4))
+      || count(b) - count(a)
+      || String(a.character || a.tag || '').localeCompare(String(b.character || b.tag || ''), 'en');
+  });
+}
+
+export function toCsv(rows, fallbackOptions = {}) {
   const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
   const headers = localized
     ? ['character', 'attributes', 'localized_name', 'localized_aliases']
     : ['character', 'attributes'];
-  headers.push('profile_status', 'eligible_sample_count', 'outfit_sample_count');
+  headers.push('profile_status', 'eligible_sample_count', 'outfit_sample_count', 'copyright', 'post_count');
   const lines = [
     headers.join(','),
-    ...rows.map((row) => {
+    ...sortRowsByCopyright(rows).map((row) => {
       const canonicalCells = [
         csvCell(displayTag(row.character, row.options)),
         csvCell(row.attributes.map(([tag]) => displayTag(tag, row.options)).join(', ')),
       ];
-      const profileCells = [csvCell(row.profileStatus), csvCell(row.eligibleSampleCount), csvCell(row.outfitSampleCount)];
+      const profileCells = [csvCell(row.profileStatus), csvCell(row.eligibleSampleCount), csvCell(row.outfitSampleCount), csvCell(row.copyright), csvCell(row.postCount)];
       if (!localized) return [...canonicalCells, ...profileCells].join(',');
 
       const characterLocalization = getLocalizedTag(row.options.localizationMap, row.localizationTag || row.character);
@@ -1213,11 +1227,11 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
   const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
   const combined = (rows[0]?.options || fallbackOptions).mode === 'combined';
   const headers = ['tag', 'category', 'color', 'post_count', 'classifiers'];
-  if (combined) headers.push('type', 'attributes', 'attributes_collected', 'sample_count', 'attribute_status', 'profile_status', 'eligible_sample_count', 'outfit_sample_count');
+  if (combined) headers.push('type', 'attributes', 'attributes_collected', 'sample_count', 'attribute_status', 'profile_status', 'eligible_sample_count', 'outfit_sample_count', 'copyright');
   if (localized) headers.push('localized_name', 'localized_aliases');
   const lines = [
     headers.join(','),
-    ...rows.map((row) => {
+    ...(combined ? sortRowsByCopyright(rows) : rows).map((row) => {
       const canonicalCells = [
         csvCell(displayTag(row.tag, row.options)),
         csvCell(row.category),
@@ -1234,6 +1248,7 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
         csvCell(row.category === 4 ? row.profileStatus : ''),
         csvCell(row.category === 4 ? row.eligibleSampleCount : ''),
         csvCell(row.category === 4 ? row.outfitSampleCount : ''),
+        csvCell(row.copyright || (row.category === 3 ? row.tag : '')),
       );
       if (!localized) return canonicalCells.join(',');
       const localization = getLocalizedTag(row.options.localizationMap, row.tag);
@@ -1382,6 +1397,7 @@ async function main() {
           return [];
         }
         const posts = await fetchPostsForCharacter(row.tag, options);
+        row.copyright = getPrimaryCopyright(posts);
         const profile = getCharacterProfile(row.tag, posts, options);
         Object.assign(row, profile);
         const { attributes } = profile;
@@ -1452,7 +1468,7 @@ async function main() {
       if (options.delayMs > 0) {
         await controlledSleep(options.delayMs);
       }
-      return { character: outputCharacter, localizationTag: character, ...profile, options };
+      return { character: outputCharacter, localizationTag: character, copyright, postCount: options.characterPostCounts?.get(character), ...profile, options };
     }, (completedRows) => {
       const csv = toCsv(completedRows, options);
       checkpointWrite = checkpointWrite.then(async () => {

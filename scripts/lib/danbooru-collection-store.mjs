@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { CHARACTER_PROFILE_POLICY } from './danbooru-character-profile.mjs';
 
 export function collectionPolicy(options) {
-  return JSON.stringify({ version: 1, limit: Number.isFinite(options.limit) ? options.limit : 'all',
+  return JSON.stringify({ version: 2, exportOrder: 'copyright-asc-post-count-desc-name-asc', limit: Number.isFinite(options.limit) ? options.limit : 'all',
     profilePolicy: CHARACTER_PROFILE_POLICY,
     catalogCategories: [1, 3, 4],
     minTagPosts: options.minTagPosts, minCharacterPosts: options.minCharacterPosts,
