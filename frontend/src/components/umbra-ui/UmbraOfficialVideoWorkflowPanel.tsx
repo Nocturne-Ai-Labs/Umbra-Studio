@@ -3,13 +3,15 @@
 import { AutoSizePromptTextarea } from '@/components/umbra-ui/AutoSizePromptTextarea';
 import { mobileOfficialVideoDraft, mobileOfficialVideoInputError } from '@/lib/mobileOfficialVideo';
 import { prepareOfficialVideoResolution } from '@/lib/officialVideoResolution';
+import { openUmbraSetup } from '@/lib/openUmbraSetup';
+import { isUmbraRemoteClient } from '@/utils/hostOnly';
 
 import React from 'react';
 import { useVideoStudioProject } from './useVideoStudioProject';
 import { VideoStudioProjectPicker } from './VideoStudioProjectPicker';
 import { VideoStudioTimeline } from './VideoStudioTimeline';
 import { videoShotInputIssue, projectGenerationDraft, type VideoStudioMedia } from '../../../../shared/umbra-ui/videoStudioProject';
-import { Camera, FolderOpen, Save, Undo2, Redo2, Clapperboard, ExternalLink, Loader2, PanelRight, Play, RefreshCw, Upload } from 'lucide-react';
+import { Camera, FolderOpen, Save, Undo2, Redo2, Clapperboard, ExternalLink, Loader2, PanelRight, Play, RefreshCw, Upload, Wrench } from 'lucide-react';
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import { pushAppSettingsToBackend, saveAppSettings } from '@/lib/appSettings';
 import { cn } from '@/lib/utils';
@@ -100,6 +102,7 @@ export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = tr
   const [loading, setLoading] = React.useState(true);
   const [catalogError, setCatalogError] = React.useState('');
   const [actionError, setActionError] = React.useState('');
+  const [setupError, setSetupError] = React.useState('');
   const [status, setStatus] = React.useState('');
   const [busy, setBusy] = React.useState<'opening' | 'capturing' | 'importing' | 'queueing' | ''>('');
   const [policySaving, setPolicySaving] = React.useState(false);
@@ -439,6 +442,12 @@ export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = tr
   const routingControl = <UmbraSelectControl value="dasiwa-only" disabled={policySaving || !!busy} onChange={event => void changePolicy(event.target.value)} aria-label="Video routing policy" controlSize="sm" className="min-w-40 rounded border border-white/15 bg-black/20 px-2 text-[11px]">
           <option value="dasiwa-only">DaSiWa only</option><option value="all-routes">All video routes</option>
         </UmbraSelectControl>;
+  const remoteClient = isUmbraRemoteClient();
+  const openSetup = async (tab: 'tools' | 'models') => {
+    setSetupError('');
+    try { await openUmbraSetup(tab); }
+    catch (error) { setSetupError(errorText(error)); }
+  };
   const workflowControls = <UmbraMobileSettingsSection enabled={phoneMode} title="Workflow & setup" summary={`${loading ? 'Checking…' : catalogError ? 'Check failed' : selected?.readiness.ready ? 'Ready' : 'Setup required'} · ${selected?.name || 'Choose a workflow'}`}>
           <div className="flex items-center justify-between gap-2"><h3 className={labelClass}>Official workflows</h3><button type="button" className={buttonClass} disabled={loading || !!busy} onClick={() => void refresh()} aria-label="Refresh official workflow readiness"><RefreshCw size={13} />Check readiness</button></div>
           {loading ? <p role="status" className="flex items-center gap-2 py-3 text-xs text-zinc-400"><Loader2 size={15} className="animate-spin" />Checking official workflows…</p> : null}
@@ -468,6 +477,15 @@ export function UmbraOfficialVideoWorkflowPanel({ phoneMode = false, active = tr
           {selected ? <section className="space-y-3 border-b border-white/10 pb-3" aria-label="Selected official workflow">
             <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400"><span>{selected.license}</span>{selected.id === 'h3-vsa' ? <span>Umbra experimental adaptation / Kablex VSA: Apache-2.0 / CUDA sol_attn required</span> : null}<span title={selected.sourceCommit}>Revision {selected.sourceCommit.slice(0, 10)}</span><span title={selected.sha256}>SHA-256 {selected.sha256.slice(0, 12)}</span><a href={selected.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 text-[var(--umbra-accent)] hover:underline">Upstream source<ExternalLink size={12} /></a></div>
             {!selected.readiness.ready ? <div role="status" data-official-readiness-blocked="" className="space-y-1 text-xs text-amber-200"><h4 className={labelClass}>Setup required</h4>{selected.readiness.issues.map((issue, index) => <p key={`${index}:${issue}`} className="break-words">{issue}</p>)}</div> : null}
+            <div className="space-y-2 text-xs text-zinc-400">
+              <p>{remoteClient ? 'Open Umbra Setup on the host PC.' : 'Open Umbra Setup to install or update this workflow’s requirements.'} Use <strong>Advanced → Tools</strong> for the {selected.id === 'h3-vsa' ? 'Official DaSiWa H3 and Turbo + Sparse Attention bundles' : 'selected DaSiWa bundle'} and <strong>Advanced → Models</strong> for {selected.id === 'ltx23-50' ? 'LTX-2.3 Video support files' : selected.id === 'h3-vsa' ? 'MiniMax H3 Reference Video and Turbo + Sparse Attention weights' : 'MiniMax H3 Video'}. Restart ComfyUI after updating nodes, then select Check readiness.</p>
+              {selected.id !== 'ltx23-50' ? <p>For local text-only prompting, select <strong>DaSiWa H3 Prompt Forge Model (Optional)</strong> in Models.</p> : null}
+              {!remoteClient ? <div className="flex flex-wrap gap-2">
+                <button type="button" className={buttonClass} onClick={() => void openSetup('tools')}><Wrench size={13} />Open Setup Tools</button>
+                <button type="button" className={buttonClass} onClick={() => void openSetup('models')}>Open Setup Models</button>
+              </div> : null}
+              {!remoteClient && setupError ? <p role="alert" className="break-words text-amber-200">{setupError}</p> : null}
+            </div>
             {!comfyConnected ? <p className="text-xs text-zinc-400">ComfyUI is not connected. Open its workspace to use the managed controls.</p> : null}
           </section> : null}
   </UmbraMobileSettingsSection>;

@@ -120,8 +120,18 @@ dependencies in `defaults/UmbraUI/tool-requirements.json`. Their reviewed baseli
 is ComfyUI 0.38.0 with frontend 1.53.6 and DaSiWa 0.5.51, plus the declared
 provider suites and frontend assets. Setup repairs these through
 the existing managed installer after a dependency-plan review. Local conflicts,
-busy runtimes and unverified shutdowns hold the repair; generation models remain
-a separate user selection/setup step.
+busy runtimes and unverified shutdowns hold the repair.
+
+In Video Studio, open **Workflow & setup** and choose **Open Setup Tools** or
+**Open Setup Models**. In Umbra Setup, use **Advanced → Tools** to install or
+update the selected Official DaSiWa bundle, then **Advanced → Models** for the
+MiniMax H3 Video or LTX-2.3 Video support files. For H3 reference workflows, also
+select **MiniMax H3 Reference Video**. The experimental sparse-attention workflow
+also needs the **H3 REF2VA Turbo + Sparse Attention (Experimental)** entries in
+both Tools and Models. LTX-2.3 needs a compatible transformer from Model Manager.
+For local text-only H3 prompting, Models also offers the optional
+**DaSiWa H3 Prompt Forge Model** (Llama 3.2 3B Instruct).
+Restart ComfyUI after updating nodes, then select **Check readiness** in Video Studio.
 
 H3 Enhanced Upscale uses either optional **MiniMax H3 2D Latent Upscaler**
 (about 364 MB) or **MiniMax H3 Latent Upscaler** (3D, about 691 MB) from Setup.
