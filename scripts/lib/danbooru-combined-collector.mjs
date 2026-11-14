@@ -13,7 +13,8 @@ export function createCombinedCollector({ initialRows = [], concurrency, enrich,
   const checkpoint = (force = false) => {
     if (!force && Date.now() - lastSave < checkpointMs) return writes;
     lastSave = Date.now();
-    writes = writes.then(() => save([...rows.values()].filter(row => row.category !== 4 || row.attributesCollected)));
+    // A failed publication must not prevent the final recovery checkpoint.
+    writes = writes.catch(() => {}).then(() => save([...rows.values()].filter(row => row.category !== 4 || row.attributesCollected)));
     return writes;
   };
   async function accept(batch) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -12,6 +12,7 @@ import {
 } from './lib/danbooru-localization.mjs';
 import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
 import { createCombinedCollector } from './lib/danbooru-combined-collector.mjs';
+import { writeCollectionCheckpoint } from './lib/danbooru-checkpoint-file.mjs';
 import { parseCombinedCheckpoint, requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
 
@@ -1333,11 +1334,7 @@ async function main() {
         if (options.delayMs > 0) await controlledSleep(options.delayMs);
         return attributes;
       },
-      save: async (rows) => {
-        const temporary = `${options.outFile}.collecting.tmp`;
-        await writeFile(temporary, tagRowsToCsv(rows, options), 'utf8');
-        await rename(temporary, options.outFile);
-      },
+      save: (rows) => writeCollectionCheckpoint(options.outFile, tagRowsToCsv(rows, options)),
     });
     options.onRows = collector.accept;
     let rows;
