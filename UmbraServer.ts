@@ -1192,7 +1192,9 @@ async function handleBooruDatasetGeneratorRun(req: Request): Promise<Response> {
 
 async function handleBooruDatasetGeneratorStatus(url: URL): Promise<Response> {
   const id = String(url.searchParams.get('id') || '').trim();
-  const job = danbooruDatasetGeneratorJobs.get(id);
+  const job = id ? danbooruDatasetGeneratorJobs.get(id) : [...danbooruDatasetGeneratorJobs.values()]
+    .sort((left, right) => Number(right.running) - Number(left.running) || right.startedAt - left.startedAt)[0];
+  if (!id && !job) return json({ ok: true, job: null });
   if (!job) return json({ error: 'Generator job not found' }, 404);
   await updateDanbooruDatasetGeneratorPreview(job).catch(() => {});
   return json(serializeDanbooruDatasetGeneratorJob(job));

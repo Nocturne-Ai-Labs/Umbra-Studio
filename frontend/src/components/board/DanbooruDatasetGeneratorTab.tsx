@@ -6,6 +6,7 @@ import { isUmbraRemoteClient } from '@/utils/hostOnly';
 type GeneratorMode = 'character-attributes' | 'tags' | 'combined';
 type CharacterSource = 'danbooru' | 'single' | 'series';
 type OutputLanguage = 'canonical' | 'ja' | 'zh-CN';
+const GENERATOR_JOB_STORAGE_KEY = 'umbra.dataforge.datasetGeneratorJob';
 
 const getDefaultOutputFileName = (mode: GeneratorMode, outputLanguage: OutputLanguage) => {
   const base = mode === 'combined' ? 'danbooru-catalog' : mode === 'tags' ? 'danbooru-tags' : 'danbooru-character-attributes';
@@ -33,6 +34,8 @@ type GeneratorResult = {
   stderr: string;
   preview: string;
   ratePercent?: number;
+  mode?: GeneratorMode;
+  args?: string[];
   progress?: { stage: string; completed: number; total: number | null; catalogRows: number; characters?: number; current: string; retryUntil: number };
 };
 
@@ -64,6 +67,72 @@ export function DanbooruDatasetGeneratorTab() {
   const [controlling, setControlling] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<GeneratorResult | null>(null);
+  const [reconnecting, setReconnecting] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const reconnect = async () => {
+      try {
+        const url = new URL(window.location.href);
+        let savedId = url.searchParams.get('datasetGeneratorJob') || '';
+        if (!savedId) {
+          try { savedId = window.localStorage.getItem(GENERATOR_JOB_STORAGE_KEY) || ''; } catch { /* Storage can be disabled. */ }
+        }
+        const load = async (id: string) => fetch(`/api/booru/dataset-generator/status${id ? `?id=${encodeURIComponent(id)}` : ''}`, { cache: 'no-store', signal: controller.signal });
+        // Prefer the server's current job over an older browser-saved job.
+        let response = await load(url.searchParams.get('datasetGeneratorJob') || '');
+        if (response.status === 404 && savedId) response = await load(savedId);
+        // Older installed backends require an explicit ID; saved/deep-linked
+        // jobs still reconnect without restarting an active collection.
+        if (response.status === 404) return;
+        const data: GeneratorResult = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not reconnect to collection');
+        if (cancelled || !data.id) return;
+        setResult(data);
+        setRunning(data.running === true);
+        const args = data.args || [];
+        const arg = (name: string) => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
+        const numberArg = (name: string, setter: (value: number) => void) => { const value = arg(name); if (value !== undefined && Number.isFinite(Number(value))) setter(Number(value)); };
+        if (data.mode) setMode(data.mode);
+        setRatePercent(data.ratePercent ?? 100);
+        setOutputFileName(data.outputPath.split(/[\\/]/).pop() || 'danbooru-catalog.csv');
+        setLimit(args.includes('--all') ? 'all' : arg('--limit') || '100');
+        numberArg('--post-sample', setPostSample);
+        numberArg('--max-attributes', setMaxAttributes);
+        numberArg('--min-character-posts', setMinCharacterPosts);
+        numberArg('--min-tag-posts', setMinTagPosts);
+        numberArg('--min-frequency', setMinFrequency);
+        numberArg('--concurrency', setConcurrency);
+        numberArg('--series-post-sample', setSeriesPostSample);
+        setPostFilter(arg('--post-filter') || '');
+        setResumeExisting(args.includes('--resume-existing'));
+        setPreferCorpus(args.includes('--corpus-path'));
+        setRemoveUnderscores(args.includes('--remove-underscores'));
+        setAppendCopyright(!args.includes('--no-append-copyright'));
+        setCharacterSource(arg('--tag') ? 'single' : arg('--series') ? 'series' : 'danbooru');
+        setTag(arg('--tag') || '');
+        setSeriesTag(arg('--series') || '');
+        setTagCategory(arg('--tag-category') || '0');
+        setOutputLanguage((arg('--output-language') || 'canonical') as OutputLanguage);
+        if (url.searchParams.has('datasetGeneratorJob')) {
+          url.searchParams.delete('datasetGeneratorJob');
+          window.history.replaceState(window.history.state, '', url);
+        }
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || 'Could not reconnect to collection');
+      } finally {
+        if (!cancelled) setReconnecting(false);
+      }
+    };
+    void reconnect();
+    return () => { cancelled = true; controller.abort(); };
+  }, []);
+
+  useEffect(() => {
+    if (!result?.id) return;
+    try { window.localStorage.setItem(GENERATOR_JOB_STORAGE_KEY, result.id); } catch { /* Optional persistence. */ }
+  }, [result?.id]);
 
   const runGenerator = async () => {
     setRunning(true);
@@ -139,11 +208,10 @@ export function DanbooruDatasetGeneratorTab() {
         if (cancelled) return;
         setResult(data);
         setRunning(data.running === true);
-        if (!data.running && data.error) setError(data.error);
+        setError(!data.running && data.error ? data.error : '');
       } catch (err: any) {
         if (!cancelled) {
           setError(err?.message || 'Failed to refresh generator status');
-          setRunning(false);
         }
       }
     };
@@ -301,11 +369,11 @@ export function DanbooruDatasetGeneratorTab() {
           ) : (
             <button
               onClick={() => void runGenerator()}
-              disabled={running}
+              disabled={running || reconnecting}
               className="flex w-full items-center justify-center gap-2 rounded-md border border-emerald-400/35 bg-emerald-500/15 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-40"
             >
               <Play className="h-4 w-4" />
-              Run Generator
+              {reconnecting ? 'Reconnecting…' : 'Run Generator'}
             </button>
           )}
         </div>
@@ -317,8 +385,8 @@ export function DanbooruDatasetGeneratorTab() {
           <div className="flex h-full min-h-[360px] items-center justify-center rounded-md border border-dashed border-white/10 bg-white/[0.02] text-center">
             <div>
               <FileText className="mx-auto h-8 w-8 text-zinc-600" />
-              <div className="mt-3 text-sm font-bold text-zinc-300">No generated CSV yet</div>
-              <div className="mt-1 text-xs text-zinc-600">Configure the generator and run it.</div>
+              <div className="mt-3 text-sm font-bold text-zinc-300">{reconnecting ? 'Checking for a running collection…' : 'No generated CSV yet'}</div>
+              <div className="mt-1 text-xs text-zinc-600">{reconnecting ? 'Your collection continues when you leave this page.' : 'Configure the generator and run it.'}</div>
             </div>
           </div>
         ) : (
