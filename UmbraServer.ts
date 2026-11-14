@@ -1,3 +1,4 @@
+import { compareCatalogEntries, normalizeCatalogSort, type CatalogSort } from './backend/powerPrompterCatalogSort';
 import { mergeGeneratedDatasetCaption, recoverLegacyDatasetCaption } from './backend/DatasetPlainCaption';
 import { captionProgressReader, type CaptionProgress } from './backend/DatasetTaggingProgress';
 import { FizgigService } from './backend/FizgigService';
@@ -26541,6 +26542,7 @@ let ppIndex: PPItem[] = [];
 let ppTagIndex: PPItem[] = [];
 let ppCharacterIndex: PPItem[] = [];
 let ppBrowseIndex: PPItem[] = [];
+const ppSortedCatalogIndexes = new Map<CatalogSort, PPItem[]>();
 let ppIndexingPromise: Promise<void> | null = null;
 
 function normalizePPQueueMode(rawMode: unknown): PowerPrompterQueueMode {
@@ -27474,6 +27476,7 @@ async function indexPowerPrompterCSVs() {
     await processDir(PP_CSV_CHARS_DIR, 'character');
 
     ppIndex = newIndex;
+    ppSortedCatalogIndexes.clear();
     ppCharacterIndex = newIndex.filter((entry) => entry.type === 'character' || entry.category === 4);
     ppTagIndex = newIndex.filter((entry) => !(entry.type === 'character' || entry.category === 4));
     ppBrowseIndex = [...newIndex].sort((left, right) => (
@@ -27618,6 +27621,7 @@ function searchPP(
     cardType?: unknown;
     fast?: unknown;
     browse?: unknown;
+    sort?: unknown;
     category?: unknown;
     classifier?: unknown;
     includeExplicit?: unknown;
@@ -27630,6 +27634,7 @@ function searchPP(
   const cardType = normalizePPCardSearchType(options?.cardType);
   const fast = String(options?.fast || '').trim().toLowerCase() === '1' || options?.fast === true;
   const browse = String(options?.browse || '').trim().toLowerCase() === '1' || options?.browse === true;
+  const sort = normalizeCatalogSort(options?.sort);
   const category = normalizePPSearchCategory(options?.category);
   const classifier = normalizePPSearchClassifier(options?.classifier);
   const includeExplicit = options?.includeExplicit !== false && String(options?.includeExplicit ?? '1').trim() !== '0';
@@ -27642,7 +27647,7 @@ function searchPP(
     return { results: [], total: 0, hasMore: false };
   }
 
-  if (fast && q.length >= 2) {
+  if (fast && q.length >= 2 && !sort) {
     const byKey = new Map<string, PPItem>();
     const seenOrder: string[] = [];
     const considerItem = (item: PPItem) => {
@@ -27685,7 +27690,11 @@ function searchPP(
     results.push(...ordered.slice(start, start + safeLimit));
   } else {
     // Avoid expensive array allocations on huge indexes by streaming matches.
-    const sourceIndex = browse && !q ? ppBrowseIndex : ppIndex;
+    let sourceIndex = browse && !q ? ppBrowseIndex : ppIndex;
+    if (sort) {
+      if (!ppSortedCatalogIndexes.has(sort)) ppSortedCatalogIndexes.set(sort, [...ppIndex].sort((a, b) => compareCatalogEntries(a, b, sort)));
+      sourceIndex = ppSortedCatalogIndexes.get(sort)!;
+    }
     for (const item of sourceIndex) {
       if (!matchesPPCsvFilter(item, csvFilter)) continue;
       if (!matchesPPSearchCardScope(item, cardType, scope)) continue;
@@ -38942,6 +38951,7 @@ const server = Bun.serve<UmbraSocketData>({
         const cardType = url.searchParams.get('cardType') || '';
         const fast = url.searchParams.get('fast') || '';
         const browse = url.searchParams.get('browse') || '';
+        const sort = url.searchParams.get('sort') || '';
         const category = url.searchParams.get('category') || '';
         const classifier = url.searchParams.get('classifier') || '';
         const includeExplicit = url.searchParams.get('includeExplicit') !== '0';
@@ -38954,6 +38964,7 @@ const server = Bun.serve<UmbraSocketData>({
           cardType,
           fast,
           browse,
+          sort,
           category,
           classifier,
           includeExplicit,

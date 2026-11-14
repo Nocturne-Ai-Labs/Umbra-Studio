@@ -1,3 +1,4 @@
+import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -100,7 +101,7 @@ const CATEGORY_LABELS: Record<number, string> = {
 };
 
 const CATEGORIES = [
-  { value: 'all', label: 'All' },
+  { value: 'all', label: 'All Tags' },
   { value: '0', label: 'General' },
   { value: '4', label: 'Character' },
   { value: '3', label: 'Copyright' },
@@ -159,6 +160,8 @@ export const PowerPrompterSearchPanel = React.memo(({
   const filtersId = React.useId();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
+  const [sortOrder, setSortOrder] = useState('posts-desc');
+  const [resultTotal, setResultTotal] = useState(0);
   const [classifier, setClassifier] = useState('all');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedItems, setSelectedItems] = useState<SearchResult[]>([]);
@@ -376,6 +379,7 @@ export const PowerPrompterSearchPanel = React.memo(({
         limit: '120',
         csvs: enabledCSVs.join(','),
         browse: '1',
+        sort: sortOrder,
         includeExplicit: explicitCatalogEnabled ? '1' : '0',
       });
       if (category !== 'all') params.set('category', category);
@@ -386,6 +390,7 @@ export const PowerPrompterSearchPanel = React.memo(({
       if (!isCurrentRequest()) return;
       const values = Array.isArray(payload?.results) ? payload.results : [];
       setResults((current) => append ? [...current, ...values] : values);
+      setResultTotal(Number(payload?.total) || 0);
       setHasMore(payload?.hasMore === true);
       setPage(nextPage);
     } catch (nextError) {
@@ -395,7 +400,7 @@ export const PowerPrompterSearchPanel = React.memo(({
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [activeView, category, classifier, enabledCSVs, explicitCatalogEnabled, query]);
+  }, [activeView, category, classifier, enabledCSVs, explicitCatalogEnabled, query, sortOrder]);
 
   useEffect(() => {
     const revision = ++catalogRequestRevisionRef.current;
@@ -403,6 +408,7 @@ export const PowerPrompterSearchPanel = React.memo(({
     paginationAbortRef.current = null;
     setResults([]);
     setPage(0);
+    setResultTotal(0);
     setHasMore(false);
     setLoading(false);
     setError('');
@@ -635,7 +641,7 @@ export const PowerPrompterSearchPanel = React.memo(({
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[10px] font-black uppercase tracking-[0.15em] text-zinc-100">{mobileLayout ? 'Tag Catalog' : 'Danbooru Tag Catalog'}</h2>
           <div className="font-mono text-[9px] text-zinc-600">
-            {loading ? 'Loading...' : `${activeView === 'favorites' ? favorites.length : results.length} shown`} · {mobileLayout ? `${enabledCSVs.length} source${enabledCSVs.length === 1 ? '' : 's'}` : `${selectedItems.length} selected · ${enabledCSVs.length} CSV`}
+            {loading ? 'Loading...' : activeView === 'favorites' ? `${favorites.length} favorites` : `${results.length} of ${resultTotal.toLocaleString()} shown`} · {mobileLayout ? `${enabledCSVs.length} source${enabledCSVs.length === 1 ? '' : 's'}` : `${selectedItems.length} selected · ${enabledCSVs.length} CSV`}
           </div>
         </div>
         {!mobileLayout ? <button type="button" onClick={() => setRefreshRevision((value) => value + 1)} className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-white/10 text-zinc-500 hover:text-cyan-100" title="Refresh catalog">
@@ -660,7 +666,7 @@ export const PowerPrompterSearchPanel = React.memo(({
 
       <div data-umbra-catalog-tabs="" className="grid grid-cols-3 gap-1 border-b border-white/[0.08] p-2">
         {([
-          ['catalog', 'Catalog', Tags],
+          ['catalog', 'All Tags', Tags],
           ['favorites', 'Favorites', Star],
           ['sources', 'Sources', Database],
         ] as const).map(([value, label, Icon]) => (
@@ -668,7 +674,10 @@ export const PowerPrompterSearchPanel = React.memo(({
             key={value}
             type="button"
             aria-pressed={activeView === value}
-            onClick={() => setActiveView(value)}
+            onClick={() => {
+              setActiveView(value);
+              if (value === 'catalog') { setQuery(''); setCategory('all'); setClassifier('all'); }
+            }}
             className={`inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-sm border px-2 text-[8px] font-black uppercase tracking-[0.08em] ${activeView === value ? 'border-cyan-300/30 bg-cyan-500/10 text-cyan-100' : 'border-white/[0.08] text-zinc-600 hover:text-zinc-300'}`}
           >
             <Icon className="h-3 w-3 shrink-0" /> <span className="truncate">{label}</span>
@@ -710,6 +719,15 @@ export const PowerPrompterSearchPanel = React.memo(({
               </div>}
             </div>
 
+            <div className="mt-2 flex items-center gap-2">
+              <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-zinc-500">Sort by</span>
+              <UmbraSelectControl aria-label="Sort tag catalog" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="settings-input h-8 min-w-0 flex-1 !py-1 text-xs">
+                <option value="posts-desc">Most posts</option>
+                <option value="posts-asc">Fewest posts</option>
+                <option value="name-asc">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+              </UmbraSelectControl>
+            </div>
             <div id={filtersId} hidden={mobileLayout && !filtersOpen} data-umbra-catalog-filters="">
             <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5 custom-scrollbar">
               {CATEGORIES.map((entry) => (
