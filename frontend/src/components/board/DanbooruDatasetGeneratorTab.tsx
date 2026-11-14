@@ -299,7 +299,7 @@ export function DanbooruDatasetGeneratorTab() {
               <p className="text-xs leading-5 text-zinc-400">Reuses matching local posts and saved samples before requesting Danbooru. Partial local samples are combined without duplicate posts.</p>
               {mode === 'combined' ? <NumberInput label="Min Tag Posts" value={minTagPosts} onChange={setMinTagPosts} min={0} max={10000000} /> : null}
               <NumberInput label="Posts Per Character" value={postSample} onChange={setPostSample} min={1} max={200} help="Capped at 200 to match Danbooru/API safety limits." />
-              <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} help="Reserves space for observed eye color, hair color, and up to three garment tags. Raise this limit for more outfit and accessory details." />
+              <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} help="Reserves space for eye and hair colors. Clothing is limited to 8 tags, each present in at least 90% of sampled posts (23 of 25)." />
               <NumberInput label="Min Character Posts" value={minCharacterPosts} onChange={setMinCharacterPosts} min={0} max={10000000} />
               <NumberInput label="Min Frequency" value={minFrequency} onChange={setMinFrequency} min={0} max={1} step={0.01} help="0.12 keeps tags found in at least 12% of sampled posts. Lower it to include less frequently tagged details. Missing source tags cannot be inferred." />
               <TextInput label="Post Filter" value={postFilter} onChange={setPostFilter} placeholder="solo, rating:g" />

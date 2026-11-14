@@ -1,9 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { CHARACTER_CLOTHING_POLICY } from './danbooru-character-sampling.mjs';
 
 export function collectionPolicy(options) {
   return JSON.stringify({ version: 1, limit: Number.isFinite(options.limit) ? options.limit : 'all',
+    clothingPolicy: CHARACTER_CLOTHING_POLICY,
     minTagPosts: options.minTagPosts, minCharacterPosts: options.minCharacterPosts,
     postSample: options.postSample, maxAttributes: options.maxAttributes, minFrequency: options.minFrequency,
     postFilter: String(options.postFilter || '').replaceAll(',', ' ').trim().split(/\s+/).sort().join(' '),

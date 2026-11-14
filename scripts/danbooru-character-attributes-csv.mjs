@@ -13,7 +13,7 @@ import {
 import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
 import { createBatchedCombinedCollector } from './lib/danbooru-combined-collector.mjs';
 import { writeCollectionCheckpoint } from './lib/danbooru-checkpoint-file.mjs';
-import { soloGeneralFallbackFilter, selectSingleCharacterGeneralPosts } from './lib/danbooru-character-sampling.mjs';
+import { CHARACTER_CLOTHING_POLICY, soloGeneralFallbackFilter, selectSingleCharacterGeneralPosts } from './lib/danbooru-character-sampling.mjs';
 import { requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
 import { CollectionStore, CharacterSampleCache, collectionPolicy, mergeCharacterSamples } from './lib/danbooru-collection-store.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
@@ -1115,9 +1115,12 @@ export function getCommonAttributes(characterTag, posts, options) {
   }
 
   const minCount = Math.max(1, Math.ceil(usablePostCount * options.minFrequency));
+  const clothingMinCount = Math.max(minCount, Math.ceil(posts.length * CHARACTER_CLOTHING_POLICY.minFrequency));
+  let clothingCount = 0;
   const candidates = [...counts.entries()]
-    .filter(([, count]) => count >= minCount)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    .filter(([tag, count]) => count >= (isClothingAttributeTag(tag) ? clothingMinCount : minCount))
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .filter(([tag]) => !isClothingAttributeTag(tag) || ++clothingCount <= CHARACTER_CLOTHING_POLICY.maxTags);
   // Reserve space for observed identity colors and garments before common
   // body/accessory tags fill the limit. Frequency filtering still applies.
   const prioritized = [
@@ -1175,6 +1178,12 @@ function isCoreOutfitTag(tag) {
   // Small wearable details remain eligible, but must not displace the outfit.
   return classifyDanbooruTag(tag).includes('clothing')
     && !/(?:^|_)(?:gloves|socks|stockings|thighhighs|pantyhose|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag);
+}
+
+function isClothingAttributeTag(tag) {
+  return classifyDanbooruTag(tag).includes('clothing')
+    || /(?:^|_)(?:sleeves|sleeveless|strapless|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag)
+    || ['frills', 'ruffles', 'pleats', 'ribbon_trim', 'lace_trim', 'fur_trim'].includes(tag);
 }
 
 function isEyeColorTag(tag) {
