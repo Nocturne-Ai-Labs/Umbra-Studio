@@ -417,7 +417,7 @@ export function DanbooruDatasetGeneratorTab() {
           </div>
         ) : (
           <div className="space-y-4">
-            <section className="glass-panel overflow-hidden rounded-sm border border-[var(--umbra-border)] p-3">
+            <section className="glass-panel overflow-hidden rounded-sm border border-white/[0.08] p-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className={`text-[10px] font-black uppercase tracking-[0.18em] ${result.error || result.status === 'failed' ? 'text-red-300' : result.paused || result.status === 'stopping' ? 'text-amber-300' : 'text-[var(--umbra-accent)]'}`}>{generatorStatusLabel(result)}</div>
@@ -443,16 +443,16 @@ export function DanbooruDatasetGeneratorTab() {
                   </button>
                 ) : null}
               </div>
-              {progress ? <div className="mt-3 space-y-2 border-t border-[var(--umbra-border)] pt-3">
+              {progress ? <div className="mt-3 space-y-2 border-t border-white/[0.08] pt-3">
                 <div className="flex flex-wrap justify-between gap-2 font-mono text-xs text-[var(--umbra-text)]">
                   <span>{progress.stage === 'batch-discovery' ? `Batch ${progress.batchNumber}: collecting ${(progress.batchSize ?? 50000).toLocaleString()} new entries` : progress.stage === 'batch-attributes' ? `Batch ${progress.batchNumber}: collecting character attributes` : progress.stage === 'combined' ? 'Collecting tags and character attributes' : progress.stage === 'collecting' ? `Collecting ${progress.current || 'tags'}` : progress.stage === 'completed' ? 'Collection complete' : 'Collecting character attributes'}</span>
                   <span>{percent === null ? `${progress.catalogRows.toLocaleString()} entries found` : `${progress.completed.toLocaleString()} / ${progress.total?.toLocaleString()} · ${percent.toFixed(1)}%`}</span>
                 </div>
-                <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-1.5 overflow-hidden rounded-sm border border-[var(--umbra-border)] bg-[var(--umbra-bg)]">
+                <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-1.5 overflow-hidden rounded-sm border border-white/[0.08] bg-[var(--umbra-bg)]">
                   <div className={`h-full transition-[width] duration-300 motion-reduce:transition-none ${result.error || result.status === 'failed' ? 'bg-red-400' : result.paused || retrySeconds > 0 ? 'bg-amber-400' : 'bg-[var(--umbra-accent)]'} ${percent === null && running ? 'motion-safe:animate-pulse' : ''}`} style={{ width: percent === null ? '25%' : `${percent}%` }} />
                 </div>
                 {progress.populated !== undefined ? <div className="text-xs text-zinc-400">{progress.populated.toLocaleString()} characters with attributes · {(progress.empty ?? 0).toLocaleString()} without attributes ({progress.noMatches ?? 0} without matching posts; {progress.noAttributes ?? 0} without eligible attributes)</div> : null}
-                {progress.networkRequests !== undefined ? <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-[var(--umbra-border)] bg-[var(--umbra-border)] sm:grid-cols-4">
+                {progress.networkRequests !== undefined ? <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-white/[0.08] bg-white/[0.06] sm:grid-cols-4">
                   {([['Requests', progress.networkRequests], ['Saved samples', progress.cacheHits ?? 0], ['Local corpus', progress.localHits ?? 0], ['Speed', `${result.ratePercent ?? 100}%`]] as const).map(([label, value]) => <div key={label} className="bg-[var(--umbra-panel)] px-2 py-1.5"><dt className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">{label}</dt><dd className="mt-0.5 font-mono text-xs tabular-nums text-[var(--umbra-text)]">{typeof value === 'number' ? value.toLocaleString() : value}</dd></div>)}
                 </dl> : null}
                 {progress.catalogRows > 0 ? <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} entries discovered{progress.stage === 'combined' || progress.stage.startsWith('batch-') ? ` · ${(progress.charactersChecked ?? progress.completed).toLocaleString()} / ${(progress.characters ?? 0).toLocaleString()} discovered characters have attributes checked` : ''}{progress.stage === 'batch-discovery' ? ` · ${(progress.scanned ?? 0).toLocaleString()} tag entries scanned (saved entries skipped)` : ''}</div> : null}
