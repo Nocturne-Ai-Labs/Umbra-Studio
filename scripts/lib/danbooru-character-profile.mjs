@@ -1,7 +1,8 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 11, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  version: 12, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  fallbackOutfitFrequency: 0.7,
   outfitFrequency: 0.9, minimumSamples: 3, identityFrequency: 0.35,
 });
 
@@ -78,6 +79,7 @@ export function characterProfileEvidence(posts) {
 export function minimalOutfitEvidence(standard, minFrequency = 0) {
   const garments = standard.map(garmentTokens);
   const candidates = [];
+  const fallbackCandidates = [];
   const required = Math.max(CHARACTER_PROFILE_POLICY.minimumSamples, Math.ceil(standard.length * Math.max(0.3, minFrequency)));
   for (const slot of Object.keys(garmentSlots)) {
     const tagged = garments.filter(row => row[slot].length);
@@ -103,6 +105,13 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
       }
     }
     const slotRequired = slot === 'uniform' ? Math.max(3, Math.ceil(standard.length * Math.max(0.15, minFrequency))) : required;
+    if (best && best[1] >= required && best[1] / tagged.length >= Math.max(CHARACTER_PROFILE_POLICY.fallbackOutfitFrequency, minFrequency)
+      && (!ranked[1] || best[1] > ranked[1][1])) {
+      const tag = best[0];
+      const matching = garments.map((row, i) => row[slot].includes(tag)
+        || (slot === 'legwear' && row[slot].some(value => value.endsWith(`_${tag}`))) ? i : -1).filter(i => i >= 0);
+      if (matching.length >= required) fallbackCandidates.push({slot, entry: [tag, matching.length], matching});
+    }
     if (best && best[1] >= slotRequired && best[1] / tagged.length >= Math.max(CHARACTER_PROFILE_POLICY.outfitFrequency, minFrequency)
       && (!ranked[1] || best[1] > ranked[1][1])) {
       const baseLegwear = slot === 'legwear' && ['thighhighs', 'leggings', 'pantyhose', 'stockings', 'socks'].includes(best[0]);
@@ -136,6 +145,18 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
     if (matching.length < CHARACTER_PROFILE_POLICY.minimumSamples) continue;
     selected.push(candidate); supporting = matching;
   }
+  let usedFallback = false;
+  if (!selected.length) {
+    // Keep just one dominant piece, without combining competing outfits or relaxing accessories.
+    fallbackCandidates.sort((a,b) => b.entry[1] - a.entry[1] || garmentPriority(b) - garmentPriority(a) || a.slot.localeCompare(b.slot));
+    const best = fallbackCandidates[0];
+    const conflict = best && fallbackCandidates.slice(1).some(other =>
+      other.entry[1] >= best.entry[1] * 0.8
+      && other.matching.filter(i => best.matching.includes(i)).length < CHARACTER_PROFILE_POLICY.minimumSamples);
+    if (best && !conflict) {
+      selected.push(best); supporting = best.matching; usedFallback = true;
+    }
+  }
   const accessoryCounts = new Map();
   const accessoryRows = standard.map(p => [...new Set(postTags(p).filter(isAccessoryAttributeTag)
     .map(tag => tag === 'choker' || tag.endsWith('_choker') ? 'choker' : tag))]);
@@ -145,14 +166,14 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
   }
   const namedHeadwear = [...accessoryCounts].filter(([tag]) => /_headdress$/.test(tag));
   const headwearPosts = standard.filter(p => postTags(p).some(tag => /_headdress$/.test(tag))).length;
-  const accessories = selected.length ? [...accessoryCounts].filter(([tag, count]) =>
+  const accessories = selected.length && !usedFallback ? [...accessoryCounts].filter(([tag, count]) =>
     (count >= Math.max(required, Math.ceil(standard.length * Math.max(0.9, minFrequency)))
       || (tag === 'choker' && count >= required)
       || (namedHeadwear.some(([name]) => name === tag) && count >= Math.max(required, Math.ceil(standard.length * 0.5)) && count >= headwearPosts * 0.9))
     && supporting.filter(i => accessoryRows[i].includes(tag)).length >= CHARACTER_PROFILE_POLICY.minimumSamples)
     .sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0])).slice(0, CHARACTER_PROFILE_POLICY.accessoryLimit) : [];
   return {clothing: selected.map(p => p.entry), accessories,
-    profileStatus: selected.length ? 'consistent_minimal_outfit' : 'needs_review_outfit',
+    profileStatus: selected.length && !usedFallback ? 'consistent_minimal_outfit' : 'needs_review_outfit',
     outfitSampleCount: selected.length ? supporting.length : 0};
 }
 
