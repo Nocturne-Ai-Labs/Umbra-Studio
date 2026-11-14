@@ -33,7 +33,7 @@ type GeneratorResult = {
   stderr: string;
   preview: string;
   ratePercent?: number;
-  progress?: { stage: string; completed: number; total: number | null; catalogRows: number; current: string; retryUntil: number };
+  progress?: { stage: string; completed: number; total: number | null; catalogRows: number; characters?: number; current: string; retryUntil: number };
 };
 
 export function DanbooruDatasetGeneratorTab() {
@@ -257,7 +257,7 @@ export function DanbooruDatasetGeneratorTab() {
           )}
 
           {mode === 'combined' ? <Checkbox label="Resume saved CSV" checked={resumeExisting} onChange={setResumeExisting} /> : null}
-          {mode === 'combined' && resumeExisting ? <p className="text-xs text-zinc-400">Use after the full tag list has been collected. Keep the same filename and collection settings; completed character rows are retained.</p> : null}
+          {mode === 'combined' && resumeExisting ? <p className="text-xs text-zinc-400">Resume any saved collection with the same filename and settings. Completed attributes are retained; missing tags and attributes are collected together.</p> : null}
           <NumberInput label="Request speed (%)" value={ratePercent} onChange={setRatePercent} min={10} max={100} help="100% allows up to 3 requests/second. Rate-limit waits can slow it further." />
           {running ? <button disabled={controlling} onClick={() => void controlGenerator('speed')} className="settings-input w-full !py-2 text-xs">Apply speed · currently {result?.ratePercent ?? 100}%</button> : null}
           <NumberInput label="Concurrency" value={concurrency} onChange={setConcurrency} min={1} max={5} help="Capped at 5 to reduce Danbooru rate-limit errors." />
@@ -351,13 +351,13 @@ export function DanbooruDatasetGeneratorTab() {
               </div>
               {progress ? <div className="mt-4 space-y-2">
                 <div className="flex flex-wrap justify-between gap-2 text-sm text-zinc-200">
-                  <span>{progress.stage === 'collecting' ? `Collecting ${progress.current || 'tags'}` : progress.stage === 'completed' ? 'Collection complete' : 'Collecting character attributes'}</span>
+                  <span>{progress.stage === 'combined' ? 'Collecting tags and character attributes' : progress.stage === 'collecting' ? `Collecting ${progress.current || 'tags'}` : progress.stage === 'completed' ? 'Collection complete' : 'Collecting character attributes'}</span>
                   <span>{percent === null ? `${progress.catalogRows.toLocaleString()} entries found` : `${progress.completed.toLocaleString()} / ${progress.total?.toLocaleString()} · ${percent.toFixed(1)}%`}</span>
                 </div>
                 <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-2 overflow-hidden rounded-full bg-white/10">
                   <div className={`h-full rounded-full ${result.paused ? 'bg-amber-300' : 'bg-emerald-300'} ${percent === null && running ? 'animate-pulse' : ''}`} style={{ width: percent === null ? '25%' : `${percent}%` }} />
                 </div>
-                <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} catalog entries · Request speed {result.ratePercent ?? 100}%</div>
+                <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} entries discovered{progress.stage === 'combined' ? ` · ${progress.completed.toLocaleString()} / ${(progress.characters ?? 0).toLocaleString()} discovered characters have attributes checked` : ''} · Request speed {result.ratePercent ?? 100}%</div>
                 {result.running && !result.paused && retrySeconds > 0 ? <div role="status" className="text-xs text-amber-200">Danbooru rate limit / server retry · waiting {retrySeconds}s. Completed rows are saved.</div> : null}
               </div> : result.running ? <div role="status" className="mt-3 text-xs text-zinc-400">Preparing collection…</div> : null}
             </section>
