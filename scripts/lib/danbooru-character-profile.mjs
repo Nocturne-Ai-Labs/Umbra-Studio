@@ -1,7 +1,7 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 10, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  version: 11, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
   outfitFrequency: 0.9, minimumSamples: 3, identityFrequency: 0.35,
 });
 
@@ -27,9 +27,12 @@ export function isAccessoryAttributeTag(tag) {
   return !isClothingAttributeTag(tag) && (classifyDanbooruTag(tag).includes('accessory')
     || /(?:^|_)(?:bow|ribbon|hair_tubes|hairclip|hairpin|hair_flower|hair_ornament|headdress)$/.test(tag));
 }
+export const isEyePatternTag = tag => ['ringed_eyes', 'slit_pupils', 'horizontal_pupils', 'no_pupils'].includes(tag)
+  || /^[a-z]+(?:-[a-z]+)*-shaped_pupils$/.test(tag);
+
 export function isIdentityAttributeTag(tag) {
   return !isClothingAttributeTag(tag) && !isAccessoryAttributeTag(tag)
-    && (classifyDanbooruTag(tag).includes('hair') || /(?:^|_)eyes$/.test(tag) || tag === 'heterochromia');
+    && (classifyDanbooruTag(tag).includes('hair') || /(?:^|_)eyes$/.test(tag) || tag === 'heterochromia' || isEyePatternTag(tag));
 }
 export function isCoreOutfitTag(tag) {
   return (classifyDanbooruTag(tag).includes('clothing') || additionalGarment.test(tag))
@@ -189,11 +192,21 @@ export function selectMinimalIdentity(counts, standard, minFrequency = 0) {
     ...colorGroup(eyeColors, ['heterochromia', 'two-tone_eyes', 'multicolored_eyes']),
     ...colorGroup(hairColors, ['colored_inner_hair', 'streaked_hair', 'gradient_hair', 'two-tone_hair', 'multicolored_hair']),
   ];
+  const patternCounts = new Map();
+  let patternPosts = 0;
+  for (const tags of rows) {
+    let patterns = tags.filter(isEyePatternTag);
+    if (patterns.some(tag => tag !== 'symbol-shaped_pupils' && tag.endsWith('-shaped_pupils'))) patterns = patterns.filter(tag => tag !== 'symbol-shaped_pupils');
+    if (patterns.length) patternPosts++;
+    for (const tag of patterns) patternCounts.set(tag, (patternCounts.get(tag) || 0) + 1);
+  }
+  const patterns = [...patternCounts].sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+  if (patterns[0]?.[1] >= minimum && patterns[0][1] >= patternPosts * 0.6 && (!patterns[1] || patterns[0][1] > patterns[1][1])) essential.push(patterns[0]);
   const groups = [/^(?:very_long|long|medium|short|very_short)_hair$/,
     /^(?:twintails|twin_braids|braid|ponytail|side_ponytail|low_ponytail|low-tied_long_hair|hair_bun|double_bun|bob_cut|hime_cut|drill_hair|ahoge)$/,
     /^(?:blunt_bangs|swept_bangs|parted_bangs|double-parted_bangs|hair_over_one_eye|hair_between_eyes)$/];
   const details = groups.flatMap(pattern => ranked.filter(([tag]) => pattern.test(tag)).slice(0,1));
-  // Usually five; simultaneous dual-colored hair and eyes need six essential tokens.
+  // Usually five; dual-colored hair/eyes plus a defining eye pattern can need seven essential tokens.
   return [...essential, ...details].slice(0, Math.max(CHARACTER_PROFILE_POLICY.identityLimit, essential.length));
 }
 
