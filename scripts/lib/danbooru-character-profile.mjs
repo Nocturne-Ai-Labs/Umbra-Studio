@@ -1,7 +1,7 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 9, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  version: 10, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
   outfitFrequency: 0.9, minimumSamples: 3, identityFrequency: 0.35,
 });
 
@@ -17,7 +17,7 @@ export const postTags = post => [...new Set(String(post?.tag_string_general || '
 const additionalGarment = /(?:^|_)(?:tank_top|crop_top|tube_top|halter_top|camisole|blouse|blazer|leotard|tunic|robe|cape|overalls|overcoat|sarong|jumpsuit|trousers)$/;
 
 export function isClothingAttributeTag(tag) {
-  return ['maid', 'serafuku', 'armor', 'japanese_armor', 'power_armor', 'full_armor', 'breastplate', 'pauldrons', 'gauntlets', 'greaves', 'chainmail'].includes(tag) || classifyDanbooruTag(tag).includes('clothing')
+  return ['maid', 'serafuku', 'armor', 'japanese_armor', 'power_armor', 'full_armor', 'breastplate', 'pauldrons', 'gauntlets', 'greaves', 'chainmail', 'leggings', 'thong_straps', 'garters', 'garter_belt', 'garter_straps', 'leg_garter', 'thigh_strap', 'leg_warmers', 'arm_warmers'].includes(tag) || classifyDanbooruTag(tag).includes('clothing')
     || additionalGarment.test(tag)
     || /(?:^|_)(?:sleeves|sleeveless|strapless|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag)
     || /(?:^|_)(?:elbow_pads|knee_pads|shoulder_armor)$/.test(tag)
@@ -44,15 +44,21 @@ const garmentSlots = {
   signature: ['detached_sleeves'],
   armor: ['armor', 'japanese_armor', 'power_armor', 'full_armor'],
   uniform: ['serafuku', 'maid', 'military_uniform'],
-  legwear: ['striped_thighhighs', 'striped_stockings', 'striped_socks', 'argyle_thighhighs', 'argyle_pantyhose', 'fishnet_thighhighs', 'fishnet_pantyhose'],
+  footwear: ['shoes', 'boots', 'sneakers', 'sandals', 'loafers', 'pumps'],
+  straps: ['thong_straps', 'garter_straps', 'garter_belt', 'garters', 'leg_garter', 'thigh_strap'],
+  leg_warmers: ['leg_warmers'],
+  arm_warmers: ['arm_warmers'],
+  legwear: ['thighhighs', 'leggings', 'pantyhose', 'stockings', 'socks', 'striped_thighhighs', 'striped_stockings', 'striped_socks', 'argyle_thighhighs', 'argyle_pantyhose', 'fishnet_thighhighs', 'fishnet_pantyhose'],
 };
 
 function garmentTokens(post) {
-  const tags = postTags(post);
+  const tags = postTags(post).filter(tag => !/^(?:no_|unworn_|missing_|invisible_)/.test(tag)
+    && !classifyDanbooruTag(tag).includes('clothing_interaction'));
   return Object.fromEntries(Object.entries(garmentSlots).map(([slot, values]) => {
     const found = values.filter(value => tags.some(tag => tag === value || tag.endsWith(`_${value}`)));
     // A specific subtype replaces its implied parent; color and trim don't split outfits.
-    return [slot, found.filter(value => !found.some(other => other !== value && other.endsWith(value)))];
+    const specific = found.filter(value => !found.some(other => other !== value && other.endsWith(value)));
+    return [slot, slot === 'footwear' && specific.some(value => value !== 'shoes') ? specific.filter(value => value !== 'shoes') : specific];
   }));
 }
 
@@ -74,11 +80,34 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
     const tagged = garments.filter(row => row[slot].length);
     const counts = new Map();
     for (const row of tagged) for (const tag of row[slot]) counts.set(tag, (counts.get(tag) || 0) + 1);
-    const ranked = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    const best = ranked[0];
+    let ranked = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    let best = ranked[0];
+    if (slot === 'legwear') {
+      // Untagged pattern details are not evidence of plain legwear.
+      const family = tag => ['thighhighs', 'leggings', 'pantyhose', 'stockings', 'socks'].find(base => tag === base || tag.endsWith(`_${base}`)) || tag;
+      const familyCounts = new Map();
+      for (const row of tagged) for (const tag of new Set(row[slot].map(family))) familyCounts.set(tag, (familyCounts.get(tag) || 0) + 1);
+      ranked = [...familyCounts].sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+      best = ranked[0];
+      if (best) {
+        const variants = [...counts].filter(([tag]) => tag !== best[0] && family(tag) === best[0]).sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]));
+        const detailed = tagged.filter(row => row[slot].some(tag => tag !== best[0] && family(tag) === best[0])).length;
+        if (variants[0]?.[1] >= required && variants[0][1] >= detailed * Math.max(0.9, minFrequency)
+          && (!variants[1] || variants[0][1] > variants[1][1])) {
+          // Eligibility uses the family; the exported variant still requires direct supporting posts.
+          best = [variants[0][0], best[1]];
+        }
+      }
+    }
     const slotRequired = slot === 'uniform' ? Math.max(3, Math.ceil(standard.length * Math.max(0.15, minFrequency))) : required;
     if (best && best[1] >= slotRequired && best[1] / tagged.length >= Math.max(CHARACTER_PROFILE_POLICY.outfitFrequency, minFrequency)
-      && (!ranked[1] || best[1] > ranked[1][1])) candidates.push({slot, entry: best});
+      && (!ranked[1] || best[1] > ranked[1][1])) {
+      const baseLegwear = slot === 'legwear' && ['thighhighs', 'leggings', 'pantyhose', 'stockings', 'socks'].includes(best[0]);
+      candidates.push({slot, entry: [best[0], baseLegwear ? best[1] : counts.get(best[0]) || best[1]]});
+      if (baseLegwear) {
+        for (const row of garments) if (!row[slot].includes(best[0]) && row[slot].some(tag => tag.endsWith(`_${best[0]}`))) row[slot].push(best[0]);
+      }
+    }
   }
   // Equally supported incompatible pieces are ambiguous, not a reason to pick alphabetically.
   const ambiguous = new Set();
@@ -105,7 +134,9 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
     selected.push(candidate); supporting = matching;
   }
   const accessoryCounts = new Map();
-  for (const p of standard) for (const tag of postTags(p).filter(isAccessoryAttributeTag)) {
+  const accessoryRows = standard.map(p => [...new Set(postTags(p).filter(isAccessoryAttributeTag)
+    .map(tag => tag === 'choker' || tag.endsWith('_choker') ? 'choker' : tag))]);
+  for (const tags of accessoryRows) for (const tag of tags) {
     if (['jewelry', 'hair_ornament', 'bow', 'ribbon'].includes(tag)) continue;
     accessoryCounts.set(tag, (accessoryCounts.get(tag) || 0) + 1);
   }
@@ -113,8 +144,9 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
   const headwearPosts = standard.filter(p => postTags(p).some(tag => /_headdress$/.test(tag))).length;
   const accessories = selected.length ? [...accessoryCounts].filter(([tag, count]) =>
     (count >= Math.max(required, Math.ceil(standard.length * Math.max(0.9, minFrequency)))
+      || (tag === 'choker' && count >= required)
       || (namedHeadwear.some(([name]) => name === tag) && count >= Math.max(required, Math.ceil(standard.length * 0.5)) && count >= headwearPosts * 0.9))
-    && supporting.filter(i => postTags(standard[i]).includes(tag)).length >= CHARACTER_PROFILE_POLICY.minimumSamples)
+    && supporting.filter(i => accessoryRows[i].includes(tag)).length >= CHARACTER_PROFILE_POLICY.minimumSamples)
     .sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0])).slice(0, CHARACTER_PROFILE_POLICY.accessoryLimit) : [];
   return {clothing: selected.map(p => p.entry), accessories,
     profileStatus: selected.length ? 'consistent_minimal_outfit' : 'needs_review_outfit',
@@ -170,7 +202,7 @@ const tailTypes = new Set([...animalTypes.map(type => `${type}_tail`), 'shark_ta
 const earTypes = new Set([...animalTypes.map(type => `${type}_ears`), 'animal_ears']);
 const breastSizes = new Set(['flat_chest', 'small_breasts', 'medium_breasts', 'large_breasts', 'huge_breasts', 'gigantic_breasts']);
 const furColor = /^(?:white|black|grey|gray|brown|blue|red|orange|yellow|green|pink|purple|cream|tan|multicolored)_fur$/;
-export const isDistinctiveTraitTag = tag => tailTypes.has(tag) || earTypes.has(tag) || tag === 'fake_animal_ears' || tag === 'fur' || furColor.test(tag) || breastSizes.has(tag);
+export const isDistinctiveTraitTag = tag => tailTypes.has(tag) || earTypes.has(tag) || tag === 'fake_animal_ears' || tag === 'fur' || furColor.test(tag) || breastSizes.has(tag) || tag === 'navel';
 
 export function selectDistinctiveTraits(standard, minFrequency = 0) {
   const rows = standard.map(postTags);
@@ -198,5 +230,8 @@ export function selectDistinctiveTraits(standard, minFrequency = 0) {
   }), 0.6);
   // Size labels vary by artist. Keep only a clear most-supported size, never tied alternatives.
   const size = strongest(rows.map(tags => tags.filter(tag => breastSizes.has(tag))), 0.6);
-  return [...tails, ...ears, ...fur, ...size];
+  const visibleNavel = rows.filter(tags => tags.includes('navel') && !tags.includes('covered_navel')).length;
+  const navelTagged = rows.filter(tags => tags.includes('navel') || tags.includes('covered_navel')).length;
+  const navel = visibleNavel >= minimum && visibleNavel >= navelTagged * 0.6 ? [['navel', visibleNavel]] : [];
+  return [...tails, ...ears, ...fur, ...size, ...navel];
 }
