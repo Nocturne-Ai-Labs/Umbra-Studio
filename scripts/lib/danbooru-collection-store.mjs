@@ -1,11 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { CHARACTER_CLOTHING_POLICY } from './danbooru-character-sampling.mjs';
+import { basename, dirname, join } from 'node:path';
+import { CHARACTER_PROFILE_POLICY } from './danbooru-character-profile.mjs';
 
 export function collectionPolicy(options) {
   return JSON.stringify({ version: 1, limit: Number.isFinite(options.limit) ? options.limit : 'all',
-    clothingPolicy: CHARACTER_CLOTHING_POLICY,
+    profilePolicy: CHARACTER_PROFILE_POLICY,
     minTagPosts: options.minTagPosts, minCharacterPosts: options.minCharacterPosts,
     postSample: options.postSample, maxAttributes: options.maxAttributes, minFrequency: options.minFrequency,
     postFilter: String(options.postFilter || '').replaceAll(',', ' ').trim().split(/\s+/).sort().join(' '),
@@ -13,6 +13,15 @@ export function collectionPolicy(options) {
 }
 
 const payload = row => JSON.stringify(Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'options')));
+
+export function characterSampleCacheFile(outFile) {
+  const outputDir = dirname(outFile);
+  // Umbra's character and combined CSV folders share source metadata samples.
+  // Arbitrary CLI destinations keep their cache beside their own output.
+  const cacheDir = basename(outputDir).toLowerCase() === 'characters' && basename(dirname(outputDir)).toLowerCase() === 'csv'
+    ? join(dirname(outputDir), 'tags') : outputDir;
+  return join(cacheDir, '.collection-state', 'character-samples.sqlite');
+}
 
 export class CollectionStore {
   constructor(file, policy, resume) {

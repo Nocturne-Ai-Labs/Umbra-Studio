@@ -13,9 +13,10 @@ import {
 import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
 import { createBatchedCombinedCollector } from './lib/danbooru-combined-collector.mjs';
 import { writeCollectionCheckpoint } from './lib/danbooru-checkpoint-file.mjs';
-import { CHARACTER_CLOTHING_POLICY, soloGeneralFallbackFilter, selectSingleCharacterGeneralPosts } from './lib/danbooru-character-sampling.mjs';
+import { soloGeneralFallbackFilter, selectSingleCharacterGeneralPosts } from './lib/danbooru-character-sampling.mjs';
 import { requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
-import { CollectionStore, CharacterSampleCache, collectionPolicy, mergeCharacterSamples } from './lib/danbooru-collection-store.mjs';
+import { CollectionStore, CharacterSampleCache, characterSampleCacheFile, collectionPolicy, mergeCharacterSamples } from './lib/danbooru-collection-store.mjs';
+import { CHARACTER_PROFILE_POLICY, characterProfileEvidence, postTags, isClothingAttributeTag, isAccessoryAttributeTag, isIdentityAttributeTag, isCoreOutfitTag } from './lib/danbooru-character-profile.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1100,38 +1101,44 @@ function formatPostFilterForPrompt(value) {
 }
 
 export function getCommonAttributes(characterTag, posts, options) {
-  const counts = new Map();
-  let usablePostCount = 0;
+  return getCharacterProfile(characterTag, posts, options).attributes;
+}
 
-  for (const post of posts) {
-    const generalTags = String(post?.tag_string_general || '').split(/\s+/).map(normalizeTag).filter(Boolean);
-    if (generalTags.length === 0) continue;
-    usablePostCount += 1;
-
-    for (const tag of new Set(generalTags)) {
-      if (tag === characterTag || !isCharacterAttributeTag(tag)) continue;
-      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+export function getCharacterProfile(characterTag, posts, options) {
+  const evidence = characterProfileEvidence(posts);
+  const countsFor = sample => {
+    const counts = new Map();
+    for (const post of sample) for (const tag of postTags(post)) {
+      if (tag !== characterTag && isCharacterAttributeTag(tag)) counts.set(tag, (counts.get(tag) || 0) + 1);
     }
-  }
-
-  const minCount = Math.max(1, Math.ceil(usablePostCount * options.minFrequency));
-  const clothingMinCount = Math.max(minCount, Math.ceil(posts.length * CHARACTER_CLOTHING_POLICY.minFrequency));
-  let clothingCount = 0;
-  const candidates = [...counts.entries()]
-    .filter(([tag, count]) => count >= (isClothingAttributeTag(tag) ? clothingMinCount : minCount))
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .filter(([tag]) => !isClothingAttributeTag(tag) || ++clothingCount <= CHARACTER_CLOTHING_POLICY.maxTags);
-  // Reserve space for observed identity colors and garments before common
-  // body/accessory tags fill the limit. Frequency filtering still applies.
-  const prioritized = [
-    ...candidates.filter(([tag]) => isEyeColorTag(tag)).slice(0, 1),
-    ...candidates.filter(([tag]) => isHairColorTag(tag)).slice(0, 1),
-    ...candidates.filter(([tag]) => isCoreOutfitTag(tag)).slice(0, 3),
-    ...candidates,
-  ];
-  const selected = new Map(prioritized.map(([tag, count]) => [tag, count]));
-  return [...selected.entries()].slice(0, options.maxAttributes)
-    .sort((a, b) => getTagPriority(a[0]) - getTagPriority(b[0]) || b[1] - a[1] || a[0].localeCompare(b[0]));
+    return counts;
+  };
+  const counts = countsFor(evidence.standard);
+  const outfitCounts = countsFor(evidence.outfit);
+  const minCount = Math.max(1, Math.ceil(evidence.standard.length * options.minFrequency));
+  const outfitMinCount = Math.max(1, Math.ceil(evidence.outfit.length * Math.max(options.minFrequency, CHARACTER_PROFILE_POLICY.outfitFrequency)));
+  const byFrequency = (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]);
+  const identity = [...counts].filter(([tag, count]) => isIdentityAttributeTag(tag) && count >= minCount).sort(byFrequency);
+  const identityPriority = [...identity.filter(([tag]) => isEyeColorTag(tag)).slice(0, 1),
+    ...identity.filter(([tag]) => isHairColorTag(tag)).slice(0, 1), ...identity];
+  const selectedIdentity = [...new Map(identityPriority)].slice(0, CHARACTER_PROFILE_POLICY.identityLimit);
+  const wearable = [...outfitCounts].filter(([tag, count]) => (isClothingAttributeTag(tag) || isAccessoryAttributeTag(tag)) && count >= outfitMinCount).sort(byFrequency);
+  // Every selected wearable must also coexist in one observed post.
+  const representative = evidence.outfit.map(post => {
+    const tags = new Set(postTags(post));
+    return { tags, score: wearable.reduce((sum, [tag, count]) => sum + (tags.has(tag) ? count : 0), 0) };
+  }).sort((a, b) => b.score - a.score)[0]?.tags || new Set();
+  const coherent = wearable.filter(([tag]) => representative.has(tag));
+  const clothing = coherent.filter(([tag]) => isClothingAttributeTag(tag));
+  const clothingPriority = [...clothing.filter(([tag]) => isCoreOutfitTag(tag)), ...clothing];
+  const selectedClothing = [...new Map(clothingPriority)].slice(0, CHARACTER_PROFILE_POLICY.clothingLimit);
+  const accessories = coherent.filter(([tag]) => isAccessoryAttributeTag(tag)).slice(0, CHARACTER_PROFILE_POLICY.accessoryLimit);
+  const other = [...counts].filter(([tag, count]) => !isIdentityAttributeTag(tag) && !isClothingAttributeTag(tag) && !isAccessoryAttributeTag(tag) && count >= minCount).sort(byFrequency);
+  const attributes = evidence.standard.length < CHARACTER_PROFILE_POLICY.minimumSamples ? []
+    : [...selectedIdentity, ...selectedClothing, ...accessories, ...other].slice(0, options.maxAttributes)
+      .sort((a, b) => getTagPriority(a[0]) - getTagPriority(b[0]) || byFrequency(a, b));
+  return { attributes, profileStatus: evidence.profileStatus,
+    eligibleSampleCount: evidence.eligibleSampleCount, outfitSampleCount: evidence.outfitSampleCount };
 }
 
 function getPrimaryCopyright(posts) {
@@ -1174,18 +1181,6 @@ function getTagPriority(tag) {
   return 5;
 }
 
-function isCoreOutfitTag(tag) {
-  // Small wearable details remain eligible, but must not displace the outfit.
-  return classifyDanbooruTag(tag).includes('clothing')
-    && !/(?:^|_)(?:gloves|socks|stockings|thighhighs|pantyhose|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag);
-}
-
-function isClothingAttributeTag(tag) {
-  return classifyDanbooruTag(tag).includes('clothing')
-    || /(?:^|_)(?:sleeves|sleeveless|strapless|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag)
-    || ['frills', 'ruffles', 'pleats', 'ribbon_trim', 'lace_trim', 'fur_trim'].includes(tag);
-}
-
 function isEyeColorTag(tag) {
   return /^(?:(?:light|dark)_)?(?:aqua|amber|black|blue|brown|cyan|gold|green|grey|gray|hazel|orange|pink|purple|red|silver|white|yellow|multicolored)_eyes$/.test(tag)
     || tag === 'heterochromia';
@@ -1200,6 +1195,7 @@ function toCsv(rows, fallbackOptions = {}) {
   const headers = localized
     ? ['character', 'attributes', 'localized_name', 'localized_aliases']
     : ['character', 'attributes'];
+  headers.push('profile_status', 'eligible_sample_count', 'outfit_sample_count');
   const lines = [
     headers.join(','),
     ...rows.map((row) => {
@@ -1207,7 +1203,8 @@ function toCsv(rows, fallbackOptions = {}) {
         csvCell(displayTag(row.character, row.options)),
         csvCell(row.attributes.map(([tag]) => displayTag(tag, row.options)).join(', ')),
       ];
-      if (!localized) return canonicalCells.join(',');
+      const profileCells = [csvCell(row.profileStatus), csvCell(row.eligibleSampleCount), csvCell(row.outfitSampleCount)];
+      if (!localized) return [...canonicalCells, ...profileCells].join(',');
 
       const characterLocalization = getLocalizedTag(row.options.localizationMap, row.localizationTag || row.character);
       const attributeAliases = row.attributes.flatMap(([tag]) => getLocalizedTag(row.options.localizationMap, tag).aliases);
@@ -1215,6 +1212,7 @@ function toCsv(rows, fallbackOptions = {}) {
         ...canonicalCells,
         csvCell(characterLocalization.name),
         csvCell(Array.from(new Set([...characterLocalization.aliases, ...attributeAliases])).join(', ')),
+        ...profileCells,
       ].join(',');
     }),
   ];
@@ -1226,7 +1224,7 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
   const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
   const combined = (rows[0]?.options || fallbackOptions).mode === 'combined';
   const headers = ['tag', 'category', 'color', 'post_count', 'classifiers'];
-  if (combined) headers.push('type', 'attributes', 'attributes_collected', 'sample_count', 'attribute_status');
+  if (combined) headers.push('type', 'attributes', 'attributes_collected', 'sample_count', 'attribute_status', 'profile_status', 'eligible_sample_count', 'outfit_sample_count');
   if (localized) headers.push('localized_name', 'localized_aliases');
   const lines = [
     headers.join(','),
@@ -1244,6 +1242,9 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
         csvCell(row.attributesCollected ? '1' : ''),
         csvCell(row.category === 4 ? row.sampleCount : ''),
         csvCell(row.category === 4 ? row.attributeStatus : ''),
+        csvCell(row.category === 4 ? row.profileStatus : ''),
+        csvCell(row.category === 4 ? row.eligibleSampleCount : ''),
+        csvCell(row.category === 4 ? row.outfitSampleCount : ''),
       );
       if (!localized) return canonicalCells.join(',');
       const localization = getLocalizedTag(row.options.localizationMap, row.tag);
@@ -1374,7 +1375,7 @@ async function main() {
     const stateDir = path.join(path.dirname(options.outFile), '.collection-state');
     const store = new CollectionStore(path.join(stateDir, `${path.basename(options.outFile)}.sqlite`), collectionPolicy(options), options.resumeExisting);
     options.collectionStore = store;
-    options.sampleCache = new CharacterSampleCache(path.join(stateDir, 'character-samples.sqlite'));
+    options.sampleCache = new CharacterSampleCache(characterSampleCacheFile(options.outFile));
     const initialRows = store.rows('processed', options);
     const collector = createBatchedCombinedCollector({
       initialRows,
@@ -1392,10 +1393,12 @@ async function main() {
           return [];
         }
         const posts = await fetchPostsForCharacter(row.tag, options);
-        const attributes = getCommonAttributes(row.tag, posts, options);
+        const profile = getCharacterProfile(row.tag, posts, options);
+        Object.assign(row, profile);
+        const { attributes } = profile;
         row.sampleCount = posts.length;
         row.attributeStatus = attributes.length ? 'populated' : posts.length ? 'no_eligible_attributes' : 'no_matching_posts';
-        console.log(`${row.tag}: collected ${attributes.length} character attributes.`);
+        console.log(`${row.tag}: collected ${attributes.length} character attributes; ${row.profileStatus} (${row.eligibleSampleCount} eligible posts, ${row.outfitSampleCount} outfit posts).`);
         if (options.delayMs > 0) await controlledSleep(options.delayMs);
         return attributes;
       },
@@ -1433,43 +1436,49 @@ async function main() {
     return;
   }
 
-  const characters = options.characterSource === 'single'
-    ? [options.tag]
-    : options.characterSource === 'csv'
-      ? await loadCharacterTags(options.characterTagsCsv, options.limit)
-      : options.characterSource === 'series'
-        ? await fetchCharacterTagsFromSeries(options.seriesTag, options)
-        : await fetchCharacterTagsFromDanbooru(options.limit, options);
-  await mkdir(path.dirname(options.outFile), { recursive: true });
-  await writeFile(options.outFile, toCsv([], options), 'utf8');
-  let checkpointWrite = Promise.resolve();
-  reportProgress({ stage: 'attributes', completed: 0, total: characters.length });
-  const rows = await mapWithConcurrency(characters, options.concurrency, async (character, i) => {
-    await waitForGeneratorControl();
-    const posts = await fetchPostsForCharacter(character, options);
-    const attributes = getCommonAttributes(character, posts, options);
-    const copyright = options.characterSource === 'series' && options.seriesTag
-      ? options.seriesTag
-      : getPrimaryCopyright(posts);
-    const outputCharacter = formatCharacterTag(character, copyright, options);
-    console.log(`${i + 1}/${characters.length} ${character}: ${attributes.map(([tag]) => tag).join(', ') || '(no attributes)'}`);
+  options.sampleCache = new CharacterSampleCache(characterSampleCacheFile(options.outFile));
+  try {
+    const characters = options.characterSource === 'single'
+      ? [options.tag]
+      : options.characterSource === 'csv'
+        ? await loadCharacterTags(options.characterTagsCsv, options.limit)
+        : options.characterSource === 'series'
+          ? await fetchCharacterTagsFromSeries(options.seriesTag, options)
+          : await fetchCharacterTagsFromDanbooru(options.limit, options);
+    await mkdir(path.dirname(options.outFile), { recursive: true });
+    await writeFile(options.outFile, toCsv([], options), 'utf8');
+    let checkpointWrite = Promise.resolve();
+    reportProgress({ stage: 'attributes', completed: 0, total: characters.length });
+    const rows = await mapWithConcurrency(characters, options.concurrency, async (character, i) => {
+      await waitForGeneratorControl();
+      const posts = await fetchPostsForCharacter(character, options);
+      const profile = getCharacterProfile(character, posts, options);
+      const { attributes } = profile;
+      const copyright = options.characterSource === 'series' && options.seriesTag
+        ? options.seriesTag
+        : getPrimaryCopyright(posts);
+      const outputCharacter = formatCharacterTag(character, copyright, options);
+      console.log(`${i + 1}/${characters.length} ${character}: ${attributes.map(([tag]) => tag).join(', ') || '(no attributes)'} [${profile.profileStatus}]`);
 
-    if (options.delayMs > 0) {
-      await controlledSleep(options.delayMs);
-    }
-    return { character: outputCharacter, localizationTag: character, attributes, options };
-  }, (completedRows) => {
-    const csv = toCsv(completedRows, options);
-    checkpointWrite = checkpointWrite.then(async () => {
-      await writeFile(options.outFile, csv, 'utf8');
-      reportProgress({ completed: completedRows.length });
+      if (options.delayMs > 0) {
+        await controlledSleep(options.delayMs);
+      }
+      return { character: outputCharacter, localizationTag: character, ...profile, options };
+    }, (completedRows) => {
+      const csv = toCsv(completedRows, options);
+      checkpointWrite = checkpointWrite.then(async () => {
+        await writeFile(options.outFile, csv, 'utf8');
+        reportProgress({ completed: completedRows.length });
+      });
+      return checkpointWrite;
     });
-    return checkpointWrite;
-  });
 
-  await writeFile(options.outFile, toCsv(rows, options), 'utf8');
-  reportProgress({ stage: 'completed', completed: rows.length, total: rows.length });
-  console.log(`Wrote ${rows.length.toLocaleString()} character rows to ${path.relative(repoRoot, options.outFile)}`);
+    await writeFile(options.outFile, toCsv(rows, options), 'utf8');
+    reportProgress({ stage: 'completed', completed: rows.length, total: rows.length });
+    console.log(`Wrote ${rows.length.toLocaleString()} character rows to ${path.relative(repoRoot, options.outFile)}`);
+  } finally {
+    options.sampleCache.close();
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((error) => {

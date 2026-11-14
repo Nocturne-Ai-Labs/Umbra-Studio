@@ -1,5 +1,3 @@
-export const CHARACTER_CLOTHING_POLICY = Object.freeze({ maxTags: 8, minFrequency: 0.9 });
-
 export function soloGeneralFallbackFilter(filter) {
   const tokens = String(filter || '').replaceAll(',', ' ').split(/\s+/).filter(Boolean);
   if (!tokens.includes('solo') || !tokens.some(token => /^rating:(g|general)$/i.test(token))) return null;
