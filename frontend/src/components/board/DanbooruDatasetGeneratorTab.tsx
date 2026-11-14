@@ -1,11 +1,12 @@
 import { UmbraSelectControl } from '@/components/ui/UmbraSelectControl';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Database, FileText, FolderOpen, Pause, Play, Square } from 'lucide-react';
 import { isUmbraRemoteClient } from '@/utils/hostOnly';
 
 type GeneratorMode = 'character-attributes' | 'tags' | 'combined';
 type CharacterSource = 'danbooru' | 'single' | 'series';
 type OutputLanguage = 'canonical' | 'ja' | 'zh-CN';
+type PreviewPage = { headers: string[]; rows: string[][]; page: number; pages: number; pageSize: number; total: number; savedRows: number };
 const GENERATOR_JOB_STORAGE_KEY = 'umbra.dataforge.datasetGeneratorJob';
 
 const getDefaultOutputFileName = (mode: GeneratorMode, outputLanguage: OutputLanguage) => {
@@ -33,6 +34,7 @@ type GeneratorResult = {
   stdout: string;
   stderr: string;
   preview: string;
+  previewBrowsing?: boolean;
   ratePercent?: number;
   mode?: GeneratorMode;
   args?: string[];
@@ -68,6 +70,29 @@ export function DanbooruDatasetGeneratorTab() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<GeneratorResult | null>(null);
   const [reconnecting, setReconnecting] = useState(true);
+  const [previewPage, setPreviewPage] = useState<PreviewPage | null>(null);
+  const [previewQuery, setPreviewQuery] = useState('');
+  const [previewAppliedQuery, setPreviewAppliedQuery] = useState('');
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const previewRequest = useRef(0);
+  useEffect(() => { previewRequest.current++; setPreviewBusy(false); setPreviewPage(null); setPreviewQuery(''); setPreviewAppliedQuery(''); setPreviewError(''); }, [result?.id]);
+
+  const loadPreviewPage = async (page: number, query: string) => {
+    if (!result?.id || previewBusy) return;
+    const request = ++previewRequest.current;
+    setPreviewBusy(true); setPreviewError('');
+    try {
+      const params = new URLSearchParams({ id: result.id, previewPage: String(page), previewQuery: query });
+      const response = await fetch(`/api/booru/dataset-generator/status?${params}`, { cache: 'no-store' });
+      const data = await response.json();
+      if (request !== previewRequest.current) return;
+      if (!response.ok) throw new Error(data.error || 'Could not load preview');
+      if (!data.previewPage) throw new Error('Full preview browsing requires the updated Studio backend. The collection can keep running.');
+      setPreviewPage(data.previewPage); setPreviewAppliedQuery(query);
+    } catch (error: any) { if (request === previewRequest.current) setPreviewError(error?.message || 'Could not load preview'); }
+    finally { if (request === previewRequest.current) setPreviewBusy(false); }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -254,8 +279,8 @@ export function DanbooruDatasetGeneratorTab() {
   const percent = progress?.total ? Math.min(100, 100 * progress.completed / progress.total) : null;
   const retrySeconds = Math.max(0, Math.ceil(((progress?.retryUntil || 0) - clock) / 1000));
   const previewRows = parseCsvPreview(result?.preview || '');
-  const previewHeaders = previewRows[0] || [];
-  const previewBody = previewRows.slice(1);
+  const previewHeaders = previewPage?.headers || previewRows[0] || [];
+  const previewBody = previewPage?.rows || previewRows.slice(1);
 
   return (
     <div className="flex h-full min-h-0 bg-[var(--umbra-bg)] text-[var(--umbra-text)]" style={{ fontFamily: 'var(--font-family)' }}>
@@ -392,11 +417,11 @@ export function DanbooruDatasetGeneratorTab() {
           </div>
         ) : (
           <div className="space-y-4">
-            <section className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+            <section className="glass-panel overflow-hidden rounded-sm border border-[var(--umbra-border)] p-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-200">{generatorStatusLabel(result)}</div>
-                  <h2 className="mt-1 truncate text-lg font-black text-zinc-100">{result.outputPath}</h2>
+                  <div className={`text-[10px] font-black uppercase tracking-[0.18em] ${result.error || result.status === 'failed' ? 'text-red-300' : result.paused || result.status === 'stopping' ? 'text-amber-300' : 'text-[var(--umbra-accent)]'}`}>{generatorStatusLabel(result)}</div>
+                  <h2 title={result.outputPath} className="mt-1 truncate font-mono text-xs font-semibold text-[var(--umbra-text)]">{result.outputPath.split(/[\\/]/).pop()}</h2>
                   <div className="mt-1 text-xs text-zinc-500">
                     {result.paused
                       ? 'Paused. Completed rows are saved.'
@@ -418,25 +443,40 @@ export function DanbooruDatasetGeneratorTab() {
                   </button>
                 ) : null}
               </div>
-              {progress ? <div className="mt-4 space-y-2">
-                <div className="flex flex-wrap justify-between gap-2 text-sm text-zinc-200">
+              {progress ? <div className="mt-3 space-y-2 border-t border-[var(--umbra-border)] pt-3">
+                <div className="flex flex-wrap justify-between gap-2 font-mono text-xs text-[var(--umbra-text)]">
                   <span>{progress.stage === 'batch-discovery' ? `Batch ${progress.batchNumber}: collecting ${(progress.batchSize ?? 50000).toLocaleString()} new entries` : progress.stage === 'batch-attributes' ? `Batch ${progress.batchNumber}: collecting character attributes` : progress.stage === 'combined' ? 'Collecting tags and character attributes' : progress.stage === 'collecting' ? `Collecting ${progress.current || 'tags'}` : progress.stage === 'completed' ? 'Collection complete' : 'Collecting character attributes'}</span>
                   <span>{percent === null ? `${progress.catalogRows.toLocaleString()} entries found` : `${progress.completed.toLocaleString()} / ${progress.total?.toLocaleString()} · ${percent.toFixed(1)}%`}</span>
                 </div>
-                <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-2 overflow-hidden rounded-full bg-white/10">
-                  <div className={`h-full rounded-full ${result.paused ? 'bg-amber-300' : 'bg-emerald-300'} ${percent === null && running ? 'animate-pulse' : ''}`} style={{ width: percent === null ? '25%' : `${percent}%` }} />
+                <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-1.5 overflow-hidden rounded-sm border border-[var(--umbra-border)] bg-[var(--umbra-bg)]">
+                  <div className={`h-full transition-[width] duration-300 motion-reduce:transition-none ${result.error || result.status === 'failed' ? 'bg-red-400' : result.paused || retrySeconds > 0 ? 'bg-amber-400' : 'bg-[var(--umbra-accent)]'} ${percent === null && running ? 'motion-safe:animate-pulse' : ''}`} style={{ width: percent === null ? '25%' : `${percent}%` }} />
                 </div>
                 {progress.populated !== undefined ? <div className="text-xs text-zinc-400">{progress.populated.toLocaleString()} characters with attributes · {(progress.empty ?? 0).toLocaleString()} without attributes ({progress.noMatches ?? 0} without matching posts; {progress.noAttributes ?? 0} without eligible attributes)</div> : null}
-                {progress.networkRequests !== undefined ? <div className="text-xs text-zinc-500">{progress.networkRequests.toLocaleString()} requests · {progress.cacheHits ?? 0} saved sample hits · {progress.localHits ?? 0} local corpus hits</div> : null}
-                <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} entries discovered{progress.stage === 'combined' || progress.stage.startsWith('batch-') ? ` · ${(progress.charactersChecked ?? progress.completed).toLocaleString()} / ${(progress.characters ?? 0).toLocaleString()} discovered characters have attributes checked` : ''}{progress.stage === 'batch-discovery' ? ` · ${(progress.scanned ?? 0).toLocaleString()} tag entries scanned (saved entries skipped)` : ''} · Request speed {result.ratePercent ?? 100}%</div>
+                {progress.networkRequests !== undefined ? <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-[var(--umbra-border)] bg-[var(--umbra-border)] sm:grid-cols-4">
+                  {([['Requests', progress.networkRequests], ['Saved samples', progress.cacheHits ?? 0], ['Local corpus', progress.localHits ?? 0], ['Speed', `${result.ratePercent ?? 100}%`]] as const).map(([label, value]) => <div key={label} className="bg-[var(--umbra-panel)] px-2 py-1.5"><dt className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">{label}</dt><dd className="mt-0.5 font-mono text-xs tabular-nums text-[var(--umbra-text)]">{typeof value === 'number' ? value.toLocaleString() : value}</dd></div>)}
+                </dl> : null}
+                {progress.catalogRows > 0 ? <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} entries discovered{progress.stage === 'combined' || progress.stage.startsWith('batch-') ? ` · ${(progress.charactersChecked ?? progress.completed).toLocaleString()} / ${(progress.characters ?? 0).toLocaleString()} discovered characters have attributes checked` : ''}{progress.stage === 'batch-discovery' ? ` · ${(progress.scanned ?? 0).toLocaleString()} tag entries scanned (saved entries skipped)` : ''}</div> : null}
                 {result.running && !result.paused && retrySeconds > 0 ? <div role="status" className="text-xs text-amber-200">Danbooru rate limit / server retry · waiting {retrySeconds}s. Completed rows are saved.</div> : null}
               </div> : result.running ? <div role="status" className="mt-3 text-xs text-zinc-400">Preparing collection…</div> : null}
             </section>
             <section className="rounded-md border border-white/10 bg-black/25 p-4">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">Preview</h3>
-                <span className="text-[10px] uppercase tracking-wide text-zinc-600">{previewBody.length} preview rows</span>
+                <span className="text-[10px] uppercase tracking-wide text-zinc-400">{previewPage ? `${previewPage.total.toLocaleString()} matches · ${previewPage.savedRows.toLocaleString()} saved rows` : `First ${previewBody.length} saved rows`}</span>
               </div>
+              {result.previewBrowsing ? <form className="mb-3 flex flex-wrap items-center gap-2" onSubmit={event => { event.preventDefault(); void loadPreviewPage(0, previewQuery); }}>
+                <input aria-label="Search collected rows" placeholder="Search character, outfit, copyright, or review status" maxLength={200} value={previewQuery} onChange={event => setPreviewQuery(event.target.value)} className="settings-input min-w-40 flex-1 text-xs" />
+                <button type="submit" disabled={previewBusy} className="settings-button px-3 py-2 text-xs disabled:opacity-40">{previewBusy ? 'Loading…' : previewPage ? 'Search' : 'Browse all saved rows'}</button>
+                {previewPage ? <button type="button" disabled={previewBusy} onClick={() => void loadPreviewPage(previewPage.page, previewAppliedQuery)} className="settings-button px-3 py-2 text-xs disabled:opacity-40">Refresh</button> : null}
+              </form> : <p className="mb-2 text-xs text-zinc-500">This is a limited preview; the CSV contains all saved rows.</p>}
+              {previewError ? <p role="alert" className="mb-2 text-xs text-amber-300">{previewError}</p> : null}
+              {previewPage ? <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+                <button type="button" disabled={previewBusy || previewPage.page === 0} onClick={() => void loadPreviewPage(previewPage.page - 1, previewAppliedQuery)} className="settings-button px-3 py-2 disabled:opacity-40">Previous</button>
+                <span>Page {previewPage.page + 1} of {previewPage.pages} · {previewPage.total ? previewPage.page * previewPage.pageSize + 1 : 0}–{Math.min(previewPage.total, (previewPage.page + 1) * previewPage.pageSize)}</span>
+                <button type="button" disabled={previewBusy || previewPage.page + 1 >= previewPage.pages} onClick={() => void loadPreviewPage(previewPage.page + 1, previewAppliedQuery)} className="settings-button px-3 py-2 disabled:opacity-40">Next</button>
+                {result.running ? <span>Saved snapshot · Refresh to include new rows.</span> : null}
+              </div> : null}
+              {previewPage && !previewBody.length ? <p className="mb-2 text-xs text-zinc-400">No saved rows match this search.</p> : null}
               {previewHeaders.length > 0 ? (
                 <div className="custom-scrollbar max-h-96 overflow-auto rounded-md border border-white/10">
                   <table className="min-w-full border-collapse text-left text-xs">

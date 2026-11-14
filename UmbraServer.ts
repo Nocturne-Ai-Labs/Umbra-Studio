@@ -208,6 +208,7 @@ import {
   parsePowerPrompterCsv,
   type PowerPrompterCsvItem,
 } from './backend/powerPrompterCsv';
+import { readDatasetPreview } from './backend/datasetGeneratorPreview';
 import {
   DANBOORU_TAG_CLASSIFIERS,
   getDanbooruTagClassifierDefinition,
@@ -1124,6 +1125,7 @@ function serializeDanbooruDatasetGeneratorJob(job: DanbooruDatasetGeneratorJob) 
     stdout: job.stdout,
     stderr: job.stderr,
     preview: job.preview,
+    previewBrowsing: true,
     args: job.args,
     ratePercent: job.ratePercent,
     progress: job.progress,
@@ -1196,6 +1198,14 @@ async function handleBooruDatasetGeneratorStatus(url: URL): Promise<Response> {
     .sort((left, right) => Number(right.running) - Number(left.running) || right.startedAt - left.startedAt)[0];
   if (!id && !job) return json({ ok: true, job: null });
   if (!job) return json({ error: 'Generator job not found' }, 404);
+  if (url.searchParams.has('previewPage')) {
+    try {
+      const previewPage = await readDatasetPreview(job.outFile, Number(url.searchParams.get('previewPage')), String(url.searchParams.get('previewQuery') || ''));
+      return json({ ok: true, id: job.id, previewPage });
+    } catch (error: any) {
+      return json({ ok: false, error: error?.message || 'Could not read the collection preview.' }, 409);
+    }
+  }
   await updateDanbooruDatasetGeneratorPreview(job).catch(() => {});
   return json(serializeDanbooruDatasetGeneratorJob(job));
 }
