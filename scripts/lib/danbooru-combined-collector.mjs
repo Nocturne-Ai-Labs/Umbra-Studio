@@ -1,6 +1,6 @@
 // Keep discovery and attribute sampling in one bounded stream. Only completed
 // character records are published; interrupted discovery can be replayed safely.
-export function createCombinedCollector({ initialRows = [], concurrency, enrich, save, report, checkpointMs = 5000 }) {
+export function createCombinedCollector({ initialRows = [], concurrency, enrich, save, report, onRowComplete, checkpointMs = 5000 }) {
   const rows = new Map(initialRows.map(row => [row.tag, row]));
   const scheduled = new Set();
   const active = new Set();
@@ -9,7 +9,11 @@ export function createCombinedCollector({ initialRows = [], concurrency, enrich,
   let characters = initialRows.filter(row => row.category === 4).length;
   let lastSave = 0;
   let writes = Promise.resolve();
-  const notify = () => report({ stage: 'combined', total: null, catalogRows: rows.size, completed, characters, current: '' });
+  let populated = initialRows.filter(row => row.category === 4 && row.attributes?.length).length;
+  let noMatches = initialRows.filter(row => row.attributeStatus === 'no_matching_posts').length;
+  let noAttributes = initialRows.filter(row => row.attributeStatus === 'no_eligible_attributes').length;
+  const notify = () => report({ stage: 'combined', total: null, catalogRows: rows.size, completed, characters,
+    populated, empty: completed - populated, noMatches, noAttributes, current: '' });
   const checkpoint = (force = false) => {
     if (!force && Date.now() - lastSave < checkpointMs) return writes;
     lastSave = Date.now();
@@ -35,7 +39,11 @@ export function createCombinedCollector({ initialRows = [], concurrency, enrich,
       const task = Promise.resolve().then(async () => {
         row.attributes = await enrich(row);
         row.attributesCollected = true;
+        await onRowComplete?.(row);
         completed += 1;
+        if (row.attributes.length) populated += 1;
+        if (row.attributeStatus === 'no_matching_posts') noMatches += 1;
+        if (row.attributeStatus === 'no_eligible_attributes') noAttributes += 1;
         notify();
         await checkpoint();
       }).catch(error => { failure ||= error; }).finally(() => active.delete(task));
@@ -47,6 +55,7 @@ export function createCombinedCollector({ initialRows = [], concurrency, enrich,
   }
   async function finish() {
     await Promise.all(active);
+    notify();
     await checkpoint(true);
     if (failure) throw failure;
     return [...rows.values()].filter(row => row.category !== 4 || row.attributesCollected);
@@ -61,7 +70,7 @@ export function createBatchedCombinedCollector(options) {
   const initialRows = options.initialRows || [];
   const seen = new Set(initialRows.filter(row => row.category !== 4 || row.attributesCollected).map(row => row.tag));
   let pending = [];
-  let batchNumber = 1;
+  let batchNumber = options.batchNumber ?? 1;
   let scanned = 0;
   let checked = initialRows.filter(row => row.category === 4 && row.attributesCollected).length;
   let characters = initialRows.filter(row => row.category === 4 && row.attributesCollected).length;
@@ -87,8 +96,10 @@ export function createBatchedCombinedCollector(options) {
     pending = [];
     batchStart = checked;
     batchCharacters = batch.filter(row => row.category === 4).length;
+    await options.onBatchStart?.(batch, batchNumber);
     await inner.accept(batch);
     await inner.finish();
+    await options.onBatchComplete?.(batch, batchNumber);
     batchNumber += 1;
   }
   async function accept(rows) {
@@ -108,9 +119,9 @@ export function createBatchedCombinedCollector(options) {
   }
   async function checkpoint() {
     // No new sampling during cancellation. Discovered ordinary tags can still
-    // be saved; unfinished characters are rediscovered on resume.
+    // be saved; durable pending records remain available on resume.
     await inner.accept(pending.filter(row => row.category !== 4)).catch(() => {});
     return inner.finish();
   }
-  return { accept, finish, checkpoint };
+  return { accept, finish, checkpoint, flushPending: flush };
 }

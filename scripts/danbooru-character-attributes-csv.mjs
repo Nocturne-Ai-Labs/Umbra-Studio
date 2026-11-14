@@ -14,7 +14,8 @@ import { classifyDanbooruTag } from '../shared/danbooru/tagClassifiers.ts';
 import { createBatchedCombinedCollector } from './lib/danbooru-combined-collector.mjs';
 import { writeCollectionCheckpoint } from './lib/danbooru-checkpoint-file.mjs';
 import { soloGeneralFallbackFilter, selectSingleCharacterGeneralPosts } from './lib/danbooru-character-sampling.mjs';
-import { parseCombinedCheckpoint, requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
+import { requestIntervalMs } from './lib/danbooru-collection-progress.mjs';
+import { CollectionStore, CharacterSampleCache, collectionPolicy, mergeCharacterSamples } from './lib/danbooru-collection-store.mjs';
 import { readCharacterCorpus } from './lib/danbooru-character-corpus.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +38,8 @@ let pauseWasAnnounced = false;
 let requestRatePercent = 100;
 let nextRequestAt = 0;
 let requestGate = Promise.resolve();
-let progress = { stage: 'collecting', completed: 0, total: null, catalogRows: 0, current: '', retryUntil: 0, ratePercent: 100 };
+let progress = { stage: 'collecting', completed: 0, total: null, catalogRows: 0, current: '', retryUntil: 0, ratePercent: 100,
+  networkRequests: 0, cacheHits: 0, localHits: 0 };
 function reportProgress(update = {}) {
   progress = { ...progress, ...update, ratePercent: requestRatePercent };
   console.log(`UMBRA_CSV_PROGRESS ${JSON.stringify(progress)}`);
@@ -261,9 +263,9 @@ function parseArgs(argv) {
     delayMs: 0,
     limit: 100,
     maxAttributes: 24,
-    minCharacterPosts: 100,
+    minCharacterPosts: 51,
     minFrequency: 0.12,
-    minTagPosts: null,
+    minTagPosts: 201,
     outFile: DEFAULT_OUT_FILE,
     outputLanguage: 'canonical',
     pageConcurrency: 2,
@@ -537,12 +539,12 @@ Options:
   --series-post-sample <num>   Recent series posts to scan, or all. Default: 200
   --post-sample <number>       Danbooru posts sampled per character, max 200. Default: 100
   --max-attributes <number>    Max attributes per character. Default: 24
-  --min-character-posts <num>  Minimum Danbooru post count / series appearances. Default: 100
-  --min-tag-posts <num>        Minimum post count. Defaults: general 150, artist 100, other categories 10
+  --min-character-posts <num>  Minimum Danbooru post count / series appearances. Default: 51 (above 50)
+  --min-tag-posts <num>        Minimum post count. Default: 201 (above 200)
   --min-frequency <0..1>       How common a tag must be to keep it. Default: 0.12
   --post-filter <tags>         Extra Danbooru filters, comma-separated. Use underscores inside tags. Default: "solo"
   --rate-percent <number>      Request speed 10-100%; 100% caps requests at 3/second.
-  --resume-existing           Resume a partial combined CSV; keep completed attributes and rediscover missing tags.
+  --resume-existing           Resume saved discovery cursors and unfinished batches (same collection settings).
   --concurrency <number>       Parallel Danbooru post requests. Default: 4
   --page-concurrency <number>  Parallel series-discovery page requests. Default: 2
   --delay-ms <number>          Delay after each request inside each worker. Default: 0
@@ -784,8 +786,11 @@ async function fetchCharacterTagsFromDanbooru(limit, options) {
 
 async function* fetchTagRowsForCategory(options, categoryId) {
   const rows = [];
-  let page = 1;
-  let beforeId = '';
+  const saved = options.collectionStore?.cursor(categoryId);
+  if (saved?.done) return [];
+  let page = saved?.page || 1;
+  let beforeId = saved?.beforeId || '';
+  let found = saved?.count || 0;
   const categoryName = TAG_CATEGORY_NAMES[categoryId] || 'unknown';
   const minPostCount = options.minTagPosts ?? getDefaultMinTagPosts(categoryId);
   const useStableFullCatalogPagination = !Number.isFinite(options.limit);
@@ -794,10 +799,10 @@ async function* fetchTagRowsForCategory(options, categoryId) {
   if (minPostCount > 0) {
     console.log(`  minimum post count: ${minPostCount.toLocaleString()}`);
   }
-  while (rows.length < options.limit) {
+  while (found < options.limit) {
     if (options.mode !== 'combined') reportProgress({ stage: 'collecting', current: categoryName, total: null });
     await waitForGeneratorControl();
-    const remaining = Number.isFinite(options.limit) ? options.limit - rows.length : DANBOORU_MAX_TAG_LIMIT;
+    const remaining = Number.isFinite(options.limit) ? options.limit - found : DANBOORU_MAX_TAG_LIMIT;
     const pageLimit = Math.min(DANBOORU_MAX_TAG_LIMIT, remaining);
     const url = new URL(DANBOORU_TAGS_URL);
     url.searchParams.set('limit', String(pageLimit));
@@ -815,7 +820,11 @@ async function* fetchTagRowsForCategory(options, categoryId) {
 
     const response = await danbooruFetch(url, `category ${categoryId} tag list`);
     const tags = await response.json();
-    if (!Array.isArray(tags) || tags.length === 0) break;
+    if (!Array.isArray(tags)) throw new Error(`Invalid tag response for category ${categoryId}`);
+    if (!tags.length) {
+      options.collectionStore?.recordPage(categoryId, [], { page, beforeId, count: found, done: true });
+      break;
+    }
 
     const batchStart = rows.length;
     for (const tag of tags) {
@@ -832,17 +841,20 @@ async function* fetchTagRowsForCategory(options, categoryId) {
         tag: name,
         options,
       });
-      if (rows.length >= options.limit) break;
+      found += 1;
+      if (found >= options.limit) break;
     }
 
-    console.log(`  tag page ${page}: ${rows.length.toLocaleString()} found`);
-    yield rows.slice(batchStart);
-    if (tags.length < pageLimit) break;
-    if (useStableFullCatalogPagination) {
-      const nextBeforeId = String(tags.at(-1)?.id || '');
-      if (!nextBeforeId || nextBeforeId === beforeId) break;
-      beforeId = nextBeforeId;
-    }
+    console.log(`  tag page ${page}: ${found.toLocaleString()} found`);
+    const nextBeforeId = useStableFullCatalogPagination ? String(tags.at(-1)?.id || '') : '';
+    const done = tags.length < pageLimit || found >= options.limit
+      || (useStableFullCatalogPagination && (!nextBeforeId || nextBeforeId === beforeId));
+    const batch = rows.slice(batchStart);
+    // Commit discovery and its next cursor together before enrichment can pause or fail.
+    options.collectionStore?.recordPage(categoryId, batch, { page: page + 1, beforeId: nextBeforeId, count: found, done });
+    yield batch;
+    if (done) break;
+    beforeId = nextBeforeId;
     page += 1;
   }
 
@@ -1001,44 +1013,50 @@ async function fetchSeriesPage(seriesTag, page, limit) {
 }
 
 async function fetchPostsForCharacter(characterTag, options) {
-  if (options.corpusPath) {
-    const local = readCharacterCorpus(options.corpusPath, characterTag, normalizePostFilter(options.postFilter), options.postSample);
-    if (local.posts.length >= options.postSample) {
-      console.log(`${characterTag}: using ${local.posts.length} posts from the local tag corpus.`);
-      return local.posts;
-    }
-    console.log(`${characterTag}: local cache insufficient; checking live Danbooru (${local.posts.length} cached matches).`);
+  await waitForGeneratorControl();
+  const filter = normalizePostFilter(options.postFilter);
+  const local = options.corpusPath
+    ? readCharacterCorpus(options.corpusPath, characterTag, filter, options.postSample).posts : [];
+  if (local.length >= options.postSample) {
+    reportProgress({ localHits: (progress.localHits || 0) + 1 });
+    console.log(`${characterTag}: using ${options.postSample} matching posts from the local tag corpus.`);
+    return local.slice(0, options.postSample);
   }
-  const tags = [characterTag, normalizePostFilter(options.postFilter)].filter(Boolean).join(' ').trim();
-  const url = new URL(DANBOORU_POSTS_URL);
-  url.searchParams.set('tags', tags);
-  url.searchParams.set('limit', String(options.postSample));
-  url.searchParams.set('only', 'id,rating,tag_string_general,tag_string_character,tag_string_copyright');
-
-  const response = await danbooruFetch(url, characterTag);
-
-  const posts = await response.json();
-  if (!Array.isArray(posts)) throw new Error(`Invalid post response for ${characterTag}`);
-  if (posts.length) {
-    console.log(`${characterTag}: sampled ${posts.length} posts matching ${normalizePostFilter(options.postFilter)}.`);
+  async function sample(queryFilter) {
+    const cached = options.sampleCache?.get(characterTag, queryFilter, options.postSample);
+    if (cached !== undefined && cached !== null) {
+      reportProgress({ cacheHits: (progress.cacheHits || 0) + 1 });
+      return cached;
+    }
+    const url = new URL(DANBOORU_POSTS_URL);
+    url.searchParams.set('tags', [characterTag, queryFilter].filter(Boolean).join(' '));
+    url.searchParams.set('limit', String(options.postSample));
+    url.searchParams.set('only', 'id,rating,tag_string_general,tag_string_character,tag_string_copyright');
+    const response = await danbooruFetch(url, characterTag);
+    const posts = await response.json();
+    if (!Array.isArray(posts)) throw new Error(`Invalid post response for ${characterTag}`);
+    options.sampleCache?.put(characterTag, queryFilter, options.postSample, posts);
     return posts;
   }
-  const fallbackFilter = soloGeneralFallbackFilter(options.postFilter);
+  const posts = mergeCharacterSamples(local, await sample(filter), options.postSample);
+  if (posts.length) {
+    console.log(`${characterTag}: sampled ${posts.length} posts matching ${filter}.`);
+    return posts;
+  }
+  const fallbackFilter = soloGeneralFallbackFilter(filter);
   if (fallbackFilter) {
-    url.searchParams.set('tags', `${characterTag} ${fallbackFilter}`);
-    const fallbackResponse = await danbooruFetch(url, `${characterTag} General fallback`);
-    const fallbackPosts = await fallbackResponse.json();
-    if (!Array.isArray(fallbackPosts)) throw new Error(`Invalid fallback post response for ${characterTag}`);
+    const fallbackPosts = await sample(fallbackFilter);
     const usable = selectSingleCharacterGeneralPosts(fallbackPosts, characterTag);
     console.log(`${characterTag}: no solo matches; ${usable.length}/${fallbackPosts.length} General posts contain only this named character and no tagged group.`);
     return usable;
   }
-  console.log(`${characterTag}: no posts match ${normalizePostFilter(options.postFilter)}.`);
+  console.log(`${characterTag}: no posts match ${filter}.`);
   return [];
 }
 
 async function danbooruFetch(url, label, attempt = 1) {
   await waitForRequestSlot();
+  reportProgress({ networkRequests: (progress.networkRequests || 0) + 1 });
   const response = await fetch(url, {
     headers: {
       'Accept': 'application/json',
@@ -1046,7 +1064,10 @@ async function danbooruFetch(url, label, attempt = 1) {
     },
   });
 
-  if (response.ok) return response;
+  if (response.ok) {
+    if (progress.retryUntil <= Date.now()) reportProgress({ retryUntil: 0 });
+    return response;
+  }
   if ((response.status === 429 || response.status >= 500) && attempt < MAX_FETCH_ATTEMPTS) {
     const retryAfter = Number(response.headers.get('retry-after') || 0);
     const waitMs = retryAfter > 0
@@ -1196,7 +1217,7 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
   const localized = (rows[0]?.options || fallbackOptions).outputLanguage !== 'canonical';
   const combined = (rows[0]?.options || fallbackOptions).mode === 'combined';
   const headers = ['tag', 'category', 'color', 'post_count', 'classifiers'];
-  if (combined) headers.push('type', 'attributes', 'attributes_collected');
+  if (combined) headers.push('type', 'attributes', 'attributes_collected', 'sample_count', 'attribute_status');
   if (localized) headers.push('localized_name', 'localized_aliases');
   const lines = [
     headers.join(','),
@@ -1212,6 +1233,8 @@ export function tagRowsToCsv(rows, fallbackOptions = {}) {
         csvCell(row.category === 4 ? 'character' : 'tag'),
         csvCell((row.attributes || []).map(([tag]) => displayTag(tag, row.options)).join(', ')),
         csvCell(row.attributesCollected ? '1' : ''),
+        csvCell(row.category === 4 ? row.sampleCount : ''),
+        csvCell(row.category === 4 ? row.attributeStatus : ''),
       );
       if (!localized) return canonicalCells.join(',');
       const localization = getLocalizedTag(row.options.localizationMap, row.tag);
@@ -1339,19 +1362,30 @@ async function main() {
   if (options.mode === 'combined') {
     options.tagCategory = 'all';
     await mkdir(path.dirname(options.outFile), { recursive: true });
-    const initialRows = options.resumeExisting
-      ? parseCombinedCheckpoint(await readFile(options.outFile, 'utf8'), options) : [];
+    const stateDir = path.join(path.dirname(options.outFile), '.collection-state');
+    const store = new CollectionStore(path.join(stateDir, `${path.basename(options.outFile)}.sqlite`), collectionPolicy(options), options.resumeExisting);
+    options.collectionStore = store;
+    options.sampleCache = new CharacterSampleCache(path.join(stateDir, 'character-samples.sqlite'));
+    const initialRows = store.rows('processed', options);
     const collector = createBatchedCombinedCollector({
       initialRows,
+      batchNumber: Number(store.meta('batchNumber') || 1),
+      onBatchStart: (batch, number) => store.beginBatch(batch, number),
+      onRowComplete: row => store.completeRow(row),
+      onBatchComplete: (batch, number) => store.completeBatch(batch, number),
       concurrency: options.concurrency,
       report: reportProgress,
       enrich: async (row) => {
         if (row.postCount === 0) {
+          row.sampleCount = 0;
+          row.attributeStatus = 'zero_posts';
           console.log(`${row.tag}: no indexed posts; skipping attribute requests.`);
           return [];
         }
         const posts = await fetchPostsForCharacter(row.tag, options);
         const attributes = getCommonAttributes(row.tag, posts, options);
+        row.sampleCount = posts.length;
+        row.attributeStatus = attributes.length ? 'populated' : posts.length ? 'no_eligible_attributes' : 'no_matching_posts';
         console.log(`${row.tag}: collected ${attributes.length} character attributes.`);
         if (options.delayMs > 0) await controlledSleep(options.delayMs);
         return attributes;
@@ -1361,14 +1395,17 @@ async function main() {
     options.onRows = collector.accept;
     let rows;
     try {
+      await collector.accept(store.rows('active', options));
+      await collector.flushPending();
+      await collector.accept(store.rows('pending', options));
       await fetchTagRowsFromDanbooru(options);
-      // Older checkpoints may contain unfinished character rows. Retain them
-      // and finish any that were not encountered during this discovery pass.
-      await collector.accept(initialRows);
       rows = await collector.finish();
     } catch (error) {
       await collector.checkpoint().catch(() => {});
       throw error;
+    } finally {
+      store.close();
+      options.sampleCache.close();
     }
     const characters = rows.filter(row => row.category === 4).length;
     reportProgress({ stage: 'completed', completed: characters, total: characters, catalogRows: rows.length, retryUntil: 0 });

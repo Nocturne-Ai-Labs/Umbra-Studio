@@ -36,7 +36,7 @@ type GeneratorResult = {
   ratePercent?: number;
   mode?: GeneratorMode;
   args?: string[];
-  progress?: { stage: string; completed: number; total: number | null; catalogRows: number; characters?: number; charactersChecked?: number; batchNumber?: number; batchSize?: number; scanned?: number; current: string; retryUntil: number };
+  progress?: { stage: string; completed: number; total: number | null; catalogRows: number; characters?: number; charactersChecked?: number; populated?: number; empty?: number; noMatches?: number; noAttributes?: number; cacheHits?: number; localHits?: number; networkRequests?: number; batchNumber?: number; batchSize?: number; scanned?: number; current: string; retryUntil: number };
 };
 
 export function DanbooruDatasetGeneratorTab() {
@@ -53,8 +53,8 @@ export function DanbooruDatasetGeneratorTab() {
   const [postSample, setPostSample] = useState(100);
   const [seriesPostSample, setSeriesPostSample] = useState(200);
   const [maxAttributes, setMaxAttributes] = useState(24);
-  const [minCharacterPosts, setMinCharacterPosts] = useState(100);
-  const [minTagPosts, setMinTagPosts] = useState(150);
+  const [minCharacterPosts, setMinCharacterPosts] = useState(51);
+  const [minTagPosts, setMinTagPosts] = useState(201);
   const [minFrequency, setMinFrequency] = useState(0.12);
   const [postFilter, setPostFilter] = useState('solo');
   const [concurrency, setConcurrency] = useState(4);
@@ -296,7 +296,7 @@ export function DanbooruDatasetGeneratorTab() {
               <TextInput label={mode === 'combined' ? 'Entries Per Category' : 'Characters'} value={limit} onChange={setLimit} placeholder="100 or all" help={mode === 'combined' ? 'Use all for every qualifying tag in all five categories. Each character needs an attribute sample.' : 'Use a number, or type all to process every matching character.'} />
               {mode !== 'combined' && characterSource === 'series' ? <NumberInput label="Series Posts To Scan" value={seriesPostSample} onChange={setSeriesPostSample} min={1} max={5000} /> : null}
               <Checkbox label="Prefer tag corpus for character attributes" checked={preferCorpus} onChange={setPreferCorpus} />
-              <p className="text-xs leading-5 text-zinc-400">Uses local posts when enough match the character and filter. Otherwise samples live Danbooru and records the source in the log. New corpus batches retain character associations; older batches may need recollection.</p>
+              <p className="text-xs leading-5 text-zinc-400">Reuses matching local posts and saved samples before requesting Danbooru. Partial local samples are combined without duplicate posts.</p>
               {mode === 'combined' ? <NumberInput label="Min Tag Posts" value={minTagPosts} onChange={setMinTagPosts} min={0} max={10000000} /> : null}
               <NumberInput label="Posts Per Character" value={postSample} onChange={setPostSample} min={1} max={200} help="Capped at 200 to match Danbooru/API safety limits." />
               <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} help="Reserves space for observed eye color, hair color, and up to three garment tags. Raise this limit for more outfit and accessory details." />
@@ -326,7 +326,7 @@ export function DanbooruDatasetGeneratorTab() {
           )}
 
           {mode === 'combined' ? <Checkbox label="Resume saved CSV" checked={resumeExisting} onChange={setResumeExisting} /> : null}
-          {mode === 'combined' && resumeExisting ? <p className="text-xs text-zinc-400">Resume any saved collection with the same filename and settings. Completed attributes are retained; missing tags and attributes are collected together.</p> : null}
+          {mode === 'combined' && resumeExisting ? <p className="text-xs text-zinc-400">Resume a collection started with this version using the same filename and settings. Saved pages and completed attributes are retained. Older CSV-only collections need a fresh run.</p> : null}
           <NumberInput label="Request speed (%)" value={ratePercent} onChange={setRatePercent} min={10} max={100} help="100% allows up to 3 requests/second. Rate-limit waits can slow it further." />
           {running ? <button disabled={controlling} onClick={() => void controlGenerator('speed')} className="settings-input w-full !py-2 text-xs">Apply speed · currently {result?.ratePercent ?? 100}%</button> : null}
           <NumberInput label="Concurrency" value={concurrency} onChange={setConcurrency} min={1} max={5} help="Capped at 5 to reduce Danbooru rate-limit errors." />
@@ -426,6 +426,8 @@ export function DanbooruDatasetGeneratorTab() {
                 <div role="progressbar" aria-label="CSV collection progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} className="h-2 overflow-hidden rounded-full bg-white/10">
                   <div className={`h-full rounded-full ${result.paused ? 'bg-amber-300' : 'bg-emerald-300'} ${percent === null && running ? 'animate-pulse' : ''}`} style={{ width: percent === null ? '25%' : `${percent}%` }} />
                 </div>
+                {progress.populated !== undefined ? <div className="text-xs text-zinc-400">{progress.populated.toLocaleString()} characters with attributes · {(progress.empty ?? 0).toLocaleString()} without attributes ({progress.noMatches ?? 0} without matching posts; {progress.noAttributes ?? 0} without eligible attributes)</div> : null}
+                {progress.networkRequests !== undefined ? <div className="text-xs text-zinc-500">{progress.networkRequests.toLocaleString()} requests · {progress.cacheHits ?? 0} saved sample hits · {progress.localHits ?? 0} local corpus hits</div> : null}
                 <div className="text-xs text-zinc-400">{progress.catalogRows.toLocaleString()} entries discovered{progress.stage === 'combined' || progress.stage.startsWith('batch-') ? ` · ${(progress.charactersChecked ?? progress.completed).toLocaleString()} / ${(progress.characters ?? 0).toLocaleString()} discovered characters have attributes checked` : ''}{progress.stage === 'batch-discovery' ? ` · ${(progress.scanned ?? 0).toLocaleString()} tag entries scanned (saved entries skipped)` : ''} · Request speed {result.ratePercent ?? 100}%</div>
                 {result.running && !result.paused && retrySeconds > 0 ? <div role="status" className="text-xs text-amber-200">Danbooru rate limit / server retry · waiting {retrySeconds}s. Completed rows are saved.</div> : null}
               </div> : result.running ? <div role="status" className="mt-3 text-xs text-zinc-400">Preparing collection…</div> : null}

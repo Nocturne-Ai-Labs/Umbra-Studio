@@ -916,11 +916,11 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
     const category = String(body.tagCategory ?? '0');
     args.push('--tag-category', /^[015]$/.test(category) ? category : '0');
     pushLimit(body.limit, 1000);
-    pushNumber('--min-tag-posts', body.minTagPosts, 150, 0, 10000000);
+    pushNumber('--min-tag-posts', body.minTagPosts, 201, 0, 10000000);
   } else {
     if (mode === 'combined') {
       args.push('--mode', 'combined');
-      pushNumber('--min-tag-posts', body.minTagPosts, 150, 0, 10000000);
+      pushNumber('--min-tag-posts', body.minTagPosts, 201, 0, 10000000);
     }
     if (body.preferCorpus !== false) args.push('--corpus-path', danbooruTagCorpusService.databasePath);
     const source = String(body.characterSource || 'danbooru');
@@ -939,7 +939,7 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
     pushLimit(body.limit, 100);
     pushNumber('--post-sample', body.postSample, 100, 1, 200);
     pushNumber('--max-attributes', body.maxAttributes, 24, 1, 80);
-    pushNumber('--min-character-posts', body.minCharacterPosts, 100, 0, 10000000);
+    pushNumber('--min-character-posts', body.minCharacterPosts, 51, 0, 10000000);
     const requestedFrequency = Number(body.minFrequency ?? 0.12);
     const minFrequency = Number.isFinite(requestedFrequency) ? Math.max(0, Math.min(1, requestedFrequency)) : 0.12;
     args.push('--min-frequency', String(minFrequency));
