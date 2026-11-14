@@ -1,7 +1,7 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 8, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  version: 9, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
   outfitFrequency: 0.9, minimumSamples: 3, identityFrequency: 0.35,
 });
 
@@ -89,7 +89,9 @@ export function minimalOutfitEvidence(standard, minFrequency = 0) {
       ambiguous.add(a); ambiguous.add(b);
     }
   }
-  candidates.sort((a, b) => Number(b.slot === 'uniform') - Number(a.slot === 'uniform') || b.entry[1] - a.entry[1] || a.slot.localeCompare(b.slot));
+  // A supported dress describes the complete garment; shirt tags must not crowd it out.
+  const garmentPriority = candidate => candidate.slot === 'uniform' ? 2 : candidate.entry[0] === 'dress' ? 1 : 0;
+  candidates.sort((a, b) => garmentPriority(b) - garmentPriority(a) || b.entry[1] - a.entry[1] || a.slot.localeCompare(b.slot));
   const selected = [];
   let supporting = garments.map((_, i) => i);
   for (const candidate of candidates.filter(c => !ambiguous.has(c))) {
