@@ -864,7 +864,7 @@ async function* fetchTagRowsForCategory(options, categoryId) {
 }
 
 async function fetchTagRowsFromDanbooru(options) {
-  const categoryIds = options.tagCategory === 'all'
+  const categoryIds = options.mode === 'combined' ? [1, 3, 4] : options.tagCategory === 'all'
     ? TAG_LIST_CATEGORY_IDS
     : [options.tagCategory];
   const rows = [];
@@ -1133,9 +1133,9 @@ export function getCharacterProfile(characterTag, posts, options) {
   const clothingPriority = [...clothing.filter(([tag]) => isCoreOutfitTag(tag)), ...clothing];
   const selectedClothing = [...new Map(clothingPriority)].slice(0, CHARACTER_PROFILE_POLICY.clothingLimit);
   const accessories = coherent.filter(([tag]) => isAccessoryAttributeTag(tag)).slice(0, CHARACTER_PROFILE_POLICY.accessoryLimit);
-  const other = [...counts].filter(([tag, count]) => !isIdentityAttributeTag(tag) && !isClothingAttributeTag(tag) && !isAccessoryAttributeTag(tag) && count >= minCount).sort(byFrequency);
+  const subjects = [...counts].filter(([tag, count]) => (tag === '1girl' || tag === '1boy') && count >= minCount).sort(byFrequency).slice(0, 1);
   const attributes = evidence.standard.length < CHARACTER_PROFILE_POLICY.minimumSamples ? []
-    : [...selectedIdentity, ...selectedClothing, ...accessories, ...other].slice(0, options.maxAttributes)
+    : [...subjects, ...selectedIdentity, ...selectedClothing, ...accessories].slice(0, options.maxAttributes)
       .sort((a, b) => getTagPriority(a[0]) - getTagPriority(b[0]) || byFrequency(a, b));
   return { attributes, profileStatus: evidence.profileStatus,
     eligibleSampleCount: evidence.eligibleSampleCount, outfitSampleCount: evidence.outfitSampleCount };
@@ -1167,6 +1167,7 @@ function formatCharacterTag(character, copyright, options) {
 function isCharacterAttributeTag(tag) {
   if (!tag || DEFAULT_IGNORE_TAGS.has(tag)) return false;
   if (DENY_KEYWORDS.some((keyword) => tag === keyword || tag.includes(keyword))) return false;
+  if (isClothingAttributeTag(tag) || isAccessoryAttributeTag(tag) || isIdentityAttributeTag(tag)) return true;
   if (ALWAYS_KEEP_TAGS.has(tag)) return true;
   if (isEyeColorTag(tag) || classifyDanbooruTag(tag).some(group => ['clothing', 'accessory', 'hair'].includes(group))) return true;
   if (ATTRIBUTE_KEYWORDS.some((keyword) => tag === keyword || tag.includes(keyword))) return true;

@@ -283,7 +283,7 @@ export function DanbooruDatasetGeneratorTab() {
 
           {mode !== 'tags' ? (
             <>
-              {mode === 'combined' ? <p className="text-xs leading-5 text-zinc-400">One catalog for general, artist, series, character, and meta tags. Character rows include collected attributes. Enable the resulting file in the tag catalog’s Sources.</p> : <div>
+              {mode === 'combined' ? <p className="text-xs leading-5 text-zinc-400">One catalog for artist, series, and character tags. Standalone General and Meta entries are excluded. Character rows include collected attributes. Enable the resulting file in the tag catalog’s Sources.</p> : <div>
                 <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-zinc-500">Character Source</label>
                 <UmbraSelectControl value={characterSource} onChange={(event) => setCharacterSource(event.target.value as CharacterSource)} className="settings-input !py-2 text-sm">
                   <option value="danbooru">Top Danbooru characters</option>
@@ -293,13 +293,13 @@ export function DanbooruDatasetGeneratorTab() {
               </div>}
               {mode !== 'combined' && characterSource === 'single' ? <TextInput label="Character Tag" value={tag} onChange={setTag} placeholder="hatsune_miku" /> : null}
               {mode !== 'combined' && characterSource === 'series' ? <TextInput label="Series / Copyright Tag" value={seriesTag} onChange={setSeriesTag} placeholder="zenless_zone_zero" /> : null}
-              <TextInput label={mode === 'combined' ? 'Entries Per Category' : 'Characters'} value={limit} onChange={setLimit} placeholder="100 or all" help={mode === 'combined' ? 'Use all for every qualifying tag in all five categories. Each character needs an attribute sample.' : 'Use a number, or type all to process every matching character.'} />
+              <TextInput label={mode === 'combined' ? 'Entries Per Category' : 'Characters'} value={limit} onChange={setLimit} placeholder="100 or all" help={mode === 'combined' ? 'Use all for every qualifying tag in all three categories. Each character needs an attribute sample.' : 'Use a number, or type all to process every matching character.'} />
               {mode !== 'combined' && characterSource === 'series' ? <NumberInput label="Series Posts To Scan" value={seriesPostSample} onChange={setSeriesPostSample} min={1} max={5000} /> : null}
               <Checkbox label="Prefer tag corpus for character attributes" checked={preferCorpus} onChange={setPreferCorpus} />
               <p className="text-xs leading-5 text-zinc-400">Reuses matching local posts and saved samples before requesting Danbooru. Partial local samples are combined without duplicate posts.</p>
               {mode === 'combined' ? <NumberInput label="Min Tag Posts" value={minTagPosts} onChange={setMinTagPosts} min={0} max={10000000} /> : null}
               <NumberInput label="Posts Per Character" value={postSample} onChange={setPostSample} min={1} max={200} help="Capped at 200 to match Danbooru/API safety limits." />
-              <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} help="Limits: 5 hair/eye tags, 3 clothing tags, 3 accessories. Tagged alternate designs are excluded. Clothing/accessories require 90% coverage within one majority outfit group; uncertain outfits stay blank and are marked for review." />
+              <NumberInput label="Max Attributes" value={maxAttributes} onChange={setMaxAttributes} min={1} max={80} help="Keeps 1girl or 1boy plus up to 5 hair/eye tags, 3 clothing tags, and 3 accessories. Other general extras are excluded. Tagged alternate designs are excluded. Clothing/accessories require 90% coverage within one majority outfit group; uncertain outfits stay blank and are marked for review." />
               <NumberInput label="Min Character Posts" value={minCharacterPosts} onChange={setMinCharacterPosts} min={0} max={10000000} />
               <NumberInput label="Min Frequency" value={minFrequency} onChange={setMinFrequency} min={0} max={1} step={0.01} help="0.12 keeps tags found in at least 12% of sampled posts. Lower it to include less frequently tagged details. Missing source tags cannot be inferred." />
               <TextInput label="Post Filter" value={postFilter} onChange={setPostFilter} placeholder="solo, rating:g" />

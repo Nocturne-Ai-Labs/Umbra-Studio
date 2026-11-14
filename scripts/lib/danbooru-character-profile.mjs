@@ -1,7 +1,7 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 1, clothingLimit: 3, accessoryLimit: 3, identityLimit: 5,
+  version: 3, clothingLimit: 3, accessoryLimit: 3, identityLimit: 5,
   outfitFrequency: 0.9, minimumSamples: 3,
 });
 
@@ -14,9 +14,13 @@ const alternateTags = new Set([
 ]);
 export const postTags = post => [...new Set(String(post?.tag_string_general || '').trim().split(/\s+/).filter(Boolean))];
 
+const additionalGarment = /(?:^|_)(?:tank_top|crop_top|tube_top|halter_top|camisole|blouse|blazer|leotard|tunic|robe|cape|overalls|overcoat|sarong)$/;
+
 export function isClothingAttributeTag(tag) {
   return classifyDanbooruTag(tag).includes('clothing')
+    || additionalGarment.test(tag)
     || /(?:^|_)(?:sleeves|sleeveless|strapless|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag)
+    || /(?:^|_)(?:elbow_pads|knee_pads|shoulder_armor)$/.test(tag)
     || ['frills', 'ruffles', 'pleats', 'ribbon_trim', 'lace_trim', 'fur_trim'].includes(tag);
 }
 export function isAccessoryAttributeTag(tag) {
@@ -28,7 +32,7 @@ export function isIdentityAttributeTag(tag) {
     && (classifyDanbooruTag(tag).includes('hair') || /(?:^|_)eyes$/.test(tag) || tag === 'heterochromia');
 }
 export function isCoreOutfitTag(tag) {
-  return classifyDanbooruTag(tag).includes('clothing')
+  return (classifyDanbooruTag(tag).includes('clothing') || additionalGarment.test(tag))
     && !/(?:^|_)(?:gloves|socks|stockings|thighhighs|pantyhose|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag);
 }
 
