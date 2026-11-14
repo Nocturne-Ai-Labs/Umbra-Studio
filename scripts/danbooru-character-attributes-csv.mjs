@@ -1117,7 +1117,7 @@ export function getCharacterProfile(characterTag, posts, options) {
   const minCount = Math.max(1, Math.ceil(evidence.standard.length * Math.max(options.minFrequency, 0.5)));
   const byFrequency = (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]);
   const selectedIdentity = selectMinimalIdentity(counts, evidence.standard, options.minFrequency);
-  const outfit = minimalOutfitEvidence(characterTag, evidence.standard, options.minFrequency);
+  const outfit = minimalOutfitEvidence(evidence.standard, options.minFrequency);
   const selectedClothing = outfit.clothing;
   const accessories = outfit.accessories;
   const distinctive = selectDistinctiveTraits(evidence.standard, options.minFrequency);

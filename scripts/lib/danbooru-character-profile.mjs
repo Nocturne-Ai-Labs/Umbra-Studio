@@ -1,7 +1,7 @@
 import { classifyDanbooruTag } from '../../shared/danbooru/tagClassifiers.ts';
 
 export const CHARACTER_PROFILE_POLICY = Object.freeze({
-  version: 6, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
+  version: 7, clothingLimit: 3, accessoryLimit: 1, identityLimit: 5,
   outfitFrequency: 0.9, minimumSamples: 3, identityFrequency: 0.35,
 });
 
@@ -36,13 +36,6 @@ export function isCoreOutfitTag(tag) {
     && !/(?:^|_)(?:gloves|socks|stockings|thighhighs|pantyhose|boots|footwear|loafers|sandals|shoes|sneakers)$/.test(tag);
 }
 
-// These minimal defaults were explicitly reviewed by the collection owner.
-// Keep provenance separate from statistical consensus; never label them inferred.
-const reviewedOutfits = new Map([
-  ['hatsune_miku', ['detached_sleeves']],
-  ['tifa_lockhart', ['tank_top', 'miniskirt']],
-]);
-
 const garmentSlots = {
   top: ['tank_top', 'crop_top', 'tube_top', 'halter_top', 'camisole', 'blouse', 'shirt', 'sweater', 'hoodie'],
   bottom: ['miniskirt', 'skirt', 'shorts', 'pants', 'trousers'],
@@ -72,12 +65,7 @@ export function characterProfileEvidence(posts) {
   return { standard, eligibleSampleCount: standard.length };
 }
 
-export function minimalOutfitEvidence(character, standard, minFrequency = 0) {
-  const reviewed = reviewedOutfits.get(character);
-  if (reviewed && standard.length >= CHARACTER_PROFILE_POLICY.minimumSamples) {
-    return { clothing: reviewed.map(tag => [tag, standard.filter(p => postTags(p).includes(tag)).length]),
-      accessories: [], profileStatus: 'reviewed_minimal_outfit', outfitSampleCount: 0 };
-  }
+export function minimalOutfitEvidence(standard, minFrequency = 0) {
   const garments = standard.map(garmentTokens);
   const candidates = [];
   const required = Math.max(CHARACTER_PROFILE_POLICY.minimumSamples, Math.ceil(standard.length * Math.max(0.3, minFrequency)));
