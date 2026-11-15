@@ -894,7 +894,7 @@ function buildDanbooruDatasetGeneratorCommand(body: Record<string, unknown>) {
   const args: string[] = [];
   const outputDir = mode === 'tags' || mode === 'combined'
     ? join(USER_DIR, 'PowerPrompter', 'CSV', 'tags')
-    : join(USER_DIR, 'PowerPrompter', 'CSV', 'Characters');
+    : join(USER_DIR, 'PowerPrompter', 'CSV', 'character tags');
   const outFile = join(outputDir, sanitizeCsvFileName(body.outputFileName, mode === 'combined' ? 'danbooru-catalog.csv' : mode === 'tags' ? 'danbooru-tags.csv' : 'danbooru-character-attributes.csv'));
 
   const pushNumber = (flag: string, value: unknown, fallback: number, min: number, max: number) => {

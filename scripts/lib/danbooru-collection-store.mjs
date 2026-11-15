@@ -19,7 +19,7 @@ export function characterSampleCacheFile(outFile) {
   const outputDir = dirname(outFile);
   // Umbra's character and combined CSV folders share source metadata samples.
   // Arbitrary CLI destinations keep their cache beside their own output.
-  const cacheDir = basename(outputDir).toLowerCase() === 'characters' && basename(dirname(outputDir)).toLowerCase() === 'csv'
+  const cacheDir = ['characters', 'character tags'].includes(basename(outputDir).toLowerCase()) && basename(dirname(outputDir)).toLowerCase() === 'csv'
     ? join(dirname(outputDir), 'tags') : outputDir;
   return join(cacheDir, '.collection-state', 'character-samples.sqlite');
 }
