@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.91.13 - 2026-11-21
+
+### TL;DR - Setup After Updating
+
+**Umbra Remote mobile is supported in Beta. Further usability and device-compatibility improvements are ongoing.**
+
+**Canvas is experimental on desktop and tablet and is not ready for feedback. Phone Remote does not expose Canvas. Background removal runs exclusively on CPU and was checked on illustrated fixtures with soft alpha and request-scoped cancellation. Photographic subjects, fresh GPU generation, physical touch interaction, and complete localization remain unqualified.**
+
+**Video generation is in beta and is not ready for feedback. MiniMax H3 is somewhat usable; other video models remain experimental and less reliable.**
+
+- Update with `UmbraSetup.bat` on Windows or `./umbra-setup.sh` on Linux. In Video Studio, follow the Umbra Setup link to update the DaSiWa requirements and restart ComfyUI when its queue is idle. Recreate existing LTX captures for OmniForge C-LTX23-51. H3 Enhanced Upscale offers optional 2D (about 364 MB) and 3D (about 691 MB) upscalers.
+- New character CSV collections save in the folder Tag Catalog scans. For an older export in `User/PowerPrompter/CSV/Characters`, copy the desired CSV into `User/PowerPrompter/CSV/character tags`. Open **Tag Catalog → Sources → Reindex**, then enable the file.
+
+### Data Forge and Tag Catalog
+
+- Collect character profiles, tag lists, or a combined catalog. The collector can reuse matching tag corpus records and saved public post samples. Combined collections save their progress in batches and can resume with matching settings.
+- Character profiles use repeated standard-outfit evidence for hair, eyes, markings such as shaped pupils, clothing, and distinctive traits. The export records eligible sample counts and flags uncertain outfits for review. Character rows are grouped alphabetically by copyright and ranked by post count within each group.
+- Browse or search saved CSV rows in 100-row pages. The progress panel shows the collection stage, request speed, and sample reuse. All Tags adds catalog-wide sorting, including post count.
+
+### Video Studio
+
+- Updated the bundled LTX workflow to OmniForge C-LTX23-51 and the reviewed DaSiWa node requirements to 0.5.51. Setup lists the H3 upscalers and Video Studio exposes the applicable workflow controls. Optional RTX processing requires supported hardware.
+
+### Fixes And Quality-of-Life Recap
+
+- Fixed: Clearing or quickly changing a Tag Catalog search could leave results loading indefinitely.
+- Fixed: New character-only CSVs could finish successfully but be missing from the catalog source list.
+- Improved: Collection progress reconnects after navigation. CSV checkpoint writes retry temporary Windows file locks.
+- Improved: The collection tracker follows the selected theme and shows saved samples and local corpus hits separately.
+
 ## v0.91.12 - 2026-11-08
 
 ### TL;DR - Setup After Updating
