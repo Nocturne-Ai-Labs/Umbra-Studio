@@ -25,6 +25,7 @@
 
 ### Fixes And Quality-of-Life Recap
 
+- Fixed: The Windows package build can prepare the bundled runtime on runners that cannot use PowerShell's Expand-Archive command.
 - Fixed: Clearing or quickly changing a Tag Catalog search could leave results loading indefinitely.
 - Fixed: New character-only CSVs could finish successfully but be missing from the catalog source list.
 - Improved: Collection progress reconnects after navigation. CSV checkpoint writes retry temporary Windows file locks.

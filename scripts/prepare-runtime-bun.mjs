@@ -44,14 +44,14 @@ function copyExecutable(sourcePath, targetPath) {
 }
 
 function findSystemBun() {
-  const finder = process.platform === 'win32' ? 'where' : 'which';
-  const res = spawnSync(finder, ['bun'], { encoding: 'utf-8', shell: process.platform === 'win32' });
+  const finder = process.platform === 'win32' ? 'where.exe' : 'which';
+  const res = spawnSync(finder, ['bun'], { encoding: 'utf-8' });
   if (res.status !== 0 || !res.stdout.trim()) return null;
   return res.stdout.trim().split(/\r?\n/)[0];
 }
 
 function downloadFile(url, destinationPath) {
-  const res = spawnSync('curl', ['-L', '-sS', '-o', destinationPath, url], { stdio: 'inherit' });
+  const res = spawnSync('curl', ['-fL', '-sS', '-o', destinationPath, url], { stdio: 'inherit' });
   if (res.status !== 0 || !fs.existsSync(destinationPath)) {
     throw new Error(`Failed to download ${url}`);
   }
@@ -60,6 +60,15 @@ function downloadFile(url, destinationPath) {
 function ensureWindowsBun() {
   const targetPath = runtimeBunPath('win32');
   if (bunMatchesRequestedVersion(targetPath)) return;
+
+  if (isWindows && process.arch === 'x64') {
+    const systemBun = findSystemBun();
+    if (systemBun && path.extname(systemBun).toLowerCase() === '.exe' && bunMatchesRequestedVersion(systemBun)) {
+      copyExecutable(systemBun, targetPath);
+      console.log(`Runtime Bun prepared from matching system runtime: ${targetPath}`);
+      return;
+    }
+  }
 
   const releasePath = BUNDLED_BUN_VERSION === 'canary'
     ? 'canary'
@@ -74,10 +83,9 @@ function ensureWindowsBun() {
       ? spawnSync('powershell', [
         '-NoProfile',
         '-NonInteractive',
-        '-ExecutionPolicy', 'Bypass',
         '-Command',
-        `Expand-Archive -LiteralPath ${JSON.stringify(zipPath)} -DestinationPath ${JSON.stringify(tempDir)} -Force`,
-      ], { stdio: 'inherit' })
+        "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory($env:UMBRA_BUN_ARCHIVE, $env:UMBRA_BUN_EXTRACT_DIR)",
+      ], { stdio: 'inherit', env: { ...process.env, UMBRA_BUN_ARCHIVE: zipPath, UMBRA_BUN_EXTRACT_DIR: tempDir } })
       : spawnSync('unzip', ['-o', zipPath, '-d', tempDir], { stdio: 'inherit' });
     if (unzipRes.status !== 0) throw new Error('Failed to extract bun-windows-x64.zip');
 
@@ -87,6 +95,9 @@ function ensureWindowsBun() {
     ];
     const extractedBun = candidates.find((candidate) => fs.existsSync(candidate));
     if (!extractedBun) throw new Error('bun.exe not found in downloaded archive');
+    if (isWindows && !bunMatchesRequestedVersion(extractedBun)) {
+      throw new Error(`Downloaded Windows Bun does not match requested version: ${BUNDLED_BUN_VERSION}`);
+    }
     copyExecutable(extractedBun, targetPath);
     console.log(`Runtime Bun prepared: ${targetPath}`);
   } finally {
